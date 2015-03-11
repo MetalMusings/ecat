@@ -1,31 +1,37 @@
-/********************************************************************
- * fake unified build config_module.h
- *******************************************************************/
+//
+//    Copyright (C) 2015 Sascha Ittner <sascha.ittner@modusoft.de>
+//
+//    This program is free software; you can redistribute it and/or modify
+//    it under the terms of the GNU General Public License as published by
+//    the Free Software Foundation; either version 2 of the License, or
+//    (at your option) any later version.
+//
+//    This program is distributed in the hope that it will be useful,
+//    but WITHOUT ANY WARRANTY; without even the implied warranty of
+//    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//    GNU General Public License for more details.
+//
+//    You should have received a copy of the GNU General Public License
+//    along with this program; if not, write to the Free Software
+//    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+//
 
 #ifndef _LCEC_RTAPI_H_
 #define _LCEC_RTAPI_H_
 
-//#include "config_module.h"
+#include <rtapi.h>
 
-#define RTAPI_INC_CTYPE_H       "linux/ctype.h"
-#define RTAPI_INC_DEVICE_H      "linux/device.h"
-#define RTAPI_INC_FIRMWARE_H    "linux/firmware.h"
-#define RTAPI_INC_GFP_H         "linux/gfp.h"
-#define RTAPI_INC_LIST_H        "linux/list.h"
-#define RTAPI_INC_SLAB_H        "linux/slab.h"
-#define RTAPI_INC_STRING_H      "linux/string.h"
-#define RTAPI_INC_SCHED_H       "linux/sched.h"
-#define RTAPI_INC_JIFFIES_H     "linux/jiffies.h"
-#define RTAPI_INC_TIME_H        "linux/time.h"
+#ifdef __KERNEL__
+  #include "lcec_rtapi_kmod.h"
+#else
+  #include "lcec_rtapi_user.h"
+#endif
 
-#define RTAPI_GETTIMEOFDAY(x) do_gettimeofday(x) 
-//#define RTAPI_GETTIMEOFDAY(x) gettimeofday(x, NULL) 
+#if defined RTAPI_SERIAL && RTAPI_SERIAL >= 2
+ #define lcec_rtapi_shmem_getptr(id, ptr) rtapi_shmem_getptr(id, ptr, NULL)
+#else
+ #define lcec_rtapi_shmem_getptr(id, ptr) rtapi_shmem_getptr(id, ptr)
+#endif
 
-#include RTAPI_INC_SCHED_H
-#include RTAPI_INC_JIFFIES_H
-#include RTAPI_INC_CTYPE_H
-#include RTAPI_INC_SLAB_H
-#include RTAPI_INC_STRING_H
-#include RTAPI_INC_TIME_H
+#endif
 
-#endif /* CONFIG_MODULE_H */
