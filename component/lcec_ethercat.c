@@ -124,6 +124,82 @@ int lcec_read_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, ui
   return 0;
 }
 
+/// @brief Write an SDO configuration to a slave device.
+///
+/// This writes an SDO config to a specified slave device.  It can
+/// only be called before going into readtime mode as it blocks.  This
+/// sets the SDO in two phases.  First, it calls
+/// `ecrt_master_sdo_download`, which blocks until it's heard back
+/// from the slave.  This way, we can return an error if the SDO that
+/// we're trying to set does not exist.  Then, after that, we call
+/// `ecrt_slave_config_sdo`, which *also* sets the SDO, but does it
+/// asynchronously and saves the value in case the slave is
+/// power-cycled at some point in the future.
+///
+/// We need to call both, because without the call to
+/// `ecrt_master_sdo_download` we can't know if an error occurred, and
+/// without the call to `ecrt_slave_config_sdo` the config will be
+/// lost if the slave reboots.
+///
+/// @param slave The slave.
+/// @param index The SDO index to set (`0x8000` or similar).
+/// @param subindex The SDO sub-index to be set.
+/// @param value A pointer to the value to be set.
+/// @param size The number of bytes to set.
+/// @return 0 for success or -1 for failure.
+int lcec_write_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *value, size_t size) {
+  lcec_master_t *master = slave->master;
+  int err;
+  uint32_t abort_code;
+
+  if ((err = ecrt_master_sdo_download(master->master, slave->index, index, subindex, value, size, &abort_code))) {
+    rtapi_print_msg(RTAPI_MSG_ERR,
+        LCEC_MSG_PFX "slave %s.%s: Failed to execute SDO download (0x%04x:0x%02x, size %d, byte0=%d, error %d, abort_code %08x)\n",
+        master->name, slave->name, index, subindex, (int)size, (int)value[0], err, abort_code);
+    return -1;
+  }
+
+  if (ecrt_slave_config_sdo(slave->config, index, subindex, value, size) != 0) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "slave %s.%s: Failed to configure slave SDO (0x%04x:0x%02x)\n", master->name, slave->name,
+        index, subindex);
+    return -1;
+  }
+
+  return 0;
+}
+
+/// @brief Write an 8-bit SDO configuration to a slave device.
+///
+/// See `lcec_write_sdo` for details.
+///
+/// @param slave The slave.
+/// @param index The SDO index to set (`0x8000` or similar).
+/// @param subindex The SDO sub-index to be set.
+/// @param value An 8-bit value to set.
+/// @return 0 for success or -1 for failure.
+int lcec_write_sdo8(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t value) {
+  uint8_t data[1];
+
+  EC_WRITE_U8(data, value);
+  return lcec_write_sdo(slave, index, subindex, data, 1);
+}
+
+/// @brief Write a 16-bit SDO configuration to a slave device.
+///
+/// See `lcec_write_sdo` for details.
+///
+/// @param slave The slave.
+/// @param index The SDO index to set (`0x8000` or similar).
+/// @param subindex The SDO sub-index to be set.
+/// @param value An 8-bit value to set.
+/// @return 0 for success or -1 for failure.
+int lcec_write_sdo16(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t value) {
+  uint8_t data[2];
+
+  EC_WRITE_U16(data, value);
+  return lcec_write_sdo(slave, index, subindex, data, 2);
+}
+
 /// @brief Read IDN data from a slave device.
 int lcec_read_idn(struct lcec_slave *slave, uint8_t drive_no, uint16_t idn, uint8_t *target, size_t size) {
   lcec_master_t *master = slave->master;
