@@ -28,6 +28,7 @@ MODULE_LICENSE("GPL")
 MODULE_AUTHOR("Sascha Ittner <sascha.ittner@modusoft.de>")
 MODULE_DESCRIPTION("Driver for EtherCAT devices")
 
+/// @brief Global HAL Pins
 static const lcec_pindesc_t master_global_pins[] = {
     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, slaves_responding), "%s.slaves-responding"},
     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, state_init), "%s.state-init"},
@@ -39,6 +40,7 @@ static const lcec_pindesc_t master_global_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
+/// @brief Master HAL pins
 static const lcec_pindesc_t master_pins[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
     {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, pll_err), "%s.pll-err"},
@@ -48,6 +50,7 @@ static const lcec_pindesc_t master_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
+/// @brief Master params
 static const lcec_pindesc_t master_params[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
@@ -56,6 +59,7 @@ static const lcec_pindesc_t master_params[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
+/// @brief Basic Slave pins
 static const lcec_pindesc_t slave_pins[] = {
     {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, online), "%s.%s.%s.slave-online"},
     {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, operational), "%s.%s.%s.slave-oper"},
@@ -85,6 +89,7 @@ lcec_master_data_t *lcec_init_master_hal(const char *pfx, int global);
 lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_name);
 void lcec_update_master_hal(lcec_master_data_t *hal_data, ec_master_state_t *ms);
 void lcec_update_slave_state_hal(lcec_slave_state_t *hal_data, ec_slave_config_state_t *ss);
+static int lcec_check_pdo_regs(ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count);
 
 void lcec_read_all(void *arg, long period);
 void lcec_write_all(void *arg, long period);
@@ -187,6 +192,10 @@ int rtapi_app_main(void) {
           rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure in proc_init for slave %s.%s\n", master->name, slave->name);
           goto fail2;
         }
+      }
+      if (lcec_check_pdo_regs(pdo_entry_regs, slave->pdo_entry_count) != 0) {
+          rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "PDO reg check failure for slave %s.%s\n", master->name, slave->name);
+          goto fail2;
       }
       pdo_entry_regs += slave->pdo_entry_count;
 
@@ -1060,6 +1069,20 @@ lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_nam
   }
 
   return hal_data;
+}
+
+/// @brief Verify that the correct number of PDOs were added by the slave.
+/// @param pdo_entry_regs The PDOs for the driver.
+/// @param pdo_entry_count The number of expected PDOs.
+/// @return 0 for success, nonzero for failure.
+static int lcec_check_pdo_regs(ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count) {
+  for (int i =0; i<pdo_entry_count; i++) {
+    if (pdo_entry_regs[i].vendor_id == 0) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Missing PDO entry found!  Should have %d, but entry %d is unset.\n", pdo_entry_count, i);
+      return -1;
+    }
+  }
+  return 0;
 }
 
 /// @brief Update HAL pins for the master.
