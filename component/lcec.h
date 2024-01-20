@@ -101,40 +101,43 @@ typedef void (*lcec_slave_cleanup_t)(struct lcec_slave *slave);
 typedef void (*lcec_slave_rw_t)(struct lcec_slave *slave, long period);
 
 typedef enum {
-  MODPARAM_TYPE_BIT,
-  MODPARAM_TYPE_U32,
-  MODPARAM_TYPE_S32,
-  MODPARAM_TYPE_FLOAT,
-  MODPARAM_TYPE_STRING
+  MODPARAM_TYPE_BIT, ///< Modparam value is a single bit.
+  MODPARAM_TYPE_U32, ///< Modparam value is an unsigned 32-bit int.
+  MODPARAM_TYPE_S32, ///< Modparam value is a signed 32-bit int.
+  MODPARAM_TYPE_FLOAT,  ///< Modparam value is a float.
+  MODPARAM_TYPE_STRING ///< Modparam value is a string.
 } lcec_modparam_type_t;
 
 typedef struct {
-  const char *name;  ///< the name that appears in the XML.
-  int id;  ///< Numeric ID, should be unique per device driver.
-  lcec_modparam_type_t type; ///< The type (bit, int, float, string) of this modParam.
+  const char *name;           ///< the name that appears in the XML.
+  int id;                     ///< Numeric ID, should be unique per device driver.
+  lcec_modparam_type_t type;  ///< The type (bit, int, float, string) of this modParam.
 } lcec_modparam_desc_t;
 
+
+/// \brief Definition of a device that LinuxCNC-Ethercat supports.
 typedef struct {
-  char *name;  ///< The device's name ("EL1008")
-  uint32_t vid;  ///< The EtherCAT vendor ID
-  uint32_t pid;  ///< The EtherCAT product ID
-  int pdo_entry_count;  ///< The number of PDOs registered by this device.
-  int is_fsoe_logic;  ///< Does this device use Safety-over-EtherCAT?
-  lcec_slave_preinit_t proc_preinit;  ///< pre-init function, if any
-  lcec_slave_init_t proc_init;  ///< init function.  Sets up the device.
+  char *name;                             ///< The device's name ("EL1008")
+  uint32_t vid;                           ///< The EtherCAT vendor ID
+  uint32_t pid;                           ///< The EtherCAT product ID
+  int pdo_entry_count;                    ///< The number of PDOs registered by this device.
+  int is_fsoe_logic;                      ///< Does this device use Safety-over-EtherCAT?
+  lcec_slave_preinit_t proc_preinit;      ///< pre-init function, if any
+  lcec_slave_init_t proc_init;            ///< init function.  Sets up the device.
   const lcec_modparam_desc_t *modparams;  ///< XML modparams, if any
-  uint64_t flags;  ///< Flags, passed through to `proc_init` as `slave->flags`.
+  uint64_t flags;                         ///< Flags, passed through to `proc_init` as `slave->flags`.
 } lcec_typelist_t;
 
+/// \brief Linked list for holding device type definitions.
 typedef struct lcec_typelinkedlist {
-  const lcec_typelist_t *type;
-  struct lcec_typelinkedlist *next;
+  const lcec_typelist_t *type;  ///< The type definition.
+  struct lcec_typelinkedlist *next; ///< Pointer to the next `lcec_typelinkedlist` in the linked list.
 } lcec_typelinkedlist_t;
 
 typedef struct {
-  int slave_data_len;
-  int master_data_len;
-  int data_channels;
+  int slave_data_len; ///< Length of slave data.
+  int master_data_len; ///< Length of master data.
+  int data_channels; ///< Number of data channels.
 } LCEC_CONF_FSOE_T;
 
 typedef struct lcec_master_data {
@@ -155,22 +158,22 @@ typedef struct lcec_master_data {
 } lcec_master_data_t;
 
 typedef struct lcec_slave_state {
-  hal_bit_t *online;
-  hal_bit_t *operational;
-  hal_bit_t *state_init;
-  hal_bit_t *state_preop;
-  hal_bit_t *state_safeop;
-  hal_bit_t *state_op;
+  hal_bit_t *online;  ///< Is device online?  Equivalent to the `.slave-online` HAL pin.
+  hal_bit_t *operational;  ///< Is device operational?  Equivalent to the `.slave-oper` HAL pin.
+  hal_bit_t *state_init; ///< Is the device in state `INIT`?  Equivalant to the `.slave-state-init` HAL pin.
+  hal_bit_t *state_preop; ///< Is the device in state `PREOP`?  Equivalant to the `.slave-state-preop` HAL pin.
+  hal_bit_t *state_safeop; ///< Is the device in state `SAFEOP`?  Equivalant to the `.slave-state-safeop` HAL pin.
+  hal_bit_t *state_op; ///< Is the device in state `OP`?  Equivalant to the `.slave-state-op` HAL pin.
 } lcec_slave_state_t;
 
 typedef struct lcec_master {
-  struct lcec_master *prev;
-  struct lcec_master *next;
-  int index;
-  char name[LCEC_CONF_STR_MAXLEN];
-  ec_master_t *master;
-  unsigned long mutex;
-  int pdo_entry_count;
+  struct lcec_master *prev;  ///< Next master.
+  struct lcec_master *next;  ///< Previous master.
+  int index;  ///< Index of this mater.
+  char name[LCEC_CONF_STR_MAXLEN];  ///< Name of master.
+  ec_master_t *master; ///< EtherCAT master structure.
+  unsigned long mutex;  ///< Mutex for locking operations.
+  int pdo_entry_count;   ///< Number of PDO entry counts registered for master.
   ec_pdo_entry_reg_t *pdo_entry_regs;
   ec_domain_t *domain;
   uint8_t *process_data;
@@ -192,6 +195,8 @@ typedef struct lcec_master {
 #endif
 } lcec_master_t;
 
+
+/// @brief Slave Distributed Clock configuration.
 typedef struct {
   uint16_t assignActivate;
   uint32_t sync0Cycle;
@@ -200,11 +205,13 @@ typedef struct {
   int32_t sync1Shift;
 } lcec_slave_dc_t;
 
+/// @brief Slave Watchdog configuration.
 typedef struct {
   uint16_t divider;
   uint16_t intervals;
 } lcec_slave_watchdog_t;
 
+/// @brief Slave SDO configuration.
 typedef struct {
   uint16_t index;
   int16_t subindex;
@@ -212,6 +219,7 @@ typedef struct {
   uint8_t data[];
 } lcec_slave_sdoconf_t;
 
+/// @brief Slave IDN configuration.
 typedef struct {
   uint8_t drive;
   uint16_t idn;
@@ -220,64 +228,68 @@ typedef struct {
   uint8_t data[];
 } lcec_slave_idnconf_t;
 
+/// @brief ModParam definition.
 typedef struct {
   int id;
   LCEC_CONF_MODPARAM_VAL_T value;
 } lcec_slave_modparam_t;
 
+/// @brief EtherCAT slave.
 typedef struct lcec_slave {
-  struct lcec_slave *prev;
-  struct lcec_slave *next;
-  struct lcec_master *master;
-  int index;
-  char name[LCEC_CONF_STR_MAXLEN];
-  uint32_t vid;
-  uint32_t pid;
-  int pdo_entry_count;
-  ec_sync_info_t *sync_info;
-  ec_slave_config_t *config;
-  ec_slave_config_state_t state;
-  lcec_slave_dc_t *dc_conf;
-  lcec_slave_watchdog_t *wd_conf;
-  lcec_slave_preinit_t proc_preinit;
-  lcec_slave_init_t proc_init;
-  lcec_slave_cleanup_t proc_cleanup;
-  lcec_slave_rw_t proc_read;
-  lcec_slave_rw_t proc_write;
-  lcec_slave_state_t *hal_state_data;
-  void *hal_data;
-  ec_pdo_entry_info_t *generic_pdo_entries;
-  ec_pdo_info_t *generic_pdos;
-  ec_sync_info_t *generic_sync_managers;
-  lcec_slave_sdoconf_t *sdo_config;
-  lcec_slave_idnconf_t *idn_config;
-  lcec_slave_modparam_t *modparams;
-  const LCEC_CONF_FSOE_T *fsoeConf;
-  int is_fsoe_logic;
-  unsigned int *fsoe_slave_offset;
-  unsigned int *fsoe_master_offset;
-  uint64_t flags;
+  struct lcec_slave *prev;   ///< Next slave
+  struct lcec_slave *next;  ///< Previous slave
+  struct lcec_master *master;  ///< Master for this slave
+  int index;  ///< Index of this slave.
+  char name[LCEC_CONF_STR_MAXLEN];  ///< Slave name.
+  uint32_t vid;   ///< Slave's vendor ID
+  uint32_t pid; ///< Slave's EtherCAT PID/device ID.
+  int pdo_entry_count;  ///< Number of PDO entries for this device.
+  ec_sync_info_t *sync_info; ///< Sync Manager configuration.
+  ec_slave_config_t *config;  ///< Configuration data.
+  ec_slave_config_state_t state; ///< Slave state.
+  lcec_slave_dc_t *dc_conf;  ///< Distributed Clock configuration.
+  lcec_slave_watchdog_t *wd_conf;  ///< Watchdog configuration.
+  lcec_slave_preinit_t proc_preinit; ///< Callback for pre-init, if any.
+  lcec_slave_init_t proc_init; ///< Callback for initializing device.
+  lcec_slave_cleanup_t proc_cleanup;   ///< Calback for cleaning up the device.
+  lcec_slave_rw_t proc_read;   ///< Callback for reading from the device.
+  lcec_slave_rw_t proc_write;  ///< Callback for writing to the device.
+  lcec_slave_state_t *hal_state_data;   ///< HAL state data.
+  void *hal_data;   ///< HAL data, device driver specific.
+  ec_pdo_entry_info_t *generic_pdo_entries; ///< Generic PDO entries.
+  ec_pdo_info_t *generic_pdos; ///< Generic PDOs.
+  ec_sync_info_t *generic_sync_managers; ///< Generic sync managers.
+  lcec_slave_sdoconf_t *sdo_config;  ///< SDO config.
+  lcec_slave_idnconf_t *idn_config;  ///< IDN config.
+  lcec_slave_modparam_t *modparams;  ///< modParams.
+  const LCEC_CONF_FSOE_T *fsoeConf;  ///< Safety config.
+  int is_fsoe_logic;   ///< Device supports FSoE safety logic.
+  unsigned int *fsoe_slave_offset;  ///< FSoE slave offset.
+  unsigned int *fsoe_master_offset; ///< FSoE master offset.
+  uint64_t flags;  ///< Flags, as defined by the driver itself.
 } lcec_slave_t;
 
+/// \brief HAL pin description.
 typedef struct {
-  hal_type_t type;
-  hal_pin_dir_t dir;
-  int offset;
-  const char *fmt;
+  hal_type_t type;    ///< HAL type of this pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
+  hal_pin_dir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
+  int offset;         ///< Offset for this pin's data in `hal_data`.
+  const char *fmt;    ///< Format string for generating pin names via sprintf().
 } lcec_pindesc_t;
 
+/// \brief Sync manager configuration.
 typedef struct {
-  int sync_count;
-  ec_sync_info_t *curr_sync;
-  ec_sync_info_t syncs[LCEC_MAX_SYNC_COUNT + 1];
+  int sync_count;  ///< Number of syncs.
+  ec_sync_info_t *curr_sync;   ///< Current sync.
+  ec_sync_info_t syncs[LCEC_MAX_SYNC_COUNT + 1];   ///< Sync definitions.
 
-  int pdo_info_count;
-  ec_pdo_info_t *curr_pdo_info;
-  ec_pdo_info_t pdo_infos[LCEC_MAX_PDO_INFO_COUNT];
+  int pdo_info_count;  ///< Number of PDO infos.
+  ec_pdo_info_t *curr_pdo_info;   ///< Current PDO info.
+  ec_pdo_info_t pdo_infos[LCEC_MAX_PDO_INFO_COUNT];  ///< PDO info definitions.
 
-  int pdo_entry_count;
-  ec_pdo_entry_info_t *curr_pdo_entry;
-  ec_pdo_entry_info_t pdo_entries[LCEC_MAX_PDO_ENTRY_COUNT];
+  int pdo_entry_count; ///< Number of PDO entries.
+  ec_pdo_entry_info_t *curr_pdo_entry;  ///< Current PDO entry.
+  ec_pdo_entry_info_t pdo_entries[LCEC_MAX_PDO_ENTRY_COUNT]; ///< PDO entry definitions.
 } lcec_syncs_t;
 
 int lcec_read_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *target, size_t size);

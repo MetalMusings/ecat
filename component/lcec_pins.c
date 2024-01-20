@@ -62,6 +62,12 @@ static int lcec_pin_newfv(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_ad
   return 0;
 }
 
+/// @brief Define a LinuxCNC HAL bin based on a printf pattern.
+/// @param[in] type Type of pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
+/// @param[in] dir Direction (`HAL_IN`, `HAL_OUT`, or `HAL_IO`)
+/// @param[out] data_ptr_addr A pointer to the data behind the pin.
+/// @param[in] fmt A string with printf() formatting for building the pin name.
+/// @return 0 if successful, negative for error.
 int lcec_pin_newf(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_addr, const char *fmt, ...) {
   va_list ap;
   int err;
@@ -90,6 +96,10 @@ static int lcec_pin_newfv_list(void *base, const lcec_pindesc_t *list, va_list a
   return 0;
 }
 
+/// @brief Define multiple LinuxCNC HAL pins based on printf patterns.
+/// @param base Data structure behind the pins.
+/// @param list The a list of pins to register, with types and formats.
+/// @return 0 if successful, negative for error.
 int lcec_pin_newf_list(void *base, const lcec_pindesc_t *list, ...) {
   va_list ap;
   int err;

@@ -23,8 +23,8 @@
 
 static lcec_typelinkedlist_t *typeslist = NULL;
 
-// Add a single slave type to the `typeslist` linked-list, so it can
-// be looked up by name.
+/// @brief Register a single slave type with LinuxCNC-Ethercat.
+/// @param[in] type the definition of the device type to add.
 void lcec_addtype(const lcec_typelist_t *type) {
   lcec_typelinkedlist_t *t, *l;
 
@@ -51,7 +51,8 @@ void lcec_addtype(const lcec_typelist_t *type) {
   }
 }
 
-// Add an array of slavetypes to the `typeslist` linked-lisk.
+/// @brief Register an array of new slave types with LinuxCNC-Ethercat.
+/// @param[in] types A list of types to add, terminated with a `NULL`.
 void lcec_addtypes(const lcec_typelist_t types[]) {
   lcec_typelist_t const *type;
 
@@ -60,7 +61,9 @@ void lcec_addtypes(const lcec_typelist_t types[]) {
   }
 }
 
-// Find a slave type by name.
+/// @brief Find a slave type by name.
+/// @param[in] name the name to find.
+/// @returns a pointer to the `lcec_typelist_t` for the slave, or NULL if the type is not found.
 const lcec_typelist_t *lcec_findslavetype(const char *name) {
   lcec_typelinkedlist_t *tl;
 
