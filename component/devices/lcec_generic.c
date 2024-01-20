@@ -23,7 +23,7 @@
 
 #include "../lcec.h"
 
-static const lcec_typelist_t types[] = {
+static lcec_typelist_t types[] = {
     {"generic", 0, 0, 0, 0, NULL, lcec_generic_init},
     {NULL},
 };

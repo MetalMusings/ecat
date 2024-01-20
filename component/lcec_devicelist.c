@@ -21,17 +21,18 @@
 
 #include "lcec.h"
 
-static lcec_typelinkedlist_t *typeslist = NULL;
+lcec_typelinkedlist_t *typeslist = NULL;
 
 /// @brief Register a single slave type with LinuxCNC-Ethercat.
 /// @param[in] type the definition of the device type to add.
-void lcec_addtype(const lcec_typelist_t *type) {
+void lcec_addtype(lcec_typelist_t *type, char *sourcefile) {
   lcec_typelinkedlist_t *t, *l;
 
   // using malloc instead of hal_malloc because this can be called
   // from either lcec.so (inside of LinuxCNC) or lcec_conf (a
   // standalone binary).
   t = malloc(sizeof(lcec_typelinkedlist_t));
+  type->sourcefile = sourcefile;
   t->type = type;
   t->next = NULL;
 
@@ -53,11 +54,11 @@ void lcec_addtype(const lcec_typelist_t *type) {
 
 /// @brief Register an array of new slave types with LinuxCNC-Ethercat.
 /// @param[in] types A list of types to add, terminated with a `NULL`.
-void lcec_addtypes(const lcec_typelist_t types[]) {
-  lcec_typelist_t const *type;
+void lcec_addtypes(lcec_typelist_t types[], char *sourcefile) {
+  lcec_typelist_t *type;
 
   for (type = types; type->name != NULL; type++) {
-    lcec_addtype(type);
+    lcec_addtype(type, sourcefile);
   }
 }
 
