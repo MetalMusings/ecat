@@ -191,13 +191,29 @@ int lcec_write_sdo8(struct lcec_slave *slave, uint16_t index, uint8_t subindex, 
 /// @param slave The slave.
 /// @param index The SDO index to set (`0x8000` or similar).
 /// @param subindex The SDO sub-index to be set.
-/// @param value An 8-bit value to set.
+/// @param value A 16-bit value to set.
 /// @return 0 for success or -1 for failure.
 int lcec_write_sdo16(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t value) {
   uint8_t data[2];
 
   EC_WRITE_U16(data, value);
   return lcec_write_sdo(slave, index, subindex, data, 2);
+}
+
+/// @brief Write a 32-bit SDO configuration to a slave device.
+///
+/// See `lcec_write_sdo` for details.
+///
+/// @param slave The slave.
+/// @param index The SDO index to set (`0x8000` or similar).
+/// @param subindex The SDO sub-index to be set.
+/// @param value A 32-bit value to set.
+/// @return 0 for success or -1 for failure.
+int lcec_write_sdo32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t value) {
+  uint8_t data[4];
+
+  EC_WRITE_U32(data, value);
+  return lcec_write_sdo(slave, index, subindex, data, 4);
 }
 
 /// @brief Read IDN data from a slave device.
