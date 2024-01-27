@@ -163,7 +163,7 @@ int rtapi_app_main(void) {
                   slave->name, sdo_config->index);
             }
           } else {
-            if (ecrt_slave_config_sdo(slave->config, sdo_config->index, sdo_config->subindex, &sdo_config->data[0], sdo_config->length) !=
+            if (lcec_write_sdo(slave, sdo_config->index, sdo_config->subindex, &sdo_config->data[0], sdo_config->length) !=
                 0) {
               rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failed to configure slave %s.%s sdo %04x:%02x\n", master->name, slave->name,
                   sdo_config->index, sdo_config->subindex);
