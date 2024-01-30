@@ -114,7 +114,7 @@ typedef struct {
   lcec_modparam_type_t type;  ///< The type (bit, int, float, string) of this modParam.
 } lcec_modparam_desc_t;
 
-/// \brief Definition of a device that LinuxCNC-Ethercat supports.
+/// @brief Definition of a device that LinuxCNC-Ethercat supports.
 typedef struct {
   char *name;                             ///< The device's name ("EL1008")
   uint32_t vid;                           ///< The EtherCAT vendor ID
@@ -128,7 +128,7 @@ typedef struct {
   char *sourcefile;                       ///< Source filename, autopopulated.
 } lcec_typelist_t;
 
-/// \brief Linked list for holding device type definitions.
+/// @brief Linked list for holding device type definitions.
 typedef struct lcec_typelinkedlist {
   const lcec_typelist_t *type;       ///< The type definition.
   struct lcec_typelinkedlist *next;  ///< Pointer to the next `lcec_typelinkedlist` in the linked list.
@@ -268,7 +268,7 @@ typedef struct lcec_slave {
   uint64_t flags;                            ///< Flags, as defined by the driver itself.
 } lcec_slave_t;
 
-/// \brief HAL pin description.
+/// @brief HAL pin description.
 typedef struct {
   hal_type_t type;    ///< HAL type of this pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
   hal_pin_dir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
@@ -276,7 +276,7 @@ typedef struct {
   const char *fmt;    ///< Format string for generating pin names via sprintf().
 } lcec_pindesc_t;
 
-/// \brief Sync manager configuration.
+/// @brief Sync manager configuration.
 typedef struct {
   int sync_count;                                 ///< Number of syncs.
   ec_sync_info_t *curr_sync;                      ///< Current sync.
@@ -290,6 +290,18 @@ typedef struct {
   ec_pdo_entry_info_t *curr_pdo_entry;                        ///< Current PDO entry.
   ec_pdo_entry_info_t pdo_entries[LCEC_MAX_PDO_ENTRY_COUNT];  ///< PDO entry definitions.
 } lcec_syncs_t;
+
+/// @brief Lookup table mapping string to int
+typedef struct {
+  const char *key;
+  const int value;
+} lcec_lookuptable_int_t;
+
+/// @brief Lookup table mapping string to double
+typedef struct {
+  const char *key;
+  const double value;
+} lcec_lookuptable_double_t;
 
 int lcec_read_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *target, size_t size);
 int lcec_read_idn(struct lcec_slave *slave, uint8_t drive_no, uint16_t idn, uint8_t *target, size_t size);
@@ -316,5 +328,9 @@ void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subin
 const lcec_typelist_t *lcec_findslavetype(const char *name);
 void lcec_addtype(lcec_typelist_t *type, char *sourcefile);
 void lcec_addtypes(lcec_typelist_t types[], char *sourcefile);
+int lcec_lookupint(const lcec_lookuptable_int_t *table, const char *key, int default_value);
+int lcec_lookupint_i(const lcec_lookuptable_int_t *table, const char *key, int default_value);
+double lcec_lookupdouble(const lcec_lookuptable_double_t *table, const char *key, double default_value);
+double lcec_lookupdouble_i(const lcec_lookuptable_double_t *table, const char *key, double default_value);
 
 #endif
