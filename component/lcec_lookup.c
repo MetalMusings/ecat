@@ -111,7 +111,6 @@ double lcec_lookupdouble(const lcec_lookuptable_double_t *table, const char *key
 double lcec_lookupdouble_i(const lcec_lookuptable_double_t *table, const char *key, double default_value) {
   while (table && table->key) {
     if (!strcasecmp(table->key, key)) {
-      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Found\n");
       return table->value;
     }
     table++;
