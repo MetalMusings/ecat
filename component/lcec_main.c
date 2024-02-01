@@ -89,7 +89,7 @@ lcec_master_data_t *lcec_init_master_hal(const char *pfx, int global);
 lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_name);
 void lcec_update_master_hal(lcec_master_data_t *hal_data, ec_master_state_t *ms);
 void lcec_update_slave_state_hal(lcec_slave_state_t *hal_data, ec_slave_config_state_t *ss);
-static int lcec_check_pdo_regs(ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count);
+static int lcec_check_pdo_regs(lcec_slave_t *slave, ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count);
 
 void lcec_read_all(void *arg, long period);
 void lcec_write_all(void *arg, long period);
@@ -163,8 +163,7 @@ int rtapi_app_main(void) {
                   slave->name, sdo_config->index);
             }
           } else {
-            if (lcec_write_sdo(slave, sdo_config->index, sdo_config->subindex, &sdo_config->data[0], sdo_config->length) !=
-                0) {
+            if (lcec_write_sdo(slave, sdo_config->index, sdo_config->subindex, &sdo_config->data[0], sdo_config->length) != 0) {
               rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failed to configure slave %s.%s sdo %04x:%02x\n", master->name, slave->name,
                   sdo_config->index, sdo_config->subindex);
             }
@@ -193,9 +192,9 @@ int rtapi_app_main(void) {
           goto fail2;
         }
       }
-      if (lcec_check_pdo_regs(pdo_entry_regs, slave->pdo_entry_count) != 0) {
-          rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "PDO reg check failure for slave %s.%s\n", master->name, slave->name);
-          goto fail2;
+      if (lcec_check_pdo_regs(slave, pdo_entry_regs, slave->pdo_entry_count) != 0) {
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "PDO reg check failure for slave %s.%s\n", master->name, slave->name);
+        goto fail2;
       }
       pdo_entry_regs += slave->pdo_entry_count;
 
@@ -928,7 +927,7 @@ int lcec_parse_config(void) {
     }
 
     // alloc mem for pdo mappings
-    pdo_entry_regs = lcec_zalloc(sizeof(ec_pdo_entry_reg_t) * (master->pdo_entry_count + 1));
+    pdo_entry_regs = lcec_zalloc(sizeof(ec_pdo_entry_reg_t) * (master->pdo_entry_count + 2));
     if (pdo_entry_regs == NULL) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Unable to allocate master %s PDO entry memory\n", master->name);
       goto fail2;
@@ -1075,12 +1074,18 @@ lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_nam
 /// @param pdo_entry_regs The PDOs for the driver.
 /// @param pdo_entry_count The number of expected PDOs.
 /// @return 0 for success, nonzero for failure.
-static int lcec_check_pdo_regs(ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count) {
-  for (int i =0; i<pdo_entry_count; i++) {
+static int lcec_check_pdo_regs(lcec_slave_t *slave, ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count) {
+  for (int i = 0; i < pdo_entry_count; i++) {
     if (pdo_entry_regs[i].vendor_id == 0) {
-      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Missing PDO entry found!  Should have %d, but entry %d is unset.\n", pdo_entry_count, i);
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave %s.%s requested %d PDO entries but only registered %d\n", slave->master->name,
+          slave->name, pdo_entry_count, i);
       return -1;
     }
+  }
+  if (pdo_entry_regs[pdo_entry_count].vendor_id != 0) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave %s.%s requested %d PDO entries but registered at least 1 more.\n",
+        slave->master->name, slave->name, pdo_entry_count);
+    return -1;
   }
   return 0;
 }
