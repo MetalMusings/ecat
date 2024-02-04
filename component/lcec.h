@@ -229,8 +229,9 @@ typedef struct {
 
 /// @brief ModParam definition.
 typedef struct {
-  int id;
-  LCEC_CONF_MODPARAM_VAL_T value;
+  int id;                          /// The integer ID from the modparam definition.  Use this as the key for comparison.
+  const char *name;                /// The actual name used in the XML file.  Only use for error messages.
+  LCEC_CONF_MODPARAM_VAL_T value;  /// The value set in `<modparam name="..." value="..."/>`
 } lcec_slave_modparam_t;
 
 /// @brief EtherCAT slave.

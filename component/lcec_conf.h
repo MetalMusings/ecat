@@ -176,6 +176,7 @@ typedef union {
 typedef struct {
   LCEC_CONF_TYPE_T confType;
   int id;
+  char name[LCEC_CONF_STR_MAXLEN];
   LCEC_CONF_MODPARAM_VAL_T value;
 } LCEC_CONF_MODPARAM_T;
 

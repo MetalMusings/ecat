@@ -887,6 +887,7 @@ int lcec_parse_config(void) {
         // copy attributes
         modparams->id = modparam_conf->id;
         modparams->value = modparam_conf->value;
+        modparams->name = modparam_conf->name;
 
         // next entry
         modparams++;

@@ -216,6 +216,66 @@ int lcec_write_sdo32(struct lcec_slave *slave, uint16_t index, uint8_t subindex,
   return lcec_write_sdo(slave, index, subindex, data, 4);
 }
 
+/// @brief Write an 8-bit SDO configuration to a slave device as part of a modParam config
+///
+/// This tries to write the SDO provided, and prints an error message suitable for a modparam if it fails.
+///
+/// @param slave The slave.
+/// @param index The SDO index to set (`0x8000` or similar).
+/// @param subindex The SDO sub-index to be set.
+/// @param value An 8-bit value to set.
+/// @param mpname The XML name of the modparam that triggered this.  Used for error messages.
+/// @return 0 for success or -1 for failure.
+int lcec_write_sdo8_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t value, char *mpname) {
+  if (lcec_write_sdo8(slave, index, subindex, value) < 0) {
+    rtapi_print_msg(RTAPI_MSG_ERR,
+        LCEC_MSG_PFX "slave %s.%s: Failed to set SDO for <modParam name=\"%s\": sdo write of %04x:%02x = %d rejected by slave\n",
+        slave->master->name, slave->name, mpname, index, subindex, value);
+    return -1;
+  }
+  return 0;
+}
+
+/// @brief Write a 16-bit SDO configuration to a slave device as part of a modParam config
+///
+/// This tries to write the SDO provided, and prints an error message suitable for a modparam if it fails.
+///
+/// @param slave The slave.
+/// @param index The SDO index to set (`0x8000` or similar).
+/// @param subindex The SDO sub-index to be set.
+/// @param value A 16-bit value to set.
+/// @param mpname The XML name of the modparam that triggered this.  Used for error messages.
+/// @return 0 for success or -1 for failure.
+int lcec_write_sdo16_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t value, char *mpname) {
+  if (lcec_write_sdo16(slave, index, subindex, value) < 0) {
+    rtapi_print_msg(RTAPI_MSG_ERR,
+        LCEC_MSG_PFX "slave %s.%s: Failed to set SDO for <modParam name=\"%s\": sdo write of %04x:%02x = %d rejected by slave\n",
+        slave->master->name, slave->name, mpname, index, subindex, value);
+    return -1;
+  }
+  return 0;
+}
+
+/// @brief Write a 32-bit SDO configuration to a slave device as part of a modParam config
+///
+/// This tries to write the SDO provided, and prints an error message suitable for a modparam if it fails.
+///
+/// @param slave The slave.
+/// @param index The SDO index to set (`0x8000` or similar).
+/// @param subindex The SDO sub-index to be set.
+/// @param value A 32-bit value to set.
+/// @param mpname The XML name of the modparam that triggered this.  Used for error messages.
+/// @return 0 for success or -1 for failure.
+int lcec_write_sdo32_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t value, char *mpname) {
+  if (lcec_write_sdo32(slave, index, subindex, value) < 0) {
+    rtapi_print_msg(RTAPI_MSG_ERR,
+        LCEC_MSG_PFX "slave %s.%s: Failed to set SDO for <modParam name=\"%s\": sdo write of %04x:%02x = %d rejected by slave\n",
+        slave->master->name, slave->name, mpname, index, subindex, value);
+    return -1;
+  }
+  return 0;
+}
+
 /// @brief Read IDN data from a slave device.
 int lcec_read_idn(struct lcec_slave *slave, uint8_t drive_no, uint16_t idn, uint8_t *target, size_t size) {
   lcec_master_t *master = slave->master;
