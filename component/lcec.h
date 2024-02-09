@@ -333,5 +333,6 @@ int lcec_lookupint(const lcec_lookuptable_int_t *table, const char *key, int def
 int lcec_lookupint_i(const lcec_lookuptable_int_t *table, const char *key, int default_value);
 double lcec_lookupdouble(const lcec_lookuptable_double_t *table, const char *key, double default_value);
 double lcec_lookupdouble_i(const lcec_lookuptable_double_t *table, const char *key, double default_value);
-
+int lcec_modparam_desc_len(const lcec_modparam_desc_t *mp);
+lcec_modparam_desc_t *lcec_modparam_desc_concat(lcec_modparam_desc_t const *a, lcec_modparam_desc_t const *b);
 #endif
