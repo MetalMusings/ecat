@@ -226,7 +226,7 @@ int lcec_write_sdo32(struct lcec_slave *slave, uint16_t index, uint8_t subindex,
 /// @param value An 8-bit value to set.
 /// @param mpname The XML name of the modparam that triggered this.  Used for error messages.
 /// @return 0 for success or -1 for failure.
-int lcec_write_sdo8_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t value, char *mpname) {
+int lcec_write_sdo8_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t value, const char *mpname) {
   if (lcec_write_sdo8(slave, index, subindex, value) < 0) {
     rtapi_print_msg(RTAPI_MSG_ERR,
         LCEC_MSG_PFX "slave %s.%s: Failed to set SDO for <modParam name=\"%s\": sdo write of %04x:%02x = %d rejected by slave\n",
@@ -246,7 +246,7 @@ int lcec_write_sdo8_modparam(struct lcec_slave *slave, uint16_t index, uint8_t s
 /// @param value A 16-bit value to set.
 /// @param mpname The XML name of the modparam that triggered this.  Used for error messages.
 /// @return 0 for success or -1 for failure.
-int lcec_write_sdo16_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t value, char *mpname) {
+int lcec_write_sdo16_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t value, const char *mpname) {
   if (lcec_write_sdo16(slave, index, subindex, value) < 0) {
     rtapi_print_msg(RTAPI_MSG_ERR,
         LCEC_MSG_PFX "slave %s.%s: Failed to set SDO for <modParam name=\"%s\": sdo write of %04x:%02x = %d rejected by slave\n",
@@ -266,7 +266,7 @@ int lcec_write_sdo16_modparam(struct lcec_slave *slave, uint16_t index, uint8_t 
 /// @param value A 32-bit value to set.
 /// @param mpname The XML name of the modparam that triggered this.  Used for error messages.
 /// @return 0 for success or -1 for failure.
-int lcec_write_sdo32_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t value, char *mpname) {
+int lcec_write_sdo32_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t value, const char *mpname) {
   if (lcec_write_sdo32(slave, index, subindex, value) < 0) {
     rtapi_print_msg(RTAPI_MSG_ERR,
         LCEC_MSG_PFX "slave %s.%s: Failed to set SDO for <modParam name=\"%s\": sdo write of %04x:%02x = %d rejected by slave\n",
@@ -277,6 +277,9 @@ int lcec_write_sdo32_modparam(struct lcec_slave *slave, uint16_t index, uint8_t 
 }
 
 /// @brief Read IDN data from a slave device.
+///
+/// IDNs ("Identification Number") are similar to SDOs, but for SoE
+/// (Servo over EtherCAT) devices, not CoE (CanOPEN over EtherCAT).
 int lcec_read_idn(struct lcec_slave *slave, uint8_t drive_no, uint16_t idn, uint8_t *target, size_t size) {
   lcec_master_t *master = slave->master;
   int err;

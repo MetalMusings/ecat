@@ -50,7 +50,7 @@ static const lcec_pindesc_t master_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
-/// @brief Master params
+/// @brief Master params 
 static const lcec_pindesc_t master_params[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
@@ -500,8 +500,16 @@ int lcec_parse_config(void) {
 
         if (type != NULL) {
           // normal slave
-          slave->vid = type->vid;
-          slave->pid = type->pid;
+          if (slave_conf->vid)
+            slave->vid = slave_conf->vid;
+          else
+            slave->vid = type->vid;
+
+          if (slave_conf->pid)
+            slave->pid = slave_conf->pid;
+          else
+            slave->pid = type->pid;
+
           slave->pdo_entry_count = type->pdo_entry_count;
           slave->is_fsoe_logic = type->is_fsoe_logic;
           slave->proc_preinit = type->proc_preinit;
@@ -1072,6 +1080,11 @@ lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_nam
 }
 
 /// @brief Verify that the correct number of PDOs were added by the slave.
+///
+/// This is needed because (in at least some cases) saying that we
+/// need `N` PDOs but not actually registering them all will break
+/// things.
+///
 /// @param pdo_entry_regs The PDOs for the driver.
 /// @param pdo_entry_count The number of expected PDOs.
 /// @return 0 for success, nonzero for failure.

@@ -65,13 +65,14 @@
   static void AddTypes(void) { lcec_addtypes(types, __FILE__); }
 
 // vendor ids, please keep sorted.
-#define LCEC_BECKHOFF_VID 0x00000002
-#define LCEC_OMRON_VID    0x00000083
-#define LCEC_STOEBER_VID  0x000000b9
-#define LCEC_SMC_VID      0x00000114
-#define LCEC_DELTA_VID    0x000001dd
-#define LCEC_ABET_VID     0x0000079A
-#define LCEC_MODUSOFT_VID 0x00000907
+#define LCEC_BECKHOFF_VID   0x00000002
+#define LCEC_OMRON_VID      0x00000083
+#define LCEC_STOEBER_VID    0x000000b9
+#define LCEC_SMC_VID        0x00000114
+#define LCEC_DELTA_VID      0x000001dd
+#define LCEC_ABET_VID       0x0000079A
+#define LCEC_MODUSOFT_VID   0x00000907
+#define LCEC_RTELLIGENT_VID 0x00000a88
 
 // State update period (ns)
 #define LCEC_STATE_UPDATE_PERIOD 1000000000LL
@@ -312,6 +313,9 @@ int lcec_write_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, u
 int lcec_write_sdo8(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t value);
 int lcec_write_sdo16(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t value);
 int lcec_write_sdo32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t value);
+int lcec_write_sdo8_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t value, const char *mpname);
+int lcec_write_sdo16_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t value, const char *mpname);
+int lcec_write_sdo32_modparam(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t value, const char *mpname);
 
 int lcec_pin_newf(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_addr, const char *fmt, ...);
 int lcec_pin_newf_list(void *base, const lcec_pindesc_t *list, ...);
@@ -336,4 +340,5 @@ double lcec_lookupdouble_i(const lcec_lookuptable_double_t *table, const char *k
 LCEC_CONF_MODPARAM_VAL_T *lcec_modparam_get(struct lcec_slave *slave, int id) __attribute__((nonnull));
 int lcec_modparam_desc_len(const lcec_modparam_desc_t *mp) __attribute__((nonnull));
 lcec_modparam_desc_t *lcec_modparam_desc_concat(lcec_modparam_desc_t const *a, lcec_modparam_desc_t const *b) __attribute__((nonnull));
+
 #endif
