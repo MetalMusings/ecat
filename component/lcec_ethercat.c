@@ -424,8 +424,10 @@ lcec_pdo_entry_reg_t *lcec_allocate_pdo_entry_reg(int size) {
 /// @param slave The `struct lcec_slave` this is passed into `_init`.
 /// @param idx The CoE object index that we want to register.  If we're trying to register `0x6010:12`, then the index should be `0x6010`.
 /// @param sidx The object subindex that we want to register.  In the previous example, this would be `0x12`.
-/// @param os The offset for this PDO entry.  This should point to an unsigned int in your `hal_data` structure, and it will be filled in later.
-/// @param bp The bit offset for this PDO entry.  This should point to an unsigned int in your `hal_data` structure if this is a <8 bit type, or it may be NULL for 8-bit or larger types.  Attempting to use NULL with a boolean will trigger an error at runtime.
+/// @param os The offset for this PDO entry.  This should point to an unsigned int in your `hal_data` structure, and it will be filled in
+/// later.
+/// @param bp The bit offset for this PDO entry.  This should point to an unsigned int in your `hal_data` structure if this is a <8 bit
+/// type, or it may be NULL for 8-bit or larger types.  Attempting to use NULL with a boolean will trigger an error at runtime.
 /// @return 0 for succeess, <0 for failure.
 int lcec_pdo_init(struct lcec_slave *slave, uint16_t idx, uint16_t sidx, unsigned int *os, unsigned int *bp) {
   if (slave->regs->current >= slave->regs->max) {
