@@ -50,7 +50,7 @@ static const lcec_pindesc_t master_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
-/// @brief Master params
+/// @brief Master params 
 static const lcec_pindesc_t master_params[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
