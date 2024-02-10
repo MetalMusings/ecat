@@ -42,19 +42,6 @@
     (last) = (item);                        \
   } while (0);
 
-// pdo macros
-#define LCEC_PDO_INIT(pdo, pos, vid, pid, idx, sidx, off, bpos) \
-  do {                                                          \
-    pdo->position = pos;                                        \
-    pdo->vendor_id = vid;                                       \
-    pdo->product_code = pid;                                    \
-    pdo->index = idx;                                           \
-    pdo->subindex = sidx;                                       \
-    pdo->offset = off;                                          \
-    pdo->bit_position = bpos;                                   \
-    pdo++;                                                      \
-  } while (0);
-
 #define LCEC_MSG_PFX "LCEC: "
 
 // init macro; this will make GCC run calls to AddTypes() before
@@ -89,15 +76,16 @@
 
 #define LCEC_FSOE_SIZE(ch_count, data_len) (LCEC_FSOE_CMD_LEN + ch_count * (data_len + LCEC_FSOE_CRC_LEN) + LCEC_FSOE_CONNID_LEN)
 
-#define LCEC_MAX_PDO_ENTRY_COUNT 32
-#define LCEC_MAX_PDO_INFO_COUNT  8
-#define LCEC_MAX_SYNC_COUNT      4
+#define LCEC_MAX_PDO_REG_COUNT   128  ///< The maximum number of calls to lcec_pdo_init() for a single driver.
+#define LCEC_MAX_PDO_ENTRY_COUNT 32   ///< The maximum number of PDO entries in a PDO in a sync.
+#define LCEC_MAX_PDO_INFO_COUNT  8    ///< The maximum number of PDOs in a sync.
+#define LCEC_MAX_SYNC_COUNT      4    ///< The maximum number of syncs.
 
 struct lcec_master;
 struct lcec_slave;
 
 typedef int (*lcec_slave_preinit_t)(struct lcec_slave *slave);
-typedef int (*lcec_slave_init_t)(int comp_id, struct lcec_slave *slave, ec_pdo_entry_reg_t *pdo_entry_regs);
+typedef int (*lcec_slave_init_t)(int comp_id, struct lcec_slave *slave);
 typedef void (*lcec_slave_cleanup_t)(struct lcec_slave *slave);
 typedef void (*lcec_slave_rw_t)(struct lcec_slave *slave, long period);
 
@@ -120,7 +108,6 @@ typedef struct {
   char *name;                             ///< The device's name ("EL1008")
   uint32_t vid;                           ///< The EtherCAT vendor ID
   uint32_t pid;                           ///< The EtherCAT product ID
-  int pdo_entry_count;                    ///< The number of PDOs registered by this device.
   int is_fsoe_logic;                      ///< Does this device use Safety-over-EtherCAT?
   lcec_slave_preinit_t proc_preinit;      ///< pre-init function, if any
   lcec_slave_init_t proc_init;            ///< init function.  Sets up the device.
@@ -174,7 +161,6 @@ typedef struct lcec_master {
   char name[LCEC_CONF_STR_MAXLEN];  ///< Name of master.
   ec_master_t *master;              ///< EtherCAT master structure.
   unsigned long mutex;              ///< Mutex for locking operations.
-  int pdo_entry_count;              ///< Number of PDO entry counts registered for master.
   ec_pdo_entry_reg_t *pdo_entry_regs;
   ec_domain_t *domain;
   uint8_t *process_data;
@@ -195,6 +181,12 @@ typedef struct lcec_master {
   int dc_time_valid_last;
 #endif
 } lcec_master_t;
+
+typedef struct lcec_pdo_entry_reg {
+  int current;
+  int max;
+  ec_pdo_entry_reg_t *pdo_entry_regs;
+} lcec_pdo_entry_reg_t;
 
 /// @brief Slave Distributed Clock configuration.
 typedef struct {
@@ -244,7 +236,6 @@ typedef struct lcec_slave {
   char name[LCEC_CONF_STR_MAXLEN];           ///< Slave name.
   uint32_t vid;                              ///< Slave's vendor ID
   uint32_t pid;                              ///< Slave's EtherCAT PID/device ID.
-  int pdo_entry_count;                       ///< Number of PDO entries for this device.
   ec_sync_info_t *sync_info;                 ///< Sync Manager configuration.
   ec_slave_config_t *config;                 ///< Configuration data.
   ec_slave_config_state_t state;             ///< Slave state.
@@ -257,6 +248,7 @@ typedef struct lcec_slave {
   lcec_slave_rw_t proc_write;                ///< Callback for writing to the device.
   lcec_slave_state_t *hal_state_data;        ///< HAL state data.
   void *hal_data;                            ///< HAL data, device driver specific.
+  int generic_pdo_entry_count;               ///< The number of generic PDO entries.
   ec_pdo_entry_info_t *generic_pdo_entries;  ///< Generic PDO entries.
   ec_pdo_info_t *generic_pdos;               ///< Generic PDOs.
   ec_sync_info_t *generic_sync_managers;     ///< Generic sync managers.
@@ -268,6 +260,7 @@ typedef struct lcec_slave {
   unsigned int *fsoe_slave_offset;           ///< FSoE slave offset.
   unsigned int *fsoe_master_offset;          ///< FSoE master offset.
   uint64_t flags;                            ///< Flags, as defined by the driver itself.
+  lcec_pdo_entry_reg_t *regs;
 } lcec_slave_t;
 
 /// @brief HAL pin description.
@@ -340,5 +333,10 @@ double lcec_lookupdouble_i(const lcec_lookuptable_double_t *table, const char *k
 LCEC_CONF_MODPARAM_VAL_T *lcec_modparam_get(struct lcec_slave *slave, int id) __attribute__((nonnull));
 int lcec_modparam_desc_len(const lcec_modparam_desc_t *mp) __attribute__((nonnull));
 lcec_modparam_desc_t *lcec_modparam_desc_concat(lcec_modparam_desc_t const *a, lcec_modparam_desc_t const *b) __attribute__((nonnull));
+
+lcec_pdo_entry_reg_t *lcec_allocate_pdo_entry_reg(int size);
+int lcec_pdo_init(struct lcec_slave *slave, uint16_t idx, uint16_t sidx, unsigned int *os, unsigned int *bp);
+int lcec_pdo_entry_reg_len(lcec_pdo_entry_reg_t *reg);
+int lcec_append_pdo_entry_reg(lcec_pdo_entry_reg_t *dest, lcec_pdo_entry_reg_t *src);
 
 #endif

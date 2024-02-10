@@ -1,3 +1,4 @@
+
 //
 //    Copyright (C) 2012 Sascha Ittner <sascha.ittner@modusoft.de>
 //
@@ -396,4 +397,76 @@ LCEC_CONF_MODPARAM_VAL_T *lcec_modparam_get(struct lcec_slave *slave, int id) {
   }
 
   return NULL;
+}
+
+/// @brief Allocate a lcec_pdo_entry_reg struct.
+///
+/// @param size The maximum number of entries to allocate room for.
+/// @return  A lcec_pdo_entry_reg_t, or NULL if memory allocation failed.
+lcec_pdo_entry_reg_t *lcec_allocate_pdo_entry_reg(int size) {
+  lcec_pdo_entry_reg_t *reg = hal_malloc(sizeof(lcec_pdo_entry_reg_t));
+  if (reg == NULL) return NULL;
+
+  reg->max = size;
+  reg->current = 0;
+  reg->pdo_entry_regs = hal_malloc(sizeof(ec_pdo_entry_reg_t) * size);
+  if (reg->pdo_entry_regs == NULL) return NULL;
+
+  return reg;
+}
+
+/// @brief Register a new PDO entry.
+///
+/// This replaces the old LCEC_PDO_INIT() macro.  It has error
+/// checking and takes a *slave instead of pos/vid/pid, but fills the
+/// same function and should be relatively simple to swap in.
+///
+/// @param slave The `struct lcec_slave` this is passed into `_init`.
+/// @param idx The CoE object index that we want to register.  If we're trying to register `0x6010:12`, then the index should be `0x6010`.
+/// @param sidx The object subindex that we want to register.  In the previous example, this would be `0x12`.
+/// @param os The offset for this PDO entry.  This should point to an unsigned int in your `hal_data` structure, and it will be filled in later.
+/// @param bp The bit offset for this PDO entry.  This should point to an unsigned int in your `hal_data` structure if this is a <8 bit type, or it may be NULL for 8-bit or larger types.  Attempting to use NULL with a boolean will trigger an error at runtime.
+/// @return 0 for succeess, <0 for failure.
+int lcec_pdo_init(struct lcec_slave *slave, uint16_t idx, uint16_t sidx, unsigned int *os, unsigned int *bp) {
+  if (slave->regs->current >= slave->regs->max) {
+    // We specifically want to log this, because most users don't
+    // bother checking the return value, and this is an init bug.
+    rtapi_print_msg(RTAPI_MSG_ERR,
+        LCEC_MSG_PFX "lcec_pdo_init() failed for slave %s:%s; lcec_pdo_entry_reg_t is full, with %d of %d entries used\n",
+        slave->master->name, slave->name, slave->regs->current, slave->regs->max);
+    return -1;
+  }
+
+  ec_pdo_entry_reg_t *r = &slave->regs->pdo_entry_regs[slave->regs->current];
+
+  r->position = slave->index;
+  r->vendor_id = slave->vid;
+  r->product_code = slave->pid;
+  r->index = idx;
+  r->subindex = sidx;
+  r->offset = os;
+  r->bit_position = bp;
+
+  slave->regs->current++;
+  return 0;
+}
+
+/// @brief Return the number of entries in a lcec_pdo_entry_reg_t
+int lcec_pdo_entry_reg_len(lcec_pdo_entry_reg_t *reg) { return reg->current; }
+
+/// @brief Append the entries from one lcec_pdo_entry_reg_t onto another.
+///
+/// Only append used entries, not unused.  Fails if there isn't enough
+/// free space in the destination for all of the source entries.
+int lcec_append_pdo_entry_reg(lcec_pdo_entry_reg_t *dest, lcec_pdo_entry_reg_t *src) {
+  if ((dest->current + src->current) > dest->max) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_append_pdo_entry_reg() failed due to lack of space!\n");
+    return -1;
+  }
+
+  for (int i = 0; i < src->current; i++) {
+    dest->pdo_entry_regs[dest->current] = src->pdo_entry_regs[i];
+    dest->current++;
+  }
+  return 0;
 }

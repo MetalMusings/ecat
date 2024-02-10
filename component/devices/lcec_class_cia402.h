@@ -21,10 +21,6 @@
 
 #include "../lcec.h"
 
-#define LCEC_CIA402_PDOS           9
-#define LCEC_CIA402_BASIC_IN1_LEN  6
-#define LCEC_CIA402_BASIC_OUT1_LEN 5
-
 extern ec_pdo_entry_info_t lcec_cia402_basic_in1[];
 extern ec_pdo_entry_info_t lcec_cia402_basic_out1[];
 
@@ -122,8 +118,7 @@ typedef struct {
 } lcec_class_cia402_channels_t;
 
 lcec_class_cia402_channels_t *lcec_cia402_allocate_channels(int count);
-lcec_class_cia402_channel_t *lcec_cia402_register_channel(
-    ec_pdo_entry_reg_t **pdo_entry_regs, struct lcec_slave *slave, uint16_t base_idx, lcec_class_cia402_options_t *opt);
+lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *slave, uint16_t base_idx, lcec_class_cia402_options_t *opt);
 void lcec_cia402_read(struct lcec_slave *slave, lcec_class_cia402_channel_t *data);
 void lcec_cia402_read_all(struct lcec_slave *slave, lcec_class_cia402_channels_t *channels);
 void lcec_cia402_write(struct lcec_slave *slave, lcec_class_cia402_channel_t *data);
