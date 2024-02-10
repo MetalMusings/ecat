@@ -24,7 +24,7 @@
 #include "../lcec.h"
 
 static lcec_typelist_t types[] = {
-    {"generic", 0, 0, 0, 0, NULL, lcec_generic_init},
+    {"generic", 0, 0, 0, NULL, lcec_generic_init},
     {NULL},
 };
 ADD_TYPES(types)
@@ -41,7 +41,7 @@ void lcec_generic_write_u32(uint8_t *pd, lcec_generic_pin_t *hal_data, hal_u32_t
 ///
 /// Not static because it's called directly from `lcec_main`, unlike
 /// "normal" devices.
-int lcec_generic_init(int comp_id, struct lcec_slave *slave, ec_pdo_entry_reg_t *pdo_entry_regs) {
+int lcec_generic_init(int comp_id, struct lcec_slave *slave) {
   lcec_master_t *master = slave->master;
   lcec_generic_pin_t *hal_data = (lcec_generic_pin_t *)slave->hal_data;
   int i, j;
@@ -52,10 +52,9 @@ int lcec_generic_init(int comp_id, struct lcec_slave *slave, ec_pdo_entry_reg_t 
   slave->proc_write = lcec_generic_write;
 
   // initialize pins
-  for (i = 0; i < slave->pdo_entry_count; i++, hal_data++) {
+  for (i = 0; i < slave->generic_pdo_entry_count; i++, hal_data++) {
     // PDO mapping
-    LCEC_PDO_INIT(
-        pdo_entry_regs, slave->index, slave->vid, slave->pid, hal_data->pdo_idx, hal_data->pdo_sidx, &hal_data->pdo_os, &hal_data->pdo_bp);
+    lcec_pdo_init(slave, hal_data->pdo_idx, hal_data->pdo_sidx, &hal_data->pdo_os, &hal_data->pdo_bp);
 
     switch (hal_data->type) {
       case HAL_BIT:
@@ -128,7 +127,7 @@ void lcec_generic_read(struct lcec_slave *slave, long period) {
   hal_float_t fval;
 
   // read data
-  for (i = 0; i < slave->pdo_entry_count; i++, hal_data++) {
+  for (i = 0; i < slave->generic_pdo_entry_count; i++, hal_data++) {
     // skip wrong direction and uninitialized pins
     if (hal_data->dir != HAL_OUT || hal_data->pin[0] == NULL) {
       continue;
@@ -181,7 +180,7 @@ void lcec_generic_write(struct lcec_slave *slave, long period) {
   hal_float_t fval;
 
   // write data
-  for (i = 0; i < slave->pdo_entry_count; i++, hal_data++) {
+  for (i = 0; i < slave->generic_pdo_entry_count; i++, hal_data++) {
     // skip wrong direction and uninitialized pins
     if (hal_data->dir != HAL_IN || hal_data->pin[0] == NULL) {
       continue;

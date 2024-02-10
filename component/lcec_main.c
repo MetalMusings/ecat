@@ -50,7 +50,7 @@ static const lcec_pindesc_t master_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
-/// @brief Master params 
+/// @brief Master params
 static const lcec_pindesc_t master_params[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
@@ -89,7 +89,6 @@ lcec_master_data_t *lcec_init_master_hal(const char *pfx, int global);
 lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_name);
 void lcec_update_master_hal(lcec_master_data_t *hal_data, ec_master_state_t *ms);
 void lcec_update_slave_state_hal(lcec_slave_state_t *hal_data, ec_slave_config_state_t *ss);
-static int lcec_check_pdo_regs(lcec_slave_t *slave, ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count);
 
 void lcec_read_all(void *arg, long period);
 void lcec_write_all(void *arg, long period);
@@ -102,10 +101,10 @@ int rtapi_app_main(void) {
   lcec_master_t *master;
   lcec_slave_t *slave;
   char name[HAL_NAME_LEN + 1];
-  ec_pdo_entry_reg_t *pdo_entry_regs;
   lcec_slave_sdoconf_t *sdo_config;
   lcec_slave_idnconf_t *idn_config;
   struct timeval tv;
+  int pdo_entry_count = 0;
 
   // connect to the HAL
   if ((lcec_comp_id = hal_init(LCEC_MODULE_NAME)) < 0) {
@@ -143,7 +142,6 @@ int rtapi_app_main(void) {
     }
 
     // initialize slaves
-    pdo_entry_regs = master->pdo_entry_regs;
     for (slave = master->first_slave; slave != NULL; slave = slave->next) {
       // read slave config
 
@@ -184,19 +182,20 @@ int rtapi_app_main(void) {
         }
       }
 
+      slave->regs = lcec_allocate_pdo_entry_reg(LCEC_MAX_PDO_REG_COUNT);
+      if (slave->regs == NULL) {
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure allocating PDO entries for slave %s.%s\n", master->name, slave->name);
+        goto fail2;
+      }
+
       // setup pdos
       if (slave->proc_init != NULL) {
         rtapi_print_msg(RTAPI_MSG_DBG, LCEC_MSG_PFX "proc_init for slave %s.%s\n", master->name, slave->name);
-        if ((slave->proc_init(lcec_comp_id, slave, pdo_entry_regs)) != 0) {
+        if ((slave->proc_init(lcec_comp_id, slave)) != 0) {
           rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure in proc_init for slave %s.%s\n", master->name, slave->name);
           goto fail2;
         }
       }
-      if (lcec_check_pdo_regs(slave, pdo_entry_regs, slave->pdo_entry_count) != 0) {
-        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "PDO reg check failure for slave %s.%s\n", master->name, slave->name);
-        goto fail2;
-      }
-      pdo_entry_regs += slave->pdo_entry_count;
 
       // configure dc for this slave
       if (slave->dc_conf != NULL) {
@@ -228,14 +227,21 @@ int rtapi_app_main(void) {
         rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure to export slave pins for slave %s.%s\n", master->name, slave->name);
         goto fail2;
       }
+
+      pdo_entry_count += lcec_pdo_entry_reg_len(slave->regs);
     }
 
-    // terminate POD entries
-    pdo_entry_regs->index = 0;
+    lcec_pdo_entry_reg_t *master_regs = lcec_allocate_pdo_entry_reg(pdo_entry_count + 1);
+    for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+      if (lcec_append_pdo_entry_reg(master_regs, slave->regs) < 0) {
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure to append PDO entries for slave %s.%s\n", master->name, slave->name);
+        goto fail2;
+      }
+    }
 
     // register PDO entries
     rtapi_print_msg(RTAPI_MSG_DBG, LCEC_MSG_PFX "register PDO entries\n");
-    if (ecrt_domain_reg_pdo_entry_list(master->domain, master->pdo_entry_regs)) {
+    if (ecrt_domain_reg_pdo_entry_list(master->domain, master_regs->pdo_entry_regs)) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s PDO entry registration failed\n", master->name);
       goto fail2;
     }
@@ -351,7 +357,6 @@ int lcec_parse_config(void) {
   lcec_slave_t *slave;
   lcec_slave_dc_t *dc;
   lcec_slave_watchdog_t *wd;
-  ec_pdo_entry_reg_t *pdo_entry_regs;
   LCEC_CONF_TYPE_T conf_type;
   LCEC_CONF_MASTER_T *master_conf;
   LCEC_CONF_SLAVE_T *slave_conf;
@@ -510,7 +515,6 @@ int lcec_parse_config(void) {
           else
             slave->pid = type->pid;
 
-          slave->pdo_entry_count = type->pdo_entry_count;
           slave->is_fsoe_logic = type->is_fsoe_logic;
           slave->proc_preinit = type->proc_preinit;
           slave->proc_init = type->proc_init;
@@ -519,7 +523,7 @@ int lcec_parse_config(void) {
           // generic slave
           slave->vid = slave_conf->vid;
           slave->pid = slave_conf->pid;
-          slave->pdo_entry_count = slave_conf->pdoMappingCount;
+          slave->generic_pdo_entry_count = slave_conf->pdoMappingCount;
           slave->proc_init = lcec_generic_init;
 
           // alloc hal memory
@@ -929,19 +933,6 @@ int lcec_parse_config(void) {
         }
       }
     }
-
-    // stage 3 preinit: sum required pdo mappings
-    for (slave = master->first_slave; slave != NULL; slave = slave->next) {
-      master->pdo_entry_count += slave->pdo_entry_count;
-    }
-
-    // alloc mem for pdo mappings
-    pdo_entry_regs = lcec_zalloc(sizeof(ec_pdo_entry_reg_t) * (master->pdo_entry_count + 2));
-    if (pdo_entry_regs == NULL) {
-      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Unable to allocate master %s PDO entry memory\n", master->name);
-      goto fail2;
-    }
-    master->pdo_entry_regs = pdo_entry_regs;
   }
 
   return slave_count;
@@ -1077,31 +1068,6 @@ lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_nam
   }
 
   return hal_data;
-}
-
-/// @brief Verify that the correct number of PDOs were added by the slave.
-///
-/// This is needed because (in at least some cases) saying that we
-/// need `N` PDOs but not actually registering them all will break
-/// things.
-///
-/// @param pdo_entry_regs The PDOs for the driver.
-/// @param pdo_entry_count The number of expected PDOs.
-/// @return 0 for success, nonzero for failure.
-static int lcec_check_pdo_regs(lcec_slave_t *slave, ec_pdo_entry_reg_t *pdo_entry_regs, int pdo_entry_count) {
-  for (int i = 0; i < pdo_entry_count; i++) {
-    if (pdo_entry_regs[i].vendor_id == 0) {
-      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave %s.%s requested %d PDO entries but only registered %d\n", slave->master->name,
-          slave->name, pdo_entry_count, i);
-      return -1;
-    }
-  }
-  if (pdo_entry_regs[pdo_entry_count].vendor_id != 0) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave %s.%s requested %d PDO entries but registered at least 1 more.\n",
-        slave->master->name, slave->name, pdo_entry_count);
-    return -1;
-  }
-  return 0;
 }
 
 /// @brief Update HAL pins for the master.

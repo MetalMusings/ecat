@@ -32,7 +32,7 @@ void lcec_addtype(lcec_typelist_t *type, char *sourcefile) {
   // from either lcec.so (inside of LinuxCNC) or lcec_conf (a
   // standalone binary).
   t = malloc(sizeof(lcec_typelinkedlist_t));
-  if (t==NULL) {
+  if (t == NULL) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Failed to allocate memory in lcec_addtype(), skipping\n");
     return;
   }

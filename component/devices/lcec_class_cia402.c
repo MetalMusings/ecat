@@ -222,6 +222,7 @@ lcec_syncs_t *lcec_cia402_init_sync(lcec_class_cia402_options_t *options) {
 /// `lcec_syncs_add_pdo_entry()` calls you need.
 int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options) {
   lcec_class_cia402_enabled_t *enabled = lcec_cia402_enabled(options);
+  if (enabled == NULL) return -1;
 
   lcec_syncs_add_sync(syncs, EC_DIR_OUTPUT, EC_WD_DEFAULT);
   lcec_syncs_add_pdo_info(syncs, 0x1600);
@@ -242,6 +243,7 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
 /// need.
 int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options) {
   lcec_class_cia402_enabled_t *enabled = lcec_cia402_enabled(options);
+  if (enabled == NULL) return -1;
 
   lcec_syncs_add_sync(syncs, EC_DIR_INPUT, EC_WD_DEFAULT);
   lcec_syncs_add_pdo_info(syncs, 0x1a00);
@@ -260,7 +262,6 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 /// This creates a new CiA 402 channel, which is basically a single
 /// axis for a CiA 402-compatible stepper or servo controller.
 ///
-/// @param pdo_entry_regs The `pdo_entry_regs` structure passed into `_init`.
 /// @param slave The `slave` passed into `_init`.
 /// @param base_idx The base index for PDOs for this channel.  For
 ///   single-axis devices, this should be 0x6000.  For multi-axis
@@ -271,8 +272,7 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 ///   `lcec_class_cia402_options_t` from
 ///   `lcec_cia402_options_single_axis()` or
 ///   `lcec_cia402_options_multi_axes()`.
-lcec_class_cia402_channel_t *lcec_cia402_register_channel(
-    ec_pdo_entry_reg_t **pdo_entry_regs, struct lcec_slave *slave, uint16_t base_idx, lcec_class_cia402_options_t *opt) {
+lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *slave, uint16_t base_idx, lcec_class_cia402_options_t *opt) {
   lcec_class_cia402_channel_t *data;
   int err;
   lcec_class_cia402_enabled_t *enabled;
@@ -312,24 +312,19 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   data->enabled = enabled;
 
   // Register PDOs
-  LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x40, 0, &data->controlword_os, NULL);
-  LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x41, 0, &data->statusword_os, NULL);
+  lcec_pdo_init(slave, base_idx + 0x40, 0, &data->controlword_os, NULL);
+  lcec_pdo_init(slave, base_idx + 0x41, 0, &data->statusword_os, NULL);
 
   if (enabled->enable_opmode) {
-    LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x60, 0, &data->opmode_os, NULL);
-    LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x61, 0, &data->opmode_disp_os, NULL);
+    lcec_pdo_init(slave, base_idx + 0x60, 0, &data->opmode_os, NULL);
+    lcec_pdo_init(slave, base_idx + 0x61, 0, &data->opmode_disp_os, NULL);
   }
 
-  if (enabled->enable_actual_position)
-    LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x64, 0, &data->actpos_os, NULL);
-  if (enabled->enable_actual_torque)
-    LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x77, 0, &data->acttorq_os, NULL);
-  if (enabled->enable_actual_velocity)
-    LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x6c, 0, &data->actvel_os, NULL);
-  if (enabled->enable_target_position)
-    LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0x7a, 0, &data->targetpos_os, NULL);
-  if (enabled->enable_target_velocity)
-    LCEC_PDO_INIT((*pdo_entry_regs), slave->index, slave->vid, slave->pid, base_idx + 0xff, 0, &data->targetvel_os, NULL);
+  if (enabled->enable_actual_position) lcec_pdo_init(slave, base_idx + 0x64, 0, &data->actpos_os, NULL);
+  if (enabled->enable_actual_torque) lcec_pdo_init(slave, base_idx + 0x77, 0, &data->acttorq_os, NULL);
+  if (enabled->enable_actual_velocity) lcec_pdo_init(slave, base_idx + 0x6c, 0, &data->actvel_os, NULL);
+  if (enabled->enable_target_position) lcec_pdo_init(slave, base_idx + 0x7a, 0, &data->targetpos_os, NULL);
+  if (enabled->enable_target_velocity) lcec_pdo_init(slave, base_idx + 0xff, 0, &data->targetvel_os, NULL);
 
   // Register pins
   err = lcec_pin_newf_list(data, pins_required, LCEC_MODULE_NAME, slave->master->name, slave->name, name_prefix);
@@ -483,6 +478,7 @@ lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t con
 
       name = malloc(strlen(orig[l].name) + 4);
       if (name == NULL) {
+        free(mp);
         return NULL;
       }
       sprintf(name, "ch%d%s", l, orig[l].name);
@@ -501,6 +497,7 @@ lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t con
 /// device-specific `<modParam>`settings.
 lcec_modparam_desc_t *lcec_cia402_modparams(lcec_modparam_desc_t const *device_mps) {
   const lcec_modparam_desc_t *channelized_mps = lcec_cia402_channelized_modparams(per_channel_modparams);
+  if (channelized_mps == NULL) return NULL;
 
   return lcec_modparam_desc_concat(device_mps, channelized_mps);
 }
