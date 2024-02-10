@@ -304,6 +304,8 @@ typedef struct {
   const double value;
 } lcec_lookuptable_double_t;
 
+lcec_slave_t *lcec_slave_by_index(struct lcec_master *master, int index) __attribute__((nonnull));
+
 int lcec_read_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *target, size_t size);
 int lcec_read_idn(struct lcec_slave *slave, uint8_t drive_no, uint16_t idn, uint8_t *target, size_t size);
 int lcec_write_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *value, size_t size);
@@ -316,23 +318,22 @@ int lcec_pin_newf_list(void *base, const lcec_pindesc_t *list, ...);
 int lcec_param_newf(hal_type_t type, hal_pin_dir_t dir, void *data_addr, const char *fmt, ...);
 int lcec_param_newf_list(void *base, const lcec_pindesc_t *list, ...);
 
-LCEC_CONF_MODPARAM_VAL_T *lcec_modparam_get(struct lcec_slave *slave, int id);
-
-lcec_slave_t *lcec_slave_by_index(struct lcec_master *master, int index);
-
-void copy_fsoe_data(struct lcec_slave *slave, unsigned int slave_offset, unsigned int master_offset);
-
-void lcec_syncs_init(lcec_syncs_t *syncs);
+void copy_fsoe_data(struct lcec_slave *slave, unsigned int slave_offset, unsigned int master_offset) __attribute__((nonnull));
+void lcec_syncs_init(lcec_syncs_t *syncs) __attribute__((nonnull));
 void lcec_syncs_add_sync(lcec_syncs_t *syncs, ec_direction_t dir, ec_watchdog_mode_t watchdog_mode);
 void lcec_syncs_add_pdo_info(lcec_syncs_t *syncs, uint16_t index);
 void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subindex, uint8_t bit_length);
-const lcec_typelist_t *lcec_findslavetype(const char *name);
-void lcec_addtype(lcec_typelist_t *type, char *sourcefile);
-void lcec_addtypes(lcec_typelist_t types[], char *sourcefile);
-int lcec_lookupint(const lcec_lookuptable_int_t *table, const char *key, int default_value);
-int lcec_lookupint_i(const lcec_lookuptable_int_t *table, const char *key, int default_value);
-double lcec_lookupdouble(const lcec_lookuptable_double_t *table, const char *key, double default_value);
-double lcec_lookupdouble_i(const lcec_lookuptable_double_t *table, const char *key, double default_value);
-int lcec_modparam_desc_len(const lcec_modparam_desc_t *mp);
-lcec_modparam_desc_t *lcec_modparam_desc_concat(lcec_modparam_desc_t const *a, lcec_modparam_desc_t const *b);
+
+const lcec_typelist_t *lcec_findslavetype(const char *name) __attribute__((nonnull));
+void lcec_addtype(lcec_typelist_t *type, char *sourcefile) __attribute__((nonnull));
+void lcec_addtypes(lcec_typelist_t types[], char *sourcefile) __attribute__((nonnull));
+
+int lcec_lookupint(const lcec_lookuptable_int_t *table, const char *key, int default_value) __attribute__((nonnull));
+int lcec_lookupint_i(const lcec_lookuptable_int_t *table, const char *key, int default_value) __attribute__((nonnull));
+double lcec_lookupdouble(const lcec_lookuptable_double_t *table, const char *key, double default_value) __attribute__((nonnull));
+double lcec_lookupdouble_i(const lcec_lookuptable_double_t *table, const char *key, double default_value) __attribute__((nonnull));
+
+LCEC_CONF_MODPARAM_VAL_T *lcec_modparam_get(struct lcec_slave *slave, int id) __attribute__((nonnull));
+int lcec_modparam_desc_len(const lcec_modparam_desc_t *mp) __attribute__((nonnull));
+lcec_modparam_desc_t *lcec_modparam_desc_concat(lcec_modparam_desc_t const *a, lcec_modparam_desc_t const *b) __attribute__((nonnull));
 #endif
