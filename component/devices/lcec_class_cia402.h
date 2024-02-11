@@ -91,16 +91,20 @@ typedef struct {
   hal_s32_t *target_velocity;
 
   // In
+  hal_s32_t *actual_position;
+  hal_s32_t *actual_torque;
+  hal_s32_t *actual_velocity;
   hal_u32_t *statusword;
   hal_s32_t *opmode_display;
-  hal_s32_t *actual_position;
-  hal_s32_t *actual_velocity;
-  hal_s32_t *actual_torque;
+  hal_s32_t *supported_modes;
+  hal_bit_t *supports_mode_pp, *supports_mode_vl, *supports_mode_pv, *supports_mode_tq, *supports_mode_hm, *supports_mode_ip,
+      *supports_mode_csp, *supports_mode_csv, *supports_mode_cst;
 
-  unsigned int controlword_os;  ///< The controlword's offset in the master's PDO data structure.
-  unsigned int opmode_os;       ///< The opmode's offset in the master's PDO data structure.
-  unsigned int targetpos_os;    ///< The target position's offset in the master's PDO data structure.
-  unsigned int targetvel_os;    ///< The target velocity's offset in the master's PDO data structure.
+  unsigned int controlword_os;      ///< The controlword's offset in the master's PDO data structure.
+  unsigned int opmode_os;           ///< The opmode's offset in the master's PDO data structure.
+  unsigned int supported_modes_os;  ///< The supported modes offset in the master's PDO data structure.
+  unsigned int targetpos_os;        ///< The target position's offset in the master's PDO data structure.
+  unsigned int targetvel_os;        ///< The target velocity's offset in the master's PDO data structure.
 
   unsigned int statusword_os;   ///< The statusword's offset in the master's PDO data structure.
   unsigned int opmode_disp_os;  ///< The opmode display's offset in the master's PDO data structure.

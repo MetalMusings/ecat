@@ -125,6 +125,158 @@ int lcec_read_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, ui
   return 0;
 }
 
+/// @brief Read an 8-bit SDO from a slave device.
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint8_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo8(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *result) {
+  return lcec_read_sdo(slave, index, subindex, result, 1);
+}
+
+/// @brief Read a 16-bit SDO from a slave device.
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint16_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo16(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t *result) {
+  uint8_t data[2];
+  int err = lcec_read_sdo(slave, index, subindex, data, 2);
+  *result = EC_READ_U16(data);
+
+  return err;
+}
+
+/// @brief Read a 32-bit SDO from a slave device.
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint32_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t *result) {
+  uint8_t data[4];
+  int err = lcec_read_sdo(slave, index, subindex, data, 4);
+  *result = EC_READ_U32(data);
+
+  return err;
+}
+
+/// @brief Read an 8-bit SDO from a slave device into a U32 HAL pin.
+///
+/// This has two differences from `lcec_read_sdo8()`: the `result`
+/// paramater is a 32-bit integer, and it's declared `volatile` to
+/// reduce the number of warnings that GCC produces.
+///
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint32_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo8_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
+  uint8_t data;
+  int err = lcec_read_sdo(slave, index, subindex, &data, 1);
+  *result = data;
+
+  return err;
+}
+
+/// @brief Read an 8-bit SDO from a slave device into a S32 HAL pin.
+///
+/// This has two differences from `lcec_read_sdo8()`: the `result`
+/// paramater is a 32-bit integer, and it's declared `volatile` to
+/// reduce the number of warnings that GCC produces.
+///
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint32_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo8_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
+  uint8_t data;
+  int err = lcec_read_sdo(slave, index, subindex, &data, 1);
+  *result = data;
+
+  return err;
+}
+
+/// @brief Read a 16-bit SDO from a slave device into a U32 HAL pin.
+///
+/// This has two differences from `lcec_read_sdo16()`: the `result`
+/// paramater is a 32-bit integer, and it's declared `volatile` to
+/// reduce the number of warnings that GCC produces.
+///
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint32_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo16_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
+  uint8_t data[2];
+  int err = lcec_read_sdo(slave, index, subindex, data, 2);
+  *result = EC_READ_U16(data);
+
+  return err;
+}
+
+/// @brief Read a 16-bit SDO from a slave device into a S32 HAL pin.
+///
+/// This has two differences from `lcec_read_sdo16()`: the `result`
+/// paramater is a 32-bit integer, and it's declared `volatile` to
+/// reduce the number of warnings that GCC produces.
+///
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint32_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo16_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
+  uint8_t data[2];
+  int err = lcec_read_sdo(slave, index, subindex, data, 2);
+  *result = EC_READ_U16(data);
+
+  return err;
+}
+
+/// @brief Read a 32-bit SDO from a slave device into a U32 HAL pin.
+///
+/// This has two differences from `lcec_read_sdo32()`: the `result`
+/// paramater is a 32-bit integer, and it's declared `volatile` to
+/// reduce the number of warnings that GCC produces.
+///
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint32_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo32_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
+  uint8_t data[4];
+  int err = lcec_read_sdo(slave, index, subindex, data, 4);
+  *result = EC_READ_U32(data);
+
+  return err;
+}
+
+/// @brief Read a 32-bit SDO from a slave device into a S32 HAL pin.
+///
+/// This has two differences from `lcec_read_sdo32()`: the `result`
+/// paramater is a 32-bit integer, and it's declared `volatile` to
+/// reduce the number of warnings that GCC produces.
+///
+/// @param slave The `struct lcec_slave` passed to `_init`, `_read`, etc.
+/// @param index The CoE object index to read.  For `0x6010:02`, this would be `0x6010`.
+/// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
+/// @param result A pointer to a `uint32_t` to write the result into.
+/// @return 0 for success, <0 for failure.
+int lcec_read_sdo32_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
+  uint8_t data[4];
+  int err = lcec_read_sdo(slave, index, subindex, data, 4);
+  *result = EC_READ_U32(data);
+
+  return err;
+}
+
 /// @brief Write an SDO configuration to a slave device.
 ///
 /// This writes an SDO config to a specified slave device.  It can
