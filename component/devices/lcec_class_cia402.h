@@ -52,19 +52,25 @@ extern ec_pdo_entry_info_t lcec_cia402_basic_out1[];
 /// At the moment, only pp/pv/csp/csv are even slightly implemented.
 /// More will follow as hardware support grows.
 typedef struct {
-  char *name_prefix;          ///< Prefix for device naming, defaults to "srv".
-  int enable_opmode;          ///< Enable opmode and opmode-display.  They're technically optional in the spec.
-  int enable_pp;              ///< If true, enable required PP-mode pins: `-actual-position` and `-target-position`.
-  int enable_pv;              ///< If true, enable required PV-mode pins: `-actual-velocity` and `-target-velocity`.
-  int enable_csp;             ///< If true, enable required CSP-mode pins: `-actual-position` and `-target-position`, plus others.
-  int enable_csv;             ///< If true, enable required PV-mode pins: `-actual-velocity` and `-target-velocity`, plus others.
-  int enable_hm;              ///< If true, enable required homing-mode pins.  TBD
-  int enable_ip;              ///< If true, enable required interpolation-mode pins.  TBD.
-  int enable_vl;              ///< If true, enable required velocity-mode pins.  TBD.
-  int enable_cst;             ///< If true, enable required Cyclic Synchronous Torque mode pins.  TBD
-  int enable_actual_torque;   ///< If true, enable `-actual-torque`.
-  int enable_digital_input;   ///< If true, enable digital input PDO.
-  int enable_digital_output;  ///< If true, enable digital output PDO.
+  char *name_prefix;                ///< Prefix for device naming, defaults to "srv".
+  int enable_opmode;                ///< Enable opmode and opmode-display.  They're technically optional in the spec.
+  int enable_pp;                    ///< If true, enable required PP-mode pins: `-actual-position` and `-target-position`.
+  int enable_pv;                    ///< If true, enable required PV-mode pins: `-actual-velocity` and `-target-velocity`.
+  int enable_csp;                   ///< If true, enable required CSP-mode pins: `-actual-position` and `-target-position`, plus others.
+  int enable_csv;                   ///< If true, enable required PV-mode pins: `-actual-velocity` and `-target-velocity`, plus others.
+  int enable_hm;                    ///< If true, enable required homing-mode pins.  TBD
+  int enable_ip;                    ///< If true, enable required interpolation-mode pins.  TBD.
+  int enable_vl;                    ///< If true, enable required velocity-mode pins.  TBD.
+  int enable_cst;                   ///< If true, enable required Cyclic Synchronous Torque mode pins.  TBD
+  int enable_actual_torque;         ///< If true, enable `-actual-torque`.
+  int enable_digital_input;         ///< If true, enable digital input PDO.
+  int enable_digital_output;        ///< If true, enable digital output PDO.
+  int enable_profile_max_velocity;  ///< If true, enable the profile max velocity pin
+  int enable_profile_velocity;      ///< If true, enable the profile velocity pin
+  int enable_profile_end_velocity;  ///< If true, enable the profile end velocity pin
+  int enable_profile_accel;         ///< If true, enable the profile accel pin
+  int enable_profile_decel;         ///< If true, enable the profile decel pin
+  int enable_home_accel;            ///< If true, enable the home accel pin
 } lcec_class_cia402_options_t;
 
 /// This is the internal version of `lcec_class_cia402_options_t`.  It
@@ -73,7 +79,10 @@ typedef struct {
 /// This is constructed from an options structure by
 /// `lcec_cia402_enabled()`.
 typedef struct {
+  int enable_hm;
+
   int enable_opmode;
+  int enable_opmode_display;
   int enable_actual_position;
   int enable_actual_velocity;
   int enable_actual_torque;
@@ -81,6 +90,15 @@ typedef struct {
   int enable_target_velocity;
   int enable_digital_input;
   int enable_digital_output;
+  int enable_profile_max_velocity;
+  int enable_profile_velocity;
+  int enable_profile_end_velocity;
+  int enable_profile_accel;
+  int enable_profile_decel;
+  int enable_home_method;
+  int enable_home_velocity_fast;
+  int enable_home_velocity_slow;
+  int enable_home_accel;
 } lcec_class_cia402_enabled_t;
 
 typedef struct {
@@ -89,6 +107,15 @@ typedef struct {
   hal_s32_t *opmode;
   hal_s32_t *target_position;
   hal_s32_t *target_velocity;
+  hal_u32_t *profile_max_velocity;
+  hal_u32_t *profile_velocity;
+  hal_u32_t *profile_end_velocity;
+  hal_u32_t *profile_accel;
+  hal_u32_t *profile_decel;
+  hal_s32_t *home_method;
+  hal_u32_t *home_velocity_fast;
+  hal_u32_t *home_velocity_slow;
+  hal_u32_t *home_accel;
 
   // In
   hal_s32_t *actual_position;
@@ -100,17 +127,26 @@ typedef struct {
   hal_bit_t *supports_mode_pp, *supports_mode_vl, *supports_mode_pv, *supports_mode_tq, *supports_mode_hm, *supports_mode_ip,
       *supports_mode_csp, *supports_mode_csv, *supports_mode_cst;
 
-  unsigned int controlword_os;      ///< The controlword's offset in the master's PDO data structure.
-  unsigned int opmode_os;           ///< The opmode's offset in the master's PDO data structure.
-  unsigned int supported_modes_os;  ///< The supported modes offset in the master's PDO data structure.
-  unsigned int targetpos_os;        ///< The target position's offset in the master's PDO data structure.
-  unsigned int targetvel_os;        ///< The target velocity's offset in the master's PDO data structure.
+  unsigned int controlword_os;           ///< The controlword's offset in the master's PDO data structure.
+  unsigned int opmode_os;                ///< The opmode's offset in the master's PDO data structure.
+  unsigned int supported_modes_os;       ///< The supported modes offset in the master's PDO data structure.
+  unsigned int target_position_os;       ///< The target position's offset in the master's PDO data structure.
+  unsigned int target_velocity_os;       ///< The target velocity's offset in the master's PDO data structure.
+  unsigned int profile_max_velocity_os;  ///< The maximum velocity allowed in profile move modes.
+  unsigned int profile_velocity_os;      ///< The target velocity for the next move in `pp` mode.
+  unsigned int profile_end_velocity_os;  ///< The end velocity for the next move in `pp` mode.  Almost always 0.
+  unsigned int profile_accel_os;         ///< The target accleeration for the next move in `pp` mode.
+  unsigned int profile_decel_os;         ///< The target deceleration for the next move in `pp` mode.
+  unsigned int home_method_os;           ///< The homing method used.  See manufacturer's docs.
+  unsigned int home_velocity_fast_os;    ///< The velocity used for the fast portion of the homing.
+  unsigned int home_velocity_slow_os;    ///< The velocity used for the slow portion of the homing.
+  unsigned int home_accel_os;            ///< The acceleration used while homing.
 
-  unsigned int statusword_os;   ///< The statusword's offset in the master's PDO data structure.
-  unsigned int opmode_disp_os;  ///< The opmode display's offset in the master's PDO data structure.
-  unsigned int actpos_os;       ///< The actual position's offset in the master's PDO data structure.
-  unsigned int actvel_os;       ///< The actual velocity's offset in the master's PDO data structure.
-  unsigned int acttorq_os;      ///< The actual torque's offset in the master's PDO data structure.
+  unsigned int statusword_os;       ///< The statusword's offset in the master's PDO data structure.
+  unsigned int opmode_display_os;   ///< The opmode display's offset in the master's PDO data structure.
+  unsigned int actual_position_os;  ///< The actual position's offset in the master's PDO data structure.
+  unsigned int actual_velocity_os;  ///< The actual velocity's offset in the master's PDO data structure.
+  unsigned int actual_torque_os;    ///< The actual torque's offset in the master's PDO data structure.
 
   lcec_class_cia402_options_t *options;  ///< The options used to create this device.
   lcec_class_cia402_enabled_t *enabled;
@@ -152,37 +188,37 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 //
 // These need to:
 //   (a) be >= CIA402_MP_BASE and
-//   (b) be a multiple of 4, with 3 unused IDs between each.
-//       That is, the hex version should end in 0, 4, 8, or c.
+//   (b) be a multiple of 8, with 7 unused IDs between each.
+//       That is, the hex version should end in 0 or 8.
 //
 // These are run through `lcec_cia402_channelized_modparams()` which
-// creates additional versions of these for 4 different channels (or
+// creates additional versions of these for 8 different channels (or
 // axes).
 
 #define CIA402_MP_BASE              0x1000
 #define CIA402_MP_POSLIMIT_MIN      0x1000  // 0x607b:01 "Minimum position range limit" S32
-#define CIA402_MP_POSLIMIT_MAX      0x1004  // 0x607b:02 "Maximum position range limit" S32
-#define CIA402_MP_SWPOSLIMIT_MIN    0x1008  // 0x607d:01 "Minimum software position limit" S32
-#define CIA402_MP_SWPOSLIMIT_MAX    0x100c  // 0x607d:02 "Maximum software position limit" S32
-#define CIA402_MP_HOME_OFFSET       0x1010  // 0x607c:00 "home offset" S32
-#define CIA402_MP_MAXPROFILEVEL     0x1020  // 0x607f:00 "max profile velocity" U32
-#define CIA402_MP_MAXMOTORSPEED     0x1024  // 0x6080:00 "max motor speed" U32
-#define CIA402_MP_PROFILEVEL        0x1028  // 0x6081:00 "profile velocity" U32
-#define CIA402_MP_ENDVEL            0x102c  // 0x6082:00 "end velocity" U32
-#define CIA402_MP_PROFACCEL         0x1030  // 0x6083:00 "profile acceleration" U32
-#define CIA402_MP_PROFDECEL         0x1034  // 0x6084:00 "profile deceleration" U32
-#define CIA402_MP_QUICKDECEL        0x1038  // 0x6085:00 "quick stop deceleration" U32
-#define CIA402_MP_OPTCODE_QUICKSTOP 0x1040  // 0x605a:00 "quick stop option code" S16
-#define CIA402_MP_OPTCODE_SHUTDOWN  0x1044  // 0x605b:00 "shutdown option code" S16
-#define CIA402_MP_OPTCODE_DISABLE   0x1048  // 0x605c:00 "disable operation option code" S16
-#define CIA402_MP_OPTCODE_HALT      0x104c  // 0x605d:00 "halt option code" S16
-#define CIA402_MP_OPTCODE_FAULT     0x1050  // 0x605e:00 "fault option code" S16
-#define CIA402_MP_HOME_METHOD       0x1060  // 0x6098:00 "homing method" S8
-#define CIA402_MP_HOME_VEL_FAST     0x1064  // 0x6099:01 "homing velocity fast" U32
-#define CIA402_MP_HOME_VEL_SLOW     0x1068  // 0x6099:02 "homing velocity slow" U32
-#define CIA402_MP_HOME_ACCEL        0x106c  // 0x609a:00 "homing acceleration" S32
-#define CIA402_MP_PROBE_FUNCTION    0x1070  // 0x60b8:00 "probe function" U16
-#define CIA402_MP_PROBE1_POS        0x1080  // 0x60ba:00 "touch probe 1 positive value" S32
-#define CIA402_MP_PROBE1_NEG        0x1084  // 0x60bb:00 "touch probe 1 negative value" S32
-#define CIA402_MP_PROBE2_POS        0x1088  // 0x60bc:00 "touch probe 2 positive value" S32
-#define CIA402_MP_PROBE2_NEG        0x108c  // 0x60bad:00 "touch probe 2 negative value" S32
+#define CIA402_MP_POSLIMIT_MAX      0x1010  // 0x607b:02 "Maximum position range limit" S32
+#define CIA402_MP_SWPOSLIMIT_MIN    0x1020  // 0x607d:01 "Minimum software position limit" S32
+#define CIA402_MP_SWPOSLIMIT_MAX    0x1030  // 0x607d:02 "Maximum software position limit" S32
+#define CIA402_MP_HOME_OFFSET       0x1040  // 0x607c:00 "home offset" S32
+#define CIA402_MP_MAXPROFILEVEL     0x1050  // 0x607f:00 "max profile velocity" U32
+#define CIA402_MP_MAXMOTORSPEED     0x1060  // 0x6080:00 "max motor speed" U32
+#define CIA402_MP_PROFILEVEL        0x1070  // 0x6081:00 "profile velocity" U32
+#define CIA402_MP_ENDVEL            0x1080  // 0x6082:00 "end velocity" U32
+#define CIA402_MP_PROFACCEL         0x1090  // 0x6083:00 "profile acceleration" U32
+#define CIA402_MP_PROFDECEL         0x10a0  // 0x6084:00 "profile deceleration" U32
+#define CIA402_MP_QUICKDECEL        0x10b0  // 0x6085:00 "quick stop deceleration" U32
+#define CIA402_MP_OPTCODE_QUICKSTOP 0x10c0  // 0x605a:00 "quick stop option code" S16
+#define CIA402_MP_OPTCODE_SHUTDOWN  0x10d0  // 0x605b:00 "shutdown option code" S16
+#define CIA402_MP_OPTCODE_DISABLE   0x10e0  // 0x605c:00 "disable operation option code" S16
+#define CIA402_MP_OPTCODE_HALT      0x10f0  // 0x605d:00 "halt option code" S16
+#define CIA402_MP_OPTCODE_FAULT     0x1100  // 0x605e:00 "fault option code" S16
+#define CIA402_MP_HOME_METHOD       0x1110  // 0x6098:00 "homing method" S8
+#define CIA402_MP_HOME_VEL_FAST     0x1120  // 0x6099:01 "homing velocity fast" U32
+#define CIA402_MP_HOME_VEL_SLOW     0x1130  // 0x6099:02 "homing velocity slow" U32
+#define CIA402_MP_HOME_ACCEL        0x1140  // 0x609a:00 "homing acceleration" S32
+#define CIA402_MP_PROBE_FUNCTION    0x1150  // 0x60b8:00 "probe function" U16
+#define CIA402_MP_PROBE1_POS        0x1160  // 0x60ba:00 "touch probe 1 positive value" S32
+#define CIA402_MP_PROBE1_NEG        0x1170  // 0x60bb:00 "touch probe 1 negative value" S32
+#define CIA402_MP_PROBE2_POS        0x1180  // 0x60bc:00 "touch probe 2 positive value" S32
+#define CIA402_MP_PROBE2_NEG        0x1190  // 0x60bad:00 "touch probe 2 negative value" S32

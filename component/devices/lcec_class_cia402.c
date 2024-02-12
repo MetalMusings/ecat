@@ -70,6 +70,50 @@ static const lcec_pindesc_t pins_actual_velocity[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
+/// @brief Pins behind `enable_hm` (required pins for devices that support homing mode):
+static const lcec_pindesc_t pins_hm[] = {
+    {HAL_S32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, home_method), "%s.%s.%s.%s-home-method"},
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, home_velocity_fast), "%s.%s.%s.%s-home-velocity-fast"},
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, home_velocity_slow), "%s.%s.%s.%s-home-velocity-slow"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+/// @brief Pin behind `enable_home_accel`:
+static const lcec_pindesc_t pins_home_accel[] = {
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, home_accel), "%s.%s.%s.%s-home-accel"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+/// @brief Pin behind `enable_profile_max_velocity`:
+static const lcec_pindesc_t pins_profile_max_velocity[] = {
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, profile_max_velocity), "%s.%s.%s.%s-profile-max-velocity"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+/// @brief Pin behind `enable_profile_velocity`:
+static const lcec_pindesc_t pins_profile_velocity[] = {
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, profile_velocity), "%s.%s.%s.%s-profile-velocity"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+/// @brief Pin behind `enable_profile_end_velocity`:
+static const lcec_pindesc_t pins_profile_end_velocity[] = {
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, profile_end_velocity), "%s.%s.%s.%s-profile-end-velocity"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+/// @brief Pin behind `enable_profile_accel`:
+static const lcec_pindesc_t pins_profile_accel[] = {
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, profile_accel), "%s.%s.%s.%s-profile-accel"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+/// @brief Pin behind `enable_profile_decel`:
+static const lcec_pindesc_t pins_profile_decel[] = {
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, profile_decel), "%s.%s.%s.%s-profile-decel"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
 /// @brief Pins behind `enable_target_position`:
 static const lcec_pindesc_t pins_target_position[] = {
     {HAL_S32, HAL_IN, offsetof(lcec_class_cia402_channel_t, target_position), "%s.%s.%s.%s-target-position"},
@@ -93,6 +137,7 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_option
 
   if (opt->enable_opmode) {
     enabled->enable_opmode = 1;
+    enabled->enable_opmode_display = 1;
   }
   if (opt->enable_pp) {
     enabled->enable_actual_position = 1;
@@ -113,7 +158,10 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_option
     // TODO: add interpolation pins once they're added.
   }
   if (opt->enable_hm) {
-    // TODO: add homing pins once they're added.
+    enabled->enable_hm = 1;
+    enabled->enable_home_method = 1;
+    enabled->enable_home_velocity_fast = 1;
+    enabled->enable_home_velocity_slow = 1;
   }
   if (opt->enable_ip) {
     // TODO: add interpolation pins once they're added.
@@ -125,10 +173,18 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_option
     // TODO: add cyclic synchronous torque pins once they're added.
   }
 
-  // Individual pins.
-  if (opt->enable_actual_torque) enabled->enable_actual_torque = 1;
-  if (opt->enable_digital_input) enabled->enable_digital_input = 1;
-  if (opt->enable_digital_output) enabled->enable_digital_output = 1;
+  // Set individual pins in `enabled` using values from `opt`.
+#define ENABLE_OPT(pin_name) \
+  if (opt->enable_##pin_name) enabled->enable_##pin_name = 1
+  ENABLE_OPT(actual_torque);
+  ENABLE_OPT(digital_input);
+  ENABLE_OPT(digital_output);
+  ENABLE_OPT(profile_max_velocity);
+  ENABLE_OPT(profile_velocity);
+  ENABLE_OPT(profile_end_velocity);
+  ENABLE_OPT(profile_accel);
+  ENABLE_OPT(profile_decel);
+  ENABLE_OPT(home_accel);
 
   return enabled;
 }
@@ -241,6 +297,15 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
   ADD_OPTIONAL_PDO(target_position, 0x607a, 0x00, 32);
   ADD_OPTIONAL_PDO(target_velocity, 0x60ff, 0x00, 32);
   ADD_OPTIONAL_PDO(digital_output, 0x60fe, 0x01, 32);
+  ADD_OPTIONAL_PDO(profile_max_velocity, 0x607f, 0x0, 32);
+  ADD_OPTIONAL_PDO(profile_velocity, 0x6081, 0x0, 32);
+  ADD_OPTIONAL_PDO(profile_end_velocity, 0x6082, 0x0, 32);
+  ADD_OPTIONAL_PDO(profile_accel, 0x6083, 0x0, 32);
+  ADD_OPTIONAL_PDO(profile_decel, 0x6084, 0x0, 32);
+  ADD_OPTIONAL_PDO(home_method, 0x6098, 0x0, 32);
+  ADD_OPTIONAL_PDO(home_velocity_fast, 0x6099, 0x1, 32);
+  ADD_OPTIONAL_PDO(home_velocity_slow, 0x6099, 0x2, 32);
+  ADD_OPTIONAL_PDO(home_accel, 0x609a, 0x0, 32);
 
   return 0;
 };
@@ -258,7 +323,7 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
   lcec_syncs_add_sync(syncs, EC_DIR_INPUT, EC_WD_DEFAULT);
   lcec_syncs_add_pdo_info(syncs, 0x1a00);
   lcec_syncs_add_pdo_entry(syncs, 0x6041, 0x00, 16);  // Status word
-  ADD_OPTIONAL_PDO(opmode, 0x6061, 0x00, 8);          // Opmode display
+  ADD_OPTIONAL_PDO(opmode_display, 0x6061, 0x00, 8);
   ADD_OPTIONAL_PDO(actual_position, 0x6064, 0x00, 32);
   ADD_OPTIONAL_PDO(actual_velocity, 0x606c, 0x00, 32);
   ADD_OPTIONAL_PDO(actual_torque, 0x6077, 0x00, 32);
@@ -325,16 +390,24 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   lcec_pdo_init(slave, base_idx + 0x40, 0, &data->controlword_os, NULL);
   lcec_pdo_init(slave, base_idx + 0x41, 0, &data->statusword_os, NULL);
 
-  if (enabled->enable_opmode) {
-    lcec_pdo_init(slave, base_idx + 0x60, 0, &data->opmode_os, NULL);
-    lcec_pdo_init(slave, base_idx + 0x61, 0, &data->opmode_disp_os, NULL);
-  }
-
-  if (enabled->enable_actual_position) lcec_pdo_init(slave, base_idx + 0x64, 0, &data->actpos_os, NULL);
-  if (enabled->enable_actual_torque) lcec_pdo_init(slave, base_idx + 0x77, 0, &data->acttorq_os, NULL);
-  if (enabled->enable_actual_velocity) lcec_pdo_init(slave, base_idx + 0x6c, 0, &data->actvel_os, NULL);
-  if (enabled->enable_target_position) lcec_pdo_init(slave, base_idx + 0x7a, 0, &data->targetpos_os, NULL);
-  if (enabled->enable_target_velocity) lcec_pdo_init(slave, base_idx + 0xff, 0, &data->targetvel_os, NULL);
+#define REGISTER_OPTIONAL_PDO(pin_name, idx, sdx) \
+  if (enabled->enable_##pin_name) lcec_pdo_init(slave, idx, sdx, &data->pin_name##_os, NULL)
+  REGISTER_OPTIONAL_PDO(opmode, base_idx + 0x60, 0);
+  REGISTER_OPTIONAL_PDO(opmode_display, base_idx + 0x61, 0);
+  REGISTER_OPTIONAL_PDO(actual_position, base_idx + 0x64, 0);
+  REGISTER_OPTIONAL_PDO(actual_torque, base_idx + 0x77, 0);
+  REGISTER_OPTIONAL_PDO(actual_velocity, base_idx + 0x6c, 0);
+  REGISTER_OPTIONAL_PDO(target_position, base_idx + 0x7a, 0);
+  REGISTER_OPTIONAL_PDO(target_velocity, base_idx + 0xff, 0);
+  REGISTER_OPTIONAL_PDO(profile_max_velocity, base_idx + 0x7f, 0);
+  REGISTER_OPTIONAL_PDO(profile_velocity, base_idx + 0x81, 0);
+  REGISTER_OPTIONAL_PDO(profile_end_velocity, base_idx + 0x82, 0);
+  REGISTER_OPTIONAL_PDO(profile_accel, base_idx + 0x83, 0);
+  REGISTER_OPTIONAL_PDO(profile_decel, base_idx + 0x84, 0);
+  REGISTER_OPTIONAL_PDO(home_method, base_idx + 0x98, 0);
+  REGISTER_OPTIONAL_PDO(home_velocity_fast, base_idx + 0x99, 1);
+  REGISTER_OPTIONAL_PDO(home_velocity_slow, base_idx + 0x99, 2);
+  REGISTER_OPTIONAL_PDO(home_accel, base_idx + 0x9a, 0);
 
   // Register pins
   err = lcec_pin_newf_list(data, pins_required, LCEC_MODULE_NAME, slave->master->name, slave->name, name_prefix);
@@ -343,7 +416,7 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
     return NULL;
   }
 
-#define HANDLE_OPTIONAL_PINS(pin_name)                                                                                                \
+#define REGISTER_OPTIONAL_PINS(pin_name)                                                                                              \
   do {                                                                                                                                \
     if (enabled->enable_##pin_name) {                                                                                                 \
       err = lcec_pin_newf_list(data, pins_##pin_name, LCEC_MODULE_NAME, slave->master->name, slave->name, name_prefix);               \
@@ -355,13 +428,21 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   } while (0)
   //
 
-  HANDLE_OPTIONAL_PINS(opmode);
-  HANDLE_OPTIONAL_PINS(actual_position);
-  HANDLE_OPTIONAL_PINS(actual_torque);
-  HANDLE_OPTIONAL_PINS(actual_velocity);
-  HANDLE_OPTIONAL_PINS(target_position);
-  HANDLE_OPTIONAL_PINS(target_velocity);
+  REGISTER_OPTIONAL_PINS(opmode);
+  REGISTER_OPTIONAL_PINS(actual_position);
+  REGISTER_OPTIONAL_PINS(actual_torque);
+  REGISTER_OPTIONAL_PINS(actual_velocity);
+  REGISTER_OPTIONAL_PINS(target_position);
+  REGISTER_OPTIONAL_PINS(target_velocity);
+  REGISTER_OPTIONAL_PINS(profile_max_velocity);
+  REGISTER_OPTIONAL_PINS(profile_velocity);
+  REGISTER_OPTIONAL_PINS(profile_end_velocity);
+  REGISTER_OPTIONAL_PINS(profile_accel);
+  REGISTER_OPTIONAL_PINS(profile_decel);
+  REGISTER_OPTIONAL_PINS(hm);
+  REGISTER_OPTIONAL_PINS(home_accel);
 
+  // Set default values for pins here.
   uint32_t modes;
   lcec_read_sdo32(slave, base_idx + 0x502, 0, &modes);
 
@@ -376,6 +457,24 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   *(data->supports_mode_csv) = modes & 1 << 8;
   *(data->supports_mode_cst) = modes & 1 << 9;
 
+#define SET_OPTIONAL_DEFAULTS8(pin_name, idx, sidx) \
+  if (enabled->enable_##pin_name) lcec_read_sdo8_pin(slave, idx, sidx, data->pin_name)
+#define SET_OPTIONAL_DEFAULTS8S(pin_name, idx, sidx) \
+  if (enabled->enable_##pin_name) lcec_read_sdo8_pin_signed(slave, idx, sidx, data->pin_name)
+#define SET_OPTIONAL_DEFAULTS16(pin_name, idx, sidx) \
+  if (enabled->enable_##pin_name) lcec_read_sdo16_pin(slave, idx, sidx, data->pin_name)
+#define SET_OPTIONAL_DEFAULTS32(pin_name, idx, sidx) \
+  if (enabled->enable_##pin_name) lcec_read_sdo32_pin(slave, idx, sidx, data->pin_name)
+  SET_OPTIONAL_DEFAULTS32(profile_max_velocity, base_idx + 0x7f, 0);
+  SET_OPTIONAL_DEFAULTS32(profile_velocity, base_idx + 0x81, 0);
+  SET_OPTIONAL_DEFAULTS32(profile_end_velocity, base_idx + 0x82, 0);
+  SET_OPTIONAL_DEFAULTS32(profile_accel, base_idx + 0x83, 0);
+  SET_OPTIONAL_DEFAULTS32(profile_decel, base_idx + 0x84, 0);
+  SET_OPTIONAL_DEFAULTS8S(home_method, base_idx + 0x98, 0);
+  SET_OPTIONAL_DEFAULTS32(home_velocity_fast, base_idx + 0x99, 1);
+  SET_OPTIONAL_DEFAULTS32(home_velocity_slow, base_idx + 0x99, 2);
+  SET_OPTIONAL_DEFAULTS32(home_accel, base_idx + 0x9a, 0);
+
   return data;
 }
 
@@ -389,11 +488,14 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
 void lcec_cia402_read(struct lcec_slave *slave, lcec_class_cia402_channel_t *data) {
   uint8_t *pd = slave->master->process_data;
 
+#define READ_OPT(pin_name, size) \
+  if (data->enabled->enable_##pin_name) *(data->pin_name) = EC_READ_##size(&pd[data->pin_name##_os])
+
   *(data->statusword) = EC_READ_U16(&pd[data->statusword_os]);
-  if (data->enabled->enable_opmode) *(data->opmode_display) = EC_READ_U8(&pd[data->opmode_disp_os]);
-  if (data->enabled->enable_actual_position) *(data->actual_position) = EC_READ_S32(&pd[data->actpos_os]);
-  if (data->enabled->enable_actual_velocity) *(data->actual_velocity) = EC_READ_S32(&pd[data->actvel_os]);
-  if (data->enabled->enable_actual_torque) *(data->actual_torque) = EC_READ_S32(&pd[data->acttorq_os]);
+  READ_OPT(opmode_display, S8);
+  READ_OPT(actual_position, S32);
+  READ_OPT(actual_velocity, S32);
+  READ_OPT(actual_torque, S32);
 }
 
 /// @brief Reads data from all CiA 402 input ports.
@@ -409,10 +511,22 @@ void lcec_cia402_read_all(struct lcec_slave *slave, lcec_class_cia402_channels_t
 void lcec_cia402_write(struct lcec_slave *slave, lcec_class_cia402_channel_t *data) {
   uint8_t *pd = slave->master->process_data;
 
+#define WRITE_OPT(name, size) \
+  if (data->enabled->enable_##name) EC_WRITE_##size(&pd[data->name##_os], *(data->name))
+
   EC_WRITE_U16(&pd[data->controlword_os], (uint16_t)(*(data->controlword)));
-  if (data->enabled->enable_opmode) EC_WRITE_S8(&pd[data->opmode_os], (int8_t)(*(data->opmode)));
-  if (data->enabled->enable_target_position) EC_WRITE_S32(&pd[data->targetpos_os], *(data->target_position));
-  if (data->enabled->enable_target_velocity) EC_WRITE_S32(&pd[data->targetvel_os], *(data->target_velocity));
+  WRITE_OPT(opmode, S8);
+  WRITE_OPT(target_position, S32);
+  WRITE_OPT(target_velocity, S32);
+  WRITE_OPT(profile_max_velocity, U32);
+  WRITE_OPT(profile_velocity, U32);
+  WRITE_OPT(profile_end_velocity, U32);
+  WRITE_OPT(profile_accel, U32);
+  WRITE_OPT(profile_decel, U32);
+  WRITE_OPT(home_method, S32);
+  WRITE_OPT(home_velocity_fast, U32);
+  WRITE_OPT(home_velocity_slow, U32);
+  WRITE_OPT(home_accel, U32);
 }
 
 /// @brief Writess data to all CiA 402 output ports.
@@ -434,71 +548,79 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
     {"swPositionLimitMin", CIA402_MP_SWPOSLIMIT_MIN, MODPARAM_TYPE_S32},
     {"swPositionLimitMax", CIA402_MP_SWPOSLIMIT_MIN, MODPARAM_TYPE_S32},
     {"homeOffset", CIA402_MP_HOME_OFFSET, MODPARAM_TYPE_S32},
-    {"profileMaxVelocity", CIA402_MP_MAXPROFILEVEL, MODPARAM_TYPE_U32},
-    {"motorMaxSpeed_RPM", CIA402_MP_MAXMOTORSPEED, MODPARAM_TYPE_U32},
-    {"profileVelocity", CIA402_MP_PROFILEVEL, MODPARAM_TYPE_U32},
-    {"profileEndVelocity", CIA402_MP_ENDVEL, MODPARAM_TYPE_U32},
-    {"profileAccel", CIA402_MP_PROFACCEL, MODPARAM_TYPE_U32},
-    {"profileDecel", CIA402_MP_PROFDECEL, MODPARAM_TYPE_U32},
     {"quickDecel", CIA402_MP_QUICKDECEL, MODPARAM_TYPE_U32},
     {"quickStopOptionCode", CIA402_MP_OPTCODE_QUICKSTOP, MODPARAM_TYPE_S32},
     {"shutdownOptionCode", CIA402_MP_OPTCODE_SHUTDOWN, MODPARAM_TYPE_S32},
     {"disableOptionCode", CIA402_MP_OPTCODE_DISABLE, MODPARAM_TYPE_S32},
     {"haltOptionCode", CIA402_MP_OPTCODE_HALT, MODPARAM_TYPE_S32},
     {"faultOptionCode", CIA402_MP_OPTCODE_FAULT, MODPARAM_TYPE_S32},
-    {"homeMethod", CIA402_MP_HOME_METHOD, MODPARAM_TYPE_S32},
-    {"homeVelocityFast", CIA402_MP_HOME_VEL_FAST, MODPARAM_TYPE_U32},
-    {"homeVelocitySlow", CIA402_MP_HOME_VEL_SLOW, MODPARAM_TYPE_U32},
-    {"homeAccel", CIA402_MP_HOME_ACCEL, MODPARAM_TYPE_U32},
     {"probeFunction", CIA402_MP_PROBE_FUNCTION, MODPARAM_TYPE_U32},
     {"probe1Positive", CIA402_MP_PROBE1_POS, MODPARAM_TYPE_S32},
     {"probe1Negative", CIA402_MP_PROBE1_NEG, MODPARAM_TYPE_S32},
     {"probe2Positive", CIA402_MP_PROBE2_POS, MODPARAM_TYPE_S32},
     {"probe2Negative", CIA402_MP_PROBE2_NEG, MODPARAM_TYPE_S32},
+
+    // Move to pins
+    {"profileMaxVelocity", CIA402_MP_MAXPROFILEVEL, MODPARAM_TYPE_U32},
+    {"motorMaxSpeed_RPM", CIA402_MP_MAXMOTORSPEED, MODPARAM_TYPE_U32},
+    {"profileVelocity", CIA402_MP_PROFILEVEL, MODPARAM_TYPE_U32},
+    {"profileEndVelocity", CIA402_MP_ENDVEL, MODPARAM_TYPE_U32},
+    {"profileAccel", CIA402_MP_PROFACCEL, MODPARAM_TYPE_U32},
+    {"profileDecel", CIA402_MP_PROFDECEL, MODPARAM_TYPE_U32},
+    {"homeMethod", CIA402_MP_HOME_METHOD, MODPARAM_TYPE_S32},
+    {"homeVelocityFast", CIA402_MP_HOME_VEL_FAST, MODPARAM_TYPE_U32},
+    {"homeVelocitySlow", CIA402_MP_HOME_VEL_SLOW, MODPARAM_TYPE_U32},
+    {"homeAccel", CIA402_MP_HOME_ACCEL, MODPARAM_TYPE_U32},
     {NULL},
 };
 
 /// @brief Duplicate modparams with per-channel options
 ///
 /// This reads from `lcec_class_cia402_modparams` and produces a new
-/// list of modparams that includes versions of all modparams for 4
+/// list of modparams that includes versions of all modparams for 8
 /// distinct channels, for use with multi-axis CiA 402 devices.
 ///
 /// Specifically, this reads from `lcec_class_cia402_modparams` and
-/// returns a version where each line is duplicated 5 times.  The
+/// returns a version where each line is duplicated 9 times.  The
 /// first duplicate is just a copy of the entry from
-/// `lcec_class_cia402_modparams`; the other 4 are channel-specific
+/// `lcec_class_cia402_modparams`; the other 8 are channel-specific
 /// versions, with names and ID numbers modified from the original.
 /// If there's an entry for `foo` with an ID of 10, then this will
-/// produce 5 outputs:
+/// produce 9 outputs:
 ///
 /// - `{"foo", 10}`
 /// - `{"ch1foo", 10}`
 /// - `{"ch2foo", 11}`
 /// - `{"ch3foo", 12}`
 /// - `{"ch4foo", 13}`
+/// - `{"ch5foo", 13}`
+/// - `{"ch6foo", 13}`
+/// - `{"ch7foo", 13}`
 ///
 /// Note that this makes `ch1foo` equivalant to `foo`.  In all cases,
 /// `foo` should set a parameter for the first channel, not all
 /// channels.
+///
+/// If we have device-level modParams, then we should handle them via
+/// a different list.
 lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t const *orig) {
   lcec_modparam_desc_t *mp;
   int l;
 
   l = lcec_modparam_desc_len(orig);
 
-  mp = malloc(sizeof(lcec_modparam_desc_t) * (l * 5 + 1));
+  mp = malloc(sizeof(lcec_modparam_desc_t) * (l * 9 + 1));
   if (mp == NULL) {
     return NULL;
   }
 
-  mp[l * 5] = orig[l];  // Copy terminator.
+  mp[l * 9] = orig[l];  // Copy terminator.
 
   for (l = 0; orig[l].name != NULL; l++) {
-    mp[l * 5] = orig[l];
-    for (int i = 1; i < 5; i++) {
+    mp[l * 9] = orig[l];
+    for (int i = 1; i < 9; i++) {
       char *name;
-      mp[l * 5 + i] = orig[l];
+      mp[l * 9 + i] = orig[l];
 
       name = malloc(strlen(orig[l].name) + 4);
       if (name == NULL) {
@@ -506,8 +628,8 @@ lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t con
         return NULL;
       }
       sprintf(name, "ch%d%s", l, orig[l].name);
-      mp[l * 5 + i].name = name;
-      mp[l * 5 + i].id += i - 1;
+      mp[l * 9 + i].name = name;
+      mp[l * 9 + i].id += i - 1;
     }
   }
 
@@ -541,74 +663,63 @@ int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modpa
     return 0;
   }
 
-  // Each of these params is available in 5 forms:
+  // Each of these params is available in 9 forms:
   // `foo`: set foo for channel 0.  Generally used for single-axis devices.
   // `ch0foo`: set foo for channel 0.  Identical to `foo`, above.
   // `ch1foo`: set foo for channel 1.
-  // `ch2foo`: set foo for channel 2.
-  // `ch3foo`: set foo for channel 3.
+  // ...
+  // `ch8foo`: set foo for channel 8.
   //
-  // The `id` for CiA402 modparams needs to be coded so that the channel is the low-order 2 bits.
-  //
+  // The `id` for CiA402 modparams needs to be coded so that the channel is the low-order 3 bits.
+
   // To keep the switch statement from getting weird, this breaks the
   // channel and ID apart so we can handle them independently.
-  int channel = p->id & 3;
-  int id = p->id & ~3;
+  int channel = p->id & 7;
+  int id = p->id & ~7;
   int base = 0x6000 + 0x800 * channel;
 
+#define CASE_MP_S8(mp_name, idx, sidx) \
+  case mp_name:                        \
+    return lcec_write_sdo8_modparam(slave, idx, sidx, p->value.s32, p->name)
+#define CASE_MP_S16(mp_name, idx, sidx) \
+  case mp_name:                         \
+    return lcec_write_sdo16_modparam(slave, idx, sidx, p->value.s32, p->name)
+#define CASE_MP_U16(mp_name, idx, sidx) \
+  case mp_name:                         \
+    return lcec_write_sdo16_modparam(slave, idx, sidx, p->value.u32, p->name)
+#define CASE_MP_S32(mp_name, idx, sidx) \
+  case mp_name:                         \
+    return lcec_write_sdo32_modparam(slave, idx, sidx, p->value.s32, p->name)
+#define CASE_MP_U32(mp_name, idx, sidx) \
+  case mp_name:                         \
+    return lcec_write_sdo32_modparam(slave, idx, sidx, p->value.u32, p->name)
   switch (id) {
-    case CIA402_MP_POSLIMIT_MIN:
-      return lcec_write_sdo32_modparam(slave, base + 0x7b, 1, p->value.s32, p->name);
-    case CIA402_MP_POSLIMIT_MAX:
-      return lcec_write_sdo32_modparam(slave, base + 0x7b, 2, p->value.s32, p->name);
-    case CIA402_MP_SWPOSLIMIT_MIN:
-      return lcec_write_sdo32_modparam(slave, base + 0x7d, 1, p->value.s32, p->name);
-    case CIA402_MP_SWPOSLIMIT_MAX:
-      return lcec_write_sdo32_modparam(slave, base + 0x7d, 2, p->value.s32, p->name);
-    case CIA402_MP_HOME_OFFSET:
-      return lcec_write_sdo32_modparam(slave, base + 0x7c, 0, p->value.s32, p->name);
-    case CIA402_MP_MAXPROFILEVEL:
-      return lcec_write_sdo32_modparam(slave, base + 0x7f, 0, p->value.u32, p->name);
-    case CIA402_MP_MAXMOTORSPEED:
-      return lcec_write_sdo32_modparam(slave, base + 0x80, 0, p->value.u32, p->name);
-    case CIA402_MP_PROFILEVEL:
-      return lcec_write_sdo32_modparam(slave, base + 0x81, 0, p->value.u32, p->name);
-    case CIA402_MP_ENDVEL:
-      return lcec_write_sdo32_modparam(slave, base + 0x82, 0, p->value.u32, p->name);
-    case CIA402_MP_PROFACCEL:
-      return lcec_write_sdo32_modparam(slave, base + 0x83, 0, p->value.u32, p->name);
-    case CIA402_MP_PROFDECEL:
-      return lcec_write_sdo32_modparam(slave, base + 0x84, 0, p->value.u32, p->name);
-    case CIA402_MP_QUICKDECEL:
-      return lcec_write_sdo32_modparam(slave, base + 0x85, 0, p->value.u32, p->name);
-    case CIA402_MP_OPTCODE_QUICKSTOP:
-      return lcec_write_sdo16_modparam(slave, base + 0x5a, 0, p->value.s32, p->name);
-    case CIA402_MP_OPTCODE_SHUTDOWN:
-      return lcec_write_sdo16_modparam(slave, base + 0x5b, 0, p->value.s32, p->name);
-    case CIA402_MP_OPTCODE_DISABLE:
-      return lcec_write_sdo16_modparam(slave, base + 0x5c, 0, p->value.s32, p->name);
-    case CIA402_MP_OPTCODE_HALT:
-      return lcec_write_sdo16_modparam(slave, base + 0x5d, 0, p->value.s32, p->name);
-    case CIA402_MP_OPTCODE_FAULT:
-      return lcec_write_sdo16_modparam(slave, base + 0x5e, 0, p->value.s32, p->name);
-    case CIA402_MP_HOME_METHOD:
-      return lcec_write_sdo8_modparam(slave, base + 0x98, 0, p->value.s32, p->name);
-    case CIA402_MP_HOME_VEL_FAST:
-      return lcec_write_sdo32_modparam(slave, base + 0x99, 1, p->value.u32, p->name);
-    case CIA402_MP_HOME_VEL_SLOW:
-      return lcec_write_sdo32_modparam(slave, base + 0x99, 2, p->value.u32, p->name);
-    case CIA402_MP_HOME_ACCEL:
-      return lcec_write_sdo32_modparam(slave, base + 0x9a, 0, p->value.u32, p->name);
-    case CIA402_MP_PROBE_FUNCTION:
-      return lcec_write_sdo16_modparam(slave, base + 0xb8, 0, p->value.u32, p->name);
-    case CIA402_MP_PROBE1_POS:
-      return lcec_write_sdo32_modparam(slave, base + 0xba, 0, p->value.s32, p->name);
-    case CIA402_MP_PROBE1_NEG:
-      return lcec_write_sdo32_modparam(slave, base + 0xbb, 0, p->value.s32, p->name);
-    case CIA402_MP_PROBE2_POS:
-      return lcec_write_sdo32_modparam(slave, base + 0xbc, 0, p->value.s32, p->name);
-    case CIA402_MP_PROBE2_NEG:
-      return lcec_write_sdo32_modparam(slave, base + 0xbd, 0, p->value.s32, p->name);
+    CASE_MP_S32(CIA402_MP_POSLIMIT_MIN, base + 0x7b, 1);
+    CASE_MP_S32(CIA402_MP_POSLIMIT_MAX, base + 0x7b, 2);
+    CASE_MP_S32(CIA402_MP_SWPOSLIMIT_MIN, base + 0x7d, 1);
+    CASE_MP_S32(CIA402_MP_SWPOSLIMIT_MAX, base + 0x7d, 2);
+    CASE_MP_S32(CIA402_MP_HOME_OFFSET, base + 0x7c, 0);
+    CASE_MP_U32(CIA402_MP_MAXPROFILEVEL, base + 0x7f, 0);
+    CASE_MP_U32(CIA402_MP_MAXMOTORSPEED, base + 0x80, 0);
+    CASE_MP_U32(CIA402_MP_PROFILEVEL, base + 0x81, 0);
+    CASE_MP_U32(CIA402_MP_ENDVEL, base + 0x82, 0);
+    CASE_MP_U32(CIA402_MP_PROFACCEL, base + 0x83, 0);
+    CASE_MP_U32(CIA402_MP_PROFDECEL, base + 0x84, 0);
+    CASE_MP_U32(CIA402_MP_QUICKDECEL, base + 0x85, 0);
+    CASE_MP_S16(CIA402_MP_OPTCODE_QUICKSTOP, base + 0x5a, 0);
+    CASE_MP_S16(CIA402_MP_OPTCODE_SHUTDOWN, base + 0x5b, 0);
+    CASE_MP_S16(CIA402_MP_OPTCODE_DISABLE, base + 0x5c, 0);
+    CASE_MP_S16(CIA402_MP_OPTCODE_HALT, base + 0x5d, 0);
+    CASE_MP_S16(CIA402_MP_OPTCODE_FAULT, base + 0x5e, 0);
+    CASE_MP_S8(CIA402_MP_HOME_METHOD, base + 0x98, 0);
+    CASE_MP_U32(CIA402_MP_HOME_VEL_FAST, base + 0x99, 1);
+    CASE_MP_U32(CIA402_MP_HOME_VEL_SLOW, base + 0x99, 2);
+    CASE_MP_U32(CIA402_MP_HOME_ACCEL, base + 0x9a, 0);
+    CASE_MP_U16(CIA402_MP_PROBE_FUNCTION, base + 0xb8, 0);
+    CASE_MP_U32(CIA402_MP_PROBE1_POS, base + 0xba, 0);
+    CASE_MP_U32(CIA402_MP_PROBE1_NEG, base + 0xbb, 0);
+    CASE_MP_U32(CIA402_MP_PROBE2_POS, base + 0xbc, 0);
+    CASE_MP_U32(CIA402_MP_PROBE2_NEG, base + 0xbd, 0);
     default:
       return 1;
   }
