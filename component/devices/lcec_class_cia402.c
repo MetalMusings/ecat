@@ -83,10 +83,15 @@
 #define PDO_IDX_OFFSET_home_velocity_fast 0x99
 #define PDO_IDX_OFFSET_home_velocity_slow 0x99
 #define PDO_IDX_OFFSET_interpolation_time_period 0xc2
+#define PDO_IDX_OFFSET_maximum_acceleration 0xc5
+#define PDO_IDX_OFFSET_maximum_deceleration 0xc6
+#define PDO_IDX_OFFSET_maximum_motor_rpm 0x80
+#define PDO_IDX_OFFSET_maximum_torque 0x72
 #define PDO_IDX_OFFSET_motion_profile 0x86
 #define PDO_IDX_OFFSET_motor_rated_torque 0x76
 #define PDO_IDX_OFFSET_opmode 0x60
 #define PDO_IDX_OFFSET_opmode_display 0x61
+#define PDO_IDX_OFFSET_polarity 0x73
 #define PDO_IDX_OFFSET_profile_accel 0x83
 #define PDO_IDX_OFFSET_profile_decel 0x84
 #define PDO_IDX_OFFSET_profile_end_velocity 0x82
@@ -94,7 +99,12 @@
 #define PDO_IDX_OFFSET_profile_velocity 0x81
 #define PDO_IDX_OFFSET_target_position 0x7a
 #define PDO_IDX_OFFSET_target_velocity 0xff
-#define PDO_IDX_OFFSET_torque_maximum 0x72
+#define PDO_IDX_OFFSET_velocity_demand 0x6b
+#define PDO_IDX_OFFSET_velocity_error_time 0x6e
+#define PDO_IDX_OFFSET_velocity_error_window 0x6d
+#define PDO_IDX_OFFSET_velocity_sensor_selector 0x61
+#define PDO_IDX_OFFSET_velocity_threshold_time 0x60
+#define PDO_IDX_OFFSET_velocity_threshold_window 0x6f
 
 // Next, we'll do the same thing for sub-index addresses.  With CiA
 // 402, these are mostly (but not entirely) 0.
@@ -112,10 +122,15 @@
 #define PDO_SIDX_home_velocity_fast  1
 #define PDO_SIDX_home_velocity_slow  2
 #define PDO_SIDX_interpolation_time_period  1
+#define PDO_SIDX_maximum_acceleration 0
+#define PDO_SIDX_maximum_deceleration 0
+#define PDO_SIDX_maximum_motor_rpm 0
+#define PDO_SIDX_maximum_torque  0
 #define PDO_SIDX_motion_profile  0
 #define PDO_SIDX_motor_rated_torque  0
 #define PDO_SIDX_opmode  0
 #define PDO_SIDX_opmode_display  0
+#define PDO_SIDX_polarity 0
 #define PDO_SIDX_profile_accel  0
 #define PDO_SIDX_profile_decel  0
 #define PDO_SIDX_profile_end_velocity  0
@@ -123,7 +138,12 @@
 #define PDO_SIDX_profile_velocity  0
 #define PDO_SIDX_target_position  0
 #define PDO_SIDX_target_velocity  0
-#define PDO_SIDX_torque_maximum  0
+#define PDO_SIDX_velocity_demand 0
+#define PDO_SIDX_velocity_error_time 0
+#define PDO_SIDX_velocity_error_window 0
+#define PDO_SIDX_velocity_sensor_selector 0
+#define PDO_SIDX_velocity_threshold_time 0
+#define PDO_SIDX_velocity_threshold_window 0
 
 // Next, the type of pin that each uses.  *Generally* either HAL_U32
 // or HAL_S32.  We could probably generate this by concatenating
@@ -141,10 +161,15 @@
 #define PDO_PIN_TYPE_home_velocity_fast HAL_U32
 #define PDO_PIN_TYPE_home_velocity_slow HAL_U32
 #define PDO_PIN_TYPE_interpolation_time_period HAL_U32
-#define PDO_PIN_TYPE_opmode HAL_S32
-#define PDO_PIN_TYPE_opmode_display HAL_S32
+#define PDO_PIN_TYPE_maximum_acceleration HAL_U32
+#define PDO_PIN_TYPE_maximum_deceleration HAL_U32
+#define PDO_PIN_TYPE_maximum_motor_rpm HAL_U32
+#define PDO_PIN_TYPE_maximum_torque HAL_U32
 #define PDO_PIN_TYPE_motion_profile HAL_S32
 #define PDO_PIN_TYPE_motor_rated_torque HAL_U32
+#define PDO_PIN_TYPE_opmode HAL_S32
+#define PDO_PIN_TYPE_opmode_display HAL_S32
+#define PDO_PIN_TYPE_polarity HAL_U32
 #define PDO_PIN_TYPE_profile_accel HAL_U32
 #define PDO_PIN_TYPE_profile_decel HAL_U32
 #define PDO_PIN_TYPE_profile_end_velocity HAL_U32
@@ -152,35 +177,50 @@
 #define PDO_PIN_TYPE_profile_velocity HAL_U32
 #define PDO_PIN_TYPE_target_position HAL_S32
 #define PDO_PIN_TYPE_target_velocity HAL_S32
-#define PDO_PIN_TYPE_torque_maximum HAL_U32
+#define PDO_PIN_TYPE_velocity_demand HAL_S32
+#define PDO_PIN_TYPE_velocity_error_time HAL_U32
+#define PDO_PIN_TYPE_velocity_error_window HAL_U32
+#define PDO_PIN_TYPE_velocity_sensor_selector HAL_S32
+#define PDO_PIN_TYPE_velocity_threshold_time HAL_U32
+#define PDO_PIN_TYPE_velocity_threshold_window HAL_U32
 
 // Next, the length of the object for each.   Usually 8, 16, or 32.
-#define PDO_BITS_opmode 8
-#define PDO_BITS_target_position 32
-#define PDO_BITS_target_velocity 32
+#define PDO_BITS_actual_following_error 32
+#define PDO_BITS_actual_position 32
+#define PDO_BITS_actual_torque 32
+#define PDO_BITS_actual_velocity 32
+#define PDO_BITS_actual_velocity_sensor 32
+#define PDO_BITS_digital_input 32
 #define PDO_BITS_digital_output 32
-#define PDO_BITS_profile_max_velocity 32
-#define PDO_BITS_profile_velocity 32
-#define PDO_BITS_profile_end_velocity 32
-#define PDO_BITS_profile_accel 32
-#define PDO_BITS_profile_decel 32
+#define PDO_BITS_following_error_timeout 16
+#define PDO_BITS_following_error_window 32
+#define PDO_BITS_home_accel 32
 #define PDO_BITS_home_method 32
 #define PDO_BITS_home_velocity_fast 32
 #define PDO_BITS_home_velocity_slow 32
-#define PDO_BITS_home_accel 32
-#define PDO_BITS_following_error_timeout 16
-#define PDO_BITS_following_error_window 32
 #define PDO_BITS_interpolation_time_period 8
+#define PDO_BITS_maximum_acceleration 32
+#define PDO_BITS_maximum_deceleration 32
+#define PDO_BITS_maximum_motor_rpm 32
+#define PDO_BITS_maximum_torque 16
 #define PDO_BITS_motion_profile 16
 #define PDO_BITS_motor_rated_torque 32
-#define PDO_BITS_torque_maximum 16
+#define PDO_BITS_opmode 8
 #define PDO_BITS_opmode_display 8
-#define PDO_BITS_actual_position 32
-#define PDO_BITS_actual_velocity 32
-#define PDO_BITS_actual_torque 32
-#define PDO_BITS_digital_input 32
-#define PDO_BITS_actual_following_error 32
-#define PDO_BITS_actual_velocity_sensor 32
+#define PDO_BITS_polarity 8
+#define PDO_BITS_profile_accel 32
+#define PDO_BITS_profile_decel 32
+#define PDO_BITS_profile_end_velocity 32
+#define PDO_BITS_profile_max_velocity 32
+#define PDO_BITS_profile_velocity 32
+#define PDO_BITS_target_position 32
+#define PDO_BITS_target_velocity 32
+#define PDO_BITS_velocity_demand 32
+#define PDO_BITS_velocity_error_time 16
+#define PDO_BITS_velocity_error_window 16
+#define PDO_BITS_velocity_sensor_selector 16
+#define PDO_BITS_velocity_threshold_time 16
+#define PDO_BITS_velocity_threshold_window 16
 
 // Finally (?), the signeded-ness of each object.  This should match
 // PDO_PIN_TYPE_foo, but we don't *necessarily* have PDO_PIN_TYPE_foo
@@ -190,7 +230,6 @@
 #define PDO_SIGN_actual_torque S
 #define PDO_SIGN_actual_velocity S
 #define PDO_SIGN_actual_velocity_sensor S
-#define PDO_SIGN_opmode_display S
 #define PDO_SIGN_following_error_timeout U
 #define PDO_SIGN_following_error_window U
 #define PDO_SIGN_home_accel U
@@ -198,9 +237,15 @@
 #define PDO_SIGN_home_velocity_fast U
 #define PDO_SIGN_home_velocity_slow U
 #define PDO_SIGN_interpolation_time_period U
+#define PDO_SIGN_maximum_acceleration U
+#define PDO_SIGN_maximum_deceleration U
+#define PDO_SIGN_maximum_motor_rpm U
+#define PDO_SIGN_maximum_torque U
 #define PDO_SIGN_motion_profile S
 #define PDO_SIGN_motor_rated_torque U
 #define PDO_SIGN_opmode S
+#define PDO_SIGN_opmode_display S
+#define PDO_SIGN_polarity U
 #define PDO_SIGN_profile_accel U
 #define PDO_SIGN_profile_decel U
 #define PDO_SIGN_profile_end_velocity U
@@ -208,7 +253,12 @@
 #define PDO_SIGN_profile_velocity U
 #define PDO_SIGN_target_position S
 #define PDO_SIGN_target_velocity S
-#define PDO_SIGN_torque_maximum U
+#define PDO_SIGN_velocity_demand S
+#define PDO_SIGN_velocity_error_time U
+#define PDO_SIGN_velocity_error_window U
+#define PDO_SIGN_velocity_sensor_selector S
+#define PDO_SIGN_velocity_threshold_time U
+#define PDO_SIGN_velocity_threshold_window U
 
 // These work around a couple C pre-processor shortcomings.  In a few
 // places, I want to concatenate FOO and BAR into FOOBAR, and then
@@ -269,6 +319,7 @@ OPTIONAL_PIN_READ(actual_torque, "actual-torque");
 OPTIONAL_PIN_READ(actual_velocity, "actual-velocity");
 OPTIONAL_PIN_READ(actual_velocity_sensor, "actual-velocity-sensor");
 OPTIONAL_PIN_READ(opmode_display, "opmode-display");
+OPTIONAL_PIN_READ(velocity_demand, "velocity-demand");
 
 OPTIONAL_PIN_WRITE(following_error_timeout, "following-error-timeout");
 OPTIONAL_PIN_WRITE(following_error_window, "following-error-window");
@@ -277,9 +328,14 @@ OPTIONAL_PIN_WRITE(home_method, "home-method");
 OPTIONAL_PIN_WRITE(home_velocity_fast, "home-velocity-fast");
 OPTIONAL_PIN_WRITE(home_velocity_slow, "home-velocity-slow");
 OPTIONAL_PIN_WRITE(interpolation_time_period, "interpolation-time-period");
+OPTIONAL_PIN_WRITE(maximum_acceleration, "maximum-acceleration");
+OPTIONAL_PIN_WRITE(maximum_deceleration, "maximum-deceleration");
+OPTIONAL_PIN_WRITE(maximum_motor_rpm, "maximum-motor-rpm");
+OPTIONAL_PIN_WRITE(maximum_torque, "torque-maximum");
 OPTIONAL_PIN_WRITE(motion_profile, "motion-profile");
 OPTIONAL_PIN_WRITE(motor_rated_torque, "motor-rated-torque");
 OPTIONAL_PIN_WRITE(opmode, "opmode");
+OPTIONAL_PIN_WRITE(polarity, "polarity");
 OPTIONAL_PIN_WRITE(profile_accel, "profile-accel");
 OPTIONAL_PIN_WRITE(profile_decel, "profile-decel");
 OPTIONAL_PIN_WRITE(profile_end_velocity, "profile-end-velocity");
@@ -287,7 +343,12 @@ OPTIONAL_PIN_WRITE(profile_max_velocity, "profile-max-velocity");
 OPTIONAL_PIN_WRITE(profile_velocity, "profile-velocity");
 OPTIONAL_PIN_WRITE(target_position, "target-position");
 OPTIONAL_PIN_WRITE(target_velocity, "target-velocity");
-OPTIONAL_PIN_WRITE(torque_maximum, "torque-maximum");
+OPTIONAL_PIN_WRITE(velocity_error_time, "velocity-error-time");
+OPTIONAL_PIN_WRITE(velocity_error_window, "velocity-error-window");
+OPTIONAL_PIN_WRITE(velocity_sensor_selector, "velocity-sensor-selector"); 
+OPTIONAL_PIN_WRITE(velocity_threshold_time, "velocity-threshold-time");
+OPTIONAL_PIN_WRITE(velocity_threshold_window, "velocity-threshold-window");
+
 
 /// @brief Create a `lcec_class_cia402_enabled_t` from a
 /// `lcec_class_cia402_options_t`.
@@ -348,14 +409,24 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_option
   ENABLE_OPT(following_error_window);
   ENABLE_OPT(home_accel);
   ENABLE_OPT(interpolation_time_period);
+  ENABLE_OPT(maximum_acceleration);
+  ENABLE_OPT(maximum_deceleration);
+  ENABLE_OPT(maximum_motor_rpm);
+  ENABLE_OPT(maximum_torque);
   ENABLE_OPT(motion_profile);
   ENABLE_OPT(motor_rated_torque);
+  ENABLE_OPT(polarity);
   ENABLE_OPT(profile_accel);
   ENABLE_OPT(profile_decel);
   ENABLE_OPT(profile_end_velocity);
   ENABLE_OPT(profile_max_velocity);
   ENABLE_OPT(profile_velocity);
-  ENABLE_OPT(torque_maximum);
+  ENABLE_OPT(velocity_demand);
+  ENABLE_OPT(velocity_error_time);
+  ENABLE_OPT(velocity_error_window);
+  ENABLE_OPT(velocity_sensor_selector); 
+  ENABLE_OPT(velocity_threshold_time);
+  ENABLE_OPT(velocity_threshold_window);
 
   return enabled;
 }
@@ -464,25 +535,34 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
   lcec_syncs_add_sync(syncs, EC_DIR_OUTPUT, EC_WD_DEFAULT);
   lcec_syncs_add_pdo_info(syncs, 0x1600);
   lcec_syncs_add_pdo_entry(syncs, 0x6040, 0x00, 16);  // Control word
-  MAP_OPTIONAL_PDO(opmode);          // Operating mode
-  MAP_OPTIONAL_PDO(target_position);
-  MAP_OPTIONAL_PDO(target_velocity);
   MAP_OPTIONAL_PDO(digital_output);
-  MAP_OPTIONAL_PDO(profile_max_velocity);
-  MAP_OPTIONAL_PDO(profile_velocity);
-  MAP_OPTIONAL_PDO(profile_end_velocity);
-  MAP_OPTIONAL_PDO(profile_accel);
-  MAP_OPTIONAL_PDO(profile_decel);
+  MAP_OPTIONAL_PDO(following_error_timeout);
+  MAP_OPTIONAL_PDO(following_error_window);
+  MAP_OPTIONAL_PDO(home_accel);
   MAP_OPTIONAL_PDO(home_method);
   MAP_OPTIONAL_PDO(home_velocity_fast);
   MAP_OPTIONAL_PDO(home_velocity_slow);
-  MAP_OPTIONAL_PDO(home_accel);
-  MAP_OPTIONAL_PDO(following_error_timeout);
-  MAP_OPTIONAL_PDO(following_error_window);
   MAP_OPTIONAL_PDO(interpolation_time_period);
+  MAP_OPTIONAL_PDO(maximum_acceleration);
+  MAP_OPTIONAL_PDO(maximum_deceleration);
+  MAP_OPTIONAL_PDO(maximum_motor_rpm);
+  MAP_OPTIONAL_PDO(maximum_torque);
   MAP_OPTIONAL_PDO(motion_profile);
   MAP_OPTIONAL_PDO(motor_rated_torque);
-  MAP_OPTIONAL_PDO(torque_maximum);
+  MAP_OPTIONAL_PDO(opmode);          // Operating mode
+  MAP_OPTIONAL_PDO(polarity);
+  MAP_OPTIONAL_PDO(profile_accel);
+  MAP_OPTIONAL_PDO(profile_decel);
+  MAP_OPTIONAL_PDO(profile_end_velocity);
+  MAP_OPTIONAL_PDO(profile_max_velocity);
+  MAP_OPTIONAL_PDO(profile_velocity);
+  MAP_OPTIONAL_PDO(target_position);
+  MAP_OPTIONAL_PDO(target_velocity);
+  MAP_OPTIONAL_PDO(velocity_error_time);
+  MAP_OPTIONAL_PDO(velocity_error_window);
+  MAP_OPTIONAL_PDO(velocity_sensor_selector); 
+  MAP_OPTIONAL_PDO(velocity_threshold_time);
+  MAP_OPTIONAL_PDO(velocity_threshold_window);
 
   return 0;
 };
@@ -500,13 +580,14 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
   lcec_syncs_add_sync(syncs, EC_DIR_INPUT, EC_WD_DEFAULT);
   lcec_syncs_add_pdo_info(syncs, 0x1a00);
   lcec_syncs_add_pdo_entry(syncs, 0x6041, 0x00, 16);  // Status word
-  MAP_OPTIONAL_PDO(opmode_display);
-  MAP_OPTIONAL_PDO(actual_position);
-  MAP_OPTIONAL_PDO(actual_velocity);
-  MAP_OPTIONAL_PDO(actual_torque);
-  MAP_OPTIONAL_PDO(digital_input);
   MAP_OPTIONAL_PDO(actual_following_error);
+  MAP_OPTIONAL_PDO(actual_position);
+  MAP_OPTIONAL_PDO(actual_torque);
+  MAP_OPTIONAL_PDO(actual_velocity);
   MAP_OPTIONAL_PDO(actual_velocity_sensor);
+  MAP_OPTIONAL_PDO(digital_input);
+  MAP_OPTIONAL_PDO(opmode_display);
+  MAP_OPTIONAL_PDO(velocity_demand);
 
   return 0;
 };
@@ -584,10 +665,15 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   INIT_OPTIONAL_PDO(home_velocity_fast);
   INIT_OPTIONAL_PDO(home_velocity_slow);
   INIT_OPTIONAL_PDO(interpolation_time_period);
+  INIT_OPTIONAL_PDO(maximum_acceleration);
+  INIT_OPTIONAL_PDO(maximum_deceleration);
+  INIT_OPTIONAL_PDO(maximum_motor_rpm);
+  INIT_OPTIONAL_PDO(maximum_torque);
   INIT_OPTIONAL_PDO(motion_profile);
   INIT_OPTIONAL_PDO(motor_rated_torque);
   INIT_OPTIONAL_PDO(opmode);
   INIT_OPTIONAL_PDO(opmode_display);
+  INIT_OPTIONAL_PDO(polarity);
   INIT_OPTIONAL_PDO(profile_accel);
   INIT_OPTIONAL_PDO(profile_decel);
   INIT_OPTIONAL_PDO(profile_end_velocity);
@@ -595,7 +681,12 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   INIT_OPTIONAL_PDO(profile_velocity);
   INIT_OPTIONAL_PDO(target_position);
   INIT_OPTIONAL_PDO(target_velocity);
-  INIT_OPTIONAL_PDO(torque_maximum);
+  INIT_OPTIONAL_PDO(velocity_demand); 
+  INIT_OPTIONAL_PDO(velocity_error_time);
+  INIT_OPTIONAL_PDO(velocity_error_window);
+  INIT_OPTIONAL_PDO(velocity_sensor_selector); 
+  INIT_OPTIONAL_PDO(velocity_threshold_time);
+  INIT_OPTIONAL_PDO(velocity_threshold_window);
 
   // Register pins
   err = lcec_pin_newf_list(data, pins_required, LCEC_MODULE_NAME, slave->master->name, slave->name, name_prefix);
@@ -628,10 +719,15 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   REGISTER_OPTIONAL_PINS(home_velocity_fast);
   REGISTER_OPTIONAL_PINS(home_velocity_slow);
   REGISTER_OPTIONAL_PINS(interpolation_time_period);
+  REGISTER_OPTIONAL_PINS(maximum_acceleration);
+  REGISTER_OPTIONAL_PINS(maximum_deceleration);
+  REGISTER_OPTIONAL_PINS(maximum_motor_rpm);
+  REGISTER_OPTIONAL_PINS(maximum_torque);
   REGISTER_OPTIONAL_PINS(motion_profile);
   REGISTER_OPTIONAL_PINS(motor_rated_torque);
   REGISTER_OPTIONAL_PINS(opmode);
   REGISTER_OPTIONAL_PINS(opmode_display);
+  REGISTER_OPTIONAL_PINS(polarity);
   REGISTER_OPTIONAL_PINS(profile_accel);
   REGISTER_OPTIONAL_PINS(profile_decel);
   REGISTER_OPTIONAL_PINS(profile_end_velocity);
@@ -639,7 +735,12 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   REGISTER_OPTIONAL_PINS(profile_velocity);
   REGISTER_OPTIONAL_PINS(target_position);
   REGISTER_OPTIONAL_PINS(target_velocity);
-  REGISTER_OPTIONAL_PINS(torque_maximum);
+  REGISTER_OPTIONAL_PINS(velocity_demand);
+  REGISTER_OPTIONAL_PINS(velocity_error_time);
+  REGISTER_OPTIONAL_PINS(velocity_error_window);
+  REGISTER_OPTIONAL_PINS(velocity_sensor_selector); 
+  REGISTER_OPTIONAL_PINS(velocity_threshold_time);
+  REGISTER_OPTIONAL_PINS(velocity_threshold_window);
 
   // Set default values for pins here.
   uint32_t modes;
@@ -674,20 +775,29 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   if (enabled->enable_##pin_name) SUBSTJOIN5(lcec_read_sdo, PDO_BITS_##pin_name, _pin_, PDO_SIGN_##pin_name, 32)(slave, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, data->pin_name)
 
   SET_OPTIONAL_DEFAULTS(following_error_timeout);
-  SET_OPTIONAL_DEFAULTS(motion_profile);
-  SET_OPTIONAL_DEFAULTS(torque_maximum);
   SET_OPTIONAL_DEFAULTS(following_error_window);
   SET_OPTIONAL_DEFAULTS(home_accel);
+  SET_OPTIONAL_DEFAULTS(home_method);
   SET_OPTIONAL_DEFAULTS(home_velocity_fast);
   SET_OPTIONAL_DEFAULTS(home_velocity_slow);
+  SET_OPTIONAL_DEFAULTS(interpolation_time_period);
+  SET_OPTIONAL_DEFAULTS(maximum_acceleration);
+  SET_OPTIONAL_DEFAULTS(maximum_deceleration);
+  SET_OPTIONAL_DEFAULTS(maximum_motor_rpm);
+  SET_OPTIONAL_DEFAULTS(maximum_torque);
+  SET_OPTIONAL_DEFAULTS(motion_profile);
   SET_OPTIONAL_DEFAULTS(motor_rated_torque);
+  SET_OPTIONAL_DEFAULTS(polarity);
   SET_OPTIONAL_DEFAULTS(profile_accel);
   SET_OPTIONAL_DEFAULTS(profile_decel);
   SET_OPTIONAL_DEFAULTS(profile_end_velocity);
   SET_OPTIONAL_DEFAULTS(profile_max_velocity);
   SET_OPTIONAL_DEFAULTS(profile_velocity);
-  SET_OPTIONAL_DEFAULTS(interpolation_time_period);
-  SET_OPTIONAL_DEFAULTS(home_method);
+  SET_OPTIONAL_DEFAULTS(velocity_error_time);
+  SET_OPTIONAL_DEFAULTS(velocity_error_window);
+  SET_OPTIONAL_DEFAULTS(velocity_sensor_selector); 
+  SET_OPTIONAL_DEFAULTS(velocity_threshold_time);
+  SET_OPTIONAL_DEFAULTS(velocity_threshold_window);
 
   return data;
 }
@@ -712,6 +822,7 @@ void lcec_cia402_read(struct lcec_slave *slave, lcec_class_cia402_channel_t *dat
   READ_OPT(actual_velocity);
   READ_OPT(actual_velocity_sensor);
   READ_OPT(opmode_display);
+  READ_OPT(velocity_demand);
 }
 
 /// @brief Reads data from all CiA 402 input ports.
@@ -738,9 +849,14 @@ void lcec_cia402_write(struct lcec_slave *slave, lcec_class_cia402_channel_t *da
   WRITE_OPT(home_velocity_fast);
   WRITE_OPT(home_velocity_slow);
   WRITE_OPT(interpolation_time_period);
+  WRITE_OPT(maximum_acceleration);
+  WRITE_OPT(maximum_deceleration);
+  WRITE_OPT(maximum_motor_rpm);
+  WRITE_OPT(maximum_torque);
   WRITE_OPT(motion_profile);
   WRITE_OPT(motor_rated_torque);
   WRITE_OPT(opmode);
+  WRITE_OPT(polarity);
   WRITE_OPT(profile_accel);
   WRITE_OPT(profile_decel);
   WRITE_OPT(profile_end_velocity);
@@ -748,7 +864,12 @@ void lcec_cia402_write(struct lcec_slave *slave, lcec_class_cia402_channel_t *da
   WRITE_OPT(profile_velocity);
   WRITE_OPT(target_position);
   WRITE_OPT(target_velocity);
-  WRITE_OPT(torque_maximum);
+  WRITE_OPT(velocity_demand);
+  WRITE_OPT(velocity_error_time);
+  WRITE_OPT(velocity_error_window);
+  WRITE_OPT(velocity_sensor_selector); 
+  WRITE_OPT(velocity_threshold_time);
+  WRITE_OPT(velocity_threshold_window);
 }
 
 /// @brief Writess data to all CiA 402 output ports.
