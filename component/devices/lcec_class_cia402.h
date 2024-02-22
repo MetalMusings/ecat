@@ -64,9 +64,11 @@ typedef struct {
   int enable_tq;      ///< If true, enable required torque-mode pins.  TBD.
   int enable_cst;     ///< If true, enable required Cyclic Synchronous Torque mode pins.  TBD
 
+  int enable_actual_current;
   int enable_actual_following_error;
   int enable_actual_torque;  ///< If true, enable `-actual-torque`.
   int enable_actual_velocity_sensor;
+  int enable_actual_voltage;
   int enable_digital_input;   ///< If true, enable digital input PDO.
   int enable_digital_output;  ///< If true, enable digital output PDO.
   int enable_following_error_timeout;
@@ -74,10 +76,12 @@ typedef struct {
   int enable_home_accel;  ///< If true, enable the home accel pin
   int enable_interpolation_time_period;
   int enable_maximum_acceleration;
+  int enable_maximum_current;
   int enable_maximum_deceleration;
   int enable_maximum_motor_rpm;
   int enable_maximum_torque;
   int enable_motion_profile;
+  int enable_motor_rated_current;
   int enable_motor_rated_torque;
   int enable_polarity;
   int enable_profile_accel;         ///< If true, enable the profile accel pin
@@ -85,14 +89,16 @@ typedef struct {
   int enable_profile_end_velocity;  ///< If true, enable the profile end velocity pin
   int enable_profile_max_velocity;  ///< If true, enable the profile max velocity pin
   int enable_profile_velocity;      ///< If true, enable the profile velocity pin
+  int enable_target_torque;
+  int enable_torque_demand;
+  int enable_torque_profile_type;
+  int enable_torque_slope;
   int enable_velocity_demand;
   int enable_velocity_error_time;
   int enable_velocity_error_window;
   int enable_velocity_sensor_selector; 
   int enable_velocity_threshold_time;
   int enable_velocity_threshold_window;
-
-
 } lcec_class_cia402_options_t;
 
 /// This is the internal version of `lcec_class_cia402_options_t`.  It
@@ -103,11 +109,13 @@ typedef struct {
 typedef struct {
   int enable_hm;
 
+  int enable_actual_current;
   int enable_actual_following_error;
   int enable_actual_position;
   int enable_actual_torque;
   int enable_actual_velocity;
   int enable_actual_velocity_sensor;
+  int enable_actual_voltage;
   int enable_digital_input;
   int enable_digital_output;
   int enable_following_error_timeout;
@@ -118,10 +126,12 @@ typedef struct {
   int enable_home_velocity_slow;
   int enable_interpolation_time_period;
   int enable_maximum_acceleration;
+  int enable_maximum_current;
   int enable_maximum_deceleration;
   int enable_maximum_motor_rpm;
   int enable_maximum_torque;
   int enable_motion_profile;
+  int enable_motor_rated_current;
   int enable_motor_rated_torque;
   int enable_opmode;
   int enable_opmode_display;
@@ -132,7 +142,11 @@ typedef struct {
   int enable_profile_max_velocity;
   int enable_profile_velocity;
   int enable_target_position;
+  int enable_target_torque;
   int enable_target_velocity;
+  int enable_torque_demand;
+  int enable_torque_profile_type;
+  int enable_torque_slope;
   int enable_velocity_demand;
   int enable_velocity_error_time;
   int enable_velocity_error_window;
@@ -149,7 +163,9 @@ typedef struct {
   hal_s32_t *home_method;
   hal_s32_t *motion_profile;
   hal_s32_t *target_position;
+  hal_s32_t *target_torque;
   hal_s32_t *target_velocity;
+  hal_s32_t *torque_profile_type;
   hal_s32_t *velocity_sensor_selector; 
   hal_u32_t *following_error_timeout;
   hal_u32_t *following_error_window;
@@ -158,9 +174,11 @@ typedef struct {
   hal_u32_t *home_velocity_slow;
   hal_u32_t *interpolation_time_period;
   hal_u32_t *maximum_acceleration;
+  hal_u32_t *maximum_current;
   hal_u32_t *maximum_deceleration;
   hal_u32_t *maximum_motor_rpm;
   hal_u32_t *maximum_torque;
+  hal_u32_t *motor_rated_current;
   hal_u32_t *motor_rated_torque;
   hal_u32_t *polarity;
   hal_u32_t *profile_accel;
@@ -168,24 +186,29 @@ typedef struct {
   hal_u32_t *profile_end_velocity;
   hal_u32_t *profile_max_velocity;
   hal_u32_t *profile_velocity;
+  hal_u32_t *torque_slope;
   hal_u32_t *velocity_error_time;
   hal_u32_t *velocity_error_window;
   hal_u32_t *velocity_threshold_time;
   hal_u32_t *velocity_threshold_window;
-
+  
   // In
   hal_u32_t *statusword;
   hal_s32_t *opmode_display;
   hal_s32_t *supported_modes;
-  hal_s32_t *velocity_demand;
+
   hal_bit_t *supports_mode_pp, *supports_mode_vl, *supports_mode_pv, *supports_mode_tq, *supports_mode_hm, *supports_mode_ip,
       *supports_mode_csp, *supports_mode_csv, *supports_mode_cst;
 
+  hal_s32_t *actual_current;
   hal_s32_t *actual_position;
   hal_s32_t *actual_torque;
   hal_s32_t *actual_velocity;
   hal_s32_t *actual_velocity_sensor;
+  hal_s32_t *torque_demand;
+  hal_s32_t *velocity_demand;
   hal_u32_t *actual_following_error;
+  hal_u32_t *actual_voltage;
 
   unsigned int controlword_os;           ///< The controlword's offset in the master's PDO data structure.
   unsigned int following_error_timeout_os;
@@ -196,10 +219,12 @@ typedef struct {
   unsigned int home_velocity_slow_os;    ///< The velocity used for the slow portion of the homing.
   unsigned int interpolation_time_period_os;
   unsigned int maximum_acceleration_os;
+  unsigned int maximum_current_os;
   unsigned int maximum_deceleration_os;
   unsigned int maximum_motor_rpm_os;
   unsigned int maximum_torque_os;
   unsigned int motion_profile_os;
+  unsigned int motor_rated_current_os;
   unsigned int motor_rated_torque_os;
   unsigned int opmode_os;                ///< The opmode's offset in the master's PDO data structure.
   unsigned int polarity_os;
@@ -210,20 +235,26 @@ typedef struct {
   unsigned int profile_velocity_os;      ///< The target velocity for the next move in `pp` mode.
   unsigned int supported_modes_os;       ///< The supported modes offset in the master's PDO data structure.
   unsigned int target_position_os;       ///< The target position's offset in the master's PDO data structure.
+  unsigned int target_torque_os;
   unsigned int target_velocity_os;       ///< The target velocity's offset in the master's PDO data structure.
+  unsigned int torque_profile_type_os;
+  unsigned int torque_slope_os;
   unsigned int velocity_error_time_os;
   unsigned int velocity_error_window_os;
   unsigned int velocity_sensor_selector_os; 
   unsigned int velocity_threshold_time_os;
   unsigned int velocity_threshold_window_os;
 
-  unsigned int statusword_os;       ///< The statusword's offset in the master's PDO data structure.
-  unsigned int opmode_display_os;   ///< The opmode display's offset in the master's PDO data structure.
-  unsigned int actual_position_os;  ///< The actual position's offset in the master's PDO data structure.
-  unsigned int actual_velocity_os;  ///< The actual velocity's offset in the master's PDO data structure.
-  unsigned int actual_torque_os;    ///< The actual torque's offset in the master's PDO data structure.
+  unsigned int actual_current_os;
   unsigned int actual_following_error_os;
+  unsigned int actual_position_os;  ///< The actual position's offset in the master's PDO data structure.
+  unsigned int actual_torque_os;    ///< The actual torque's offset in the master's PDO data structure.
+  unsigned int actual_velocity_os;  ///< The actual velocity's offset in the master's PDO data structure.
   unsigned int actual_velocity_sensor_os;
+  unsigned int actual_voltage_os;
+  unsigned int opmode_display_os;   ///< The opmode display's offset in the master's PDO data structure.
+  unsigned int statusword_os;       ///< The statusword's offset in the master's PDO data structure.
+  unsigned int torque_demand_os;
   unsigned int velocity_demand_os;
 
   lcec_class_cia402_options_t *options;  ///< The options used to create this device.
@@ -292,37 +323,46 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_PROBE2_POS        0x1180  // 0x60bc:00 "touch probe 2 positive value" S32
 #define CIA402_MP_PROBE2_NEG        0x1190  // 0x60bd:00 "touch probe 2 negative value" S32
 
-#define CIA402_MP_ENABLE_PP 0x2000
-#define CIA402_MP_ENABLE_PV 0x2010
-#define CIA402_MP_ENABLE_CSP 0x2020
-#define CIA402_MP_ENABLE_CSV 0x2030
-#define CIA402_MP_ENABLE_HM 0x2040
-#define CIA402_MP_ENABLE_IP 0x2050
-#define CIA402_MP_ENABLE_VL 0x2060
-#define CIA402_MP_ENABLE_TQ 0x2070
-#define CIA402_MP_ENABLE_CST 0x2080
+#define CIA402_MP_ENABLE_ACTUAL_CURRENT 0x22d0 
 #define CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR 0x2100
 #define CIA402_MP_ENABLE_ACTUAL_TORQUE 0x2110
 #define CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR 0x2120
+#define CIA402_MP_ENABLE_ACTUAL_VOLTAGE 0x22e0
+#define CIA402_MP_ENABLE_CSP 0x2020
+#define CIA402_MP_ENABLE_CST 0x2080
+#define CIA402_MP_ENABLE_CSV 0x2030
 #define CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT 0x2130
 #define CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW 0x2140
+#define CIA402_MP_ENABLE_HM 0x2040
 #define CIA402_MP_ENABLE_HOME_ACCEL 0x2150
 #define CIA402_MP_ENABLE_INTERPOLATION_TIME_PERIOD 0x2160
+#define CIA402_MP_ENABLE_IP 0x2050
 #define CIA402_MP_ENABLE_MAXIMUM_ACCELERATION 0x2170
+#define CIA402_MP_ENABLE_MAXIMUM_CURRENT 0x22a0
 #define CIA402_MP_ENABLE_MAXIMUM_DECELERATION 0x2180
 #define CIA402_MP_ENABLE_MAXIMUM_MOTOR_RPM 0x2190
 #define CIA402_MP_ENABLE_MAXIMUM_TORQUE 0x21a0
 #define CIA402_MP_ENABLE_MOTION_PROFILE 0x21b0
+#define CIA402_MP_ENABLE_MOTOR_RATED_CURRENT 0x22c0
 #define CIA402_MP_ENABLE_MOTOR_RATED_TORQUE 0x21c0
 #define CIA402_MP_ENABLE_POLARITY 0x21d0
+#define CIA402_MP_ENABLE_PP 0x2000
 #define CIA402_MP_ENABLE_PROFILE_ACCEL 0x21e0
 #define CIA402_MP_ENABLE_PROFILE_DECEL 0x21f0
 #define CIA402_MP_ENABLE_PROFILE_END_VELOCITY 0x2200
 #define CIA402_MP_ENABLE_PROFILE_MAX_VELOCITY 0x2210
 #define CIA402_MP_ENABLE_PROFILE_VELOCITY 0x2220
+#define CIA402_MP_ENABLE_PV 0x2010
+#define CIA402_MP_ENABLE_TARGET_TORQUE 0x2290
+#define CIA402_MP_ENABLE_TORQUE_DEMAND 0x22b0
+#define CIA402_MP_ENABLE_TORQUE_PROFILE_TYPE 0x2300
+#define CIA402_MP_ENABLE_TORQUE_SLOPE 0x22f0
+#define CIA402_MP_ENABLE_TQ 0x2070
 #define CIA402_MP_ENABLE_VELOCITY_DEMAND 0x2230
 #define CIA402_MP_ENABLE_VELOCITY_ERROR_TIME 0x2240
 #define CIA402_MP_ENABLE_VELOCITY_ERROR_WINDOW 0x2250
 #define CIA402_MP_ENABLE_VELOCITY_SENSOR_SELECTOR 0x2260
 #define CIA402_MP_ENABLE_VELOCITY_THRESHOLD_TIME 0x2270
 #define CIA402_MP_ENABLE_VELOCITY_THRESHOLD_WINDOW 0x2280
+#define CIA402_MP_ENABLE_VL 0x2060
+
