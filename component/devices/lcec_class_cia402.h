@@ -61,6 +61,7 @@ typedef struct {
   int enable_hm;      ///< If true, enable required homing-mode pins.  TBD
   int enable_ip;      ///< If true, enable required interpolation-mode pins.  TBD.
   int enable_vl;      ///< If true, enable required velocity-mode pins.  TBD.
+  int enable_tq;      ///< If true, enable required torque-mode pins.  TBD.
   int enable_cst;     ///< If true, enable required Cyclic Synchronous Torque mode pins.  TBD
 
   int enable_actual_following_error;
@@ -242,7 +243,7 @@ void lcec_cia402_write(struct lcec_slave *slave, lcec_class_cia402_channel_t *da
 void lcec_cia402_write_all(struct lcec_slave *slave, lcec_class_cia402_channels_t *channels);
 lcec_class_cia402_options_t *lcec_cia402_options_single_axis(void);
 lcec_class_cia402_options_t *lcec_cia402_options_multi_axis(void);
-int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modparam_t *p);
+int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modparam_t *p, lcec_class_cia402_options_t *opt);
 lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t const *orig);
 lcec_modparam_desc_t *lcec_cia402_modparams(lcec_modparam_desc_t const *device_mps);
 lcec_syncs_t *lcec_cia402_init_sync(lcec_class_cia402_options_t *options);
@@ -290,3 +291,38 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_PROBE1_NEG        0x1170  // 0x60bb:00 "touch probe 1 negative value" S32
 #define CIA402_MP_PROBE2_POS        0x1180  // 0x60bc:00 "touch probe 2 positive value" S32
 #define CIA402_MP_PROBE2_NEG        0x1190  // 0x60bd:00 "touch probe 2 negative value" S32
+
+#define CIA402_MP_ENABLE_PP 0x2000
+#define CIA402_MP_ENABLE_PV 0x2010
+#define CIA402_MP_ENABLE_CSP 0x2020
+#define CIA402_MP_ENABLE_CSV 0x2030
+#define CIA402_MP_ENABLE_HM 0x2040
+#define CIA402_MP_ENABLE_IP 0x2050
+#define CIA402_MP_ENABLE_VL 0x2060
+#define CIA402_MP_ENABLE_TQ 0x2070
+#define CIA402_MP_ENABLE_CST 0x2080
+#define CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR 0x2100
+#define CIA402_MP_ENABLE_ACTUAL_TORQUE 0x2110
+#define CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR 0x2120
+#define CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT 0x2130
+#define CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW 0x2140
+#define CIA402_MP_ENABLE_HOME_ACCEL 0x2150
+#define CIA402_MP_ENABLE_INTERPOLATION_TIME_PERIOD 0x2160
+#define CIA402_MP_ENABLE_MAXIMUM_ACCELERATION 0x2170
+#define CIA402_MP_ENABLE_MAXIMUM_DECELERATION 0x2180
+#define CIA402_MP_ENABLE_MAXIMUM_MOTOR_RPM 0x2190
+#define CIA402_MP_ENABLE_MAXIMUM_TORQUE 0x21a0
+#define CIA402_MP_ENABLE_MOTION_PROFILE 0x21b0
+#define CIA402_MP_ENABLE_MOTOR_RATED_TORQUE 0x21c0
+#define CIA402_MP_ENABLE_POLARITY 0x21d0
+#define CIA402_MP_ENABLE_PROFILE_ACCEL 0x21e0
+#define CIA402_MP_ENABLE_PROFILE_DECEL 0x21f0
+#define CIA402_MP_ENABLE_PROFILE_END_VELOCITY 0x2200
+#define CIA402_MP_ENABLE_PROFILE_MAX_VELOCITY 0x2210
+#define CIA402_MP_ENABLE_PROFILE_VELOCITY 0x2220
+#define CIA402_MP_ENABLE_VELOCITY_DEMAND 0x2230
+#define CIA402_MP_ENABLE_VELOCITY_ERROR_TIME 0x2240
+#define CIA402_MP_ENABLE_VELOCITY_ERROR_WINDOW 0x2250
+#define CIA402_MP_ENABLE_VELOCITY_SENSOR_SELECTOR 0x2260
+#define CIA402_MP_ENABLE_VELOCITY_THRESHOLD_TIME 0x2270
+#define CIA402_MP_ENABLE_VELOCITY_THRESHOLD_WINDOW 0x2280
