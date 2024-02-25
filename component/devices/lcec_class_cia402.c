@@ -902,6 +902,39 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
     {"probe1Negative", CIA402_MP_PROBE1_NEG, MODPARAM_TYPE_S32},
     {"probe2Positive", CIA402_MP_PROBE2_POS, MODPARAM_TYPE_S32},
     {"probe2Negative", CIA402_MP_PROBE2_NEG, MODPARAM_TYPE_S32},
+    {"enablePP", CIA402_MP_ENABLE_PP, MODPARAM_TYPE_BIT},
+    {"enablePV", CIA402_MP_ENABLE_PV, MODPARAM_TYPE_BIT},
+    {"enableCSP", CIA402_MP_ENABLE_CSP, MODPARAM_TYPE_BIT},
+    {"enableCSV", CIA402_MP_ENABLE_CSV, MODPARAM_TYPE_BIT},
+    {"enableHM", CIA402_MP_ENABLE_HM, MODPARAM_TYPE_BIT},
+    {"enableIP", CIA402_MP_ENABLE_IP, MODPARAM_TYPE_BIT},
+    {"enableVL", CIA402_MP_ENABLE_VL, MODPARAM_TYPE_BIT},
+    {"enableTQ", CIA402_MP_ENABLE_TQ, MODPARAM_TYPE_BIT},
+    {"enableCST", CIA402_MP_ENABLE_CST, MODPARAM_TYPE_BIT},
+    {"enableActualFollowingError", CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR, MODPARAM_TYPE_BIT},
+    {"enableActualTorque", CIA402_MP_ENABLE_ACTUAL_TORQUE, MODPARAM_TYPE_BIT},
+    {"enableActualVelocitySensor", CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR, MODPARAM_TYPE_BIT},
+    {"enableFollowingErrorTimeout", CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT, MODPARAM_TYPE_BIT},
+    {"enableFollowingErrorWindow", CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW, MODPARAM_TYPE_BIT},
+    {"enableHomeAccel", CIA402_MP_ENABLE_HOME_ACCEL, MODPARAM_TYPE_BIT},
+    {"enableInterpolationTimePeriod", CIA402_MP_ENABLE_INTERPOLATION_TIME_PERIOD, MODPARAM_TYPE_BIT},
+    {"enableMaximumAcceleration", CIA402_MP_ENABLE_MAXIMUM_ACCELERATION, MODPARAM_TYPE_BIT},
+    {"enableMaximumDeceleration", CIA402_MP_ENABLE_MAXIMUM_DECELERATION, MODPARAM_TYPE_BIT},
+    {"enableMaximumMotorRPM", CIA402_MP_ENABLE_MAXIMUM_MOTOR_RPM, MODPARAM_TYPE_BIT},
+    {"enableMaximumTorque", CIA402_MP_ENABLE_MAXIMUM_TORQUE, MODPARAM_TYPE_BIT},
+    {"enableMotorRatedTorque", CIA402_MP_ENABLE_MOTOR_RATED_TORQUE, MODPARAM_TYPE_BIT},
+    {"enablePolarity", CIA402_MP_ENABLE_POLARITY, MODPARAM_TYPE_BIT},
+    {"enableProfileAccel", CIA402_MP_ENABLE_PROFILE_ACCEL, MODPARAM_TYPE_BIT},
+    {"enableProfileDecel", CIA402_MP_ENABLE_PROFILE_DECEL, MODPARAM_TYPE_BIT},
+    {"enableProfileEndVelocity", CIA402_MP_ENABLE_PROFILE_END_VELOCITY, MODPARAM_TYPE_BIT},
+    {"enableProfileMaxVelocity", CIA402_MP_ENABLE_PROFILE_MAX_VELOCITY, MODPARAM_TYPE_BIT},
+    {"enableProfileVelocity", CIA402_MP_ENABLE_PROFILE_VELOCITY, MODPARAM_TYPE_BIT},
+    {"enableVelocityDemand", CIA402_MP_ENABLE_VELOCITY_DEMAND, MODPARAM_TYPE_BIT},
+    {"enableVelocityErrorTime", CIA402_MP_ENABLE_VELOCITY_ERROR_TIME, MODPARAM_TYPE_BIT},
+    {"enableVelocityErrorWindow", CIA402_MP_ENABLE_VELOCITY_ERROR_WINDOW, MODPARAM_TYPE_BIT},
+    {"enableVelocitySensorSelector", CIA402_MP_ENABLE_VELOCITY_SENSOR_SELECTOR, MODPARAM_TYPE_BIT},
+    {"enableVelocityThresholdTime", CIA402_MP_ENABLE_VELOCITY_THRESHOLD_TIME, MODPARAM_TYPE_BIT},
+    {"enableVelocityThresholdWindow", CIA402_MP_ENABLE_VELOCITY_THRESHOLD_WINDOW, MODPARAM_TYPE_BIT},
     {NULL},
 };
 
@@ -989,7 +1022,7 @@ lcec_modparam_desc_t *lcec_cia402_modparams(lcec_modparam_desc_t const *device_m
 /// @param p The current modparam being processed.
 ///
 /// @return 0 if the modparam was handled, 1 if it was not handled, and <0 if an error occurred.
-int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modparam_t *p) {
+int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modparam_t *p, lcec_class_cia402_options_t *opt) {
   if (p->id < CIA402_MP_BASE) {
     return 0;
   }
@@ -1024,6 +1057,10 @@ int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modpa
 #define CASE_MP_U32(mp_name, idx, sidx) \
   case mp_name:                         \
     return lcec_write_sdo32_modparam(slave, idx, sidx, p->value.u32, p->name)
+#define CASE_MP_ENABLE_BIT(mp_name, pin_name) \
+  case mp_name: \
+    opt->enable_##pin_name = p->value.bit; \
+    return 0;
   switch (id) {
     CASE_MP_S32(CIA402_MP_POSLIMIT_MIN, base + 0x7b, 1);
     CASE_MP_S32(CIA402_MP_POSLIMIT_MAX, base + 0x7b, 2);
@@ -1041,6 +1078,41 @@ int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modpa
     CASE_MP_U32(CIA402_MP_PROBE1_NEG, base + 0xbb, 0);
     CASE_MP_U32(CIA402_MP_PROBE2_POS, base + 0xbc, 0);
     CASE_MP_U32(CIA402_MP_PROBE2_NEG, base + 0xbd, 0);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PP, pp);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PV, pv);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_CSP, csp);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_CSV, csv);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_HM, hm);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_IP, ip);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VL, vl);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_TQ, tq);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_CST, cst);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR, actual_following_error);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_TORQUE, actual_torque);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR, actual_velocity_sensor);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT, following_error_timeout);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW, following_error_window);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_HOME_ACCEL, home_accel);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_INTERPOLATION_TIME_PERIOD, interpolation_time_period);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_ACCELERATION, maximum_acceleration);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_DECELERATION, maximum_deceleration);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_MOTOR_RPM, maximum_motor_rpm);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_TORQUE, maximum_torque);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MOTION_PROFILE, motion_profile);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MOTOR_RATED_TORQUE, motor_rated_torque);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_POLARITY, polarity);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_ACCEL, profile_accel);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_DECEL, profile_decel);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_END_VELOCITY, profile_end_velocity);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_MAX_VELOCITY, profile_max_velocity);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_VELOCITY, profile_velocity);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_DEMAND, velocity_demand);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_ERROR_TIME, velocity_error_time);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_ERROR_WINDOW, velocity_error_window);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_SENSOR_SELECTOR, velocity_sensor_selector);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_THRESHOLD_TIME, velocity_threshold_time);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_THRESHOLD_WINDOW, velocity_threshold_window);
+    
     default:
       return 1;
   }
