@@ -174,7 +174,7 @@ int lcec_read_sdo32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, 
 /// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
 /// @param result A pointer to a `uint32_t` to write the result into.
 /// @return 0 for success, <0 for failure.
-int lcec_read_sdo8_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
+int lcec_read_sdo8_pin_U32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
   uint8_t data;
   int err = lcec_read_sdo(slave, index, subindex, &data, 1);
   *result = data;
@@ -193,7 +193,7 @@ int lcec_read_sdo8_pin(struct lcec_slave *slave, uint16_t index, uint8_t subinde
 /// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
 /// @param result A pointer to a `uint32_t` to write the result into.
 /// @return 0 for success, <0 for failure.
-int lcec_read_sdo8_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
+int lcec_read_sdo8_pin_S32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
   uint8_t data;
   int err = lcec_read_sdo(slave, index, subindex, &data, 1);
   *result = data;
@@ -212,7 +212,7 @@ int lcec_read_sdo8_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t 
 /// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
 /// @param result A pointer to a `uint32_t` to write the result into.
 /// @return 0 for success, <0 for failure.
-int lcec_read_sdo16_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
+int lcec_read_sdo16_pin_U32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
   uint8_t data[2];
   int err = lcec_read_sdo(slave, index, subindex, data, 2);
   *result = EC_READ_U16(data);
@@ -231,7 +231,7 @@ int lcec_read_sdo16_pin(struct lcec_slave *slave, uint16_t index, uint8_t subind
 /// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
 /// @param result A pointer to a `uint32_t` to write the result into.
 /// @return 0 for success, <0 for failure.
-int lcec_read_sdo16_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
+int lcec_read_sdo16_pin_S32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
   uint8_t data[2];
   int err = lcec_read_sdo(slave, index, subindex, data, 2);
   *result = EC_READ_U16(data);
@@ -250,7 +250,7 @@ int lcec_read_sdo16_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t
 /// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
 /// @param result A pointer to a `uint32_t` to write the result into.
 /// @return 0 for success, <0 for failure.
-int lcec_read_sdo32_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
+int lcec_read_sdo32_pin_U32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result) {
   uint8_t data[4];
   int err = lcec_read_sdo(slave, index, subindex, data, 4);
   *result = EC_READ_U32(data);
@@ -269,7 +269,7 @@ int lcec_read_sdo32_pin(struct lcec_slave *slave, uint16_t index, uint8_t subind
 /// @param subindex The CoE object subindex to read.  For `0x6010:02`, this would be `0x02`.
 /// @param result A pointer to a `uint32_t` to write the result into.
 /// @return 0 for success, <0 for failure.
-int lcec_read_sdo32_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
+int lcec_read_sdo32_pin_S32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
   uint8_t data[4];
   int err = lcec_read_sdo(slave, index, subindex, data, 4);
   *result = EC_READ_U32(data);
