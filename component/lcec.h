@@ -303,14 +303,14 @@ lcec_slave_t *lcec_slave_by_index(struct lcec_master *master, int index) __attri
 
 int lcec_read_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *target, size_t size);
 int lcec_read_sdo8(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *result);
-int lcec_read_sdo8_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result);
-int lcec_read_sdo8_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result);
+int lcec_read_sdo8_pin_U32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result);
+int lcec_read_sdo8_pin_S32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result);
 int lcec_read_sdo16(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint16_t *result);
-int lcec_read_sdo16_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result);
-int lcec_read_sdo16_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result);
+int lcec_read_sdo16_pin_U32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result);
+int lcec_read_sdo16_pin_S32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result);
 int lcec_read_sdo32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint32_t *result);
-int lcec_read_sdo32_pin(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result);
-int lcec_read_sdo32_pin_signed(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result);
+int lcec_read_sdo32_pin_U32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile uint32_t *result);
+int lcec_read_sdo32_pin_S32(struct lcec_slave *slave, uint16_t index, uint8_t subindex, volatile int32_t *result);
 int lcec_read_idn(struct lcec_slave *slave, uint8_t drive_no, uint16_t idn, uint8_t *target, size_t size);
 int lcec_write_sdo(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t *value, size_t size);
 int lcec_write_sdo8(struct lcec_slave *slave, uint16_t index, uint8_t subindex, uint8_t value);
