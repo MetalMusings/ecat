@@ -68,7 +68,9 @@ typedef struct {
   int enable_actual_following_error;
   int enable_actual_torque;  ///< If true, enable `-actual-torque`.
   int enable_actual_velocity_sensor;
+  int enable_actual_vl;
   int enable_actual_voltage;
+  int enable_demand_vl;
   int enable_digital_input;   ///< If true, enable digital input PDO.
   int enable_digital_output;  ///< If true, enable digital output PDO.
   int enable_following_error_timeout;
@@ -90,6 +92,7 @@ typedef struct {
   int enable_profile_max_velocity;  ///< If true, enable the profile max velocity pin
   int enable_profile_velocity;      ///< If true, enable the profile velocity pin
   int enable_target_torque;
+  int enable_target_vl;
   int enable_torque_demand;
   int enable_torque_profile_type;
   int enable_torque_slope;
@@ -99,6 +102,10 @@ typedef struct {
   int enable_velocity_sensor_selector; 
   int enable_velocity_threshold_time;
   int enable_velocity_threshold_window;
+  int enable_vl_accel;
+  int enable_vl_decel;
+  int enable_vl_maximum;
+  int enable_vl_minimum;
 } lcec_class_cia402_options_t;
 
 /// This is the internal version of `lcec_class_cia402_options_t`.  It
@@ -115,7 +122,9 @@ typedef struct {
   int enable_actual_torque;
   int enable_actual_velocity;
   int enable_actual_velocity_sensor;
+  int enable_actual_vl;
   int enable_actual_voltage;
+  int enable_demand_vl;
   int enable_digital_input;
   int enable_digital_output;
   int enable_following_error_timeout;
@@ -144,6 +153,7 @@ typedef struct {
   int enable_target_position;
   int enable_target_torque;
   int enable_target_velocity;
+  int enable_target_vl;
   int enable_torque_demand;
   int enable_torque_profile_type;
   int enable_torque_slope;
@@ -153,6 +163,10 @@ typedef struct {
   int enable_velocity_sensor_selector; 
   int enable_velocity_threshold_time;
   int enable_velocity_threshold_window;
+  int enable_vl_accel;
+  int enable_vl_decel;
+  int enable_vl_maximum;
+  int enable_vl_minimum;
 } lcec_class_cia402_enabled_t;
 
 typedef struct {
@@ -165,8 +179,11 @@ typedef struct {
   hal_s32_t *target_position;
   hal_s32_t *target_torque;
   hal_s32_t *target_velocity;
+  hal_s32_t *target_vl;
   hal_s32_t *torque_profile_type;
   hal_s32_t *velocity_sensor_selector; 
+  hal_s32_t *vl_maximum;
+  hal_s32_t *vl_minimum;
   hal_u32_t *following_error_timeout;
   hal_u32_t *following_error_window;
   hal_u32_t *home_accel;
@@ -191,6 +208,8 @@ typedef struct {
   hal_u32_t *velocity_error_window;
   hal_u32_t *velocity_threshold_time;
   hal_u32_t *velocity_threshold_window;
+  hal_u32_t *vl_accel;
+  hal_u32_t *vl_decel;
   
   // In
   hal_u32_t *statusword;
@@ -205,6 +224,8 @@ typedef struct {
   hal_s32_t *actual_torque;
   hal_s32_t *actual_velocity;
   hal_s32_t *actual_velocity_sensor;
+  hal_s32_t *actual_vl;
+  hal_s32_t *demand_vl;
   hal_s32_t *torque_demand;
   hal_s32_t *velocity_demand;
   hal_u32_t *actual_following_error;
@@ -237,6 +258,7 @@ typedef struct {
   unsigned int target_position_os;       ///< The target position's offset in the master's PDO data structure.
   unsigned int target_torque_os;
   unsigned int target_velocity_os;       ///< The target velocity's offset in the master's PDO data structure.
+  unsigned int target_vl_os;
   unsigned int torque_profile_type_os;
   unsigned int torque_slope_os;
   unsigned int velocity_error_time_os;
@@ -244,6 +266,10 @@ typedef struct {
   unsigned int velocity_sensor_selector_os; 
   unsigned int velocity_threshold_time_os;
   unsigned int velocity_threshold_window_os;
+  unsigned int vl_accel_os;
+  unsigned int vl_decel_os;
+  unsigned int vl_maximum_os;
+  unsigned int vl_minimum_os;
 
   unsigned int actual_current_os;
   unsigned int actual_following_error_os;
@@ -251,7 +277,9 @@ typedef struct {
   unsigned int actual_torque_os;    ///< The actual torque's offset in the master's PDO data structure.
   unsigned int actual_velocity_os;  ///< The actual velocity's offset in the master's PDO data structure.
   unsigned int actual_velocity_sensor_os;
+  unsigned int actual_vl_os;
   unsigned int actual_voltage_os;
+  unsigned int demand_vl_os;
   unsigned int opmode_display_os;   ///< The opmode display's offset in the master's PDO data structure.
   unsigned int statusword_os;       ///< The statusword's offset in the master's PDO data structure.
   unsigned int torque_demand_os;
@@ -327,10 +355,12 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR 0x2100
 #define CIA402_MP_ENABLE_ACTUAL_TORQUE 0x2110
 #define CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR 0x2120
+#define CIA402_MP_ENABLE_ACTUAL_VL 0x2330
 #define CIA402_MP_ENABLE_ACTUAL_VOLTAGE 0x22e0
 #define CIA402_MP_ENABLE_CSP 0x2020
 #define CIA402_MP_ENABLE_CST 0x2080
 #define CIA402_MP_ENABLE_CSV 0x2030
+#define CIA402_MP_ENABLE_DEMAND_VL 0x2320
 #define CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT 0x2130
 #define CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW 0x2140
 #define CIA402_MP_ENABLE_HM 0x2040
@@ -354,6 +384,7 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_ENABLE_PROFILE_VELOCITY 0x2220
 #define CIA402_MP_ENABLE_PV 0x2010
 #define CIA402_MP_ENABLE_TARGET_TORQUE 0x2290
+#define CIA402_MP_ENABLE_TARGET_VL 0x2310
 #define CIA402_MP_ENABLE_TORQUE_DEMAND 0x22b0
 #define CIA402_MP_ENABLE_TORQUE_PROFILE_TYPE 0x2300
 #define CIA402_MP_ENABLE_TORQUE_SLOPE 0x22f0
@@ -365,4 +396,8 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_ENABLE_VELOCITY_THRESHOLD_TIME 0x2270
 #define CIA402_MP_ENABLE_VELOCITY_THRESHOLD_WINDOW 0x2280
 #define CIA402_MP_ENABLE_VL 0x2060
+#define CIA402_MP_ENABLE_VL_ACCEL 0x2360
+#define CIA402_MP_ENABLE_VL_DECEL 0x2370
+#define CIA402_MP_ENABLE_VL_MAXIMUM 0x2350
+#define CIA402_MP_ENABLE_VL_MINIMUM 0x2340
 
