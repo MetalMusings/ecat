@@ -31,6 +31,16 @@ static const lcec_pindesc_t pins_required[] = {
     // HAL_OUT is readable, HAL_IN is writable.
     {HAL_U32, HAL_IN, offsetof(lcec_class_cia402_channel_t, controlword), "%s.%s.%s.%s-cia-controlword"},
     {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, statusword), "%s.%s.%s.%s-cia-statusword"},
+    {HAL_U32, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supported_modes), "%s.%s.%s.%s-supported-modes"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_pp), "%s.%s.%s.%s-supports-mode-pp"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_vl), "%s.%s.%s.%s-supports-mode-vl"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_pv), "%s.%s.%s.%s-supports-mode-pv"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_tq), "%s.%s.%s.%s-supports-mode-tq"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_hm), "%s.%s.%s.%s-supports-mode-hm"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_ip), "%s.%s.%s.%s-supports-mode-ip"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_csp), "%s.%s.%s.%s-supports-mode-csp"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_csv), "%s.%s.%s.%s-supports-mode-csv"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_class_cia402_channel_t, supports_mode_cst), "%s.%s.%s.%s-supports-mode-cst"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -351,6 +361,20 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(struct lcec_slave *sla
   HANDLE_OPTIONAL_PINS(actual_velocity);
   HANDLE_OPTIONAL_PINS(target_position);
   HANDLE_OPTIONAL_PINS(target_velocity);
+
+  uint32_t modes;
+  lcec_read_sdo32(slave, base_idx + 0x502, 0, &modes);
+
+  *(data->supported_modes) = modes;
+  *(data->supports_mode_pp) = modes & 1 << 0;
+  *(data->supports_mode_vl) = modes & 1 << 1;
+  *(data->supports_mode_pv) = modes & 1 << 2;
+  *(data->supports_mode_tq) = modes & 1 << 3;
+  *(data->supports_mode_hm) = modes & 1 << 5;
+  *(data->supports_mode_ip) = modes & 1 << 6;
+  *(data->supports_mode_csp) = modes & 1 << 7;
+  *(data->supports_mode_csv) = modes & 1 << 8;
+  *(data->supports_mode_cst) = modes & 1 << 9;
 
   return data;
 }
