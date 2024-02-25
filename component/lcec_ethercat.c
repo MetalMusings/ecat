@@ -59,7 +59,10 @@ void copy_fsoe_data(struct lcec_slave *slave, unsigned int slave_offset, unsigne
 }
 
 /// @brief Initialize syncs to 0.
-void lcec_syncs_init(lcec_syncs_t *syncs) { memset(syncs, 0, sizeof(lcec_syncs_t)); }
+void lcec_syncs_init(lcec_slave_t *slave, lcec_syncs_t *syncs) {
+  memset(syncs, 0, sizeof(lcec_syncs_t));
+  syncs->slave = slave;
+}
 
 /// @brief Add a new EtherCAT sync manager configuration.
 void lcec_syncs_add_sync(lcec_syncs_t *syncs, ec_direction_t dir, ec_watchdog_mode_t watchdog_mode) {
@@ -69,7 +72,12 @@ void lcec_syncs_add_sync(lcec_syncs_t *syncs, ec_direction_t dir, ec_watchdog_mo
   syncs->curr_sync->dir = dir;
   syncs->curr_sync->watchdog_mode = watchdog_mode;
 
-  (syncs->sync_count)++;
+  if (syncs->sync_count >= LCEC_MAX_SYNC_COUNT) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_syncs_add_sync: WARNING: sync full for slave %s.%s, not adding more.  Expect failure.\n",
+		    syncs->slave->master->name, syncs->slave->name);
+  } else {
+      (syncs->sync_count)++;
+  }
   syncs->syncs[syncs->sync_count].index = 0xff;
 }
 
@@ -84,7 +92,12 @@ void lcec_syncs_add_pdo_info(lcec_syncs_t *syncs, uint16_t index) {
 
   syncs->curr_pdo_info->index = index;
 
-  (syncs->pdo_info_count)++;
+  if (syncs->pdo_info_count >= LCEC_MAX_PDO_INFO_COUNT) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_syncs_add_pdo_info: WARNING: pdo_info full for slave %s.%s, not adding more.  Expect failure.\n",
+		    syncs->slave->master->name, syncs->slave->name);
+  } else {
+      (syncs->pdo_info_count)++;
+  }
 }
 
 /// @brief Add a new PDO entry to an existing PDO.
@@ -100,7 +113,12 @@ void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subin
   syncs->curr_pdo_entry->subindex = subindex;
   syncs->curr_pdo_entry->bit_length = bit_length;
 
-  (syncs->pdo_entry_count)++;
+  if (syncs->pdo_entry_count >= LCEC_MAX_PDO_ENTRY_COUNT) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_syncs_add_pdo_entry: WARNING: pdo_entries full for slave %s.%s, not adding more.  Expect failure.\n",
+		    syncs->slave->master->name, syncs->slave->name);
+  } else {
+    (syncs->pdo_entry_count)++;
+  }
 }
 
 /// @brief Read an SDO configuration from a slave device.

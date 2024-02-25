@@ -607,8 +607,9 @@ lcec_class_cia402_options_t *lcec_cia402_options_multi_axes(int axis) {
 
 /// @brief Allocates a `lcec_syncs_t` and fills in the CiA 402 portion of it using data from `options`.
 ///
+
 /// @param opt A `lcec_class_cia402_options_t` structure that describes the options in use.
-lcec_syncs_t *lcec_cia402_init_sync(lcec_class_cia402_options_t *options) {
+lcec_syncs_t *lcec_cia402_init_sync(lcec_slave_t *slave, lcec_class_cia402_options_t *options) {
   lcec_syncs_t *syncs;
 
   syncs = hal_malloc(sizeof(lcec_syncs_t));
@@ -616,7 +617,7 @@ lcec_syncs_t *lcec_cia402_init_sync(lcec_class_cia402_options_t *options) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "hal_malloc() for lcec_cia402_init_sync failed\n");
     return NULL;
   }
-  lcec_syncs_init(syncs);
+  lcec_syncs_init(slave, syncs);
   lcec_syncs_add_sync(syncs, EC_DIR_OUTPUT, EC_WD_DEFAULT);
   lcec_syncs_add_sync(syncs, EC_DIR_INPUT, EC_WD_DEFAULT);
 

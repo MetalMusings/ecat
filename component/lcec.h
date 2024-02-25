@@ -78,9 +78,9 @@
 #define LCEC_FSOE_SIZE(ch_count, data_len) (LCEC_FSOE_CMD_LEN + ch_count * (data_len + LCEC_FSOE_CRC_LEN) + LCEC_FSOE_CONNID_LEN)
 
 #define LCEC_MAX_PDO_REG_COUNT   128  ///< The maximum number of calls to lcec_pdo_init() for a single driver.
-#define LCEC_MAX_PDO_ENTRY_COUNT 32   ///< The maximum number of PDO entries in a PDO in a sync.
-#define LCEC_MAX_PDO_INFO_COUNT  8    ///< The maximum number of PDOs in a sync.
-#define LCEC_MAX_SYNC_COUNT      4    ///< The maximum number of syncs.
+#define LCEC_MAX_PDO_ENTRY_COUNT 128   ///< The maximum number of PDO entries in a PDO in a sync.
+#define LCEC_MAX_PDO_INFO_COUNT  16    ///< The maximum number of PDOs in a sync.
+#define LCEC_MAX_SYNC_COUNT      8    ///< The maximum number of syncs.
 
 struct lcec_master;
 struct lcec_slave;
@@ -274,6 +274,7 @@ typedef struct {
 
 /// @brief Sync manager configuration.
 typedef struct {
+  lcec_slave_t *slave; ///< For debugging messages
   int sync_count;                                 ///< Number of syncs.
   ec_sync_info_t *curr_sync;                      ///< Current sync.
   ec_sync_info_t syncs[LCEC_MAX_SYNC_COUNT + 1];  ///< Sync definitions.
@@ -326,7 +327,7 @@ int lcec_param_newf(hal_type_t type, hal_pin_dir_t dir, void *data_addr, const c
 int lcec_param_newf_list(void *base, const lcec_pindesc_t *list, ...);
 
 void copy_fsoe_data(struct lcec_slave *slave, unsigned int slave_offset, unsigned int master_offset) __attribute__((nonnull));
-void lcec_syncs_init(lcec_syncs_t *syncs) __attribute__((nonnull));
+void lcec_syncs_init(lcec_slave_t *slave, lcec_syncs_t *syncs) __attribute__((nonnull));
 void lcec_syncs_add_sync(lcec_syncs_t *syncs, ec_direction_t dir, ec_watchdog_mode_t watchdog_mode);
 void lcec_syncs_add_pdo_info(lcec_syncs_t *syncs, uint16_t index);
 void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subindex, uint8_t bit_length);
