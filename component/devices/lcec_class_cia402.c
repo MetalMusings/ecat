@@ -345,8 +345,10 @@
 // macro expansion happening, so you need to nest that inside *yet
 // another* macro.  Go read the GCC preprocessor manual, it's in there
 // and this is how they recommend handling it.
+#define JOIN2(a, b)            a##b
 #define JOIN3(a, b, c)            a##b##c
 #define JOIN5(a, b, c, d, e)      a##b##c##d##e
+#define SUBSTJOIN2(a, b)       JOIN2(a, b)
 #define SUBSTJOIN3(a, b, c)       JOIN3(a, b, c)
 #define SUBSTJOIN5(a, b, c, d, e) JOIN5(a, b, c, d, e)
 
@@ -652,27 +654,11 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
     lcec_syncs_add_pdo_info(syncs, 0x1600 + channel);
     lcec_syncs_add_pdo_entry(syncs, offset + 0x40, 0x00, 16);  // Control word
     MAP_OPTIONAL_PDO(digital_output);
-    MAP_OPTIONAL_PDO(following_error_timeout);
-    MAP_OPTIONAL_PDO(following_error_window);
-    MAP_OPTIONAL_PDO(home_accel);
     MAP_OPTIONAL_PDO(home_method);
-    MAP_OPTIONAL_PDO(home_velocity_fast);
-    MAP_OPTIONAL_PDO(home_velocity_slow);
     MAP_OPTIONAL_PDO(interpolation_time_period);
-    MAP_OPTIONAL_PDO(maximum_acceleration);
-    MAP_OPTIONAL_PDO(maximum_current);
-    MAP_OPTIONAL_PDO(maximum_deceleration);
-    MAP_OPTIONAL_PDO(maximum_motor_rpm);
-    MAP_OPTIONAL_PDO(maximum_torque);
     MAP_OPTIONAL_PDO(motion_profile);
-    MAP_OPTIONAL_PDO(motor_rated_current);
-    MAP_OPTIONAL_PDO(motor_rated_torque);
     MAP_OPTIONAL_PDO(opmode);  // Operating mode
     MAP_OPTIONAL_PDO(polarity);
-    MAP_OPTIONAL_PDO(profile_accel);
-    MAP_OPTIONAL_PDO(profile_decel);
-    MAP_OPTIONAL_PDO(profile_end_velocity);
-    MAP_OPTIONAL_PDO(profile_max_velocity);
     MAP_OPTIONAL_PDO(profile_velocity);
     MAP_OPTIONAL_PDO(target_position);
     MAP_OPTIONAL_PDO(target_torque);
@@ -680,15 +666,8 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
     MAP_OPTIONAL_PDO(target_vl);
     MAP_OPTIONAL_PDO(torque_profile_type);
     MAP_OPTIONAL_PDO(torque_slope);
-    MAP_OPTIONAL_PDO(velocity_error_time);
-    MAP_OPTIONAL_PDO(velocity_error_window);
-    MAP_OPTIONAL_PDO(velocity_sensor_selector);
-    MAP_OPTIONAL_PDO(velocity_threshold_time);
-    MAP_OPTIONAL_PDO(velocity_threshold_window);
     MAP_OPTIONAL_PDO(vl_accel);
     MAP_OPTIONAL_PDO(vl_decel);
-    MAP_OPTIONAL_PDO(vl_maximum);
-    MAP_OPTIONAL_PDO(vl_minimum);
   }
 
   return 0;
@@ -701,12 +680,12 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
 /// 0x1a01)` and whichever `lcec_syncs_add_pdo_entry()` calls you
 /// need.
 int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options) {
+  lcec_syncs_add_sync(syncs, EC_DIR_INPUT, EC_WD_DEFAULT);
   for (int channel = 0; channel < options->channels; channel++) {
     unsigned int offset = 0x6000 + 0x800 * channel;
     lcec_class_cia402_enabled_t *enabled = lcec_cia402_enabled(options->channel[channel]);
     if (enabled == NULL) return -1;
 
-    lcec_syncs_add_sync(syncs, EC_DIR_INPUT, EC_WD_DEFAULT);
     lcec_syncs_add_pdo_info(syncs, 0x1a00 + channel);
     lcec_syncs_add_pdo_entry(syncs, offset + 0x41, 0x00, 16);  // Status word
     MAP_OPTIONAL_PDO(actual_current);
@@ -770,8 +749,8 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   }
   memset(data, 0, sizeof(lcec_class_cia402_channel_t));
 
-  // Save important options for later use.  None of the _idx/_sidx will be needed outside of this function.
   data->options = opt;
+  data->base_idx = base_idx;
 
   // Set the `enabled` struct from `opt`.
   enabled = lcec_cia402_enabled(opt);
@@ -798,46 +777,50 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   INIT_OPTIONAL_PDO(actual_vl);
   INIT_OPTIONAL_PDO(actual_voltage);
   INIT_OPTIONAL_PDO(demand_vl);
-  INIT_OPTIONAL_PDO(following_error_timeout);
-  INIT_OPTIONAL_PDO(following_error_window);
-  INIT_OPTIONAL_PDO(home_accel);
   INIT_OPTIONAL_PDO(home_method);
-  INIT_OPTIONAL_PDO(home_velocity_fast);
-  INIT_OPTIONAL_PDO(home_velocity_slow);
   INIT_OPTIONAL_PDO(interpolation_time_period);
-  INIT_OPTIONAL_PDO(maximum_acceleration);
-  INIT_OPTIONAL_PDO(maximum_current);
-  INIT_OPTIONAL_PDO(maximum_deceleration);
-  INIT_OPTIONAL_PDO(maximum_motor_rpm);
-  INIT_OPTIONAL_PDO(maximum_torque);
-  INIT_OPTIONAL_PDO(motion_profile);
-  INIT_OPTIONAL_PDO(motor_rated_current);
-  INIT_OPTIONAL_PDO(motor_rated_torque);
   INIT_OPTIONAL_PDO(opmode);
   INIT_OPTIONAL_PDO(opmode_display);
-  INIT_OPTIONAL_PDO(polarity);
-  INIT_OPTIONAL_PDO(profile_accel);
-  INIT_OPTIONAL_PDO(profile_decel);
-  INIT_OPTIONAL_PDO(profile_end_velocity);
-  INIT_OPTIONAL_PDO(profile_max_velocity);
   INIT_OPTIONAL_PDO(profile_velocity);
   INIT_OPTIONAL_PDO(target_position);
   INIT_OPTIONAL_PDO(target_torque);
   INIT_OPTIONAL_PDO(target_velocity);
   INIT_OPTIONAL_PDO(target_vl);
   INIT_OPTIONAL_PDO(torque_demand);
-  INIT_OPTIONAL_PDO(torque_profile_type);
-  INIT_OPTIONAL_PDO(torque_slope);
   INIT_OPTIONAL_PDO(velocity_demand);
-  INIT_OPTIONAL_PDO(velocity_error_time);
-  INIT_OPTIONAL_PDO(velocity_error_window);
-  INIT_OPTIONAL_PDO(velocity_sensor_selector);
-  INIT_OPTIONAL_PDO(velocity_threshold_time);
-  INIT_OPTIONAL_PDO(velocity_threshold_window);
-  INIT_OPTIONAL_PDO(vl_accel);
-  INIT_OPTIONAL_PDO(vl_decel);
-  INIT_OPTIONAL_PDO(vl_maximum);
-  INIT_OPTIONAL_PDO(vl_minimum);
+
+#define INIT_SDO_REQUEST(pin_name) \
+  data->pin_name##_sdorequest = ecrt_slave_config_create_sdo_request(slave->config, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, PDO_BITS_##pin_name)
+  
+  INIT_SDO_REQUEST(following_error_timeout);
+  INIT_SDO_REQUEST(following_error_window);
+  INIT_SDO_REQUEST(home_accel);
+  INIT_SDO_REQUEST(home_velocity_fast);
+  INIT_SDO_REQUEST(home_velocity_slow);
+  INIT_SDO_REQUEST(maximum_acceleration);
+  INIT_SDO_REQUEST(maximum_current);
+  INIT_SDO_REQUEST(maximum_deceleration);
+  INIT_SDO_REQUEST(maximum_motor_rpm);
+  INIT_SDO_REQUEST(maximum_torque);
+  INIT_SDO_REQUEST(motion_profile);
+  INIT_SDO_REQUEST(motor_rated_current);
+  INIT_SDO_REQUEST(motor_rated_torque);
+  INIT_SDO_REQUEST(polarity);
+  INIT_SDO_REQUEST(profile_accel);
+  INIT_SDO_REQUEST(profile_decel);
+  INIT_SDO_REQUEST(profile_end_velocity);
+  INIT_SDO_REQUEST(profile_max_velocity);
+  INIT_SDO_REQUEST(torque_profile_type);
+  INIT_SDO_REQUEST(torque_slope);
+  INIT_SDO_REQUEST(velocity_error_time);
+  INIT_SDO_REQUEST(velocity_error_window);
+  INIT_SDO_REQUEST(velocity_sensor_selector);
+  INIT_SDO_REQUEST(velocity_threshold_time);
+  INIT_SDO_REQUEST(velocity_threshold_window);
+  INIT_SDO_REQUEST(vl_accel);
+  INIT_SDO_REQUEST(vl_decel);
+  INIT_SDO_REQUEST(vl_maximum);
+  INIT_SDO_REQUEST(vl_minimum);
 
   // Register pins
   err = lcec_pin_newf_list(data, pins_required, LCEC_MODULE_NAME, slave->master->name, slave->name, name_prefix);
@@ -1019,51 +1002,83 @@ void lcec_cia402_read_all(struct lcec_slave *slave, lcec_class_cia402_channels_t
   }
 }
 
-void lcec_cia402_write(struct lcec_slave *slave, lcec_class_cia402_channel_t *data) {
-  uint8_t *pd = slave->master->process_data;
-
 #define WRITE_OPT(name) \
   if (data->enabled->enable_##name) SUBSTJOIN3(EC_WRITE_, PDO_SIGN_##name, PDO_BITS_##name)(&pd[data->name##_os], *(data->name))
 
+/// OK, this is kind of a mess.  It presents the same interface as
+/// WRITE_OPT(), but instead of writing to a mapped PDO entry, it
+/// writes to an SDO.  Unfortunately, Etherlab's EtherCAT library
+/// doesn't make this entirely trivial.  We have to have allocated an
+/// SDO request before real-time mode started (which we did, it's
+/// stored in `name##_sdorequest`).  Then we need to do 3 things:
+///
+/// 1. Make sure that another write isn't in progress for this SDO.
+///    To do this, we need to check `ecrt_sdo_request_state()` and make
+///    sure that it's not EC_REQUEST_BUSY.
+/// 2. Next, we need to write the data into the request struct, using
+///    `ecrt_sdo_request_data()` and one of the
+///    `EC_WRITE_*()`. macros.
+/// 3. Finally, we call `ecrt_sdo_request_write()` to start a write.
+///    It may not finish for a while.
+#define WRITE_OPT_SDO(name) \
+  do { \
+    if (data->enabled->enable_##name) { 	       \
+      if (*(data->name) != data->name##_old) { \
+	if (ecrt_sdo_request_state(data->name##_sdorequest) != EC_REQUEST_BUSY ) { \
+	  data->name##_old = *(data->name); \
+	  uint8_t *sdo_tmp = ecrt_sdo_request_data(data->name##_sdorequest);	\
+	  SUBSTJOIN3(EC_WRITE_, PDO_SIGN_##name, PDO_BITS_##name)(sdo_tmp, data->name##_old); \
+	  ecrt_sdo_request_write(data->name##_sdorequest); \
+	}								\
+      }\
+    } \
+  } while(0)
+
+void lcec_cia402_write(struct lcec_slave *slave, lcec_class_cia402_channel_t *data) {
+  uint8_t *pd = slave->master->process_data;
+
   EC_WRITE_U16(&pd[data->controlword_os], (uint16_t)(*(data->controlword)));
-  WRITE_OPT(following_error_timeout);
-  WRITE_OPT(following_error_window);
-  WRITE_OPT(home_accel);
+
+  // Write PDOs (mapped, auto-synced between slaves and the master)
   WRITE_OPT(home_method);
-  WRITE_OPT(home_velocity_fast);
-  WRITE_OPT(home_velocity_slow);
   WRITE_OPT(interpolation_time_period);
-  WRITE_OPT(maximum_acceleration);
-  WRITE_OPT(maximum_current);
-  WRITE_OPT(maximum_deceleration);
-  WRITE_OPT(maximum_motor_rpm);
-  WRITE_OPT(maximum_torque);
-  WRITE_OPT(motion_profile);
-  WRITE_OPT(motor_rated_current);
-  WRITE_OPT(motor_rated_torque);
   WRITE_OPT(opmode);
-  WRITE_OPT(polarity);
-  WRITE_OPT(profile_accel);
-  WRITE_OPT(profile_decel);
-  WRITE_OPT(profile_end_velocity);
-  WRITE_OPT(profile_max_velocity);
   WRITE_OPT(profile_velocity);
   WRITE_OPT(target_position);
   WRITE_OPT(target_torque);
   WRITE_OPT(target_velocity);
   WRITE_OPT(target_vl);
-  WRITE_OPT(torque_profile_type);
-  WRITE_OPT(torque_slope);
-  WRITE_OPT(velocity_demand);
-  WRITE_OPT(velocity_error_time);
-  WRITE_OPT(velocity_error_window);
-  WRITE_OPT(velocity_sensor_selector);
-  WRITE_OPT(velocity_threshold_time);
-  WRITE_OPT(velocity_threshold_window);
-  WRITE_OPT(vl_accel);
-  WRITE_OPT(vl_decel);
-  WRITE_OPT(vl_maximum);
-  WRITE_OPT(vl_minimum);
+
+  // Write SDOs (*not* mapped, written on demand, slower)
+  WRITE_OPT_SDO(following_error_timeout);
+  WRITE_OPT_SDO(following_error_window);
+  WRITE_OPT_SDO(home_accel);
+  WRITE_OPT_SDO(home_velocity_fast);
+  WRITE_OPT_SDO(home_velocity_slow);
+  WRITE_OPT_SDO(maximum_acceleration);
+  WRITE_OPT_SDO(maximum_current);
+  WRITE_OPT_SDO(maximum_deceleration);
+  WRITE_OPT_SDO(maximum_motor_rpm);
+  WRITE_OPT_SDO(maximum_torque);
+  WRITE_OPT_SDO(motion_profile);
+  WRITE_OPT_SDO(motor_rated_current);
+  WRITE_OPT_SDO(motor_rated_torque);
+  WRITE_OPT_SDO(polarity);
+  WRITE_OPT_SDO(profile_accel);
+  WRITE_OPT_SDO(profile_decel);
+  WRITE_OPT_SDO(profile_end_velocity);
+  WRITE_OPT_SDO(profile_max_velocity);
+  WRITE_OPT_SDO(torque_profile_type);
+  WRITE_OPT_SDO(torque_slope);
+  WRITE_OPT_SDO(velocity_error_time);
+  WRITE_OPT_SDO(velocity_error_window);
+  WRITE_OPT_SDO(velocity_sensor_selector);
+  WRITE_OPT_SDO(velocity_threshold_time);
+  WRITE_OPT_SDO(velocity_threshold_window);
+  WRITE_OPT_SDO(vl_accel);
+  WRITE_OPT_SDO(vl_decel);
+  WRITE_OPT_SDO(vl_maximum);
+  WRITE_OPT_SDO(vl_minimum);
 }
 
 /// @brief Writess data to all CiA 402 output ports.

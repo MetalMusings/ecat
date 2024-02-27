@@ -72,7 +72,7 @@ void lcec_syncs_add_sync(lcec_syncs_t *syncs, ec_direction_t dir, ec_watchdog_mo
   syncs->curr_sync->dir = dir;
   syncs->curr_sync->watchdog_mode = watchdog_mode;
 
-  if (syncs->sync_count >= LCEC_MAX_SYNC_COUNT) {
+  if (syncs->sync_count > LCEC_MAX_SYNC_COUNT) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_syncs_add_sync: WARNING: sync full for slave %s.%s, not adding more.  Expect failure.\n",
 		    syncs->slave->master->name, syncs->slave->name);
   } else {
@@ -92,7 +92,7 @@ void lcec_syncs_add_pdo_info(lcec_syncs_t *syncs, uint16_t index) {
 
   syncs->curr_pdo_info->index = index;
 
-  if (syncs->pdo_info_count >= LCEC_MAX_PDO_INFO_COUNT) {
+  if (syncs->pdo_info_count > LCEC_MAX_PDO_INFO_COUNT) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_syncs_add_pdo_info: WARNING: pdo_info full for slave %s.%s, not adding more.  Expect failure.\n",
 		    syncs->slave->master->name, syncs->slave->name);
   } else {
@@ -113,7 +113,7 @@ void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subin
   syncs->curr_pdo_entry->subindex = subindex;
   syncs->curr_pdo_entry->bit_length = bit_length;
 
-  if (syncs->pdo_entry_count >= LCEC_MAX_PDO_ENTRY_COUNT) {
+  if (syncs->pdo_entry_count > LCEC_MAX_PDO_ENTRY_COUNT) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_syncs_add_pdo_entry: WARNING: pdo_entries full for slave %s.%s, not adding more.  Expect failure.\n",
 		    syncs->slave->master->name, syncs->slave->name);
   } else {
