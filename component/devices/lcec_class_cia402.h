@@ -178,120 +178,78 @@ typedef struct {
 } lcec_class_cia402_enabled_t;
 
 typedef struct {
+#define PDO_PIN(name, pin_type)				\
+  pin_type *name; \
+  unsigned int name##_os; \
+  unsigned int name##_bp;
+  
+#define SDO_PIN(name, pin_type) \
+  pin_type *name; \
+  pin_type name##_old; \
+  ec_sdo_request_t *name##_sdorequest;
+
   // Out
-  hal_u32_t *controlword;
-  hal_s32_t *opmode;
+  PDO_PIN(controlword, hal_u32_t);
+  PDO_PIN(home_method, hal_s32_t);
+  PDO_PIN(opmode, hal_s32_t);
+  PDO_PIN(target_position, hal_s32_t);
+  PDO_PIN(target_torque, hal_s32_t);
+  PDO_PIN(target_velocity, hal_s32_t);
+  PDO_PIN(target_vl, hal_s32_t);
+  PDO_PIN(interpolation_time_period, hal_u32_t);
+  PDO_PIN(profile_velocity, hal_u32_t);
 
-  hal_s32_t *home_method;
-  hal_s32_t *motion_profile;
-  hal_s32_t *target_position;
-  hal_s32_t *target_torque;
-  hal_s32_t *target_velocity;
-  hal_s32_t *target_vl;
-  hal_s32_t *torque_profile_type;
-  hal_s32_t *velocity_sensor_selector;
-  hal_s32_t *vl_maximum;
-  hal_s32_t *vl_minimum;
-  hal_u32_t *following_error_timeout;
-  hal_u32_t *following_error_window;
-  hal_u32_t *home_accel;
-  hal_u32_t *home_velocity_fast;
-  hal_u32_t *home_velocity_slow;
-  hal_u32_t *interpolation_time_period;
-  hal_u32_t *maximum_acceleration;
-  hal_u32_t *maximum_current;
-  hal_u32_t *maximum_deceleration;
-  hal_u32_t *maximum_motor_rpm;
-  hal_u32_t *maximum_torque;
-  hal_u32_t *motor_rated_current;
-  hal_u32_t *motor_rated_torque;
-  hal_u32_t *polarity;
-  hal_u32_t *profile_accel;
-  hal_u32_t *profile_decel;
-  hal_u32_t *profile_end_velocity;
-  hal_u32_t *profile_max_velocity;
-  hal_u32_t *profile_velocity;
-  hal_u32_t *torque_slope;
-  hal_u32_t *velocity_error_time;
-  hal_u32_t *velocity_error_window;
-  hal_u32_t *velocity_threshold_time;
-  hal_u32_t *velocity_threshold_window;
-  hal_u32_t *vl_accel;
-  hal_u32_t *vl_decel;
+  SDO_PIN(following_error_timeout, hal_u32_t);
+  SDO_PIN(following_error_window, hal_u32_t);
+  SDO_PIN(home_accel, hal_u32_t);  
+  SDO_PIN(home_velocity_fast, hal_u32_t); 
+  SDO_PIN(home_velocity_slow, hal_u32_t); 
+  SDO_PIN(maximum_acceleration, hal_u32_t);  
+  SDO_PIN(maximum_current, hal_u32_t); 
+  SDO_PIN(maximum_deceleration, hal_u32_t); 
+  SDO_PIN(maximum_motor_rpm, hal_u32_t); 
+  SDO_PIN(maximum_torque, hal_u32_t); 
+  SDO_PIN(motion_profile, hal_s32_t);
+  SDO_PIN(motor_rated_current, hal_u32_t); 
+  SDO_PIN(motor_rated_torque, hal_u32_t); 
+  SDO_PIN(polarity, hal_u32_t); 
+  SDO_PIN(profile_accel, hal_u32_t);  
+  SDO_PIN(profile_decel, hal_u32_t); 
+  SDO_PIN(profile_end_velocity, hal_u32_t); 
+  SDO_PIN(profile_max_velocity, hal_u32_t); 
+  SDO_PIN(torque_profile_type, hal_s32_t);
+  SDO_PIN(torque_slope, hal_u32_t);
+  SDO_PIN(velocity_error_time, hal_u32_t); 
+  SDO_PIN(velocity_error_window, hal_u32_t); 
+  SDO_PIN(velocity_sensor_selector, hal_s32_t);
+  SDO_PIN(velocity_threshold_time, hal_u32_t); 
+  SDO_PIN(velocity_threshold_window, hal_u32_t); 
+  SDO_PIN(vl_accel, hal_u32_t);
+  SDO_PIN(vl_decel, hal_u32_t);
+  SDO_PIN(vl_maximum, hal_s32_t);
+  SDO_PIN(vl_minimum, hal_s32_t);
 
-  // In
-  hal_u32_t *statusword;
-  hal_s32_t *opmode_display;
+  // In.
+  PDO_PIN(statusword, hal_u32_t);
+  PDO_PIN(opmode_display, hal_s32_t);
   hal_s32_t *supported_modes;
-
   hal_bit_t *supports_mode_pp, *supports_mode_vl, *supports_mode_pv, *supports_mode_tq, *supports_mode_hm, *supports_mode_ip,
       *supports_mode_csp, *supports_mode_csv, *supports_mode_cst;
 
-  hal_s32_t *actual_current;
-  hal_s32_t *actual_position;
-  hal_s32_t *actual_torque;
-  hal_s32_t *actual_velocity;
-  hal_s32_t *actual_velocity_sensor;
-  hal_s32_t *actual_vl;
-  hal_s32_t *demand_vl;
-  hal_s32_t *torque_demand;
-  hal_s32_t *velocity_demand;
-  hal_u32_t *actual_following_error;
-  hal_u32_t *actual_voltage;
+  PDO_PIN(actual_current, hal_s32_t);
+  PDO_PIN(actual_position, hal_s32_t);
+  PDO_PIN(actual_torque, hal_s32_t);
+  PDO_PIN(actual_velocity, hal_s32_t);
+  PDO_PIN(actual_velocity_sensor, hal_s32_t);
+  PDO_PIN(actual_vl, hal_s32_t);
+  PDO_PIN(demand_vl, hal_s32_t);
+  PDO_PIN(torque_demand, hal_s32_t);
+  PDO_PIN(velocity_demand, hal_s32_t);
 
-  unsigned int controlword_os;  ///< The controlword's offset in the master's PDO data structure.
-  unsigned int following_error_timeout_os;
-  unsigned int following_error_window_os;
-  unsigned int home_accel_os;          ///< The acceleration used while homing.
-  unsigned int home_method_os;         ///< The homing method used.  See manufacturer's docs.
-  unsigned int home_velocity_fast_os;  ///< The velocity used for the fast portion of the homing.
-  unsigned int home_velocity_slow_os;  ///< The velocity used for the slow portion of the homing.
-  unsigned int interpolation_time_period_os;
-  unsigned int maximum_acceleration_os;
-  unsigned int maximum_current_os;
-  unsigned int maximum_deceleration_os;
-  unsigned int maximum_motor_rpm_os;
-  unsigned int maximum_torque_os;
-  unsigned int motion_profile_os;
-  unsigned int motor_rated_current_os;
-  unsigned int motor_rated_torque_os;
-  unsigned int opmode_os;  ///< The opmode's offset in the master's PDO data structure.
-  unsigned int polarity_os;
-  unsigned int profile_accel_os;         ///< The target accleeration for the next move in `pp` mode.
-  unsigned int profile_decel_os;         ///< The target deceleration for the next move in `pp` mode.
-  unsigned int profile_end_velocity_os;  ///< The end velocity for the next move in `pp` mode.  Almost always 0.
-  unsigned int profile_max_velocity_os;  ///< The maximum velocity allowed in profile move modes.
-  unsigned int profile_velocity_os;      ///< The target velocity for the next move in `pp` mode.
-  unsigned int supported_modes_os;       ///< The supported modes offset in the master's PDO data structure.
-  unsigned int target_position_os;       ///< The target position's offset in the master's PDO data structure.
-  unsigned int target_torque_os;
-  unsigned int target_velocity_os;  ///< The target velocity's offset in the master's PDO data structure.
-  unsigned int target_vl_os;
-  unsigned int torque_profile_type_os;
-  unsigned int torque_slope_os;
-  unsigned int velocity_error_time_os;
-  unsigned int velocity_error_window_os;
-  unsigned int velocity_sensor_selector_os;
-  unsigned int velocity_threshold_time_os;
-  unsigned int velocity_threshold_window_os;
-  unsigned int vl_accel_os;
-  unsigned int vl_decel_os;
-  unsigned int vl_maximum_os;
-  unsigned int vl_minimum_os;
+  PDO_PIN(actual_following_error, hal_u32_t);
+  PDO_PIN(actual_voltage, hal_u32_t);
 
-  unsigned int actual_current_os;
-  unsigned int actual_following_error_os;
-  unsigned int actual_position_os;  ///< The actual position's offset in the master's PDO data structure.
-  unsigned int actual_torque_os;    ///< The actual torque's offset in the master's PDO data structure.
-  unsigned int actual_velocity_os;  ///< The actual velocity's offset in the master's PDO data structure.
-  unsigned int actual_velocity_sensor_os;
-  unsigned int actual_vl_os;
-  unsigned int actual_voltage_os;
-  unsigned int demand_vl_os;
-  unsigned int opmode_display_os;  ///< The opmode display's offset in the master's PDO data structure.
-  unsigned int statusword_os;      ///< The statusword's offset in the master's PDO data structure.
-  unsigned int torque_demand_os;
-  unsigned int velocity_demand_os;
+  unsigned int base_idx; ///< The PDO/SDO offset for this channel
 
   lcec_class_cia402_channel_options_t *options;  ///< The options used to create this device.
   lcec_class_cia402_enabled_t *enabled;
