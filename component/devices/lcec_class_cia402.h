@@ -178,14 +178,14 @@ typedef struct {
 } lcec_class_cia402_enabled_t;
 
 typedef struct {
-#define PDO_PIN(name, pin_type)				\
-  pin_type *name; \
-  unsigned int name##_os; \
+#define PDO_PIN(name, pin_type) \
+  pin_type *name;               \
+  unsigned int name##_os;       \
   unsigned int name##_bp;
-  
+
 #define SDO_PIN(name, pin_type) \
-  pin_type *name; \
-  pin_type name##_old; \
+  pin_type *name;               \
+  pin_type name##_old;          \
   ec_sdo_request_t *name##_sdorequest;
 
   // Out
@@ -201,29 +201,29 @@ typedef struct {
 
   SDO_PIN(following_error_timeout, hal_u32_t);
   SDO_PIN(following_error_window, hal_u32_t);
-  SDO_PIN(home_accel, hal_u32_t);  
-  SDO_PIN(home_velocity_fast, hal_u32_t); 
-  SDO_PIN(home_velocity_slow, hal_u32_t); 
-  SDO_PIN(maximum_acceleration, hal_u32_t);  
-  SDO_PIN(maximum_current, hal_u32_t); 
-  SDO_PIN(maximum_deceleration, hal_u32_t); 
-  SDO_PIN(maximum_motor_rpm, hal_u32_t); 
-  SDO_PIN(maximum_torque, hal_u32_t); 
+  SDO_PIN(home_accel, hal_u32_t);
+  SDO_PIN(home_velocity_fast, hal_u32_t);
+  SDO_PIN(home_velocity_slow, hal_u32_t);
+  SDO_PIN(maximum_acceleration, hal_u32_t);
+  SDO_PIN(maximum_current, hal_u32_t);
+  SDO_PIN(maximum_deceleration, hal_u32_t);
+  SDO_PIN(maximum_motor_rpm, hal_u32_t);
+  SDO_PIN(maximum_torque, hal_u32_t);
   SDO_PIN(motion_profile, hal_s32_t);
-  SDO_PIN(motor_rated_current, hal_u32_t); 
-  SDO_PIN(motor_rated_torque, hal_u32_t); 
-  SDO_PIN(polarity, hal_u32_t); 
-  SDO_PIN(profile_accel, hal_u32_t);  
-  SDO_PIN(profile_decel, hal_u32_t); 
-  SDO_PIN(profile_end_velocity, hal_u32_t); 
-  SDO_PIN(profile_max_velocity, hal_u32_t); 
+  SDO_PIN(motor_rated_current, hal_u32_t);
+  SDO_PIN(motor_rated_torque, hal_u32_t);
+  SDO_PIN(polarity, hal_u32_t);
+  SDO_PIN(profile_accel, hal_u32_t);
+  SDO_PIN(profile_decel, hal_u32_t);
+  SDO_PIN(profile_end_velocity, hal_u32_t);
+  SDO_PIN(profile_max_velocity, hal_u32_t);
   SDO_PIN(torque_profile_type, hal_s32_t);
   SDO_PIN(torque_slope, hal_u32_t);
-  SDO_PIN(velocity_error_time, hal_u32_t); 
-  SDO_PIN(velocity_error_window, hal_u32_t); 
+  SDO_PIN(velocity_error_time, hal_u32_t);
+  SDO_PIN(velocity_error_window, hal_u32_t);
   SDO_PIN(velocity_sensor_selector, hal_s32_t);
-  SDO_PIN(velocity_threshold_time, hal_u32_t); 
-  SDO_PIN(velocity_threshold_window, hal_u32_t); 
+  SDO_PIN(velocity_threshold_time, hal_u32_t);
+  SDO_PIN(velocity_threshold_window, hal_u32_t);
   SDO_PIN(vl_accel, hal_u32_t);
   SDO_PIN(vl_decel, hal_u32_t);
   SDO_PIN(vl_maximum, hal_s32_t);
@@ -249,7 +249,7 @@ typedef struct {
   PDO_PIN(actual_following_error, hal_u32_t);
   PDO_PIN(actual_voltage, hal_u32_t);
 
-  unsigned int base_idx; ///< The PDO/SDO offset for this channel
+  unsigned int base_idx;  ///< The PDO/SDO offset for this channel
 
   lcec_class_cia402_channel_options_t *options;  ///< The options used to create this device.
   lcec_class_cia402_enabled_t *enabled;

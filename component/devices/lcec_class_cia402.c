@@ -345,10 +345,10 @@
 // macro expansion happening, so you need to nest that inside *yet
 // another* macro.  Go read the GCC preprocessor manual, it's in there
 // and this is how they recommend handling it.
-#define JOIN2(a, b)            a##b
+#define JOIN2(a, b)               a##b
 #define JOIN3(a, b, c)            a##b##c
 #define JOIN5(a, b, c, d, e)      a##b##c##d##e
-#define SUBSTJOIN2(a, b)       JOIN2(a, b)
+#define SUBSTJOIN2(a, b)          JOIN2(a, b)
 #define SUBSTJOIN3(a, b, c)       JOIN3(a, b, c)
 #define SUBSTJOIN5(a, b, c, d, e) JOIN5(a, b, c, d, e)
 
@@ -790,8 +790,9 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   INIT_OPTIONAL_PDO(velocity_demand);
 
 #define INIT_SDO_REQUEST(pin_name) \
-  data->pin_name##_sdorequest = ecrt_slave_config_create_sdo_request(slave->config, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, PDO_BITS_##pin_name)
-  
+  data->pin_name##_sdorequest =    \
+      ecrt_slave_config_create_sdo_request(slave->config, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, PDO_BITS_##pin_name)
+
   INIT_SDO_REQUEST(following_error_timeout);
   INIT_SDO_REQUEST(following_error_window);
   INIT_SDO_REQUEST(home_accel);
@@ -920,9 +921,8 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   ///
   /// The upshot?  Call SET_OPTIONAL_DEFAULTS(FOO), and the right
   /// thing happens.
-#define SET_OPTIONAL_DEFAULTS(pin_name)                                          \
-  if (enabled->enable_##pin_name)                                                \
-  SUBSTJOIN5(lcec_read_sdo, PDO_BITS_##pin_name, _pin_, PDO_SIGN_##pin_name, 32) \
+#define SET_OPTIONAL_DEFAULTS(pin_name)                                                                          \
+  if (enabled->enable_##pin_name) SUBSTJOIN5(lcec_read_sdo, PDO_BITS_##pin_name, _pin_, PDO_SIGN_##pin_name, 32) \
   (slave, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, data->pin_name)
 
   SET_OPTIONAL_DEFAULTS(following_error_timeout);
@@ -1020,19 +1020,19 @@ void lcec_cia402_read_all(lcec_slave_t *slave, lcec_class_cia402_channels_t *cha
 ///    `EC_WRITE_*()`. macros.
 /// 3. Finally, we call `ecrt_sdo_request_write()` to start a write.
 ///    It may not finish for a while.
-#define WRITE_OPT_SDO(name) \
-  do { \
-    if (data->enabled->enable_##name) { 	       \
-      if (*(data->name) != data->name##_old) { \
-	if (ecrt_sdo_request_state(data->name##_sdorequest) != EC_REQUEST_BUSY ) { \
-	  data->name##_old = *(data->name); \
-	  uint8_t *sdo_tmp = ecrt_sdo_request_data(data->name##_sdorequest);	\
-	  SUBSTJOIN3(EC_WRITE_, PDO_SIGN_##name, PDO_BITS_##name)(sdo_tmp, data->name##_old); \
-	  ecrt_sdo_request_write(data->name##_sdorequest); \
-	}								\
-      }\
-    } \
-  } while(0)
+#define WRITE_OPT_SDO(name)                                                                   \
+  do {                                                                                        \
+    if (data->enabled->enable_##name) {                                                       \
+      if (*(data->name) != data->name##_old) {                                                \
+        if (ecrt_sdo_request_state(data->name##_sdorequest) != EC_REQUEST_BUSY) {             \
+          data->name##_old = *(data->name);                                                   \
+          uint8_t *sdo_tmp = ecrt_sdo_request_data(data->name##_sdorequest);                  \
+          SUBSTJOIN3(EC_WRITE_, PDO_SIGN_##name, PDO_BITS_##name)(sdo_tmp, data->name##_old); \
+          ecrt_sdo_request_write(data->name##_sdorequest);                                    \
+        }                                                                                     \
+      }                                                                                       \
+    }                                                                                         \
+  } while (0)
 
 void lcec_cia402_write(lcec_slave_t *slave, lcec_class_cia402_channel_t *data) {
   uint8_t *pd = slave->master->process_data;
