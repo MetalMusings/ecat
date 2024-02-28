@@ -79,7 +79,7 @@ typedef struct {
 typedef struct {
   LCEC_CONF_TYPE_T confType;
   int index;
-  char typename[LCEC_CONF_STR_MAXLEN];
+  char type_name[LCEC_CONF_STR_MAXLEN];
   uint32_t vid;
   uint32_t pid;
   int configPdos;

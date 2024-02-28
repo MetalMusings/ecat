@@ -467,13 +467,13 @@ int lcec_parse_config(void) {
         }
 
         // check for valid slave type
-        if (!strcmp(slave_conf->typename, "generic")) {
+        if (!strcmp(slave_conf->type_name, "generic")) {
           type = NULL;
         } else {
-          type = lcec_findslavetype(slave_conf->typename);
+          type = lcec_findslavetype(slave_conf->type_name);
 
           if (type == NULL) {
-            rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "Invalid slave name \"%s\"\n", slave_conf->typename);
+            rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "Invalid slave name \"%s\"\n", slave_conf->type_name);
             continue;
           }
         }
