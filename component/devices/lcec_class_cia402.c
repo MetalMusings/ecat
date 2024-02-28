@@ -79,6 +79,7 @@
 #define PDO_IDX_OFFSET_demand_vl                 0x43
 #define PDO_IDX_OFFSET_digital_input             0xfd
 #define PDO_IDX_OFFSET_digital_output            0xfe
+#define PDO_IDX_OFFSET_error_code                0x3f
 #define PDO_IDX_OFFSET_following_error_timeout   0x66
 #define PDO_IDX_OFFSET_following_error_window    0x65
 #define PDO_IDX_OFFSET_home_accel                0x9a
@@ -133,6 +134,7 @@
 #define PDO_SIDX_demand_vl                 0
 #define PDO_SIDX_digital_input             0
 #define PDO_SIDX_digital_output            1
+#define PDO_SIDX_error_code                0
 #define PDO_SIDX_following_error_timeout   0
 #define PDO_SIDX_following_error_window    0
 #define PDO_SIDX_home_accel                0
@@ -187,6 +189,7 @@
 #define PDO_PIN_TYPE_actual_vl                 HAL_S32
 #define PDO_PIN_TYPE_actual_voltage            HAL_U32
 #define PDO_PIN_TYPE_demand_vl                 HAL_S32
+#define PDO_PIN_TYPE_error_code                HAL_U32
 #define PDO_PIN_TYPE_following_error_timeout   HAL_U32
 #define PDO_PIN_TYPE_following_error_window    HAL_U32
 #define PDO_PIN_TYPE_home_accel                HAL_U32
@@ -240,6 +243,7 @@
 #define PDO_BITS_demand_vl                 16
 #define PDO_BITS_digital_input             32
 #define PDO_BITS_digital_output            32
+#define PDO_BITS_error_code                16
 #define PDO_BITS_following_error_timeout   16
 #define PDO_BITS_following_error_window    32
 #define PDO_BITS_home_accel                32
@@ -293,6 +297,7 @@
 #define PDO_SIGN_actual_vl                 S
 #define PDO_SIGN_actual_voltage            U
 #define PDO_SIGN_demand_vl                 S
+#define PDO_SIGN_error_code                U
 #define PDO_SIGN_following_error_timeout   U
 #define PDO_SIGN_following_error_window    U
 #define PDO_SIGN_home_accel                U
@@ -397,6 +402,7 @@ OPTIONAL_PIN_READ(actual_velocity, "actual-velocity");
 OPTIONAL_PIN_READ(actual_velocity_sensor, "actual-velocity-sensor");
 OPTIONAL_PIN_READ(actual_vl, "actual-vl");
 OPTIONAL_PIN_READ(actual_voltage, "actual-voltage");
+OPTIONAL_PIN_READ(error_code, "error-code");
 OPTIONAL_PIN_READ(demand_vl, "demand-vl");
 OPTIONAL_PIN_READ(opmode_display, "opmode-display");
 OPTIONAL_PIN_READ(torque_demand, "torque-demand");
@@ -503,6 +509,7 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_channe
   ENABLE_OPT(actual_vl);
   ENABLE_OPT(actual_voltage);
   ENABLE_OPT(demand_vl);
+  ENABLE_OPT(error_code);
   ENABLE_OPT(digital_input);
   ENABLE_OPT(digital_output);
   ENABLE_OPT(following_error_timeout);
@@ -697,6 +704,7 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
     MAP_OPTIONAL_PDO(actual_vl);
     MAP_OPTIONAL_PDO(actual_voltage);
     MAP_OPTIONAL_PDO(demand_vl);
+    MAP_OPTIONAL_PDO(error_code);
     MAP_OPTIONAL_PDO(digital_input);
     MAP_OPTIONAL_PDO(opmode_display);
     MAP_OPTIONAL_PDO(torque_demand);
@@ -777,6 +785,7 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   INIT_OPTIONAL_PDO(actual_vl);
   INIT_OPTIONAL_PDO(actual_voltage);
   INIT_OPTIONAL_PDO(demand_vl);
+  INIT_OPTIONAL_PDO(error_code);
   INIT_OPTIONAL_PDO(home_method);
   INIT_OPTIONAL_PDO(interpolation_time_period);
   INIT_OPTIONAL_PDO(opmode);
@@ -851,6 +860,7 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   REGISTER_OPTIONAL_PINS(actual_vl);
   REGISTER_OPTIONAL_PINS(actual_voltage);
   REGISTER_OPTIONAL_PINS(demand_vl);
+  REGISTER_OPTIONAL_PINS(error_code);
   REGISTER_OPTIONAL_PINS(following_error_timeout);
   REGISTER_OPTIONAL_PINS(following_error_window);
   REGISTER_OPTIONAL_PINS(home_accel);
@@ -987,6 +997,7 @@ void lcec_cia402_read(lcec_slave_t *slave, lcec_class_cia402_channel_t *data) {
   READ_OPT(actual_vl);
   READ_OPT(actual_voltage);
   READ_OPT(demand_vl);
+  READ_OPT(error_code);
   READ_OPT(opmode_display);
   READ_OPT(torque_demand);
   READ_OPT(velocity_demand);
@@ -1120,6 +1131,7 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
     {"enableVL", CIA402_MP_ENABLE_VL, MODPARAM_TYPE_BIT},
     {"enableTQ", CIA402_MP_ENABLE_TQ, MODPARAM_TYPE_BIT},
     {"enableCST", CIA402_MP_ENABLE_CST, MODPARAM_TYPE_BIT},
+
     {"enableActualCurrent", CIA402_MP_ENABLE_ACTUAL_CURRENT, MODPARAM_TYPE_BIT},
     {"enableActualFollowingError", CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR, MODPARAM_TYPE_BIT},
     {"enableActualTorque", CIA402_MP_ENABLE_ACTUAL_TORQUE, MODPARAM_TYPE_BIT},
@@ -1127,6 +1139,7 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
     {"enableActualVelocitySensor", CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR, MODPARAM_TYPE_BIT},
     {"enableActualVoltage", CIA402_MP_ENABLE_ACTUAL_VOLTAGE, MODPARAM_TYPE_BIT},
     {"enableDemandVL", CIA402_MP_ENABLE_DEMAND_VL, MODPARAM_TYPE_BIT},
+    {"enableErrorCode", CIA402_MP_ENABLE_ERROR_CODE, MODPARAM_TYPE_BIT},
     {"enableFollowingErrorTimeout", CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT, MODPARAM_TYPE_BIT},
     {"enableFollowingErrorWindow", CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW, MODPARAM_TYPE_BIT},
     {"enableHomeAccel", CIA402_MP_ENABLE_HOME_ACCEL, MODPARAM_TYPE_BIT},
@@ -1318,6 +1331,7 @@ int lcec_cia402_handle_modparam(lcec_slave_t *slave, const lcec_slave_modparam_t
     CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_VL, actual_vl);
     CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_VOLTAGE, actual_voltage);
     CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_DEMAND_VL, demand_vl);
+    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ERROR_CODE, error_code);
     CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT, following_error_timeout);
     CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW, following_error_window);
     CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_HOME_ACCEL, home_accel);

@@ -73,6 +73,7 @@ typedef struct {
   int enable_demand_vl;
   int enable_digital_input;   ///< If true, enable digital input PDO.
   int enable_digital_output;  ///< If true, enable digital output PDO.
+  int enable_error_code;
   int enable_following_error_timeout;
   int enable_following_error_window;
   int enable_home_accel;  ///< If true, enable the home accel pin
@@ -135,6 +136,7 @@ typedef struct {
   int enable_demand_vl;
   int enable_digital_input;
   int enable_digital_output;
+  int enable_error_code;
   int enable_following_error_timeout;
   int enable_following_error_window;
   int enable_home_accel;
@@ -243,6 +245,7 @@ typedef struct {
   PDO_PIN(actual_velocity_sensor, hal_s32_t);
   PDO_PIN(actual_vl, hal_s32_t);
   PDO_PIN(demand_vl, hal_s32_t);
+  PDO_PIN(error_code, hal_u32_t);
   PDO_PIN(torque_demand, hal_s32_t);
   PDO_PIN(velocity_demand, hal_s32_t);
 
@@ -331,6 +334,7 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_ENABLE_CST                       0x2080
 #define CIA402_MP_ENABLE_CSV                       0x2030
 #define CIA402_MP_ENABLE_DEMAND_VL                 0x2320
+#define CIA402_MP_ENABLE_ERROR_CODE                0x2480
 #define CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT   0x2130
 #define CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW    0x2140
 #define CIA402_MP_ENABLE_HM                        0x2040
@@ -370,4 +374,4 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_ENABLE_VL_DECEL                  0x2370
 #define CIA402_MP_ENABLE_VL_MAXIMUM                0x2350
 #define CIA402_MP_ENABLE_VL_MINIMUM                0x2340
-// next is 0x2480
+// next is 0x2490
