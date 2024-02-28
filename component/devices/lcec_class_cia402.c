@@ -22,6 +22,7 @@
 #include "lcec_class_cia402.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "../lcec.h"
 
@@ -1183,6 +1184,14 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
     {"probe2Negative", CIA402_MP_PROBE2_NEG, MODPARAM_TYPE_S32},
     {"digitalInChannels", CIA402_MP_DIGITAL_IN_CHANNELS, MODPARAM_TYPE_U32},
     {"digitalOutChannels", CIA402_MP_DIGITAL_OUT_CHANNELS, MODPARAM_TYPE_U32},
+    {"vlQuickStopRatio", CIA402_MP_VL_QUICKSTOP_RATIO, MODPARAM_TYPE_STRING},
+    {"vlSetPoint", CIA402_MP_VL_SET_POINT, MODPARAM_TYPE_STRING},
+    {"vlDimensionFactor", CIA402_MP_VL_DIMENSION_FACTOR, MODPARAM_TYPE_STRING},
+    {"encoderRatio", CIA402_MP_POS_ENCODER_RATIO, MODPARAM_TYPE_STRING},
+    {"velEncoderRatio", CIA402_MP_VEL_ENCODER_RATIO, MODPARAM_TYPE_STRING},
+    {"gearRatio", CIA402_MP_GEAR_RATIO, MODPARAM_TYPE_STRING},
+    {"feedRatio", CIA402_MP_FEED_RATIO, MODPARAM_TYPE_STRING},
+    {"eGearRatio", CIA402_MP_EGEAR_RATIO, MODPARAM_TYPE_STRING},
 
     // CiA 402 modParams for enabling entire modes.
     {"enablePP", CIA402_MP_ENABLE_PP, MODPARAM_TYPE_BIT},
@@ -1344,6 +1353,7 @@ int lcec_cia402_handle_modparam(lcec_slave_t *slave, const lcec_slave_modparam_t
   int channel = p->id & 7;
   int id = p->id & ~7;
   int base = 0x6000 + 0x800 * channel;
+  lcec_ratio ratio;
 
 #define CASE_MP_S8(mp_name, idx, sidx) \
   case mp_name:                        \
@@ -1441,8 +1451,130 @@ int lcec_cia402_handle_modparam(lcec_slave_t *slave, const lcec_slave_modparam_t
     case CIA402_MP_DIGITAL_OUT_CHANNELS:
       opt->channel[channel]->digital_out_channels = p->value.u32;
       return 0;
-
+    case CIA402_MP_VL_QUICKSTOP_RATIO:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 14);
+      lcec_write_sdo32_modparam(slave, base + 0x4a, 1, ratio.numerator, p->name);
+      lcec_write_sdo16_modparam(slave, base + 0x4a, 2, ratio.denominator, p->name);
+      return 0;
+    case CIA402_MP_VL_SET_POINT:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 14);
+      lcec_write_sdo16_modparam(slave, base + 0x4b, 1, ratio.numerator, p->name);
+      lcec_write_sdo16_modparam(slave, base + 0x4b, 2, ratio.denominator, p->name);
+      return 0;
+    case CIA402_MP_VL_DIMENSION_FACTOR:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 30);
+      lcec_write_sdo32_modparam(slave, base + 0x4c, 1, ratio.numerator, p->name);
+      lcec_write_sdo32_modparam(slave, base + 0x4c, 2, ratio.denominator, p->name);
+      return 0;
+    case CIA402_MP_POS_ENCODER_RATIO:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 30);
+      lcec_write_sdo32_modparam(slave, base + 0x8f, 1, ratio.numerator, p->name);
+      lcec_write_sdo32_modparam(slave, base + 0x8f, 2, ratio.denominator, p->name);
+      return 0;
+    case CIA402_MP_VEL_ENCODER_RATIO:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 30);
+      lcec_write_sdo32_modparam(slave, base + 0x90, 1, ratio.numerator, p->name);
+      lcec_write_sdo32_modparam(slave, base + 0x90, 2, ratio.denominator, p->name);
+      return 0;
+    case CIA402_MP_GEAR_RATIO:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 30);
+      lcec_write_sdo32_modparam(slave, base + 0x91, 1, ratio.numerator, p->name);
+      lcec_write_sdo32_modparam(slave, base + 0x91, 2, ratio.denominator, p->name);
+      return 0;
+    case CIA402_MP_FEED_RATIO:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 30);
+      lcec_write_sdo32_modparam(slave, base + 0x92, 1, ratio.numerator, p->name);
+      lcec_write_sdo32_modparam(slave, base + 0x92, 2, ratio.denominator, p->name);
+      return 0;
+    case CIA402_MP_EGEAR_RATIO:
+      ratio = lcec_cia402_decode_ratio_modparam(p->value.str, 1 << 30);
+      lcec_write_sdo32_modparam(slave, base + 0x93, 1, ratio.numerator, p->name);
+      lcec_write_sdo32_modparam(slave, base + 0x93, 2, ratio.denominator, p->name);
+      return 0;
     default:
       return 1;
+  }
+}
+
+/// @brief Handle a "ratio" modparam.
+///
+/// CiA 402 has a number of config settings that are effectively
+/// ratios; they have a numerator object (usually int32) and a
+/// denominator object (usually uint16), and the ratio of the two
+/// control some setting, like encoder resolution, the mapping between
+/// steps and distance, and so forth.
+///
+/// I'm feeling a bit surly here, and want to let the user set these in 2 different ways:
+///
+/// 1. Provide the numerator and denominator directly.  `<modParam
+///    name="encoderResolution" value="4000/3"/>`
+/// 2. Provide a floating point number, which we'll try to approximate
+///    as best we can.  So `<modParam name="feedConstant"
+///    value="241.72"/>` In cases where actual measurement is
+///    involved, this is probably better, and I'd rather just write
+///    the damn measurement into the config than spend time finding an
+///    approximation by hand.
+///
+/// @param value A string that contains either a ratio of two
+///   integers with a slash ("123/45") or colon ("123:45"), or a
+///   floating point number ("6.789").
+/// @param max_denominator The largest denominator allowed when
+///   computing a rational approximation of a FP number.  Generally,
+///   you'll want to pick the largest int representable by the
+///   register that you're writing it into.
+lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, unsigned int max_denominator) {
+  lcec_ratio result;
+  char *slash = strchr(value, '/');
+
+  // If there's no "/", then try a colon.
+  if (slash == NULL) slash = strchr(value, ':');
+
+  if (slash != NULL) {
+    // It's a ratio, so decode as-is.
+    result.numerator = strtol(value, NULL, 10);
+    result.denominator = strtoul(slash + 1, NULL, 10);
+
+    if (result.numerator == 0) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Attempting to handle modParam ratio of \"%s\" produced a numerator of 0\n", value);
+    }
+    if (result.denominator == 0) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Attempting to handle modParam ratio of \"%s\" produced a denominator of 0\n", value);
+    }
+
+    return result;
+  } else {
+    // Probably a floating point value.  Let's extract it.
+    double fpval = atof(value);
+
+    int matrix[2][2];
+    double x = fpval;
+    int error;
+
+    // Derived from https://ics.uci.edu/~eppstein/numth/frap.c
+    matrix[0][0] = matrix[1][1] = 1;
+    matrix[0][1] = matrix[1][0] = 0;
+
+    error = x;
+    while ((matrix[1][0] * error + matrix[1][1]) <= max_denominator) {
+      int temp;
+
+      temp = matrix[0][0] * error + matrix[0][1];
+      matrix[0][1] = matrix[0][0];
+      matrix[0][0] = temp;
+
+      temp = matrix[1][0] * error + matrix[1][1];
+      matrix[1][1] = matrix[1][0];
+      matrix[1][0] = temp;
+      if (x == (double)error) break;  // will divide by 0
+      x = 1 / (x - error);
+      if (x > (double)0x7fffffff) break;  // will overflow
+
+      error = x;
+    }
+
+    result.numerator = matrix[0][0];
+    result.denominator = matrix[1][0];
+
+    return result;
   }
 }

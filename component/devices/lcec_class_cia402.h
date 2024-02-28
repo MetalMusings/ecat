@@ -268,6 +268,11 @@ typedef struct {
   lcec_class_cia402_channel_t **channels;  ///< a dynamic array of `lcec_class_cia402_channel_t` channels.  There should be 1 per axis.
 } lcec_class_cia402_channels_t;
 
+typedef struct {
+  int numerator;
+  unsigned int denominator;
+} lcec_ratio;
+
 lcec_class_cia402_channels_t *lcec_cia402_allocate_channels(int count);
 lcec_class_cia402_channel_t *lcec_cia402_register_channel(
     struct lcec_slave *slave, uint16_t base_idx, lcec_class_cia402_channel_options_t *opt);
@@ -284,6 +289,7 @@ lcec_modparam_desc_t *lcec_cia402_modparams(lcec_modparam_desc_t const *device_m
 lcec_syncs_t *lcec_cia402_init_sync(lcec_slave_t *slave, lcec_class_cia402_options_t *options);
 int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options);
 int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options);
+lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, unsigned int max_denominator);
 
 #define ADD_TYPES_WITH_CIA402_MODPARAMS(types, mps)        \
   static void AddTypes(void) __attribute__((constructor)); \
@@ -328,7 +334,15 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 #define CIA402_MP_PROBE2_NEG           0x1190  // 0x60bd:00 "touch probe 2 negative value" S32
 #define CIA402_MP_DIGITAL_IN_CHANNELS  0x11a0
 #define CIA402_MP_DIGITAL_OUT_CHANNELS 0x11b0
-// next is 0x11c0
+#define CIA402_MP_VL_QUICKSTOP_RATIO   0x11c0
+#define CIA402_MP_VL_SET_POINT         0x11d0
+#define CIA402_MP_VL_DIMENSION_FACTOR  0x11e0
+#define CIA402_MP_POS_ENCODER_RATIO    0x11f0
+#define CIA402_MP_VEL_ENCODER_RATIO    0x1200
+#define CIA402_MP_GEAR_RATIO           0x1210
+#define CIA402_MP_FEED_RATIO           0x1220
+#define CIA402_MP_EGEAR_RATIO          0x1230
+// next is 0x1240
 
 // "enable" modParams
 #define CIA402_MP_ENABLE_ACTUAL_CURRENT            0x22d0
