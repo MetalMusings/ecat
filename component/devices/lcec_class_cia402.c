@@ -88,13 +88,12 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_channe
   }
   if (opt->enable_csp) {
     enabled->enable_actual_position = 1;
+    enabled->enable_actual_velocity = 1;
     enabled->enable_target_position = 1;
-    // TODO: add interpolation pins once they're added.
   }
   if (opt->enable_csv) {
     enabled->enable_actual_velocity = 1;
     enabled->enable_target_velocity = 1;
-    // TODO: add interpolation pins once they're added.
   }
   if (opt->enable_hm) {
     enabled->enable_hm = 1;
@@ -250,8 +249,6 @@ int lcec_cia402_add_output_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_c
     FOR_ALL_WRITE_PDOS_DO(MAP_OPTIONAL_PDO);
     MAP_OPTIONAL_PDO(digital_output);
 
-    rtapi_print_msg(RTAPI_MSG_ERR, "****** rxpdo:  %d vs %d\n", syncs->pdo_entry_count - entrycount, options->rxpdolimit);
-
     if (options->rxpdolimit && (syncs->pdo_entry_count - entrycount) > options->rxpdolimit) {
       rtapi_print_msg(RTAPI_MSG_ERR,
           LCEC_MSG_PFX "slave %s.%s: FAILURE: FAILURE: more output PDO entries configured than your hardware supports.\n",
@@ -297,8 +294,6 @@ int lcec_cia402_add_input_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_cl
     // but still needs to be mapped.
     FOR_ALL_READ_PDOS_DO(MAP_OPTIONAL_PDO);
     MAP_OPTIONAL_PDO(digital_input);  // Special
-
-    rtapi_print_msg(RTAPI_MSG_ERR, "****** txpdo:  %d vs %d\n", syncs->pdo_entry_count - entrycount, options->rxpdolimit);
 
     if (options->txpdolimit && (syncs->pdo_entry_count - entrycount) > options->txpdolimit) {
       rtapi_print_msg(RTAPI_MSG_ERR,
