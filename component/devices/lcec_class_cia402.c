@@ -571,6 +571,8 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
     {"homeOffset", CIA402_MP_HOME_OFFSET, MODPARAM_TYPE_S32},
     {"quickDecel", CIA402_MP_QUICKDECEL, MODPARAM_TYPE_U32},
     {"quickStopOptionCode", CIA402_MP_OPTCODE_QUICKSTOP, MODPARAM_TYPE_S32},
+    {"positioningOptionCode", CIA402_MP_OPTCODE_POSITIONING, MODPARAM_TYPE_S32},
+    {"connectionOptionCode", CIA402_MP_OPTCODE_CONNECTION, MODPARAM_TYPE_S32},
     {"shutdownOptionCode", CIA402_MP_OPTCODE_SHUTDOWN, MODPARAM_TYPE_S32},
     {"disableOptionCode", CIA402_MP_OPTCODE_DISABLE, MODPARAM_TYPE_S32},
     {"haltOptionCode", CIA402_MP_OPTCODE_HALT, MODPARAM_TYPE_S32},
@@ -735,6 +737,9 @@ int lcec_cia402_handle_modparam(lcec_slave_t *slave, const lcec_slave_modparam_t
     CASE_MP_S16(CIA402_MP_OPTCODE_DISABLE, base + 0x5c, 0);
     CASE_MP_S16(CIA402_MP_OPTCODE_HALT, base + 0x5d, 0);
     CASE_MP_S16(CIA402_MP_OPTCODE_FAULT, base + 0x5e, 0);
+    CASE_MP_S16(CIA402_MP_OPTCODE_POSITIONING, base + 0xf2, 0);
+    CASE_MP_S16(CIA402_MP_OPTCODE_CONNECTION, base + 0x7, 0);
+
     CASE_MP_U16(CIA402_MP_PROBE_FUNCTION, base + 0xb8, 0);
     CASE_MP_U32(CIA402_MP_PROBE1_POS, base + 0xba, 0);
     CASE_MP_U32(CIA402_MP_PROBE1_NEG, base + 0xbb, 0);
