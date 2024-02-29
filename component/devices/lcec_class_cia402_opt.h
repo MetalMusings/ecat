@@ -525,8 +525,6 @@
 
 // This is the list of write SDOs.  These need to be initialized, mapped, and written.
 #define FOR_ALL_WRITE_PDOS_DO(thing) \
-  thing(home_method);                \
-  thing(interpolation_time_period);  \
   thing(opmode);                     \
   thing(profile_velocity);           \
   thing(target_position);            \
@@ -539,8 +537,10 @@
   thing(following_error_timeout);    \
   thing(following_error_window);     \
   thing(home_accel);                 \
+  thing(home_method);                \
   thing(home_velocity_fast);         \
   thing(home_velocity_slow);         \
+  thing(interpolation_time_period);  \
   thing(maximum_acceleration);       \
   thing(maximum_current);            \
   thing(maximum_deceleration);       \

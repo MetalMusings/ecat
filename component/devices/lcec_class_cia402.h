@@ -213,8 +213,6 @@ typedef struct {
 
   // Out
   PDO_PIN(controlword, hal_u32_t);
-  PDO_PIN(home_method, hal_s32_t);
-  PDO_PIN(interpolation_time_period, hal_u32_t);
   PDO_PIN(opmode, hal_s32_t);
   PDO_PIN(profile_velocity, hal_u32_t);
   PDO_PIN(target_position, hal_s32_t);
@@ -225,8 +223,10 @@ typedef struct {
   SDO_PIN(following_error_timeout, hal_u32_t);
   SDO_PIN(following_error_window, hal_u32_t);
   SDO_PIN(home_accel, hal_u32_t);
+  SDO_PIN(home_method, hal_s32_t);
   SDO_PIN(home_velocity_fast, hal_u32_t);
   SDO_PIN(home_velocity_slow, hal_u32_t);
+  SDO_PIN(interpolation_time_period, hal_u32_t);
   SDO_PIN(maximum_acceleration, hal_u32_t);
   SDO_PIN(maximum_current, hal_u32_t);
   SDO_PIN(maximum_deceleration, hal_u32_t);
