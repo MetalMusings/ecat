@@ -72,6 +72,7 @@ typedef struct {
   int enable_actual_velocity_sensor;
   int enable_actual_vl;
   int enable_actual_voltage;
+  int enable_control_effort;
   int enable_demand_vl;
   int enable_digital_input;   ///< If true, enable digital input PDO.
   int enable_digital_output;  ///< If true, enable digital output PDO.
@@ -84,11 +85,16 @@ typedef struct {
   int enable_maximum_current;
   int enable_maximum_deceleration;
   int enable_maximum_motor_rpm;
+  int enable_maximum_slippage;
   int enable_maximum_torque;
   int enable_motion_profile;
   int enable_motor_rated_current;
   int enable_motor_rated_torque;
   int enable_polarity;
+  int enable_position_demand;
+  int enable_positioning_time;
+  int enable_positioning_window;
+  int enable_probe_status;
   int enable_profile_accel;         ///< If true, enable the profile accel pin
   int enable_profile_decel;         ///< If true, enable the profile decel pin
   int enable_profile_end_velocity;  ///< If true, enable the profile end velocity pin
@@ -133,6 +139,7 @@ typedef struct {
   int enable_actual_velocity_sensor;
   int enable_actual_vl;
   int enable_actual_voltage;
+  int enable_control_effort;
   int enable_csp;
   int enable_cst;
   int enable_csv;
@@ -153,6 +160,7 @@ typedef struct {
   int enable_maximum_current;
   int enable_maximum_deceleration;
   int enable_maximum_motor_rpm;
+  int enable_maximum_slippage;
   int enable_maximum_torque;
   int enable_motion_profile;
   int enable_motor_rated_current;
@@ -160,7 +168,11 @@ typedef struct {
   int enable_opmode;
   int enable_opmode_display;
   int enable_polarity;
+  int enable_position_demand;
+  int enable_positioning_time;
+  int enable_positioning_window;
   int enable_pp;
+  int enable_probe_status;
   int enable_profile_accel;
   int enable_profile_decel;
   int enable_profile_end_velocity;
@@ -202,13 +214,13 @@ typedef struct {
   // Out
   PDO_PIN(controlword, hal_u32_t);
   PDO_PIN(home_method, hal_s32_t);
+  PDO_PIN(interpolation_time_period, hal_u32_t);
   PDO_PIN(opmode, hal_s32_t);
+  PDO_PIN(profile_velocity, hal_u32_t);
   PDO_PIN(target_position, hal_s32_t);
   PDO_PIN(target_torque, hal_s32_t);
   PDO_PIN(target_velocity, hal_s32_t);
   PDO_PIN(target_vl, hal_s32_t);
-  PDO_PIN(interpolation_time_period, hal_u32_t);
-  PDO_PIN(profile_velocity, hal_u32_t);
 
   SDO_PIN(following_error_timeout, hal_u32_t);
   SDO_PIN(following_error_window, hal_u32_t);
@@ -219,11 +231,14 @@ typedef struct {
   SDO_PIN(maximum_current, hal_u32_t);
   SDO_PIN(maximum_deceleration, hal_u32_t);
   SDO_PIN(maximum_motor_rpm, hal_u32_t);
+  SDO_PIN(maximum_slippage, hal_s32_t);
   SDO_PIN(maximum_torque, hal_u32_t);
   SDO_PIN(motion_profile, hal_s32_t);
   SDO_PIN(motor_rated_current, hal_u32_t);
   SDO_PIN(motor_rated_torque, hal_u32_t);
   SDO_PIN(polarity, hal_u32_t);
+  SDO_PIN(positioning_time, hal_u32_t);
+  SDO_PIN(positioning_window, hal_u32_t);
   SDO_PIN(profile_accel, hal_u32_t);
   SDO_PIN(profile_decel, hal_u32_t);
   SDO_PIN(profile_end_velocity, hal_u32_t);
@@ -248,18 +263,20 @@ typedef struct {
       *supports_mode_csp, *supports_mode_csv, *supports_mode_cst;
 
   PDO_PIN(actual_current, hal_s32_t);
+  PDO_PIN(actual_following_error, hal_u32_t);
   PDO_PIN(actual_position, hal_s32_t);
   PDO_PIN(actual_torque, hal_s32_t);
   PDO_PIN(actual_velocity, hal_s32_t);
   PDO_PIN(actual_velocity_sensor, hal_s32_t);
   PDO_PIN(actual_vl, hal_s32_t);
+  PDO_PIN(actual_voltage, hal_u32_t);
+  PDO_PIN(control_effort, hal_s32_t);
   PDO_PIN(demand_vl, hal_s32_t);
   PDO_PIN(error_code, hal_u32_t);
+  PDO_PIN(position_demand, hal_s32_t);
+  PDO_PIN(probe_status, hal_u32_t);
   PDO_PIN(torque_demand, hal_s32_t);
   PDO_PIN(velocity_demand, hal_s32_t);
-
-  PDO_PIN(actual_following_error, hal_u32_t);
-  PDO_PIN(actual_voltage, hal_u32_t);
 
   unsigned int base_idx;  ///< The PDO/SDO offset for this channel
 
@@ -334,6 +351,8 @@ lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, unsigned int max
 #define CIA402_MP_OPTCODE_DISABLE      0x10e0  // 0x605c:00 "disable operation option code" S16
 #define CIA402_MP_OPTCODE_HALT         0x10f0  // 0x605d:00 "halt option code" S16
 #define CIA402_MP_OPTCODE_FAULT        0x1100  // 0x605e:00 "fault option code" S16
+#define CIA402_MP_OPTCODE_POSITIONING  0x1240
+#define CIA402_MP_OPTCODE_CONNECTION   0x1250
 #define CIA402_MP_PROBE_FUNCTION       0x1150  // 0x60b8:00 "probe function" U16
 #define CIA402_MP_PROBE1_POS           0x1160  // 0x60ba:00 "touch probe 1 positive value" S32
 #define CIA402_MP_PROBE1_NEG           0x1170  // 0x60bb:00 "touch probe 1 negative value" S32
@@ -349,7 +368,7 @@ lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, unsigned int max
 #define CIA402_MP_GEAR_RATIO           0x1210
 #define CIA402_MP_FEED_RATIO           0x1220
 #define CIA402_MP_EGEAR_RATIO          0x1230
-// next is 0x1240
+// next is 0x1260
 
 // "enable" modParams
 #define CIA402_MP_ENABLE_actual_current            0x22d0
@@ -405,4 +424,10 @@ lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, unsigned int max
 #define CIA402_MP_ENABLE_vl_maximum                0x2350
 #define CIA402_MP_ENABLE_vl_minimum                0x2340
 #define CIA402_MP_ENABLE_opmode                    0x23b0
-// next is 0x24c0
+#define CIA402_MP_ENABLE_positioning_window        0x24c0
+#define CIA402_MP_ENABLE_positioning_time          0x24d0
+#define CIA402_MP_ENABLE_maximum_slippage          0x24e0
+#define CIA402_MP_ENABLE_probe_status              0x24f0
+#define CIA402_MP_ENABLE_position_demand           0x2500
+#define CIA402_MP_ENABLE_control_effort            0x2510
+// next is 0x2520

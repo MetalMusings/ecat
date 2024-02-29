@@ -70,6 +70,7 @@
 #define PDO_IDX_OFFSET_actual_velocity_sensor    0x69
 #define PDO_IDX_OFFSET_actual_vl                 0x44
 #define PDO_IDX_OFFSET_actual_voltage            0x79
+#define PDO_IDX_OFFSET_control_effort            0xfa
 #define PDO_IDX_OFFSET_demand_vl                 0x43
 #define PDO_IDX_OFFSET_digital_input             0xfd
 #define PDO_IDX_OFFSET_digital_output            0xfe
@@ -85,6 +86,7 @@
 #define PDO_IDX_OFFSET_maximum_current           0x73
 #define PDO_IDX_OFFSET_maximum_deceleration      0xc6
 #define PDO_IDX_OFFSET_maximum_motor_rpm         0x80
+#define PDO_IDX_OFFSET_maximum_slippage          0xf8
 #define PDO_IDX_OFFSET_maximum_torque            0x72
 #define PDO_IDX_OFFSET_motion_profile            0x86
 #define PDO_IDX_OFFSET_motor_rated_current       0x75
@@ -92,6 +94,10 @@
 #define PDO_IDX_OFFSET_opmode                    0x60
 #define PDO_IDX_OFFSET_opmode_display            0x61
 #define PDO_IDX_OFFSET_polarity                  0x7e
+#define PDO_IDX_OFFSET_position_demand           0x62
+#define PDO_IDX_OFFSET_positioning_time          0x68
+#define PDO_IDX_OFFSET_positioning_window        0x67
+#define PDO_IDX_OFFSET_probe_status              0xb9
 #define PDO_IDX_OFFSET_profile_accel             0x83
 #define PDO_IDX_OFFSET_profile_decel             0x84
 #define PDO_IDX_OFFSET_profile_end_velocity      0x82
@@ -125,6 +131,7 @@
 #define PDO_SIDX_actual_velocity_sensor    0
 #define PDO_SIDX_actual_vl                 0
 #define PDO_SIDX_actual_voltage            0
+#define PDO_SIDX_control_effort            0
 #define PDO_SIDX_demand_vl                 0
 #define PDO_SIDX_digital_input             0
 #define PDO_SIDX_digital_output            1
@@ -140,6 +147,7 @@
 #define PDO_SIDX_maximum_current           0
 #define PDO_SIDX_maximum_deceleration      0
 #define PDO_SIDX_maximum_motor_rpm         0
+#define PDO_SIDX_maximum_slippage          0
 #define PDO_SIDX_maximum_torque            0
 #define PDO_SIDX_motion_profile            0
 #define PDO_SIDX_motor_rated_current       0
@@ -147,6 +155,10 @@
 #define PDO_SIDX_opmode                    0
 #define PDO_SIDX_opmode_display            0
 #define PDO_SIDX_polarity                  0
+#define PDO_SIDX_position_demand           0
+#define PDO_SIDX_positioning_time          0
+#define PDO_SIDX_positioning_window        0
+#define PDO_SIDX_probe_status              0
 #define PDO_SIDX_profile_accel             0
 #define PDO_SIDX_profile_decel             0
 #define PDO_SIDX_profile_end_velocity      0
@@ -182,6 +194,7 @@
 #define PDO_PIN_TYPE_actual_velocity_sensor    HAL_S32
 #define PDO_PIN_TYPE_actual_vl                 HAL_S32
 #define PDO_PIN_TYPE_actual_voltage            HAL_U32
+#define PDO_PIN_TYPE_control_effort            HAL_S32
 #define PDO_PIN_TYPE_demand_vl                 HAL_S32
 #define PDO_PIN_TYPE_error_code                HAL_U32
 #define PDO_PIN_TYPE_following_error_timeout   HAL_U32
@@ -195,6 +208,7 @@
 #define PDO_PIN_TYPE_maximum_current           HAL_U32
 #define PDO_PIN_TYPE_maximum_deceleration      HAL_U32
 #define PDO_PIN_TYPE_maximum_motor_rpm         HAL_U32
+#define PDO_PIN_TYPE_maximum_slippage          HAL_S32
 #define PDO_PIN_TYPE_maximum_torque            HAL_U32
 #define PDO_PIN_TYPE_motion_profile            HAL_S32
 #define PDO_PIN_TYPE_motor_rated_current       HAL_U32
@@ -202,6 +216,10 @@
 #define PDO_PIN_TYPE_opmode                    HAL_S32
 #define PDO_PIN_TYPE_opmode_display            HAL_S32
 #define PDO_PIN_TYPE_polarity                  HAL_U32
+#define PDO_PIN_TYPE_position_demand           HAL_S32
+#define PDO_PIN_TYPE_positioning_time          HAL_U32
+#define PDO_PIN_TYPE_positioning_window        HAL_U32
+#define PDO_PIN_TYPE_probe_status              HAL_U32
 #define PDO_PIN_TYPE_profile_accel             HAL_U32
 #define PDO_PIN_TYPE_profile_decel             HAL_U32
 #define PDO_PIN_TYPE_profile_end_velocity      HAL_U32
@@ -234,11 +252,9 @@
 #define PDO_PIN_NAME_actual_velocity_sensor    "actual-velocity-sensor"
 #define PDO_PIN_NAME_actual_vl                 "actual-vl"
 #define PDO_PIN_NAME_actual_voltage            "actual-voltage"
-#define PDO_PIN_NAME_error_code                "error-code"
+#define PDO_PIN_NAME_control_effort            "control-effort"
 #define PDO_PIN_NAME_demand_vl                 "demand-vl"
-#define PDO_PIN_NAME_opmode_display            "opmode-display"
-#define PDO_PIN_NAME_torque_demand             "torque-demand"
-#define PDO_PIN_NAME_velocity_demand           "velocity-demand"
+#define PDO_PIN_NAME_error_code                "error-code"
 #define PDO_PIN_NAME_following_error_timeout   "following-error-timeout"
 #define PDO_PIN_NAME_following_error_window    "following-error-window"
 #define PDO_PIN_NAME_home_accel                "home-accel"
@@ -250,12 +266,18 @@
 #define PDO_PIN_NAME_maximum_current           "maximum-current"
 #define PDO_PIN_NAME_maximum_deceleration      "maximum-deceleration"
 #define PDO_PIN_NAME_maximum_motor_rpm         "maximum-motor-rpm"
+#define PDO_PIN_NAME_maximum_slippage          "maximum-slippage"
 #define PDO_PIN_NAME_maximum_torque            "torque-maximum"
 #define PDO_PIN_NAME_motion_profile            "motion-profile"
 #define PDO_PIN_NAME_motor_rated_current       "motor-rated-current"
 #define PDO_PIN_NAME_motor_rated_torque        "motor-rated-torque"
 #define PDO_PIN_NAME_opmode                    "opmode"
+#define PDO_PIN_NAME_opmode_display            "opmode-display"
 #define PDO_PIN_NAME_polarity                  "polarity"
+#define PDO_PIN_NAME_position_demand           "position-demand"
+#define PDO_PIN_NAME_positioning_time          "positioning-time"
+#define PDO_PIN_NAME_positioning_window        "positioning-window"
+#define PDO_PIN_NAME_probe_status              "probe-status"
 #define PDO_PIN_NAME_profile_accel             "profile-accel"
 #define PDO_PIN_NAME_profile_decel             "profile-decel"
 #define PDO_PIN_NAME_profile_end_velocity      "profile-end-velocity"
@@ -265,8 +287,10 @@
 #define PDO_PIN_NAME_target_torque             "target-torque"
 #define PDO_PIN_NAME_target_velocity           "target-velocity"
 #define PDO_PIN_NAME_target_vl                 "target-vl"
+#define PDO_PIN_NAME_torque_demand             "torque-demand"
 #define PDO_PIN_NAME_torque_profile_type       "torque-profile-type"
 #define PDO_PIN_NAME_torque_slope              "torque-slope"
+#define PDO_PIN_NAME_velocity_demand           "velocity-demand"
 #define PDO_PIN_NAME_velocity_error_time       "velocity-error-time"
 #define PDO_PIN_NAME_velocity_error_window     "velocity-error-window"
 #define PDO_PIN_NAME_velocity_sensor_selector  "velocity-sensor-selector"
@@ -286,6 +310,7 @@
 #define PDO_BITS_actual_velocity_sensor    32
 #define PDO_BITS_actual_vl                 16
 #define PDO_BITS_actual_voltage            32
+#define PDO_BITS_control_effort            32
 #define PDO_BITS_demand_vl                 16
 #define PDO_BITS_digital_input             32
 #define PDO_BITS_digital_output            32
@@ -301,6 +326,7 @@
 #define PDO_BITS_maximum_current           16
 #define PDO_BITS_maximum_deceleration      32
 #define PDO_BITS_maximum_motor_rpm         32
+#define PDO_BITS_maximum_slippage          32
 #define PDO_BITS_maximum_torque            16
 #define PDO_BITS_motion_profile            16
 #define PDO_BITS_motor_rated_current       32
@@ -308,6 +334,10 @@
 #define PDO_BITS_opmode                    8
 #define PDO_BITS_opmode_display            8
 #define PDO_BITS_polarity                  8
+#define PDO_BITS_position_demand           32
+#define PDO_BITS_positioning_time          16
+#define PDO_BITS_positioning_window        32
+#define PDO_BITS_probe_status              16
 #define PDO_BITS_profile_accel             32
 #define PDO_BITS_profile_decel             32
 #define PDO_BITS_profile_end_velocity      32
@@ -342,6 +372,7 @@
 #define PDO_SIGN_actual_velocity_sensor    S
 #define PDO_SIGN_actual_vl                 S
 #define PDO_SIGN_actual_voltage            U
+#define PDO_SIGN_control_effort            S
 #define PDO_SIGN_demand_vl                 S
 #define PDO_SIGN_error_code                U
 #define PDO_SIGN_following_error_timeout   U
@@ -355,6 +386,7 @@
 #define PDO_SIGN_maximum_current           U
 #define PDO_SIGN_maximum_deceleration      U
 #define PDO_SIGN_maximum_motor_rpm         U
+#define PDO_SIGN_maximum_slippage          S
 #define PDO_SIGN_maximum_torque            U
 #define PDO_SIGN_motion_profile            S
 #define PDO_SIGN_motor_rated_current       U
@@ -362,6 +394,10 @@
 #define PDO_SIGN_opmode                    S
 #define PDO_SIGN_opmode_display            S
 #define PDO_SIGN_polarity                  U
+#define PDO_SIGN_position_demand           S
+#define PDO_SIGN_positioning_time          U
+#define PDO_SIGN_positioning_window        U
+#define PDO_SIGN_probe_status              U
 #define PDO_SIGN_profile_accel             U
 #define PDO_SIGN_profile_decel             U
 #define PDO_SIGN_profile_end_velocity      U
@@ -389,56 +425,62 @@
 #define PDO_MP_NAME_actual_current            "enableActualCurrent"
 #define PDO_MP_NAME_actual_following_error    "enableActualFollowingError"
 #define PDO_MP_NAME_actual_torque             "enableActualTorque"
-#define PDO_MP_NAME_actual_vl                 "enableActualVL"
 #define PDO_MP_NAME_actual_velocity_sensor    "enableActualVelocitySensor"
+#define PDO_MP_NAME_actual_vl                 "enableActualVL"
 #define PDO_MP_NAME_actual_voltage            "enableActualVoltage"
+#define PDO_MP_NAME_control_effort            "enableControlEffort"
+#define PDO_MP_NAME_csp                       "enableCSP"
+#define PDO_MP_NAME_cst                       "enableCST"
+#define PDO_MP_NAME_csv                       "enableCSV"
 #define PDO_MP_NAME_demand_vl                 "enableDemandVL"
 #define PDO_MP_NAME_digital_input             "enableDigitalInput"
 #define PDO_MP_NAME_digital_output            "enableDigitalOutput"
 #define PDO_MP_NAME_error_code                "enableErrorCode"
 #define PDO_MP_NAME_following_error_timeout   "enableFollowingErrorTimeout"
 #define PDO_MP_NAME_following_error_window    "enableFollowingErrorWindow"
+#define PDO_MP_NAME_hm                        "enableHM"
 #define PDO_MP_NAME_home_accel                "enableHomeAccel"
 #define PDO_MP_NAME_interpolation_time_period "enableInterpolationTimePeriod"
+#define PDO_MP_NAME_ip                        "enableIP"
 #define PDO_MP_NAME_maximum_acceleration      "enableMaximumAcceleration"
 #define PDO_MP_NAME_maximum_current           "enableMaximumCurrent"
 #define PDO_MP_NAME_maximum_deceleration      "enableMaximumDeceleration"
 #define PDO_MP_NAME_maximum_motor_rpm         "enableMaximumMotorRPM"
+#define PDO_MP_NAME_maximum_slippage          "enableMaximumSlippage"
 #define PDO_MP_NAME_maximum_torque            "enableMaximumTorque"
+#define PDO_MP_NAME_motion_profile            "enableMotionProfile"
 #define PDO_MP_NAME_motor_rated_current       "enableMotorRatedCurrent"
 #define PDO_MP_NAME_motor_rated_torque        "enableMotorRatedTorque"
+#define PDO_MP_NAME_opmode                    "enableOpmode"
 #define PDO_MP_NAME_polarity                  "enablePolarity"
+#define PDO_MP_NAME_position_demand           "enablePositionDemand"
+#define PDO_MP_NAME_positioning_time          "enablePositioningTime"
+#define PDO_MP_NAME_positioning_window        "enablePositioningWindow"
+#define PDO_MP_NAME_pp                        "enablePP"
+#define PDO_MP_NAME_probe_status              "enableProbeStatus"
 #define PDO_MP_NAME_profile_accel             "enableProfileAccel"
 #define PDO_MP_NAME_profile_decel             "enableProfileDecel"
 #define PDO_MP_NAME_profile_end_velocity      "enableProfileEndVelocity"
 #define PDO_MP_NAME_profile_max_velocity      "enableProfileMaxVelocity"
 #define PDO_MP_NAME_profile_velocity          "enableProfileVelocity"
+#define PDO_MP_NAME_pv                        "enablePV"
 #define PDO_MP_NAME_target_torque             "enableTargetTorque"
 #define PDO_MP_NAME_target_vl                 "enableTargetVL"
 #define PDO_MP_NAME_torque_demand             "enableTorqueDemand"
 #define PDO_MP_NAME_torque_profile_type       "enableTorqueProfileType"
 #define PDO_MP_NAME_torque_slope              "enableTorqueSlope"
-#define PDO_MP_NAME_vl_accel                  "enableVLAccel"
-#define PDO_MP_NAME_vl_decel                  "enableVLDecel"
-#define PDO_MP_NAME_vl_maximum                "enableVLMaximum"
-#define PDO_MP_NAME_vl_minimum                "enableVLMinimum"
+#define PDO_MP_NAME_tq                        "enableTQ"
 #define PDO_MP_NAME_velocity_demand           "enableVelocityDemand"
 #define PDO_MP_NAME_velocity_error_time       "enableVelocityErrorTime"
 #define PDO_MP_NAME_velocity_error_window     "enableVelocityErrorWindow"
 #define PDO_MP_NAME_velocity_sensor_selector  "enableVelocitySensorSelector"
 #define PDO_MP_NAME_velocity_threshold_time   "enableVelocityThresholdTime"
 #define PDO_MP_NAME_velocity_threshold_window "enableVelocityThresholdWindow"
-#define PDO_MP_NAME_pp                        "enablePP"
-#define PDO_MP_NAME_pv                        "enablePV"
-#define PDO_MP_NAME_csp                       "enableCSP"
-#define PDO_MP_NAME_cst                       "enableCST"
-#define PDO_MP_NAME_csv                       "enableCSV"
-#define PDO_MP_NAME_hm                        "enableHM"
-#define PDO_MP_NAME_ip                        "enableIP"
-#define PDO_MP_NAME_tq                        "enableTQ"
 #define PDO_MP_NAME_vl                        "enableVL"
-#define PDO_MP_NAME_opmode                    "enableOpmode"
-#define PDO_MP_NAME_motion_profile            "enableMotionProfile"
+#define PDO_MP_NAME_vl_accel                  "enableVLAccel"
+#define PDO_MP_NAME_vl_decel                  "enableVLDecel"
+#define PDO_MP_NAME_vl_maximum                "enableVLMaximum"
+#define PDO_MP_NAME_vl_minimum                "enableVLMinimum"
 
 // These work around a couple C pre-processor shortcomings.  In a few
 // places, I want to concatenate FOO and BAR into FOOBAR, and then
@@ -472,9 +514,12 @@
   thing(actual_velocity_sensor);    \
   thing(actual_vl);                 \
   thing(actual_voltage);            \
-  thing(error_code);                \
+  thing(control_effort);            \
   thing(demand_vl);                 \
+  thing(error_code);                \
   thing(opmode_display);            \
+  thing(position_demand);           \
+  thing(probe_status);              \
   thing(torque_demand);             \
   thing(velocity_demand);
 
@@ -500,11 +545,14 @@
   thing(maximum_current);            \
   thing(maximum_deceleration);       \
   thing(maximum_motor_rpm);          \
+  thing(maximum_slippage);           \
   thing(maximum_torque);             \
   thing(motion_profile);             \
   thing(motor_rated_current);        \
   thing(motor_rated_torque);         \
   thing(polarity);                   \
+  thing(positioning_time);           \
+  thing(positioning_window);         \
   thing(profile_accel);              \
   thing(profile_decel);              \
   thing(profile_end_velocity);       \
@@ -536,4 +584,6 @@
                               thing(torque_demand) thing(torque_profile_type) thing(torque_slope) thing(tq) thing(velocity_demand)         \
                                   thing(velocity_error_time) thing(velocity_error_window) thing(velocity_sensor_selector)                  \
                                       thing(velocity_threshold_time) thing(velocity_threshold_window) thing(vl) thing(vl_accel)            \
-                                          thing(vl_decel) thing(vl_maximum) thing(vl_minimum)
+                                          thing(vl_decel) thing(vl_maximum) thing(vl_minimum) thing(positioning_window)                    \
+                                              thing(positioning_time) thing(maximum_slippage) thing(probe_status) thing(position_demand)   \
+                                                  thing(control_effort)
