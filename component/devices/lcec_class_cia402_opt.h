@@ -481,6 +481,11 @@
 #define PDO_MP_NAME_vl_decel                  "enableVLDecel"
 #define PDO_MP_NAME_vl_maximum                "enableVLMaximum"
 #define PDO_MP_NAME_vl_minimum                "enableVLMinimum"
+#define PDO_MP_NAME_target_position           ""  // not individually enableable
+#define PDO_MP_NAME_target_velocity           ""  // not individually enableable
+#define PDO_MP_NAME_actual_position           ""  // not individually enableable
+#define PDO_MP_NAME_actual_velocity           ""  // not individually enableable
+#define PDO_MP_NAME_opmode_display            ""  // not individually enableable
 
 // These work around a couple C pre-processor shortcomings.  In a few
 // places, I want to concatenate FOO and BAR into FOOBAR, and then
@@ -568,6 +573,9 @@
   thing(vl_decel);                   \
   thing(vl_maximum);                 \
   thing(vl_minimum);
+
+// This is the list of CiA 402 modes:
+#define FOR_ALL_CIA402_MODES_DO(thing) thing(pp) thing(pv) thing(csp) thing(csv) thing(cst) thing(hm) thing(ip) thing(tq) thing(vl)
 
 // This is all items that have entries in `enabled`.  It is neither a
 // proper superset not proper subset of the above entries.

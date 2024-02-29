@@ -222,16 +222,23 @@ lcec_syncs_t *lcec_cia402_init_sync(lcec_slave_t *slave, lcec_class_cia402_optio
     lcec_syncs_add_pdo_entry(syncs, offset + PDO_IDX_OFFSET_##name, PDO_SIDX_##name, PDO_BITS_##name); \
   }
 
+#define PRINT_OPTIONAL_PDO_NAME(name)                                                                   \
+  if (enabled->enable_##name && PDO_MP_NAME_##name[0] != 0) {                                           \
+    rtapi_print_msg(RTAPI_MSG_ERR, "  -  <modParam name=\"" PDO_MP_NAME_##name "\" value=\"true\">\n"); \
+  }
+
 /// @brief Sets up the first batch of output PDOs for syncing.
 ///
 /// This should be called after `lcec_cia402_init_sync()`, but before
 /// registering any device-specific PDOs.  Once this returns, then
 /// call `lcec_syncs_add_pdo_info(syncs, 0x1601)` and whichever
 /// `lcec_syncs_add_pdo_entry()` calls you need.
-int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options) {
+int lcec_cia402_add_output_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_class_cia402_options_t *options) {
   lcec_syncs_add_sync(syncs, EC_DIR_OUTPUT, EC_WD_DEFAULT);
   for (int channel = 0; channel < options->channels; channel++) {
     unsigned int offset = 0x6000 + 0x800 * channel;
+    int entrycount = syncs->pdo_entry_count;
+
     lcec_class_cia402_enabled_t *enabled = lcec_cia402_enabled(options->channel[channel]);
     if (enabled == NULL) return -1;
 
@@ -242,6 +249,27 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
     // but still needs to be mapped.
     FOR_ALL_WRITE_PDOS_DO(MAP_OPTIONAL_PDO);
     MAP_OPTIONAL_PDO(digital_output);
+
+    rtapi_print_msg(RTAPI_MSG_ERR, "****** rxpdo:  %d vs %d\n", syncs->pdo_entry_count - entrycount, options->rxpdolimit);
+
+    if (options->rxpdolimit && (syncs->pdo_entry_count - entrycount) > options->rxpdolimit) {
+      rtapi_print_msg(RTAPI_MSG_ERR,
+          LCEC_MSG_PFX "slave %s.%s: FAILURE: FAILURE: more output PDO entries configured than your hardware supports.\n",
+          slave->master->name, slave->name);
+      rtapi_print_msg(RTAPI_MSG_ERR, "Axis %d has %d PDO entries, vs a configured limit of %d.  You will need to edit your XML\n",
+          channel + 1, syncs->pdo_entry_count - entrycount, options->rxpdolimit);
+      rtapi_print_msg(RTAPI_MSG_ERR, "configuration and either remove some <modParam name=\"enable*\"> entries or increase \n");
+      rtapi_print_msg(
+          RTAPI_MSG_ERR, "<modParam name=\"ciaRxPDOEntryLimit\">. Check your CiA 402 slave's hardware manual to determine the\n");
+      rtapi_print_msg(RTAPI_MSG_ERR, "correct limit.\n\n");
+      rtapi_print_msg(RTAPI_MSG_ERR, "Enabled features that impact this limit are:\n\n");
+      FOR_ALL_READ_PDOS_DO(PRINT_OPTIONAL_PDO_NAME);
+      rtapi_print_msg(
+          RTAPI_MSG_ERR, "\nIn addition, disabling unneeded CiA 402 modes may help, as some implicitly add additional PDO entries:\n\n");
+      FOR_ALL_CIA402_MODES_DO(PRINT_OPTIONAL_PDO_NAME);
+
+      return -1;
+    }
   }
 
   return 0;
@@ -253,10 +281,12 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
 /// Once this returns, then call `lcec_syncs_add_pdo_info(syncs,
 /// 0x1a01)` and whichever `lcec_syncs_add_pdo_entry()` calls you
 /// need.
-int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options) {
+int lcec_cia402_add_input_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_class_cia402_options_t *options) {
   lcec_syncs_add_sync(syncs, EC_DIR_INPUT, EC_WD_DEFAULT);
   for (int channel = 0; channel < options->channels; channel++) {
     unsigned int offset = 0x6000 + 0x800 * channel;
+    int entrycount = syncs->pdo_entry_count;
+
     lcec_class_cia402_enabled_t *enabled = lcec_cia402_enabled(options->channel[channel]);
     if (enabled == NULL) return -1;
 
@@ -267,6 +297,27 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
     // but still needs to be mapped.
     FOR_ALL_READ_PDOS_DO(MAP_OPTIONAL_PDO);
     MAP_OPTIONAL_PDO(digital_input);  // Special
+
+    rtapi_print_msg(RTAPI_MSG_ERR, "****** txpdo:  %d vs %d\n", syncs->pdo_entry_count - entrycount, options->rxpdolimit);
+
+    if (options->txpdolimit && (syncs->pdo_entry_count - entrycount) > options->txpdolimit) {
+      rtapi_print_msg(RTAPI_MSG_ERR,
+          LCEC_MSG_PFX "slave %s.%s: FAILURE: FAILURE: more input PDO entries configured than your hardware supports.\n",
+          slave->master->name, slave->name);
+      rtapi_print_msg(RTAPI_MSG_ERR, "Axis %d has %d PDO entries, vs a configured limit of %d.  You will need to edit your XML\n",
+          channel + 1, syncs->pdo_entry_count - entrycount, options->txpdolimit);
+      rtapi_print_msg(RTAPI_MSG_ERR, "configuration and either remove some <modParam name=\"enable*\"> entries or increase \n");
+      rtapi_print_msg(
+          RTAPI_MSG_ERR, "<modParam name=\"ciaTxPDOEntryLimit\">. Check your CiA 402 slave's hardware manual to determine the\n");
+      rtapi_print_msg(RTAPI_MSG_ERR, "correct limit.\n\n");
+      rtapi_print_msg(RTAPI_MSG_ERR, "Enabled features that impact this limit are:\n\n");
+      FOR_ALL_READ_PDOS_DO(PRINT_OPTIONAL_PDO_NAME);
+      rtapi_print_msg(
+          RTAPI_MSG_ERR, "\nIn addition, disabling unneeded CiA 402 modes may help, as some implicitly add additional PDO entries:\n\n");
+      FOR_ALL_CIA402_MODES_DO(PRINT_OPTIONAL_PDO_NAME);
+
+      return -1;
+    }
   }
 
   return 0;

@@ -122,6 +122,7 @@ typedef struct {
 /// an array of per-channel options.
 typedef struct {
   int channels;                                     ///< Number of channels;
+  int rxpdolimit, txpdolimit;                       ///< Maximum number of PDO entries allowed per PDO.
   lcec_class_cia402_channel_options_t *channel[8];  ///< Room for 8 channel options.
 } lcec_class_cia402_options_t;
 
@@ -311,8 +312,8 @@ int lcec_cia402_handle_modparam(struct lcec_slave *slave, const lcec_slave_modpa
 lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t const *orig);
 lcec_modparam_desc_t *lcec_cia402_modparams(lcec_modparam_desc_t const *device_mps);
 lcec_syncs_t *lcec_cia402_init_sync(lcec_slave_t *slave, lcec_class_cia402_options_t *options);
-int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options);
-int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t *options);
+int lcec_cia402_add_output_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_class_cia402_options_t *options);
+int lcec_cia402_add_input_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_class_cia402_options_t *options);
 lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, unsigned int max_denominator);
 
 #define ADD_TYPES_WITH_CIA402_MODPARAMS(types, mps)        \
