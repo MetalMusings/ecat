@@ -46,75 +46,24 @@ static const lcec_pindesc_t pins_required[] = {
 };
 
 /// @brief Create a new, optional pin for reading, using standardized names.
-#define OPTIONAL_PIN_READ(var_name, pin_name)                                                                       \
-  static const lcec_pindesc_t pins_##var_name[] = {                                                                 \
-      {PDO_PIN_TYPE_##var_name, HAL_OUT, offsetof(lcec_class_cia402_channel_t, var_name), "%s.%s.%s.%s-" pin_name}, \
-      {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},                                                        \
+#define OPTIONAL_PIN_READ(var_name)                                                                                                \
+  static const lcec_pindesc_t pins_##var_name[] = {                                                                                \
+      {PDO_PIN_TYPE_##var_name, HAL_OUT, offsetof(lcec_class_cia402_channel_t, var_name), "%s.%s.%s.%s-" PDO_PIN_NAME_##var_name}, \
+      {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},                                                                       \
   }
 
 /// @brief Create a new, optional pin for writing, using standardized names.
-#define OPTIONAL_PIN_WRITE(var_name, pin_name)                                                                     \
-  static const lcec_pindesc_t pins_##var_name[] = {                                                                \
-      {PDO_PIN_TYPE_##var_name, HAL_IN, offsetof(lcec_class_cia402_channel_t, var_name), "%s.%s.%s.%s-" pin_name}, \
-      {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},                                                       \
+#define OPTIONAL_PIN_WRITE(var_name)                                                                                              \
+  static const lcec_pindesc_t pins_##var_name[] = {                                                                               \
+      {PDO_PIN_TYPE_##var_name, HAL_IN, offsetof(lcec_class_cia402_channel_t, var_name), "%s.%s.%s.%s-" PDO_PIN_NAME_##var_name}, \
+      {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},                                                                      \
   }
 
-// I really wish I could get rid of the quoted part here, but I want
-// to keep pin names using dashes while obviously we can't use dashes
-// in C variable names.  I guess I could post-process these when
-// they're applied to turn `_` into `-`, but that feels like a bit
-// much at the moment.
-OPTIONAL_PIN_READ(actual_current, "actual-current");
-OPTIONAL_PIN_READ(actual_following_error, "actual-following-error");
-OPTIONAL_PIN_READ(actual_position, "actual-position");
-OPTIONAL_PIN_READ(actual_torque, "actual-torque");
-OPTIONAL_PIN_READ(actual_velocity, "actual-velocity");
-OPTIONAL_PIN_READ(actual_velocity_sensor, "actual-velocity-sensor");
-OPTIONAL_PIN_READ(actual_vl, "actual-vl");
-OPTIONAL_PIN_READ(actual_voltage, "actual-voltage");
-OPTIONAL_PIN_READ(error_code, "error-code");
-OPTIONAL_PIN_READ(demand_vl, "demand-vl");
-OPTIONAL_PIN_READ(opmode_display, "opmode-display");
-OPTIONAL_PIN_READ(torque_demand, "torque-demand");
-OPTIONAL_PIN_READ(velocity_demand, "velocity-demand");
-
-OPTIONAL_PIN_WRITE(following_error_timeout, "following-error-timeout");
-OPTIONAL_PIN_WRITE(following_error_window, "following-error-window");
-OPTIONAL_PIN_WRITE(home_accel, "home-accel");
-OPTIONAL_PIN_WRITE(home_method, "home-method");
-OPTIONAL_PIN_WRITE(home_velocity_fast, "home-velocity-fast");
-OPTIONAL_PIN_WRITE(home_velocity_slow, "home-velocity-slow");
-OPTIONAL_PIN_WRITE(interpolation_time_period, "interpolation-time-period");
-OPTIONAL_PIN_WRITE(maximum_acceleration, "maximum-acceleration");
-OPTIONAL_PIN_WRITE(maximum_current, "maximum-current");
-OPTIONAL_PIN_WRITE(maximum_deceleration, "maximum-deceleration");
-OPTIONAL_PIN_WRITE(maximum_motor_rpm, "maximum-motor-rpm");
-OPTIONAL_PIN_WRITE(maximum_torque, "torque-maximum");
-OPTIONAL_PIN_WRITE(motion_profile, "motion-profile");
-OPTIONAL_PIN_WRITE(motor_rated_current, "motor-rated-current");
-OPTIONAL_PIN_WRITE(motor_rated_torque, "motor-rated-torque");
-OPTIONAL_PIN_WRITE(opmode, "opmode");
-OPTIONAL_PIN_WRITE(polarity, "polarity");
-OPTIONAL_PIN_WRITE(profile_accel, "profile-accel");
-OPTIONAL_PIN_WRITE(profile_decel, "profile-decel");
-OPTIONAL_PIN_WRITE(profile_end_velocity, "profile-end-velocity");
-OPTIONAL_PIN_WRITE(profile_max_velocity, "profile-max-velocity");
-OPTIONAL_PIN_WRITE(profile_velocity, "profile-velocity");
-OPTIONAL_PIN_WRITE(target_position, "target-position");
-OPTIONAL_PIN_WRITE(target_torque, "target-torque");
-OPTIONAL_PIN_WRITE(target_velocity, "target-velocity");
-OPTIONAL_PIN_WRITE(target_vl, "target-vl");
-OPTIONAL_PIN_WRITE(torque_profile_type, "torque-profile-type");
-OPTIONAL_PIN_WRITE(torque_slope, "torque-slope");
-OPTIONAL_PIN_WRITE(velocity_error_time, "velocity-error-time");
-OPTIONAL_PIN_WRITE(velocity_error_window, "velocity-error-window");
-OPTIONAL_PIN_WRITE(velocity_sensor_selector, "velocity-sensor-selector");
-OPTIONAL_PIN_WRITE(velocity_threshold_time, "velocity-threshold-time");
-OPTIONAL_PIN_WRITE(velocity_threshold_window, "velocity-threshold-window");
-OPTIONAL_PIN_WRITE(vl_accel, "vl-accel");
-OPTIONAL_PIN_WRITE(vl_decel, "vl-decel");
-OPTIONAL_PIN_WRITE(vl_maximum, "vl-maximum");
-OPTIONAL_PIN_WRITE(vl_minimum, "vl-minimum");
+// These three create a whole slew of `pin_foo` variables that define
+// the pins for each PDO and SDO that we want pins for.
+FOR_ALL_READ_PDOS_DO(OPTIONAL_PIN_READ);
+FOR_ALL_WRITE_PDOS_DO(OPTIONAL_PIN_WRITE);
+FOR_ALL_WRITE_SDOS_DO(OPTIONAL_PIN_WRITE);
 
 /// @brief Create a `lcec_class_cia402_enabled_t` from a
 /// `lcec_class_cia402_channel_options_t`.
@@ -171,50 +120,10 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_channe
 
   // Set individual pins in `enabled` using values from `opt`.
 #define ENABLE_OPT(pin_name) \
-  if (opt->enable_##pin_name) enabled->enable_##pin_name = 1
-  ENABLE_OPT(actual_current);
-  ENABLE_OPT(actual_following_error);
-  ENABLE_OPT(actual_torque);
-  ENABLE_OPT(actual_velocity_sensor);
-  ENABLE_OPT(actual_vl);
-  ENABLE_OPT(actual_voltage);
-  ENABLE_OPT(demand_vl);
-  ENABLE_OPT(error_code);
-  ENABLE_OPT(digital_input);
-  ENABLE_OPT(digital_output);
-  ENABLE_OPT(following_error_timeout);
-  ENABLE_OPT(following_error_window);
-  ENABLE_OPT(home_accel);
-  ENABLE_OPT(interpolation_time_period);
-  ENABLE_OPT(maximum_acceleration);
-  ENABLE_OPT(maximum_current);
-  ENABLE_OPT(maximum_deceleration);
-  ENABLE_OPT(maximum_motor_rpm);
-  ENABLE_OPT(maximum_torque);
-  ENABLE_OPT(motion_profile);
-  ENABLE_OPT(motor_rated_current);
-  ENABLE_OPT(motor_rated_torque);
-  ENABLE_OPT(polarity);
-  ENABLE_OPT(profile_accel);
-  ENABLE_OPT(profile_decel);
-  ENABLE_OPT(profile_end_velocity);
-  ENABLE_OPT(profile_max_velocity);
-  ENABLE_OPT(profile_velocity);
-  ENABLE_OPT(target_torque);
-  ENABLE_OPT(target_vl);
-  ENABLE_OPT(torque_demand);
-  ENABLE_OPT(torque_profile_type);
-  ENABLE_OPT(torque_slope);
-  ENABLE_OPT(velocity_demand);
-  ENABLE_OPT(velocity_error_time);
-  ENABLE_OPT(velocity_error_window);
-  ENABLE_OPT(velocity_sensor_selector);
-  ENABLE_OPT(velocity_threshold_time);
-  ENABLE_OPT(velocity_threshold_window);
-  ENABLE_OPT(vl_accel);
-  ENABLE_OPT(vl_decel);
-  ENABLE_OPT(vl_maximum);
-  ENABLE_OPT(vl_minimum);
+  if (opt->enable_##pin_name) enabled->enable_##pin_name = 1;
+
+  // Copy all `enable_foo` settings from `opt` to `enabled`.
+  FOR_ALL_OPTS_DO(ENABLE_OPT);
 
   return enabled;
 }
@@ -328,21 +237,11 @@ int lcec_cia402_add_output_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t
 
     lcec_syncs_add_pdo_info(syncs, 0x1600 + channel);
     lcec_syncs_add_pdo_entry(syncs, offset + 0x40, 0x00, 16);  // Control word
+
+    // Map all writeable PDOs, plus `digital_output` which is special
+    // but still needs to be mapped.
+    FOR_ALL_WRITE_PDOS_DO(MAP_OPTIONAL_PDO);
     MAP_OPTIONAL_PDO(digital_output);
-    MAP_OPTIONAL_PDO(home_method);
-    MAP_OPTIONAL_PDO(interpolation_time_period);
-    MAP_OPTIONAL_PDO(motion_profile);
-    MAP_OPTIONAL_PDO(opmode);  // Operating mode
-    MAP_OPTIONAL_PDO(polarity);
-    MAP_OPTIONAL_PDO(profile_velocity);
-    MAP_OPTIONAL_PDO(target_position);
-    MAP_OPTIONAL_PDO(target_torque);
-    MAP_OPTIONAL_PDO(target_velocity);
-    MAP_OPTIONAL_PDO(target_vl);
-    MAP_OPTIONAL_PDO(torque_profile_type);
-    MAP_OPTIONAL_PDO(torque_slope);
-    MAP_OPTIONAL_PDO(vl_accel);
-    MAP_OPTIONAL_PDO(vl_decel);
   }
 
   return 0;
@@ -363,20 +262,11 @@ int lcec_cia402_add_input_sync(lcec_syncs_t *syncs, lcec_class_cia402_options_t 
 
     lcec_syncs_add_pdo_info(syncs, 0x1a00 + channel);
     lcec_syncs_add_pdo_entry(syncs, offset + 0x41, 0x00, 16);  // Status word
-    MAP_OPTIONAL_PDO(actual_current);
-    MAP_OPTIONAL_PDO(actual_following_error);
-    MAP_OPTIONAL_PDO(actual_position);
-    MAP_OPTIONAL_PDO(actual_torque);
-    MAP_OPTIONAL_PDO(actual_velocity);
-    MAP_OPTIONAL_PDO(actual_velocity_sensor);
-    MAP_OPTIONAL_PDO(actual_vl);
-    MAP_OPTIONAL_PDO(actual_voltage);
-    MAP_OPTIONAL_PDO(demand_vl);
-    MAP_OPTIONAL_PDO(error_code);
-    MAP_OPTIONAL_PDO(digital_input);
-    MAP_OPTIONAL_PDO(opmode_display);
-    MAP_OPTIONAL_PDO(torque_demand);
-    MAP_OPTIONAL_PDO(velocity_demand);
+
+    // Map all readable PDOs, plus `digital_input` which is special
+    // but still needs to be mapped.
+    FOR_ALL_READ_PDOS_DO(MAP_OPTIONAL_PDO);
+    MAP_OPTIONAL_PDO(digital_input);  // Special
   }
 
   return 0;
@@ -444,61 +334,17 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   if (enabled->enable_##pin_name)   \
   lcec_pdo_init(slave, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, &data->pin_name##_os, NULL)
 
-  INIT_OPTIONAL_PDO(actual_current);
-  INIT_OPTIONAL_PDO(actual_following_error);
-  INIT_OPTIONAL_PDO(actual_position);
-  INIT_OPTIONAL_PDO(actual_torque);
-  INIT_OPTIONAL_PDO(actual_velocity);
-  INIT_OPTIONAL_PDO(actual_velocity_sensor);
-  INIT_OPTIONAL_PDO(actual_vl);
-  INIT_OPTIONAL_PDO(actual_voltage);
-  INIT_OPTIONAL_PDO(demand_vl);
-  INIT_OPTIONAL_PDO(error_code);
-  INIT_OPTIONAL_PDO(home_method);
-  INIT_OPTIONAL_PDO(interpolation_time_period);
-  INIT_OPTIONAL_PDO(opmode);
-  INIT_OPTIONAL_PDO(opmode_display);
-  INIT_OPTIONAL_PDO(profile_velocity);
-  INIT_OPTIONAL_PDO(target_position);
-  INIT_OPTIONAL_PDO(target_torque);
-  INIT_OPTIONAL_PDO(target_velocity);
-  INIT_OPTIONAL_PDO(target_vl);
-  INIT_OPTIONAL_PDO(torque_demand);
-  INIT_OPTIONAL_PDO(velocity_demand);
+  // Call `lcec_pdo_init()` for all writeable PDOs.
+  FOR_ALL_WRITE_PDOS_DO(INIT_OPTIONAL_PDO);
 
 #define INIT_SDO_REQUEST(pin_name) \
   data->pin_name##_sdorequest =    \
       ecrt_slave_config_create_sdo_request(slave->config, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, PDO_BITS_##pin_name)
 
-  INIT_SDO_REQUEST(following_error_timeout);
-  INIT_SDO_REQUEST(following_error_window);
-  INIT_SDO_REQUEST(home_accel);
-  INIT_SDO_REQUEST(home_velocity_fast);
-  INIT_SDO_REQUEST(home_velocity_slow);
-  INIT_SDO_REQUEST(maximum_acceleration);
-  INIT_SDO_REQUEST(maximum_current);
-  INIT_SDO_REQUEST(maximum_deceleration);
-  INIT_SDO_REQUEST(maximum_motor_rpm);
-  INIT_SDO_REQUEST(maximum_torque);
-  INIT_SDO_REQUEST(motion_profile);
-  INIT_SDO_REQUEST(motor_rated_current);
-  INIT_SDO_REQUEST(motor_rated_torque);
-  INIT_SDO_REQUEST(polarity);
-  INIT_SDO_REQUEST(profile_accel);
-  INIT_SDO_REQUEST(profile_decel);
-  INIT_SDO_REQUEST(profile_end_velocity);
-  INIT_SDO_REQUEST(profile_max_velocity);
-  INIT_SDO_REQUEST(torque_profile_type);
-  INIT_SDO_REQUEST(torque_slope);
-  INIT_SDO_REQUEST(velocity_error_time);
-  INIT_SDO_REQUEST(velocity_error_window);
-  INIT_SDO_REQUEST(velocity_sensor_selector);
-  INIT_SDO_REQUEST(velocity_threshold_time);
-  INIT_SDO_REQUEST(velocity_threshold_window);
-  INIT_SDO_REQUEST(vl_accel);
-  INIT_SDO_REQUEST(vl_decel);
-  INIT_SDO_REQUEST(vl_maximum);
-  INIT_SDO_REQUEST(vl_minimum);
+  // Call `ecrt_slave_config_create_sdo_request()` for all writable
+  // SDOs, so we're able to write to them after we flip to real-time
+  // mode.
+  FOR_ALL_WRITE_SDOS_DO(INIT_SDO_REQUEST);
 
   // Register pins
   err = lcec_pin_newf_list(data, pins_required, LCEC_MODULE_NAME, slave->master->name, slave->name, name_prefix);
@@ -571,56 +417,11 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   } while (0)
   //
 
-  REGISTER_OPTIONAL_PINS(actual_current);
-  REGISTER_OPTIONAL_PINS(actual_following_error);
-  REGISTER_OPTIONAL_PINS(actual_position);
-  REGISTER_OPTIONAL_PINS(actual_torque);
-  REGISTER_OPTIONAL_PINS(actual_velocity);
-  REGISTER_OPTIONAL_PINS(actual_velocity_sensor);
-  REGISTER_OPTIONAL_PINS(actual_vl);
-  REGISTER_OPTIONAL_PINS(actual_voltage);
-  REGISTER_OPTIONAL_PINS(demand_vl);
-  REGISTER_OPTIONAL_PINS(error_code);
-  REGISTER_OPTIONAL_PINS(following_error_timeout);
-  REGISTER_OPTIONAL_PINS(following_error_window);
-  REGISTER_OPTIONAL_PINS(home_accel);
-  REGISTER_OPTIONAL_PINS(home_method);
-  REGISTER_OPTIONAL_PINS(home_velocity_fast);
-  REGISTER_OPTIONAL_PINS(home_velocity_slow);
-  REGISTER_OPTIONAL_PINS(interpolation_time_period);
-  REGISTER_OPTIONAL_PINS(maximum_acceleration);
-  REGISTER_OPTIONAL_PINS(maximum_current);
-  REGISTER_OPTIONAL_PINS(maximum_deceleration);
-  REGISTER_OPTIONAL_PINS(maximum_motor_rpm);
-  REGISTER_OPTIONAL_PINS(maximum_torque);
-  REGISTER_OPTIONAL_PINS(motion_profile);
-  REGISTER_OPTIONAL_PINS(motor_rated_current);
-  REGISTER_OPTIONAL_PINS(motor_rated_torque);
-  REGISTER_OPTIONAL_PINS(opmode);
-  REGISTER_OPTIONAL_PINS(opmode_display);
-  REGISTER_OPTIONAL_PINS(polarity);
-  REGISTER_OPTIONAL_PINS(profile_accel);
-  REGISTER_OPTIONAL_PINS(profile_decel);
-  REGISTER_OPTIONAL_PINS(profile_end_velocity);
-  REGISTER_OPTIONAL_PINS(profile_max_velocity);
-  REGISTER_OPTIONAL_PINS(profile_velocity);
-  REGISTER_OPTIONAL_PINS(target_position);
-  REGISTER_OPTIONAL_PINS(target_torque);
-  REGISTER_OPTIONAL_PINS(target_velocity);
-  REGISTER_OPTIONAL_PINS(target_vl);
-  REGISTER_OPTIONAL_PINS(torque_demand);
-  REGISTER_OPTIONAL_PINS(torque_profile_type);
-  REGISTER_OPTIONAL_PINS(torque_slope);
-  REGISTER_OPTIONAL_PINS(velocity_demand);
-  REGISTER_OPTIONAL_PINS(velocity_error_time);
-  REGISTER_OPTIONAL_PINS(velocity_error_window);
-  REGISTER_OPTIONAL_PINS(velocity_sensor_selector);
-  REGISTER_OPTIONAL_PINS(velocity_threshold_time);
-  REGISTER_OPTIONAL_PINS(velocity_threshold_window);
-  REGISTER_OPTIONAL_PINS(vl_accel);
-  REGISTER_OPTIONAL_PINS(vl_decel);
-  REGISTER_OPTIONAL_PINS(vl_maximum);
-  REGISTER_OPTIONAL_PINS(vl_minimum);
+  // Register pins for all read PDOs, write PDOs, and write SDOs.  The
+  // process is identical for all three.
+  FOR_ALL_READ_PDOS_DO(REGISTER_OPTIONAL_PINS);
+  FOR_ALL_WRITE_PDOS_DO(REGISTER_OPTIONAL_PINS);
+  FOR_ALL_WRITE_SDOS_DO(REGISTER_OPTIONAL_PINS);
 
   // Set default values for pins here.
   uint32_t modes;
@@ -655,40 +456,11 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
   if (enabled->enable_##pin_name) SUBSTJOIN5(lcec_read_sdo, PDO_BITS_##pin_name, _pin_, PDO_SIGN_##pin_name, 32) \
   (slave, base_idx + PDO_IDX_OFFSET_##pin_name, PDO_SIDX_##pin_name, data->pin_name)
 
-  SET_OPTIONAL_DEFAULTS(following_error_timeout);
-  SET_OPTIONAL_DEFAULTS(following_error_window);
-  SET_OPTIONAL_DEFAULTS(home_accel);
-  SET_OPTIONAL_DEFAULTS(home_method);
-  SET_OPTIONAL_DEFAULTS(home_velocity_fast);
-  SET_OPTIONAL_DEFAULTS(home_velocity_slow);
-  SET_OPTIONAL_DEFAULTS(interpolation_time_period);
-  SET_OPTIONAL_DEFAULTS(maximum_acceleration);
-  SET_OPTIONAL_DEFAULTS(maximum_current);
-  SET_OPTIONAL_DEFAULTS(maximum_deceleration);
-  SET_OPTIONAL_DEFAULTS(maximum_motor_rpm);
-  SET_OPTIONAL_DEFAULTS(maximum_torque);
-  SET_OPTIONAL_DEFAULTS(motion_profile);
-  SET_OPTIONAL_DEFAULTS(motor_rated_current);
-  SET_OPTIONAL_DEFAULTS(motor_rated_torque);
-  SET_OPTIONAL_DEFAULTS(polarity);
-  SET_OPTIONAL_DEFAULTS(profile_accel);
-  SET_OPTIONAL_DEFAULTS(profile_decel);
-  SET_OPTIONAL_DEFAULTS(profile_end_velocity);
-  SET_OPTIONAL_DEFAULTS(profile_max_velocity);
-  SET_OPTIONAL_DEFAULTS(profile_velocity);
-  SET_OPTIONAL_DEFAULTS(target_torque);
-  SET_OPTIONAL_DEFAULTS(target_vl);
-  SET_OPTIONAL_DEFAULTS(torque_profile_type);
-  SET_OPTIONAL_DEFAULTS(torque_slope);
-  SET_OPTIONAL_DEFAULTS(velocity_error_time);
-  SET_OPTIONAL_DEFAULTS(velocity_error_window);
-  SET_OPTIONAL_DEFAULTS(velocity_sensor_selector);
-  SET_OPTIONAL_DEFAULTS(velocity_threshold_time);
-  SET_OPTIONAL_DEFAULTS(velocity_threshold_window);
-  SET_OPTIONAL_DEFAULTS(vl_accel);
-  SET_OPTIONAL_DEFAULTS(vl_decel);
-  SET_OPTIONAL_DEFAULTS(vl_maximum);
-  SET_OPTIONAL_DEFAULTS(vl_minimum);
+  // Read the current value of all of our writable PDOs and SDOs, so
+  // (a) we have a reasonable default and (b) we don't immediately
+  // overwrite the presumably-valid settings on the device.
+  FOR_ALL_WRITE_PDOS_DO(SET_OPTIONAL_DEFAULTS);
+  FOR_ALL_WRITE_SDOS_DO(SET_OPTIONAL_DEFAULTS);
 
   return data;
 }
@@ -708,19 +480,9 @@ void lcec_cia402_read(lcec_slave_t *slave, lcec_class_cia402_channel_t *data) {
   *(data->pin_name) = (SUBSTJOIN3(EC_READ_, PDO_SIGN_##pin_name, PDO_BITS_##pin_name)(&pd[data->pin_name##_os]))
 
   *(data->statusword) = EC_READ_U16(&pd[data->statusword_os]);
-  READ_OPT(actual_current);
-  READ_OPT(actual_following_error);
-  READ_OPT(actual_position);
-  READ_OPT(actual_torque);
-  READ_OPT(actual_velocity);
-  READ_OPT(actual_velocity_sensor);
-  READ_OPT(actual_vl);
-  READ_OPT(actual_voltage);
-  READ_OPT(demand_vl);
-  READ_OPT(error_code);
-  READ_OPT(opmode_display);
-  READ_OPT(torque_demand);
-  READ_OPT(velocity_demand);
+
+  // Read from all readable PDOs.
+  FOR_ALL_READ_PDOS_DO(READ_OPT);
 
   if (data->enabled->enable_digital_input) {
     lcec_din_read_all(slave, data->din);
@@ -775,45 +537,10 @@ void lcec_cia402_write(lcec_slave_t *slave, lcec_class_cia402_channel_t *data) {
   EC_WRITE_U16(&pd[data->controlword_os], (uint16_t)(*(data->controlword)));
 
   // Write PDOs (mapped, auto-synced between slaves and the master)
-  WRITE_OPT(home_method);
-  WRITE_OPT(interpolation_time_period);
-  WRITE_OPT(opmode);
-  WRITE_OPT(profile_velocity);
-  WRITE_OPT(target_position);
-  WRITE_OPT(target_torque);
-  WRITE_OPT(target_velocity);
-  WRITE_OPT(target_vl);
+  FOR_ALL_WRITE_PDOS_DO(WRITE_OPT);
 
   // Write SDOs (*not* mapped, written on demand, slower)
-  WRITE_OPT_SDO(following_error_timeout);
-  WRITE_OPT_SDO(following_error_window);
-  WRITE_OPT_SDO(home_accel);
-  WRITE_OPT_SDO(home_velocity_fast);
-  WRITE_OPT_SDO(home_velocity_slow);
-  WRITE_OPT_SDO(maximum_acceleration);
-  WRITE_OPT_SDO(maximum_current);
-  WRITE_OPT_SDO(maximum_deceleration);
-  WRITE_OPT_SDO(maximum_motor_rpm);
-  WRITE_OPT_SDO(maximum_torque);
-  WRITE_OPT_SDO(motion_profile);
-  WRITE_OPT_SDO(motor_rated_current);
-  WRITE_OPT_SDO(motor_rated_torque);
-  WRITE_OPT_SDO(polarity);
-  WRITE_OPT_SDO(profile_accel);
-  WRITE_OPT_SDO(profile_decel);
-  WRITE_OPT_SDO(profile_end_velocity);
-  WRITE_OPT_SDO(profile_max_velocity);
-  WRITE_OPT_SDO(torque_profile_type);
-  WRITE_OPT_SDO(torque_slope);
-  WRITE_OPT_SDO(velocity_error_time);
-  WRITE_OPT_SDO(velocity_error_window);
-  WRITE_OPT_SDO(velocity_sensor_selector);
-  WRITE_OPT_SDO(velocity_threshold_time);
-  WRITE_OPT_SDO(velocity_threshold_window);
-  WRITE_OPT_SDO(vl_accel);
-  WRITE_OPT_SDO(vl_decel);
-  WRITE_OPT_SDO(vl_maximum);
-  WRITE_OPT_SDO(vl_minimum);
+  FOR_ALL_WRITE_SDOS_DO(WRITE_OPT_SDO);
 
   if (data->enabled->enable_digital_output) {
     lcec_dout_write_all(slave, data->dout);
@@ -831,6 +558,8 @@ void lcec_cia402_write_all(lcec_slave_t *slave, lcec_class_cia402_channels_t *ch
     lcec_cia402_write(slave, channel);
   }
 }
+
+#define ENABLE_MODPARAM(name) {PDO_MP_NAME_##name, CIA402_MP_ENABLE_##name, MODPARAM_TYPE_BIT},
 
 /// @brief Modparams settings available via XML.
 static const lcec_modparam_desc_t per_channel_modparams[] = {
@@ -862,61 +591,11 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
     {"feedRatio", CIA402_MP_FEED_RATIO, MODPARAM_TYPE_STRING},
     {"eGearRatio", CIA402_MP_EGEAR_RATIO, MODPARAM_TYPE_STRING},
 
-    // CiA 402 modParams for enabling entire modes.
-    {"enablePP", CIA402_MP_ENABLE_PP, MODPARAM_TYPE_BIT},
-    {"enablePV", CIA402_MP_ENABLE_PV, MODPARAM_TYPE_BIT},
-    {"enableCSP", CIA402_MP_ENABLE_CSP, MODPARAM_TYPE_BIT},
-    {"enableCSV", CIA402_MP_ENABLE_CSV, MODPARAM_TYPE_BIT},
-    {"enableHM", CIA402_MP_ENABLE_HM, MODPARAM_TYPE_BIT},
-    {"enableIP", CIA402_MP_ENABLE_IP, MODPARAM_TYPE_BIT},
-    {"enableVL", CIA402_MP_ENABLE_VL, MODPARAM_TYPE_BIT},
-    {"enableTQ", CIA402_MP_ENABLE_TQ, MODPARAM_TYPE_BIT},
-    {"enableCST", CIA402_MP_ENABLE_CST, MODPARAM_TYPE_BIT},
+    // Create entries for all options using the names from
+    // lcec_class_cia402_opt.h:
+    FOR_ALL_OPTS_DO(ENABLE_MODPARAM)
 
-    // CiA 402 modParams for enabling specific features.
-    {"enableActualCurrent", CIA402_MP_ENABLE_ACTUAL_CURRENT, MODPARAM_TYPE_BIT},
-    {"enableActualFollowingError", CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR, MODPARAM_TYPE_BIT},
-    {"enableActualTorque", CIA402_MP_ENABLE_ACTUAL_TORQUE, MODPARAM_TYPE_BIT},
-    {"enableActualVL", CIA402_MP_ENABLE_ACTUAL_VL, MODPARAM_TYPE_BIT},
-    {"enableActualVelocitySensor", CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR, MODPARAM_TYPE_BIT},
-    {"enableActualVoltage", CIA402_MP_ENABLE_ACTUAL_VOLTAGE, MODPARAM_TYPE_BIT},
-    {"enableDemandVL", CIA402_MP_ENABLE_DEMAND_VL, MODPARAM_TYPE_BIT},
-    {"enableDigitalInput", CIA402_MP_ENABLE_DIGITAL_INPUT, MODPARAM_TYPE_BIT},
-    {"enableDigitalOutput", CIA402_MP_ENABLE_DIGITAL_OUTPUT, MODPARAM_TYPE_BIT},
-    {"enableErrorCode", CIA402_MP_ENABLE_ERROR_CODE, MODPARAM_TYPE_BIT},
-    {"enableFollowingErrorTimeout", CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT, MODPARAM_TYPE_BIT},
-    {"enableFollowingErrorWindow", CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW, MODPARAM_TYPE_BIT},
-    {"enableHomeAccel", CIA402_MP_ENABLE_HOME_ACCEL, MODPARAM_TYPE_BIT},
-    {"enableInterpolationTimePeriod", CIA402_MP_ENABLE_INTERPOLATION_TIME_PERIOD, MODPARAM_TYPE_BIT},
-    {"enableMaximumAcceleration", CIA402_MP_ENABLE_MAXIMUM_ACCELERATION, MODPARAM_TYPE_BIT},
-    {"enableMaximumCurrent", CIA402_MP_ENABLE_MAXIMUM_CURRENT, MODPARAM_TYPE_BIT},
-    {"enableMaximumDeceleration", CIA402_MP_ENABLE_MAXIMUM_DECELERATION, MODPARAM_TYPE_BIT},
-    {"enableMaximumMotorRPM", CIA402_MP_ENABLE_MAXIMUM_MOTOR_RPM, MODPARAM_TYPE_BIT},
-    {"enableMaximumTorque", CIA402_MP_ENABLE_MAXIMUM_TORQUE, MODPARAM_TYPE_BIT},
-    {"enableMotorRatedCurrent", CIA402_MP_ENABLE_MOTOR_RATED_CURRENT, MODPARAM_TYPE_BIT},
-    {"enableMotorRatedTorque", CIA402_MP_ENABLE_MOTOR_RATED_TORQUE, MODPARAM_TYPE_BIT},
-    {"enablePolarity", CIA402_MP_ENABLE_POLARITY, MODPARAM_TYPE_BIT},
-    {"enableProfileAccel", CIA402_MP_ENABLE_PROFILE_ACCEL, MODPARAM_TYPE_BIT},
-    {"enableProfileDecel", CIA402_MP_ENABLE_PROFILE_DECEL, MODPARAM_TYPE_BIT},
-    {"enableProfileEndVelocity", CIA402_MP_ENABLE_PROFILE_END_VELOCITY, MODPARAM_TYPE_BIT},
-    {"enableProfileMaxVelocity", CIA402_MP_ENABLE_PROFILE_MAX_VELOCITY, MODPARAM_TYPE_BIT},
-    {"enableProfileVelocity", CIA402_MP_ENABLE_PROFILE_VELOCITY, MODPARAM_TYPE_BIT},
-    {"enableTargetTorque", CIA402_MP_ENABLE_TARGET_TORQUE, MODPARAM_TYPE_BIT},
-    {"enableTargetVL", CIA402_MP_ENABLE_TARGET_VL, MODPARAM_TYPE_BIT},
-    {"enableTorqueDemand", CIA402_MP_ENABLE_TORQUE_DEMAND, MODPARAM_TYPE_BIT},
-    {"enableTorqueProfileType", CIA402_MP_ENABLE_TORQUE_PROFILE_TYPE, MODPARAM_TYPE_BIT},
-    {"enableTorqueSlope", CIA402_MP_ENABLE_TORQUE_SLOPE, MODPARAM_TYPE_BIT},
-    {"enableVLAccel", CIA402_MP_ENABLE_VL_ACCEL, MODPARAM_TYPE_BIT},
-    {"enableVLDecel", CIA402_MP_ENABLE_VL_DECEL, MODPARAM_TYPE_BIT},
-    {"enableVLMaximum", CIA402_MP_ENABLE_VL_MAXIMUM, MODPARAM_TYPE_BIT},
-    {"enableVLMinimum", CIA402_MP_ENABLE_VL_MINIMUM, MODPARAM_TYPE_BIT},
-    {"enableVelocityDemand", CIA402_MP_ENABLE_VELOCITY_DEMAND, MODPARAM_TYPE_BIT},
-    {"enableVelocityErrorTime", CIA402_MP_ENABLE_VELOCITY_ERROR_TIME, MODPARAM_TYPE_BIT},
-    {"enableVelocityErrorWindow", CIA402_MP_ENABLE_VELOCITY_ERROR_WINDOW, MODPARAM_TYPE_BIT},
-    {"enableVelocitySensorSelector", CIA402_MP_ENABLE_VELOCITY_SENSOR_SELECTOR, MODPARAM_TYPE_BIT},
-    {"enableVelocityThresholdTime", CIA402_MP_ENABLE_VELOCITY_THRESHOLD_TIME, MODPARAM_TYPE_BIT},
-    {"enableVelocityThresholdWindow", CIA402_MP_ENABLE_VELOCITY_THRESHOLD_WINDOW, MODPARAM_TYPE_BIT},
-    {NULL},
+        {NULL},
 };
 
 /// @brief Duplicate modparams with per-channel options
@@ -1039,8 +718,8 @@ int lcec_cia402_handle_modparam(lcec_slave_t *slave, const lcec_slave_modparam_t
 #define CASE_MP_U32(mp_name, idx, sidx) \
   case mp_name:                         \
     return lcec_write_sdo32_modparam(slave, idx, sidx, p->value.u32, p->name)
-#define CASE_MP_ENABLE_BIT(mp_name, pin_name)                \
-  case mp_name:                                              \
+#define CASE_MP_ENABLE_BIT(pin_name)                         \
+  case CIA402_MP_ENABLE_##pin_name:                          \
     opt->channel[channel]->enable_##pin_name = p->value.bit; \
     return 0;
 
@@ -1061,58 +740,9 @@ int lcec_cia402_handle_modparam(lcec_slave_t *slave, const lcec_slave_modparam_t
     CASE_MP_U32(CIA402_MP_PROBE1_NEG, base + 0xbb, 0);
     CASE_MP_U32(CIA402_MP_PROBE2_POS, base + 0xbc, 0);
     CASE_MP_U32(CIA402_MP_PROBE2_NEG, base + 0xbd, 0);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PP, pp);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PV, pv);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_CSP, csp);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_CSV, csv);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_HM, hm);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_IP, ip);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VL, vl);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_TQ, tq);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_CST, cst);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_CURRENT, actual_current);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_FOLLOWING_ERROR, actual_following_error);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_TORQUE, actual_torque);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_VELOCITY_SENSOR, actual_velocity_sensor);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_VL, actual_vl);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ACTUAL_VOLTAGE, actual_voltage);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_DEMAND_VL, demand_vl);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_DIGITAL_INPUT, digital_input);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_DIGITAL_OUTPUT, digital_output);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_ERROR_CODE, error_code);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_FOLLOWING_ERROR_TIMEOUT, following_error_timeout);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_FOLLOWING_ERROR_WINDOW, following_error_window);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_HOME_ACCEL, home_accel);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_INTERPOLATION_TIME_PERIOD, interpolation_time_period);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_ACCELERATION, maximum_acceleration);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_CURRENT, maximum_current);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_DECELERATION, maximum_deceleration);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_MOTOR_RPM, maximum_motor_rpm);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MAXIMUM_TORQUE, maximum_torque);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MOTION_PROFILE, motion_profile);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MOTOR_RATED_CURRENT, motor_rated_current);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_MOTOR_RATED_TORQUE, motor_rated_torque);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_POLARITY, polarity);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_ACCEL, profile_accel);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_DECEL, profile_decel);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_END_VELOCITY, profile_end_velocity);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_MAX_VELOCITY, profile_max_velocity);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_PROFILE_VELOCITY, profile_velocity);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_TARGET_TORQUE, target_torque);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_TARGET_VL, target_vl);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_TORQUE_DEMAND, torque_demand);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_TORQUE_PROFILE_TYPE, torque_profile_type);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_TORQUE_SLOPE, torque_slope);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_DEMAND, velocity_demand);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_ERROR_TIME, velocity_error_time);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_ERROR_WINDOW, velocity_error_window);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_SENSOR_SELECTOR, velocity_sensor_selector);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_THRESHOLD_TIME, velocity_threshold_time);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VELOCITY_THRESHOLD_WINDOW, velocity_threshold_window);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VL_ACCEL, vl_accel);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VL_DECEL, vl_decel);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VL_MAXIMUM, vl_maximum);
-    CASE_MP_ENABLE_BIT(CIA402_MP_ENABLE_VL_MINIMUM, vl_minimum);
+
+    // Handle options for all enableable bits.
+    FOR_ALL_OPTS_DO(CASE_MP_ENABLE_BIT)
 
     case CIA402_MP_DIGITAL_IN_CHANNELS:
       opt->channel[channel]->digital_in_channels = p->value.u32;
