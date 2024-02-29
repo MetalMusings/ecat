@@ -225,6 +225,58 @@
 #define PDO_PIN_TYPE_vl_maximum                HAL_S32
 #define PDO_PIN_TYPE_vl_minimum                HAL_S32
 
+// Pin names
+#define PDO_PIN_NAME_actual_current            "actual-current"
+#define PDO_PIN_NAME_actual_following_error    "actual-following-error"
+#define PDO_PIN_NAME_actual_position           "actual-position"
+#define PDO_PIN_NAME_actual_torque             "actual-torque"
+#define PDO_PIN_NAME_actual_velocity           "actual-velocity"
+#define PDO_PIN_NAME_actual_velocity_sensor    "actual-velocity-sensor"
+#define PDO_PIN_NAME_actual_vl                 "actual-vl"
+#define PDO_PIN_NAME_actual_voltage            "actual-voltage"
+#define PDO_PIN_NAME_error_code                "error-code"
+#define PDO_PIN_NAME_demand_vl                 "demand-vl"
+#define PDO_PIN_NAME_opmode_display            "opmode-display"
+#define PDO_PIN_NAME_torque_demand             "torque-demand"
+#define PDO_PIN_NAME_velocity_demand           "velocity-demand"
+#define PDO_PIN_NAME_following_error_timeout   "following-error-timeout"
+#define PDO_PIN_NAME_following_error_window    "following-error-window"
+#define PDO_PIN_NAME_home_accel                "home-accel"
+#define PDO_PIN_NAME_home_method               "home-method"
+#define PDO_PIN_NAME_home_velocity_fast        "home-velocity-fast"
+#define PDO_PIN_NAME_home_velocity_slow        "home-velocity-slow"
+#define PDO_PIN_NAME_interpolation_time_period "interpolation-time-period"
+#define PDO_PIN_NAME_maximum_acceleration      "maximum-acceleration"
+#define PDO_PIN_NAME_maximum_current           "maximum-current"
+#define PDO_PIN_NAME_maximum_deceleration      "maximum-deceleration"
+#define PDO_PIN_NAME_maximum_motor_rpm         "maximum-motor-rpm"
+#define PDO_PIN_NAME_maximum_torque            "torque-maximum"
+#define PDO_PIN_NAME_motion_profile            "motion-profile"
+#define PDO_PIN_NAME_motor_rated_current       "motor-rated-current"
+#define PDO_PIN_NAME_motor_rated_torque        "motor-rated-torque"
+#define PDO_PIN_NAME_opmode                    "opmode"
+#define PDO_PIN_NAME_polarity                  "polarity"
+#define PDO_PIN_NAME_profile_accel             "profile-accel"
+#define PDO_PIN_NAME_profile_decel             "profile-decel"
+#define PDO_PIN_NAME_profile_end_velocity      "profile-end-velocity"
+#define PDO_PIN_NAME_profile_max_velocity      "profile-max-velocity"
+#define PDO_PIN_NAME_profile_velocity          "profile-velocity"
+#define PDO_PIN_NAME_target_position           "target-position"
+#define PDO_PIN_NAME_target_torque             "target-torque"
+#define PDO_PIN_NAME_target_velocity           "target-velocity"
+#define PDO_PIN_NAME_target_vl                 "target-vl"
+#define PDO_PIN_NAME_torque_profile_type       "torque-profile-type"
+#define PDO_PIN_NAME_torque_slope              "torque-slope"
+#define PDO_PIN_NAME_velocity_error_time       "velocity-error-time"
+#define PDO_PIN_NAME_velocity_error_window     "velocity-error-window"
+#define PDO_PIN_NAME_velocity_sensor_selector  "velocity-sensor-selector"
+#define PDO_PIN_NAME_velocity_threshold_time   "velocity-threshold-time"
+#define PDO_PIN_NAME_velocity_threshold_window "velocity-threshold-window"
+#define PDO_PIN_NAME_vl_accel                  "vl-accel"
+#define PDO_PIN_NAME_vl_decel                  "vl-decel"
+#define PDO_PIN_NAME_vl_maximum                "vl-maximum"
+#define PDO_PIN_NAME_vl_minimum                "vl-minimum"
+
 // Next, the length of the object for each.   Usually 8, 16, or 32.
 #define PDO_BITS_actual_current            16
 #define PDO_BITS_actual_following_error    32
@@ -279,7 +331,7 @@
 #define PDO_BITS_vl_maximum                16
 #define PDO_BITS_vl_minimum                16
 
-// Finally (?), the signeded-ness of each object.  This should match
+// The signeded-ness of each object.  This should match
 // PDO_PIN_TYPE_foo, but we don't *necessarily* have PDO_PIN_TYPE_foo
 // for all objects.
 #define PDO_SIGN_actual_current            S
@@ -333,6 +385,61 @@
 #define PDO_SIGN_vl_maximum                S
 #define PDO_SIGN_vl_minimum                S
 
+// define modParam names for each setting.
+#define PDO_MP_NAME_actual_current            "enableActualCurrent"
+#define PDO_MP_NAME_actual_following_error    "enableActualFollowingError"
+#define PDO_MP_NAME_actual_torque             "enableActualTorque"
+#define PDO_MP_NAME_actual_vl                 "enableActualVL"
+#define PDO_MP_NAME_actual_velocity_sensor    "enableActualVelocitySensor"
+#define PDO_MP_NAME_actual_voltage            "enableActualVoltage"
+#define PDO_MP_NAME_demand_vl                 "enableDemandVL"
+#define PDO_MP_NAME_digital_input             "enableDigitalInput"
+#define PDO_MP_NAME_digital_output            "enableDigitalOutput"
+#define PDO_MP_NAME_error_code                "enableErrorCode"
+#define PDO_MP_NAME_following_error_timeout   "enableFollowingErrorTimeout"
+#define PDO_MP_NAME_following_error_window    "enableFollowingErrorWindow"
+#define PDO_MP_NAME_home_accel                "enableHomeAccel"
+#define PDO_MP_NAME_interpolation_time_period "enableInterpolationTimePeriod"
+#define PDO_MP_NAME_maximum_acceleration      "enableMaximumAcceleration"
+#define PDO_MP_NAME_maximum_current           "enableMaximumCurrent"
+#define PDO_MP_NAME_maximum_deceleration      "enableMaximumDeceleration"
+#define PDO_MP_NAME_maximum_motor_rpm         "enableMaximumMotorRPM"
+#define PDO_MP_NAME_maximum_torque            "enableMaximumTorque"
+#define PDO_MP_NAME_motor_rated_current       "enableMotorRatedCurrent"
+#define PDO_MP_NAME_motor_rated_torque        "enableMotorRatedTorque"
+#define PDO_MP_NAME_polarity                  "enablePolarity"
+#define PDO_MP_NAME_profile_accel             "enableProfileAccel"
+#define PDO_MP_NAME_profile_decel             "enableProfileDecel"
+#define PDO_MP_NAME_profile_end_velocity      "enableProfileEndVelocity"
+#define PDO_MP_NAME_profile_max_velocity      "enableProfileMaxVelocity"
+#define PDO_MP_NAME_profile_velocity          "enableProfileVelocity"
+#define PDO_MP_NAME_target_torque             "enableTargetTorque"
+#define PDO_MP_NAME_target_vl                 "enableTargetVL"
+#define PDO_MP_NAME_torque_demand             "enableTorqueDemand"
+#define PDO_MP_NAME_torque_profile_type       "enableTorqueProfileType"
+#define PDO_MP_NAME_torque_slope              "enableTorqueSlope"
+#define PDO_MP_NAME_vl_accel                  "enableVLAccel"
+#define PDO_MP_NAME_vl_decel                  "enableVLDecel"
+#define PDO_MP_NAME_vl_maximum                "enableVLMaximum"
+#define PDO_MP_NAME_vl_minimum                "enableVLMinimum"
+#define PDO_MP_NAME_velocity_demand           "enableVelocityDemand"
+#define PDO_MP_NAME_velocity_error_time       "enableVelocityErrorTime"
+#define PDO_MP_NAME_velocity_error_window     "enableVelocityErrorWindow"
+#define PDO_MP_NAME_velocity_sensor_selector  "enableVelocitySensorSelector"
+#define PDO_MP_NAME_velocity_threshold_time   "enableVelocityThresholdTime"
+#define PDO_MP_NAME_velocity_threshold_window "enableVelocityThresholdWindow"
+#define PDO_MP_NAME_pp                        "enablePP"
+#define PDO_MP_NAME_pv                        "enablePV"
+#define PDO_MP_NAME_csp                       "enableCSP"
+#define PDO_MP_NAME_cst                       "enableCST"
+#define PDO_MP_NAME_csv                       "enableCSV"
+#define PDO_MP_NAME_hm                        "enableHM"
+#define PDO_MP_NAME_ip                        "enableIP"
+#define PDO_MP_NAME_tq                        "enableTQ"
+#define PDO_MP_NAME_vl                        "enableVL"
+#define PDO_MP_NAME_opmode                    "enableOpmode"
+#define PDO_MP_NAME_motion_profile            "enableMotionProfile"
+
 // These work around a couple C pre-processor shortcomings.  In a few
 // places, I want to concatenate FOO and BAR into FOOBAR, and then
 // evaluate FOOBAR for macro substitution before then taking the
@@ -350,3 +457,83 @@
 #define SUBSTJOIN2(a, b)          JOIN2(a, b)
 #define SUBSTJOIN3(a, b, c)       JOIN3(a, b, c)
 #define SUBSTJOIN5(a, b, c, d, e) JOIN5(a, b, c, d, e)
+
+// Now for the fun stuff.  These iterate over a set of things, calling
+// a specified function (or macro!) for each.
+
+// This is the list of read PDOs.  These all need to be initialized,
+// mapped, and read.
+#define FOR_ALL_READ_PDOS_DO(thing) \
+  thing(actual_current);            \
+  thing(actual_following_error);    \
+  thing(actual_position);           \
+  thing(actual_torque);             \
+  thing(actual_velocity);           \
+  thing(actual_velocity_sensor);    \
+  thing(actual_vl);                 \
+  thing(actual_voltage);            \
+  thing(error_code);                \
+  thing(demand_vl);                 \
+  thing(opmode_display);            \
+  thing(torque_demand);             \
+  thing(velocity_demand);
+
+// This is the list of write SDOs.  These need to be initialized, mapped, and written.
+#define FOR_ALL_WRITE_PDOS_DO(thing) \
+  thing(home_method);                \
+  thing(interpolation_time_period);  \
+  thing(opmode);                     \
+  thing(profile_velocity);           \
+  thing(target_position);            \
+  thing(target_torque);              \
+  thing(target_velocity);            \
+  thing(target_vl);
+
+// This is the list of write *SDOs*.  These need to be initialized differently and written, but not mapped.
+#define FOR_ALL_WRITE_SDOS_DO(thing) \
+  thing(following_error_timeout);    \
+  thing(following_error_window);     \
+  thing(home_accel);                 \
+  thing(home_velocity_fast);         \
+  thing(home_velocity_slow);         \
+  thing(maximum_acceleration);       \
+  thing(maximum_current);            \
+  thing(maximum_deceleration);       \
+  thing(maximum_motor_rpm);          \
+  thing(maximum_torque);             \
+  thing(motion_profile);             \
+  thing(motor_rated_current);        \
+  thing(motor_rated_torque);         \
+  thing(polarity);                   \
+  thing(profile_accel);              \
+  thing(profile_decel);              \
+  thing(profile_end_velocity);       \
+  thing(profile_max_velocity);       \
+  thing(torque_profile_type);        \
+  thing(torque_slope);               \
+  thing(velocity_error_time);        \
+  thing(velocity_error_window);      \
+  thing(velocity_sensor_selector);   \
+  thing(velocity_threshold_time);    \
+  thing(velocity_threshold_window);  \
+  thing(vl_accel);                   \
+  thing(vl_decel);                   \
+  thing(vl_maximum);                 \
+  thing(vl_minimum);
+
+// This is all items that have entries in `enabled`.  It is neither a
+// proper superset not proper subset of the above entries.
+//
+// Also, `clang-format` *really* doesn't know what to do with this.
+#define FOR_ALL_OPTS_DO(thing)                                                                                                             \
+  thing(actual_current) thing(actual_following_error) thing(actual_torque) thing(actual_velocity_sensor) thing(actual_vl)                  \
+      thing(actual_voltage) thing(csp) thing(cst) thing(csv) thing(demand_vl) thing(digital_input) thing(digital_output) thing(error_code) \
+          thing(following_error_timeout) thing(following_error_window) thing(hm) thing(home_accel) thing(interpolation_time_period)        \
+              thing(ip) thing(maximum_acceleration) thing(maximum_current) thing(maximum_deceleration) thing(maximum_motor_rpm)            \
+                  thing(maximum_torque) thing(motion_profile) thing(motor_rated_current) thing(motor_rated_torque) thing(opmode)           \
+                      thing(polarity) thing(pp) thing(profile_accel) thing(profile_decel) thing(profile_end_velocity)                      \
+                          thing(profile_max_velocity) thing(profile_velocity) thing(pv) thing(target_torque) thing(target_vl)              \
+                              thing(torque_demand) thing(torque_profile_type) thing(torque_slope) thing(tq) thing(velocity_demand)         \
+                                  thing(velocity_error_time) thing(velocity_error_window) thing(velocity_sensor_selector)                  \
+                                      thing(velocity_threshold_time) thing(velocity_threshold_window) thing(vl) thing(vl_accel)            \
+                                          thing(vl_decel) thing(vl_maximum) thing(vl_minimum)
