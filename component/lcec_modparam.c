@@ -38,10 +38,7 @@ lcec_modparam_desc_t *lcec_modparam_desc_concat(lcec_modparam_desc_t const *a, l
   a_len = lcec_modparam_desc_len(a);
   b_len = lcec_modparam_desc_len(b);
 
-  c = malloc(sizeof(lcec_modparam_desc_t) * (a_len + b_len + 1));
-  if (c == NULL) {
-    return NULL;
-  }
+  c = LCEC_ALLOCATE_ARRAY(lcec_modparam_desc_t, (a_len + b_len + 1));
 
   for (i = 0; i < a_len; i++) {
     c[i] = a[i];
