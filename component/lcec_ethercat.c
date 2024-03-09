@@ -22,8 +22,8 @@
 
 #include "lcec.h"
 
-static int lcec_param_newfv(hal_type_t type, hal_pin_dir_t dir, void *data_addr, const char *fmt, va_list ap);
-static int lcec_param_newfv_list(void *base, const lcec_pindesc_t *list, va_list ap);
+static int lcec_param_newfv(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, va_list ap);
+static int lcec_param_newfv_list(void *base, const lcec_paramdesc_t *list, va_list ap);
 int lcec_comp_id = -1;
 
 /// @brief Find the slave with a specified index underneath a specific master.
@@ -474,7 +474,7 @@ int lcec_read_idn(lcec_slave_t *slave, uint8_t drive_no, uint16_t idn, uint8_t *
   return 0;
 }
 
-static int lcec_param_newfv(hal_type_t type, hal_pin_dir_t dir, void *data_addr, const char *fmt, va_list ap) {
+static int lcec_param_newfv(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, va_list ap) {
   char name[HAL_NAME_LEN + 1];
   int sz;
   int err;
@@ -512,7 +512,7 @@ static int lcec_param_newfv(hal_type_t type, hal_pin_dir_t dir, void *data_addr,
 }
 
 /// @brief Create a new LinuxCNC `param` dynamically.
-int lcec_param_newf(hal_type_t type, hal_pin_dir_t dir, void *data_addr, const char *fmt, ...) {
+int lcec_param_newf(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, ...) {
   va_list ap;
   int err;
 
@@ -523,10 +523,10 @@ int lcec_param_newf(hal_type_t type, hal_pin_dir_t dir, void *data_addr, const c
   return err;
 }
 
-static int lcec_param_newfv_list(void *base, const lcec_pindesc_t *list, va_list ap) {
+static int lcec_param_newfv_list(void *base, const lcec_paramdesc_t *list, va_list ap) {
   va_list ac;
   int err;
-  const lcec_pindesc_t *p;
+  const lcec_paramdesc_t *p;
 
   for (p = list; p->type != HAL_TYPE_UNSPECIFIED; p++) {
     va_copy(ac, ap);
@@ -541,7 +541,7 @@ static int lcec_param_newfv_list(void *base, const lcec_pindesc_t *list, va_list
 }
 
 /// @brief Create a list of new LinuxCNC params dynamically, using sprintf() to create names.
-int lcec_param_newf_list(void *base, const lcec_pindesc_t *list, ...) {
+int lcec_param_newf_list(void *base, const lcec_paramdesc_t *list, ...) {
   va_list ap;
   int err;
 
