@@ -23,6 +23,10 @@
 #ifndef _LCEC_H_
 #define _LCEC_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "ecrt.h"
 #include "hal.h"
 #include "lcec_conf.h"
@@ -30,6 +34,10 @@
 #include "rtapi_ctype.h"
 #include "rtapi_math.h"
 #include "rtapi_string.h"
+
+#ifdef __cplusplus
+}
+#endif
 
 // list macros
 #define LCEC_LIST_APPEND(first, last, item) \
@@ -106,7 +114,7 @@ typedef struct {
 
 /// @brief Definition of a device that LinuxCNC-Ethercat supports.
 typedef struct {
-  char *name;                             ///< The device's name ("EL1008")
+  const char *name;                             ///< The device's name ("EL1008")
   uint32_t vid;                           ///< The EtherCAT vendor ID
   uint32_t pid;                           ///< The EtherCAT product ID
   int is_fsoe_logic;                      ///< Does this device use Safety-over-EtherCAT?
@@ -272,6 +280,14 @@ typedef struct {
   const char *fmt;    ///< Format string for generating pin names via sprintf().
 } lcec_pindesc_t;
 
+/// @brief HAL pin description.
+typedef struct {
+  hal_type_t type;    ///< HAL type of this pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
+  hal_param_dir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
+  int offset;         ///< Offset for this pin's data in `hal_data`.
+  const char *fmt;    ///< Format string for generating pin names via sprintf().
+} lcec_paramdesc_t;
+
 /// @brief Sync manager configuration.
 typedef struct {
   lcec_slave_t *slave; ///< For debugging messages
@@ -323,8 +339,8 @@ int lcec_write_sdo32_modparam(lcec_slave_t *slave, uint16_t index, uint8_t subin
 
 int lcec_pin_newf(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_addr, const char *fmt, ...);
 int lcec_pin_newf_list(void *base, const lcec_pindesc_t *list, ...);
-int lcec_param_newf(hal_type_t type, hal_pin_dir_t dir, void *data_addr, const char *fmt, ...);
-int lcec_param_newf_list(void *base, const lcec_pindesc_t *list, ...);
+int lcec_param_newf(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, ...);
+int lcec_param_newf_list(void *base, const lcec_paramdesc_t *list, ...);
 
 void copy_fsoe_data(lcec_slave_t *slave, unsigned int slave_offset, unsigned int master_offset) __attribute__((nonnull));
 void lcec_syncs_init(lcec_slave_t *slave, lcec_syncs_t *syncs) __attribute__((nonnull));
@@ -333,8 +349,8 @@ void lcec_syncs_add_pdo_info(lcec_syncs_t *syncs, uint16_t index);
 void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subindex, uint8_t bit_length);
 
 const lcec_typelist_t *lcec_findslavetype(const char *name) __attribute__((nonnull));
-void lcec_addtype(lcec_typelist_t *type, char *sourcefile) __attribute__((nonnull));
-void lcec_addtypes(lcec_typelist_t types[], char *sourcefile) __attribute__((nonnull));
+void lcec_addtype(lcec_typelist_t *type, const char *sourcefile) __attribute__((nonnull));
+void lcec_addtypes(lcec_typelist_t types[], const char *sourcefile) __attribute__((nonnull));
 
 int lcec_lookupint(const lcec_lookuptable_int_t *table, const char *key, int default_value) __attribute__((nonnull));
 int lcec_lookupint_i(const lcec_lookuptable_int_t *table, const char *key, int default_value) __attribute__((nonnull));

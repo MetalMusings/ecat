@@ -51,12 +51,12 @@ static const lcec_pindesc_t master_pins[] = {
 };
 
 /// @brief Master params
-static const lcec_pindesc_t master_params[] = {
+static const lcec_paramdesc_t master_params[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_max_err), "%s.pll-max-err"},
 #endif
-    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+    {HAL_TYPE_UNSPECIFIED},
 };
 
 /// @brief Basic Slave pins
