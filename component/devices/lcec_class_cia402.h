@@ -55,7 +55,6 @@ typedef struct {
   int digital_in_channels;
   int digital_out_channels;
 
-
   int enable_opmode;  ///< Enable opmode and opmode-display.  They're technically optional in the spec.
   int enable_pp;      ///< If true, enable required PP-mode pins: `-actual-position` and `-target-position`.
   int enable_pv;      ///< If true, enable required PV-mode pins: `-actual-velocity` and `-target-velocity`.
@@ -120,8 +119,8 @@ typedef struct {
 /// the CiA 402 device itself (such as the number of channels), plus
 /// an array of per-channel options.
 typedef struct {
-  int channels;                                     ///< Number of channels;
-  int rxpdolimit, txpdolimit;                       ///< Maximum number of PDO entries allowed per PDO.
+  int channels;                ///< Number of channels;
+  int rxpdolimit, txpdolimit;  ///< Maximum number of PDO entries allowed per PDO.
   int pdo_increment;
   lcec_class_cia402_channel_options_t *channel[8];  ///< Room for 8 channel options.
 } lcec_class_cia402_options_t;

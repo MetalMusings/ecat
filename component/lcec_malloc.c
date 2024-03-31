@@ -19,14 +19,15 @@
 /// @file
 /// @brief Memory allocation helpers for LinuxCNC-Ethercat
 
-#include "lcec.h"
 #include <stdio.h>
 
+#include "lcec.h"
 
 void *lcec_hal_malloc(size_t size, const char *file, const char *func, int line) {
   void *result = hal_malloc(size);
-  if (result==NULL) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "MEMORY ALLOCATION FAILURE, hal_malloc() returned NULL in function %s at %s:%d\n", func, file, line);
+  if (result == NULL) {
+    rtapi_print_msg(
+        RTAPI_MSG_ERR, LCEC_MSG_PFX "MEMORY ALLOCATION FAILURE, hal_malloc() returned NULL in function %s at %s:%d\n", func, file, line);
     exit(1);
   }
   memset(result, 0, size);
@@ -35,7 +36,7 @@ void *lcec_hal_malloc(size_t size, const char *file, const char *func, int line)
 
 void *lcec_malloc(size_t size, const char *file, const char *func, int line) {
   void *result = malloc(size);
-  if (result==NULL) {
+  if (result == NULL) {
     fprintf(stderr, LCEC_MSG_PFX "MEMORY ALLOCATION FAILURE, hal_malloc() returned NULL in function %s at %s:%d\n", func, file, line);
     exit(1);
   }

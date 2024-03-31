@@ -575,6 +575,6 @@
                           thing(profile_max_velocity) thing(profile_velocity) thing(pv) thing(target_torque) thing(target_vl)              \
                               thing(torque_demand) thing(torque_profile_type) thing(torque_slope) thing(tq) thing(velocity_demand)         \
                                   thing(velocity_error_time) thing(velocity_error_window) thing(velocity_sensor_selector)                  \
-                                      thing(velocity_threshold_time) thing(velocity_threshold_window) thing(vl) thing(vl_maximum) thing(vl_minimum) thing(positioning_window)                    \
-                                              thing(positioning_time) thing(maximum_slippage) thing(probe_status) thing(position_demand)   \
-                                                  thing(control_effort)
+                                      thing(velocity_threshold_time) thing(velocity_threshold_window) thing(vl) thing(vl_maximum)          \
+                                          thing(vl_minimum) thing(positioning_window) thing(positioning_time) thing(maximum_slippage)      \
+                                              thing(probe_status) thing(position_demand) thing(control_effort)
