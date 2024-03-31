@@ -71,7 +71,6 @@
 #define PDO_IDX_OFFSET_actual_vl                 0x44
 #define PDO_IDX_OFFSET_actual_voltage            0x79
 #define PDO_IDX_OFFSET_control_effort            0xfa
-#define PDO_IDX_OFFSET_demand_vl                 0x43
 #define PDO_IDX_OFFSET_digital_input             0xfd
 #define PDO_IDX_OFFSET_digital_output            0xfe
 #define PDO_IDX_OFFSET_error_code                0x3f
@@ -116,6 +115,7 @@
 #define PDO_IDX_OFFSET_velocity_sensor_selector  0x6a
 #define PDO_IDX_OFFSET_velocity_threshold_time   0x70
 #define PDO_IDX_OFFSET_velocity_threshold_window 0x6f
+#define PDO_IDX_OFFSET_vl_demand                 0x43
 #define PDO_IDX_OFFSET_vl_maximum                0x46
 #define PDO_IDX_OFFSET_vl_minimum                0x46
 
@@ -130,7 +130,6 @@
 #define PDO_SIDX_actual_vl                 0
 #define PDO_SIDX_actual_voltage            0
 #define PDO_SIDX_control_effort            0
-#define PDO_SIDX_demand_vl                 0
 #define PDO_SIDX_digital_input             0
 #define PDO_SIDX_digital_output            1
 #define PDO_SIDX_error_code                0
@@ -175,6 +174,7 @@
 #define PDO_SIDX_velocity_sensor_selector  0
 #define PDO_SIDX_velocity_threshold_time   0
 #define PDO_SIDX_velocity_threshold_window 0
+#define PDO_SIDX_vl_demand                 0
 #define PDO_SIDX_vl_maximum                2
 #define PDO_SIDX_vl_minimum                1
 
@@ -191,7 +191,6 @@
 #define PDO_PIN_TYPE_actual_vl                 HAL_S32
 #define PDO_PIN_TYPE_actual_voltage            HAL_U32
 #define PDO_PIN_TYPE_control_effort            HAL_S32
-#define PDO_PIN_TYPE_demand_vl                 HAL_S32
 #define PDO_PIN_TYPE_error_code                HAL_U32
 #define PDO_PIN_TYPE_following_error_timeout   HAL_U32
 #define PDO_PIN_TYPE_following_error_window    HAL_U32
@@ -234,6 +233,7 @@
 #define PDO_PIN_TYPE_velocity_sensor_selector  HAL_S32
 #define PDO_PIN_TYPE_velocity_threshold_time   HAL_U32
 #define PDO_PIN_TYPE_velocity_threshold_window HAL_U32
+#define PDO_PIN_TYPE_vl_demand                 HAL_S32
 #define PDO_PIN_TYPE_vl_maximum                HAL_U32
 #define PDO_PIN_TYPE_vl_minimum                HAL_U32
 
@@ -247,7 +247,6 @@
 #define PDO_PIN_NAME_actual_vl                 "actual-vl"
 #define PDO_PIN_NAME_actual_voltage            "actual-voltage"
 #define PDO_PIN_NAME_control_effort            "control-effort"
-#define PDO_PIN_NAME_demand_vl                 "demand-vl"
 #define PDO_PIN_NAME_error_code                "error-code"
 #define PDO_PIN_NAME_following_error_timeout   "following-error-timeout"
 #define PDO_PIN_NAME_following_error_window    "following-error-window"
@@ -290,6 +289,7 @@
 #define PDO_PIN_NAME_velocity_sensor_selector  "velocity-sensor-selector"
 #define PDO_PIN_NAME_velocity_threshold_time   "velocity-threshold-time"
 #define PDO_PIN_NAME_velocity_threshold_window "velocity-threshold-window"
+#define PDO_PIN_NAME_vl_demand                 "vl-demand"
 #define PDO_PIN_NAME_vl_maximum                "vl-maximum"
 #define PDO_PIN_NAME_vl_minimum                "vl-minimum"
 
@@ -303,7 +303,6 @@
 #define PDO_BITS_actual_vl                 16
 #define PDO_BITS_actual_voltage            32
 #define PDO_BITS_control_effort            32
-#define PDO_BITS_demand_vl                 16
 #define PDO_BITS_digital_input             32
 #define PDO_BITS_digital_output            32
 #define PDO_BITS_error_code                16
@@ -348,6 +347,7 @@
 #define PDO_BITS_velocity_sensor_selector  16
 #define PDO_BITS_velocity_threshold_time   16
 #define PDO_BITS_velocity_threshold_window 16
+#define PDO_BITS_vl_demand                 16
 #define PDO_BITS_vl_maximum                32
 #define PDO_BITS_vl_minimum                32
 
@@ -363,7 +363,6 @@
 #define PDO_SIGN_actual_vl                 S
 #define PDO_SIGN_actual_voltage            U
 #define PDO_SIGN_control_effort            S
-#define PDO_SIGN_demand_vl                 S
 #define PDO_SIGN_error_code                U
 #define PDO_SIGN_following_error_timeout   U
 #define PDO_SIGN_following_error_window    U
@@ -406,6 +405,7 @@
 #define PDO_SIGN_velocity_sensor_selector  S
 #define PDO_SIGN_velocity_threshold_time   U
 #define PDO_SIGN_velocity_threshold_window U
+#define PDO_SIGN_vl_demand                 S
 #define PDO_SIGN_vl_maximum                U
 #define PDO_SIGN_vl_minimum                U
 
@@ -420,7 +420,6 @@
 #define PDO_MP_NAME_csp                       "enableCSP"
 #define PDO_MP_NAME_cst                       "enableCST"
 #define PDO_MP_NAME_csv                       "enableCSV"
-#define PDO_MP_NAME_demand_vl                 "enableDemandVL"
 #define PDO_MP_NAME_digital_input             "enableDigitalInput"
 #define PDO_MP_NAME_digital_output            "enableDigitalOutput"
 #define PDO_MP_NAME_error_code                "enableErrorCode"
@@ -465,6 +464,7 @@
 #define PDO_MP_NAME_velocity_threshold_time   "enableVelocityThresholdTime"
 #define PDO_MP_NAME_velocity_threshold_window "enableVelocityThresholdWindow"
 #define PDO_MP_NAME_vl                        "enableVL"
+#define PDO_MP_NAME_vl_demand                 "enableVLDemand"
 #define PDO_MP_NAME_vl_maximum                "enableVLMaximum"
 #define PDO_MP_NAME_vl_minimum                "enableVLMinimum"
 #define PDO_MP_NAME_target_position           ""  // not individually enableable
@@ -506,13 +506,13 @@
   thing(actual_vl);                 \
   thing(actual_voltage);            \
   thing(control_effort);            \
-  thing(demand_vl);                 \
   thing(error_code);                \
   thing(opmode_display);            \
   thing(position_demand);           \
   thing(probe_status);              \
   thing(torque_demand);             \
-  thing(velocity_demand);
+  thing(velocity_demand);           \
+  thing(vl_demand);
 
 // This is the list of write SDOs.  These need to be initialized, mapped, and written.
 #define FOR_ALL_WRITE_PDOS_DO(thing) \
@@ -565,16 +565,16 @@
 // proper superset not proper subset of the above entries.
 //
 // Also, `clang-format` *really* doesn't know what to do with this.
-#define FOR_ALL_OPTS_DO(thing)                                                                                                             \
-  thing(actual_current) thing(actual_following_error) thing(actual_torque) thing(actual_velocity_sensor) thing(actual_vl)                  \
-      thing(actual_voltage) thing(csp) thing(cst) thing(csv) thing(demand_vl) thing(digital_input) thing(digital_output) thing(error_code) \
-          thing(following_error_timeout) thing(following_error_window) thing(hm) thing(home_accel) thing(interpolation_time_period)        \
-              thing(ip) thing(maximum_acceleration) thing(maximum_current) thing(maximum_deceleration) thing(maximum_motor_rpm)            \
-                  thing(maximum_torque) thing(motion_profile) thing(motor_rated_current) thing(motor_rated_torque) thing(opmode)           \
-                      thing(polarity) thing(pp) thing(profile_accel) thing(profile_decel) thing(profile_end_velocity)                      \
-                          thing(profile_max_velocity) thing(profile_velocity) thing(pv) thing(target_torque) thing(target_vl)              \
-                              thing(torque_demand) thing(torque_profile_type) thing(torque_slope) thing(tq) thing(velocity_demand)         \
-                                  thing(velocity_error_time) thing(velocity_error_window) thing(velocity_sensor_selector)                  \
-                                      thing(velocity_threshold_time) thing(velocity_threshold_window) thing(vl) thing(vl_maximum)          \
-                                          thing(vl_minimum) thing(positioning_window) thing(positioning_time) thing(maximum_slippage)      \
-                                              thing(probe_status) thing(position_demand) thing(control_effort)
+#define FOR_ALL_OPTS_DO(thing)                                                                                                      \
+  thing(actual_current) thing(actual_following_error) thing(actual_torque) thing(actual_velocity_sensor) thing(actual_vl)           \
+      thing(actual_voltage) thing(csp) thing(cst) thing(csv) thing(digital_input) thing(digital_output) thing(error_code)           \
+          thing(following_error_timeout) thing(following_error_window) thing(hm) thing(home_accel) thing(interpolation_time_period) \
+              thing(ip) thing(maximum_acceleration) thing(maximum_current) thing(maximum_deceleration) thing(maximum_motor_rpm)     \
+                  thing(maximum_torque) thing(motion_profile) thing(motor_rated_current) thing(motor_rated_torque) thing(opmode)    \
+                      thing(polarity) thing(pp) thing(profile_accel) thing(profile_decel) thing(profile_end_velocity)               \
+                          thing(profile_max_velocity) thing(profile_velocity) thing(pv) thing(target_torque) thing(target_vl)       \
+                              thing(torque_demand) thing(torque_profile_type) thing(torque_slope) thing(tq) thing(velocity_demand)  \
+                                  thing(velocity_error_time) thing(velocity_error_window) thing(velocity_sensor_selector)           \
+                                      thing(velocity_threshold_time) thing(velocity_threshold_window) thing(vl) thing(vl_demand)    \
+                                          thing(vl_maximum) thing(vl_minimum) thing(positioning_window) thing(positioning_time)     \
+                                              thing(maximum_slippage) thing(probe_status) thing(position_demand) thing(control_effort)

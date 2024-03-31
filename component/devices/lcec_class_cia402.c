@@ -103,8 +103,8 @@ static lcec_class_cia402_enabled_t *lcec_cia402_enabled(lcec_class_cia402_channe
   }
   if (opt->enable_vl) {
     enabled->enable_target_vl = 1;
-    enabled->enable_demand_vl = 1;
     enabled->enable_actual_vl = 1;
+    enabled->enable_vl_demand = 1;
     enabled->enable_vl_minimum = 1;
     enabled->enable_vl_maximum = 1;
   }
