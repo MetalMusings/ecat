@@ -84,7 +84,7 @@ extern "C" {
 
 #define LCEC_FSOE_SIZE(ch_count, data_len) (LCEC_FSOE_CMD_LEN + ch_count * (data_len + LCEC_FSOE_CRC_LEN) + LCEC_FSOE_CONNID_LEN)
 
-#define LCEC_MAX_PDO_REG_COUNT   128  ///< The maximum number of calls to lcec_pdo_init() for a single driver.
+#define LCEC_MAX_PDO_REG_COUNT   256  ///< The maximum number of calls to lcec_pdo_init() for a single driver.
 #define LCEC_MAX_PDO_ENTRY_COUNT 128  ///< The maximum number of PDO entries in a PDO in a sync.
 #define LCEC_MAX_PDO_INFO_COUNT  16   ///< The maximum number of PDOs in a sync.
 #define LCEC_MAX_SYNC_COUNT      4    ///< The maximum number of syncs.
