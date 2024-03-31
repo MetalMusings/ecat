@@ -144,6 +144,7 @@ lcec_class_cia402_channels_t *lcec_cia402_allocate_channels(int count) {
 lcec_class_cia402_options_t *lcec_cia402_options(void) {
   lcec_class_cia402_options_t *opts = LCEC_HAL_ALLOCATE(lcec_class_cia402_options_t);
   opts->channels = 1;
+  opts->pdo_increment = 1;
 
   for (int channel = 0; channel < 8; channel++) {
     opts->channel[channel] = lcec_cia402_channel_options();
@@ -214,10 +215,11 @@ int lcec_cia402_add_output_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_c
   for (int channel = 0; channel < options->channels; channel++) {
     unsigned int offset = 0x6000 + 0x800 * channel;
     int entrycount = syncs->pdo_entry_count;
+    int channelbase = 0x1600 + channel * options->pdo_increment;
 
     lcec_class_cia402_enabled_t *enabled = lcec_cia402_enabled(options->channel[channel]);
 
-    lcec_syncs_add_pdo_info(syncs, 0x1600 + channel);
+    lcec_syncs_add_pdo_info(syncs, channelbase);
     lcec_syncs_add_pdo_entry(syncs, offset + 0x40, 0x00, 16);  // Control word
 
     // Map all writeable PDOs, plus `digital_output` which is special
@@ -259,10 +261,11 @@ int lcec_cia402_add_input_sync(lcec_slave_t *slave, lcec_syncs_t *syncs, lcec_cl
   for (int channel = 0; channel < options->channels; channel++) {
     unsigned int offset = 0x6000 + 0x800 * channel;
     int entrycount = syncs->pdo_entry_count;
+    int channelbase = 0x1a00 + channel * options->pdo_increment;
 
     lcec_class_cia402_enabled_t *enabled = lcec_cia402_enabled(options->channel[channel]);
 
-    lcec_syncs_add_pdo_info(syncs, 0x1a00 + channel);
+    lcec_syncs_add_pdo_info(syncs, channelbase);
     lcec_syncs_add_pdo_entry(syncs, offset + 0x41, 0x00, 16);  // Status word
 
     // Map all readable PDOs, plus `digital_input` which is special
