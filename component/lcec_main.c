@@ -394,7 +394,7 @@ int lcec_parse_config(void) {
   }
 
   // check magic, get length and close shmem
-  header = (LCEC_CONF_HEADER_T*)shmem_ptr;
+  header = (LCEC_CONF_HEADER_T *)shmem_ptr;
   if (header->magic != LCEC_CONF_SHMEM_MAGIC) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_conf is not loaded\n");
     goto fail1;
@@ -532,14 +532,14 @@ int lcec_parse_config(void) {
           generic_pdos = LCEC_ALLOCATE_ARRAY(ec_pdo_info_t, slave_conf->pdoCount);
 
           // alloc sync manager memory
-          generic_sync_managers = LCEC_ALLOCATE_ARRAY(ec_sync_info_t , (slave_conf->syncManagerCount + 1));
+          generic_sync_managers = LCEC_ALLOCATE_ARRAY(ec_sync_info_t, (slave_conf->syncManagerCount + 1));
 
           generic_sync_managers->index = 0xff;
         }
 
         // alloc sdo config memory
         if (slave_conf->sdoConfigLength > 0) {
-          sdo_config = (lcec_slave_sdoconf_t*)lcec_zalloc(slave_conf->sdoConfigLength + sizeof(lcec_slave_sdoconf_t));
+          sdo_config = (lcec_slave_sdoconf_t *)lcec_zalloc(slave_conf->sdoConfigLength + sizeof(lcec_slave_sdoconf_t));
           if (sdo_config == NULL) {
             rtapi_print_msg(
                 RTAPI_MSG_ERR, LCEC_MSG_PFX "Unable to allocate slave %s.%s sdo entry memory\n", master->name, slave_conf->name);
@@ -552,7 +552,7 @@ int lcec_parse_config(void) {
 
         // alloc idn config memory
         if (slave_conf->idnConfigLength > 0) {
-          idn_config = (lcec_slave_idnconf_t*)lcec_zalloc(slave_conf->idnConfigLength + sizeof(lcec_slave_idnconf_t));
+          idn_config = (lcec_slave_idnconf_t *)lcec_zalloc(slave_conf->idnConfigLength + sizeof(lcec_slave_idnconf_t));
           if (idn_config == NULL) {
             rtapi_print_msg(
                 RTAPI_MSG_ERR, LCEC_MSG_PFX "Unable to allocate slave %s.%s idn entry memory\n", master->name, slave_conf->name);
@@ -566,7 +566,7 @@ int lcec_parse_config(void) {
 
         // alloc modparam memory
         if (slave_conf->modParamCount > 0) {
-          modparams = LCEC_ALLOCATE_ARRAY(lcec_slave_modparam_t,  (slave_conf->modParamCount + 1));
+          modparams = LCEC_ALLOCATE_ARRAY(lcec_slave_modparam_t, (slave_conf->modParamCount + 1));
           modparams[slave_conf->modParamCount].id = -1;
         }
 

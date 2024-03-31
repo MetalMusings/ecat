@@ -636,9 +636,9 @@ lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t con
 
   mp = LCEC_ALLOCATE_ARRAY(lcec_modparam_desc_t, len * 9 + 1);
 
-  mp[(len-1) * 9] = orig[(len-1)];  // Copy terminator.
+  mp[(len - 1) * 9] = orig[(len - 1)];  // Copy terminator.
 
-  for (l = 0; l<len; l++) {
+  for (l = 0; l < len; l++) {
     mp[l * 9] = orig[l];
     for (int i = 1; i < 9; i++) {
       char *name;

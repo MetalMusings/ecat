@@ -19,7 +19,6 @@
 /// @file
 /// @brief Header file for LinuxCNC-Ethercat
 
-
 #ifndef _LCEC_H_
 #define _LCEC_H_
 
@@ -86,8 +85,8 @@ extern "C" {
 #define LCEC_FSOE_SIZE(ch_count, data_len) (LCEC_FSOE_CMD_LEN + ch_count * (data_len + LCEC_FSOE_CRC_LEN) + LCEC_FSOE_CONNID_LEN)
 
 #define LCEC_MAX_PDO_REG_COUNT   128  ///< The maximum number of calls to lcec_pdo_init() for a single driver.
-#define LCEC_MAX_PDO_ENTRY_COUNT 128   ///< The maximum number of PDO entries in a PDO in a sync.
-#define LCEC_MAX_PDO_INFO_COUNT  16    ///< The maximum number of PDOs in a sync.
+#define LCEC_MAX_PDO_ENTRY_COUNT 128  ///< The maximum number of PDO entries in a PDO in a sync.
+#define LCEC_MAX_PDO_INFO_COUNT  16   ///< The maximum number of PDOs in a sync.
 #define LCEC_MAX_SYNC_COUNT      4    ///< The maximum number of syncs.
 
 // Memory allocation macros.  These differ from malloc in a couple
@@ -141,7 +140,7 @@ typedef struct {
 
 /// @brief Definition of a device that LinuxCNC-Ethercat supports.
 typedef struct {
-  const char *name;                             ///< The device's name ("EL1008")
+  const char *name;                       ///< The device's name ("EL1008")
   uint32_t vid;                           ///< The EtherCAT vendor ID
   uint32_t pid;                           ///< The EtherCAT product ID
   int is_fsoe_logic;                      ///< Does this device use Safety-over-EtherCAT?
@@ -149,7 +148,7 @@ typedef struct {
   lcec_slave_init_t proc_init;            ///< init function.  Sets up the device.
   const lcec_modparam_desc_t *modparams;  ///< XML modparams, if any
   uint64_t flags;                         ///< Flags, passed through to `proc_init` as `slave->flags`.
-  const char *sourcefile;                       ///< Source filename, autopopulated.
+  const char *sourcefile;                 ///< Source filename, autopopulated.
 } lcec_typelist_t;
 
 /// @brief Linked list for holding device type definitions.
@@ -191,8 +190,8 @@ typedef struct lcec_slave_state {
 } lcec_slave_state_t;
 
 typedef struct lcec_master {
-  lcec_master_t *prev;         ///< Next master.
-  lcec_master_t *next;         ///< Previous master.
+  lcec_master_t *prev;              ///< Next master.
+  lcec_master_t *next;              ///< Previous master.
   int index;                        ///< Index of this mater.
   char name[LCEC_CONF_STR_MAXLEN];  ///< Name of master.
   ec_master_t *master;              ///< EtherCAT master structure.
@@ -265,9 +264,9 @@ typedef struct {
 
 /// @brief EtherCAT slave.
 typedef struct lcec_slave {
-  lcec_slave_t *prev;                   ///< Next slave
-  lcec_slave_t *next;                   ///< Previous slave
-  lcec_master_t *master;                ///< Master for this slave
+  lcec_slave_t *prev;                        ///< Next slave
+  lcec_slave_t *next;                        ///< Previous slave
+  lcec_master_t *master;                     ///< Master for this slave
   int index;                                 ///< Index of this slave.
   char name[LCEC_CONF_STR_MAXLEN];           ///< Slave name.
   uint32_t vid;                              ///< Slave's vendor ID
@@ -309,26 +308,26 @@ typedef struct {
 
 /// @brief HAL pin description.
 typedef struct {
-  hal_type_t type;    ///< HAL type of this pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
+  hal_type_t type;      ///< HAL type of this pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
   hal_param_dir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
-  int offset;         ///< Offset for this pin's data in `hal_data`.
-  const char *fmt;    ///< Format string for generating pin names via sprintf().
+  int offset;           ///< Offset for this pin's data in `hal_data`.
+  const char *fmt;      ///< Format string for generating pin names via sprintf().
 } lcec_paramdesc_t;
 
 /// @brief Sync manager configuration.
 typedef struct {
-  lcec_slave_t *slave; ///< For debugging messages
+  lcec_slave_t *slave;                            ///< For debugging messages
   int sync_count;                                 ///< Number of syncs.
   ec_sync_info_t *curr_sync;                      ///< Current sync.
   ec_sync_info_t syncs[LCEC_MAX_SYNC_COUNT + 1];  ///< Sync definitions.
 
-  int pdo_info_count;                                ///< Number of PDO infos.
-  ec_pdo_info_t *curr_pdo_info;                      ///< Current PDO info.
-  ec_pdo_info_t pdo_infos[LCEC_MAX_PDO_INFO_COUNT+1];  ///< PDO info definitions.
+  int pdo_info_count;                                    ///< Number of PDO infos.
+  ec_pdo_info_t *curr_pdo_info;                          ///< Current PDO info.
+  ec_pdo_info_t pdo_infos[LCEC_MAX_PDO_INFO_COUNT + 1];  ///< PDO info definitions.
 
-  int pdo_entry_count;                                        ///< Number of PDO entries.
-  ec_pdo_entry_info_t *curr_pdo_entry;                        ///< Current PDO entry.
-  ec_pdo_entry_info_t pdo_entries[LCEC_MAX_PDO_ENTRY_COUNT+1];  ///< PDO entry definitions.
+  int pdo_entry_count;                                            ///< Number of PDO entries.
+  ec_pdo_entry_info_t *curr_pdo_entry;                            ///< Current PDO entry.
+  ec_pdo_entry_info_t pdo_entries[LCEC_MAX_PDO_ENTRY_COUNT + 1];  ///< PDO entry definitions.
 } lcec_syncs_t;
 
 /// @brief Lookup table mapping string to int
