@@ -73,7 +73,6 @@ typedef struct {
   int enable_actual_vl;
   int enable_actual_voltage;
   int enable_control_effort;
-  int enable_demand_vl;
   int enable_digital_input;   ///< If true, enable digital input PDO.
   int enable_digital_output;  ///< If true, enable digital output PDO.
   int enable_error_code;
@@ -111,6 +110,7 @@ typedef struct {
   int enable_velocity_sensor_selector;
   int enable_velocity_threshold_time;
   int enable_velocity_threshold_window;
+  int enable_vl_demand;
   int enable_vl_maximum;
   int enable_vl_minimum;
 } lcec_class_cia402_channel_options_t;
@@ -143,7 +143,6 @@ typedef struct {
   int enable_csp;
   int enable_cst;
   int enable_csv;
-  int enable_demand_vl;
   int enable_digital_input;
   int enable_digital_output;
   int enable_error_code;
@@ -194,6 +193,7 @@ typedef struct {
   int enable_velocity_threshold_time;
   int enable_velocity_threshold_window;
   int enable_vl;
+  int enable_vl_demand;
   int enable_vl_maximum;
   int enable_vl_minimum;
 } lcec_class_cia402_enabled_t;
@@ -267,12 +267,12 @@ typedef struct {
   PDO_PIN(actual_vl, hal_s32_t);
   PDO_PIN(actual_voltage, hal_u32_t);
   PDO_PIN(control_effort, hal_s32_t);
-  PDO_PIN(demand_vl, hal_s32_t);
   PDO_PIN(error_code, hal_u32_t);
   PDO_PIN(position_demand, hal_s32_t);
   PDO_PIN(probe_status, hal_u32_t);
   PDO_PIN(torque_demand, hal_s32_t);
   PDO_PIN(velocity_demand, hal_s32_t);
+  PDO_PIN(vl_demand, hal_s32_t);
 
   unsigned int base_idx;  ///< The PDO/SDO offset for this channel
 
@@ -375,10 +375,10 @@ lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, int max_denomina
 #define CIA402_MP_ENABLE_actual_velocity_sensor    0x2120
 #define CIA402_MP_ENABLE_actual_vl                 0x2330
 #define CIA402_MP_ENABLE_actual_voltage            0x22e0
+#define CIA402_MP_ENABLE_control_effort            0x2510
 #define CIA402_MP_ENABLE_csp                       0x2020
 #define CIA402_MP_ENABLE_cst                       0x2080
 #define CIA402_MP_ENABLE_csv                       0x2030
-#define CIA402_MP_ENABLE_demand_vl                 0x2320
 #define CIA402_MP_ENABLE_digital_input             0x2490
 #define CIA402_MP_ENABLE_digital_output            0x24a0
 #define CIA402_MP_ENABLE_error_code                0x2480
@@ -392,12 +392,18 @@ lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, int max_denomina
 #define CIA402_MP_ENABLE_maximum_current           0x22a0
 #define CIA402_MP_ENABLE_maximum_deceleration      0x2180
 #define CIA402_MP_ENABLE_maximum_motor_rpm         0x2190
+#define CIA402_MP_ENABLE_maximum_slippage          0x24e0
 #define CIA402_MP_ENABLE_maximum_torque            0x21a0
 #define CIA402_MP_ENABLE_motion_profile            0x21b0
 #define CIA402_MP_ENABLE_motor_rated_current       0x22c0
 #define CIA402_MP_ENABLE_motor_rated_torque        0x21c0
+#define CIA402_MP_ENABLE_opmode                    0x23b0
 #define CIA402_MP_ENABLE_polarity                  0x21d0
+#define CIA402_MP_ENABLE_position_demand           0x2500
+#define CIA402_MP_ENABLE_positioning_time          0x24d0
+#define CIA402_MP_ENABLE_positioning_window        0x24c0
 #define CIA402_MP_ENABLE_pp                        0x2000
+#define CIA402_MP_ENABLE_probe_status              0x24f0
 #define CIA402_MP_ENABLE_profile_accel             0x21e0
 #define CIA402_MP_ENABLE_profile_decel             0x21f0
 #define CIA402_MP_ENABLE_profile_end_velocity      0x2200
@@ -417,13 +423,7 @@ lcec_ratio lcec_cia402_decode_ratio_modparam(const char *value, int max_denomina
 #define CIA402_MP_ENABLE_velocity_threshold_time   0x2270
 #define CIA402_MP_ENABLE_velocity_threshold_window 0x2280
 #define CIA402_MP_ENABLE_vl                        0x2060
+#define CIA402_MP_ENABLE_vl_demand                 0x2320
 #define CIA402_MP_ENABLE_vl_maximum                0x2350
 #define CIA402_MP_ENABLE_vl_minimum                0x2340
-#define CIA402_MP_ENABLE_opmode                    0x23b0
-#define CIA402_MP_ENABLE_positioning_window        0x24c0
-#define CIA402_MP_ENABLE_positioning_time          0x24d0
-#define CIA402_MP_ENABLE_maximum_slippage          0x24e0
-#define CIA402_MP_ENABLE_probe_status              0x24f0
-#define CIA402_MP_ENABLE_position_demand           0x2500
-#define CIA402_MP_ENABLE_control_effort            0x2510
 // next is 0x2520
