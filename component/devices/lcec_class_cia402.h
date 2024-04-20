@@ -124,6 +124,9 @@ typedef struct {
   int channels;                ///< Number of channels;
   int rxpdolimit, txpdolimit;  ///< Maximum number of PDO entries allowed per PDO.
   int pdo_increment;
+  int pdo_autoflow;
+  int pdo_limit;
+  int pdo_entry_limit;
   lcec_class_cia402_channel_options_t *channel[CIA402_MAX_CHANNELS];  ///< Room for 8 channel options.
 } lcec_class_cia402_options_t;
 
