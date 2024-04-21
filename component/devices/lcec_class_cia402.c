@@ -628,26 +628,38 @@ static const lcec_modparam_desc_t per_channel_modparams[] = {
 ///
 /// If we have device-level modParams, then we should handle them via
 /// a different list.
-lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t const *orig) {
+lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t const *orig, int count) {
   lcec_modparam_desc_t *mp;
   int l, len;
+  int originals = 1, duplicates = count, total;
+
+  if (count == 1) {
+    duplicates = 0;
+    originals = 1;
+  } else if (count < CIA402_MAX_CHANNELS) {
+    duplicates = count;
+    originals = 0;
+  }
+  total = originals + duplicates;
 
   len = lcec_modparam_desc_len(orig);
 
-  mp = LCEC_ALLOCATE_ARRAY(lcec_modparam_desc_t, len * 9 + 1);
+  mp = LCEC_ALLOCATE_ARRAY(lcec_modparam_desc_t, len * total + 1);
 
-  mp[(len - 1) * 9] = orig[(len - 1)];  // Copy terminator.
+  mp[(len - 1) * total] = orig[(len - 1)];  // Copy terminator.
 
   for (l = 0; l < len; l++) {
-    mp[l * 9] = orig[l];
-    for (int i = 1; i < 9; i++) {
+    if (originals) mp[l * total] = orig[l];
+
+    for (int i = 0; i < duplicates; i++) {
       char *name;
-      mp[l * 9 + i] = orig[l];
+      int index = l * total + originals + i;
+      mp[index] = orig[l];
 
       name = LCEC_ALLOCATE_STRING(strlen(orig[l].name) + 10);
-      sprintf(name, "ch%d%s", i, orig[l].name);
-      mp[l * 9 + i].name = name;
-      mp[l * 9 + i].id += i - 1;
+      sprintf(name, "ch%d%s", i + 1, orig[l].name);
+      mp[index].name = name;
+      mp[index].id += i;
     }
   }
 
@@ -662,13 +674,14 @@ lcec_modparam_desc_t *lcec_cia402_channelized_modparams(lcec_modparam_desc_t con
 /// @param device_base_mps a `lcec_modparam_desc_t[]` containing device-specific `<modParam>` settings that should *not* be duplicated per
 /// channel.
 /// @param docs a `lcec_modparam_doc_t[]` that will override the settings of `default_value` and `comment` on existing MPs.
-lcec_modparam_desc_t *lcec_cia402_modparams(
-    lcec_modparam_desc_t const *device_channelized_mps, lcec_modparam_desc_t const *device_base_mps, lcec_modparam_doc_t const *docs) {
-  const lcec_modparam_desc_t *pre_channelized_mps = lcec_modparam_desc_concat(per_channel_modparams, device_channelized_mps);
-  const lcec_modparam_desc_t *channelized_mps = lcec_cia402_channelized_modparams(pre_channelized_mps);
+lcec_modparam_desc_t *lcec_cia402_modparams(int channels, lcec_modparam_desc_t const *device_channelized_mps,
+    lcec_modparam_desc_t const *device_base_mps, lcec_modparam_doc_t const *channelized_docs, lcec_modparam_doc_t const *base_docs) {
+  const lcec_modparam_desc_t *pre_channelized_mps =
+      lcec_modparam_desc_merge_docs(lcec_modparam_desc_concat(per_channel_modparams, device_channelized_mps), channelized_docs);
+  const lcec_modparam_desc_t *channelized_mps = lcec_cia402_channelized_modparams(pre_channelized_mps, channels);
   const lcec_modparam_desc_t *all_mps = lcec_modparam_desc_concat(channelized_mps, device_base_mps);
 
-  return lcec_modparam_desc_merge_docs(all_mps, docs);
+  return lcec_modparam_desc_merge_docs(all_mps, base_docs);
 }
 
 /// @brief Handle a single modparam entry
