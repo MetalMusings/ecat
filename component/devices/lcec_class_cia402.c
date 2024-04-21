@@ -145,6 +145,9 @@ lcec_class_cia402_options_t *lcec_cia402_options(void) {
   lcec_class_cia402_options_t *opts = LCEC_HAL_ALLOCATE(lcec_class_cia402_options_t);
   opts->channels = 1;
   opts->pdo_increment = 1;
+  opts->pdo_autoflow = 0;
+  opts->pdo_limit = 1 << 10;        // Too high to trigger
+  opts->pdo_entry_limit = 1 << 10;  //  To high to trigger
 
   for (int channel = 0; channel < 8; channel++) {
     opts->channel[channel] = lcec_cia402_channel_options();
@@ -184,6 +187,10 @@ lcec_syncs_t *lcec_cia402_init_sync(lcec_slave_t *slave, lcec_class_cia402_optio
 
   syncs = LCEC_HAL_ALLOCATE(lcec_syncs_t);
   lcec_syncs_init(slave, syncs);
+
+  if (options->pdo_autoflow) {
+    lcec_syncs_enable_autoflow(slave, syncs, options->pdo_limit, options->pdo_entry_limit, options->pdo_increment);
+  }
 
   // SM0 and SM1 aren't generally used.
   lcec_syncs_add_sync(syncs, EC_DIR_OUTPUT, EC_WD_DEFAULT);

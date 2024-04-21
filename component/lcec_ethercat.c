@@ -64,6 +64,19 @@ void lcec_syncs_init(lcec_slave_t *slave, lcec_syncs_t *syncs) {
   syncs->slave = slave;
 }
 
+/// @brief Enable autoflow, when the number of PDO entries per PDO are
+/// capped, but we automatically create a new PDO when the previous
+/// one fills up.
+///
+/// This is needed for devices like the Omron MX2, which only support
+/// 1 or 2 PDO entries per PDO, but support a huge number of PDOs.
+void lcec_syncs_enable_autoflow(lcec_slave_t *slave, lcec_syncs_t *syncs, int pdo_limit, int pdo_entry_limit, int pdo_increment) {
+  syncs->autoflow = 1;
+  syncs->pdo_limit = pdo_limit;
+  syncs->pdo_entry_limit = pdo_entry_limit;
+  syncs->pdo_increment = pdo_increment;
+}
+
 /// @brief Add a new EtherCAT sync manager configuration.
 void lcec_syncs_add_sync(lcec_syncs_t *syncs, ec_direction_t dir, ec_watchdog_mode_t watchdog_mode) {
   syncs->curr_sync = &syncs->syncs[syncs->sync_count];
@@ -97,12 +110,22 @@ void lcec_syncs_add_pdo_info(lcec_syncs_t *syncs, uint16_t index) {
     rtapi_print_msg(RTAPI_MSG_ERR,
         LCEC_MSG_PFX "lcec_syncs_add_pdo_info: WARNING: pdo_info full for slave %s.%s, not adding more.  Expect failure.\n",
         syncs->slave->master->name, syncs->slave->name);
+  } else if (syncs->autoflow && (syncs->pdo_info_count > syncs->pdo_limit)) {
+    rtapi_print_msg(RTAPI_MSG_ERR,
+        LCEC_MSG_PFX
+        "lcec_syncs_add_pdo_info: WARNING: pdo_info full for slave %s.%s has reached the configured limit of %d, not adding more.  Expect "
+        "failure.\n",
+        syncs->slave->master->name, syncs->slave->name, syncs->pdo_limit);
   } else {
     (syncs->pdo_info_count)++;
   }
 }
 
 /// @brief Add a new PDO entry to an existing PDO.
+///
+/// If `autoflow` is turned on for this syhnc, then this *may* close
+/// out one PDO and open up another one, if we've hit the
+/// pdo_entry_limit specified in `lcec_syncs_enable_autoflow`.
 void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subindex, uint8_t bit_length) {
   syncs->curr_pdo_entry = &syncs->pdo_entries[syncs->pdo_entry_count];
 
@@ -110,6 +133,11 @@ void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subin
     syncs->curr_pdo_info->entries = syncs->curr_pdo_entry;
   }
   (syncs->curr_pdo_info->n_entries)++;
+  if (syncs->autoflow && (syncs->curr_pdo_info->n_entries >= syncs->pdo_entry_limit)) {
+    // Open up a new PDO, because this one is full.
+    lcec_syncs_add_pdo_info(syncs, syncs->curr_pdo_info->index + syncs->pdo_increment);
+    syncs->curr_pdo_entry = &syncs->pdo_entries[syncs->pdo_entry_count];
+  }
 
   syncs->curr_pdo_entry->index = index;
   syncs->curr_pdo_entry->subindex = subindex;
@@ -255,7 +283,7 @@ int lcec_read_sdo16_pin_U32(lcec_slave_t *slave, uint16_t index, uint8_t subinde
 int lcec_read_sdo16_pin_S32(lcec_slave_t *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
   uint8_t data[2];
   int err = lcec_read_sdo(slave, index, subindex, data, 2);
-  *result = EC_READ_U16(data);
+  *result = EC_READ_S16(data);
 
   return err;
 }
@@ -293,7 +321,7 @@ int lcec_read_sdo32_pin_U32(lcec_slave_t *slave, uint16_t index, uint8_t subinde
 int lcec_read_sdo32_pin_S32(lcec_slave_t *slave, uint16_t index, uint8_t subindex, volatile int32_t *result) {
   uint8_t data[4];
   int err = lcec_read_sdo(slave, index, subindex, data, 4);
-  *result = EC_READ_U32(data);
+  *result = EC_READ_S32(data);
 
   return err;
 }

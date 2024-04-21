@@ -333,9 +333,14 @@ typedef struct {
   ec_pdo_info_t *curr_pdo_info;                          ///< Current PDO info.
   ec_pdo_info_t pdo_infos[LCEC_MAX_PDO_INFO_COUNT + 1];  ///< PDO info definitions.
 
-  int pdo_entry_count;                                            ///< Number of PDO entries.
+  int pdo_entry_count;                                            ///< Total number of PDO entries for slave.
   ec_pdo_entry_info_t *curr_pdo_entry;                            ///< Current PDO entry.
   ec_pdo_entry_info_t pdo_entries[LCEC_MAX_PDO_ENTRY_COUNT + 1];  ///< PDO entry definitions.
+
+  int autoflow;         ///< If true, then adding new PDO entries will automatically start a new PDO at `pdo_entry_limit`
+  int pdo_entry_limit;  ///< Device limit on the number of PDO entries per PDO
+  int pdo_limit;        ///< Device limit on the number of PDOs per sync.
+  int pdo_increment;    ///< Number to increment PDO number when overflowing.
 } lcec_syncs_t;
 
 /// @brief Lookup table mapping string to int
@@ -378,6 +383,7 @@ int lcec_param_newf_list(void *base, const lcec_paramdesc_t *list, ...);
 
 void copy_fsoe_data(lcec_slave_t *slave, unsigned int slave_offset, unsigned int master_offset) __attribute__((nonnull));
 void lcec_syncs_init(lcec_slave_t *slave, lcec_syncs_t *syncs) __attribute__((nonnull));
+void lcec_syncs_enable_autoflow(lcec_slave_t *slave, lcec_syncs_t *syncs, int pdo_limit, int pdo_entry_limit, int pdo_increment);
 void lcec_syncs_add_sync(lcec_syncs_t *syncs, ec_direction_t dir, ec_watchdog_mode_t watchdog_mode);
 void lcec_syncs_add_pdo_info(lcec_syncs_t *syncs, uint16_t index);
 void lcec_syncs_add_pdo_entry(lcec_syncs_t *syncs, uint16_t index, uint8_t subindex, uint8_t bit_length);
