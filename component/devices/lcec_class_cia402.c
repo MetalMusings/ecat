@@ -378,22 +378,22 @@ lcec_class_cia402_channel_t *lcec_cia402_register_channel(
     char *dname;
     data->din = lcec_din_allocate_channels(opt->digital_in_channels + 4);
 
-    dname = LCEC_HAL_ALLOCATE_STRING(20);
-    snprintf(dname, 20, "%s-din-cw-limit", name_prefix);
+    dname = LCEC_HAL_ALLOCATE_STRING(30);
+    snprintf(dname, 30, "%s-din-negative-limit", name_prefix);
     data->din->channels[0] = lcec_din_register_channel_packed(slave, base_idx + 0xfd, 0, 0, dname);  // negative limit switch
-    dname = LCEC_HAL_ALLOCATE_STRING(20);
-    snprintf(dname, 20, "%s-din-ccw-limit", name_prefix);
+    dname = LCEC_HAL_ALLOCATE_STRING(30);
+    snprintf(dname, 30, "%s-din-positive-limit", name_prefix);
     data->din->channels[1] = lcec_din_register_channel_packed(slave, base_idx + 0xfd, 0, 1, dname);  // positive limit switch
-    dname = LCEC_HAL_ALLOCATE_STRING(20);
-    snprintf(dname, 20, "%s-din-home", name_prefix);
+    dname = LCEC_HAL_ALLOCATE_STRING(30);
+    snprintf(dname, 30, "%s-din-home", name_prefix);
     data->din->channels[2] = lcec_din_register_channel_packed(slave, base_idx + 0xfd, 0, 2, dname);  // home
-    dname = LCEC_HAL_ALLOCATE_STRING(20);
-    snprintf(dname, 20, "%s-din-interlock", name_prefix);
+    dname = LCEC_HAL_ALLOCATE_STRING(30);
+    snprintf(dname, 30, "%s-din-interlock", name_prefix);
     data->din->channels[3] = lcec_din_register_channel_packed(slave, base_idx + 0xfd, 0, 3, dname);  // interlock?
 
     for (int channel = 0; channel < opt->digital_in_channels; channel++) {
-      dname = LCEC_HAL_ALLOCATE_STRING(20);
-      snprintf(dname, 20, "%s-din-%d", name_prefix, channel);
+      dname = LCEC_HAL_ALLOCATE_STRING(30);
+      snprintf(dname, 30, "%s-din-%d", name_prefix, channel);
       data->din->channels[4 + channel] = lcec_din_register_channel_packed(slave, base_idx + 0xfd, 0, 16 + channel, dname);
     }
   }
