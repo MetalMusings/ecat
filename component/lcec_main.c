@@ -19,6 +19,12 @@
 /// @file
 /// @brief Initialization code for LinuxCNC-Ethercat
 
+#ifndef __KERNEL__
+#include <execinfo.h>
+#include <signal.h>
+#include <stdio.h>
+#endif
+
 #include "devices/lcec_generic.h"
 #include "lcec.h"
 #include "rtapi_app.h"
@@ -95,6 +101,8 @@ void lcec_write_all(void *arg, long period);
 void lcec_read_master(void *arg, long period);
 void lcec_write_master(void *arg, long period);
 
+static void sigsegv_handler(int sig);
+
 /// @brief Main entrypoint from LinuxCNC
 int rtapi_app_main(void) {
   int slave_count;
@@ -105,6 +113,18 @@ int rtapi_app_main(void) {
   lcec_slave_idnconf_t *idn_config;
   struct timeval tv;
   int pdo_entry_count = 0;
+
+#ifndef __KERNEL
+  struct sigaction handler;
+  sigemptyset(&handler.sa_mask);
+  handler.sa_flags = SA_NODEFER | SA_RESETHAND;
+  handler.sa_handler = sigsegv_handler;
+
+  sigaction(SIGSEGV, &handler, NULL);
+  sigaction(SIGBUS, &handler, NULL);
+  sigaction(SIGFPE, &handler, NULL);
+  sigaction(SIGKILL, &handler, NULL);
+#endif
 
   // connect to the HAL
   if ((lcec_comp_id = hal_init(LCEC_MODULE_NAME)) < 0) {
@@ -1195,3 +1215,44 @@ void lcec_write_master(void *arg, long period) {
   master->dc_time_valid_last = dc_time_valid;
 #endif
 }
+
+
+#ifndef __KERNEL__
+#define BACKTRACE_SIZE 100
+
+// Print a stack backtrace.  This presumably won't work in kernel
+// mode.  It doesn't work *quite* right, in that it doesn't pick up
+// symbols from lcec.so, but the offsets are enough to debug many
+// problems.  Use `objdump --syms /usr/lib/linuxcnc/modules/lcec.so |
+// sort | less` to extract a sorted list of symbols if needed.
+static void sigsegv_handler(int sig) {
+  struct sigaction act;
+  int nptrs, i;
+  void *buffer[BACKTRACE_SIZE];
+  char **strings;
+
+  fprintf(stderr, "LinuxCNC Ethercat crashed with signal %d\n", sig);
+
+  fprintf(stderr, "-- STACK TRACE START\n");
+  nptrs = backtrace(buffer, BACKTRACE_SIZE);
+  strings = backtrace_symbols(buffer, nptrs);
+  if (strings == NULL) {
+    return;
+  }
+
+  for (i = 0; i < nptrs; ++i) {
+    fprintf(stderr, "%d\t%s\n", i, strings[i]);
+  }
+
+  free(strings);
+
+  fprintf(stderr, "-- STACK TRACE END\n");
+
+  /* Restore the default behavior for the traped signal */
+  sigemptyset(&act.sa_mask);
+  act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_RESETHAND;
+  act.sa_handler = SIG_DFL;
+  sigaction(sig, &act, NULL);
+  kill(getpid(), sig);
+}
+#endif
