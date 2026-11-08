@@ -11,12 +11,13 @@ Only reads from the bus; nothing is written to the slaves.
 
 import argparse
 import json
+import shutil
 import sys
 from dataclasses import asdict
 
 import yaml
 
-from . import coe as coe_mod, config, esi, importxml, lcecxml, propose, sii as sii_mod, tool
+from . import coe as coe_mod, config, esi, importxml, lcecxml, propose, sii as sii_mod, tool, update
 
 
 def ini_value(ini_path, section, key):
@@ -162,6 +163,9 @@ def main(argv=None):
     ap.add_argument("--interface", help="network interface, for --write")
     ap.add_argument("--transport", default="raw", choices=sorted(config.TRANSPORTS),
                     help="master transport, for --write")
+    ap.add_argument("--update", metavar="FILE",
+                    help="update an ecat configuration from the bus, keeping its choices; "
+                         "written back with a .bak copy, or to --write")
     ap.add_argument("--check", metavar="FILE", help="check an ecat configuration, and the bus against it")
     ap.add_argument("--import", dest="import_xml", metavar="XML",
                     help="import an lcec XML file; with --write, write it as an ecat configuration")
@@ -196,12 +200,43 @@ def main(argv=None):
         print(json.dumps([asdict(p) for p in proposals], indent=2, default=str))
     else:
         print("\n".join(out))
+    if args.update:
+        sys.exit(update_file(args, proposals, period))
     if args.write:
         try:
             config.write(config.from_proposals(proposals, args.interface, args.transport, period), args.write)
         except ValueError as e:
             sys.exit(str(e))
         print("Wrote %s" % args.write)
+
+
+def update_file(args, proposals, period):
+    """Update a configuration file from the proposals. Returns an exit code."""
+    try:
+        old = config.load(args.update)
+    except (OSError, yaml.YAMLError) as e:
+        print("Cannot read %s: %s" % (args.update, e))
+        return 1
+    fresh = config.from_proposals(proposals, args.interface, args.transport, period)
+    cfg, notes = update.merge(old, fresh)
+    print("Update of %s:" % args.update)
+    for n in notes:
+        print("  %s" % n)
+    errors = config.check(cfg)
+    for e in errors:
+        print("Error: %s" % e)
+    if errors:
+        return 1
+    out = args.write or args.update
+    if cfg == old and out == args.update:
+        print("  no changes: the file matches the bus")
+        return 0
+    if out == args.update:
+        shutil.copyfile(args.update, args.update + ".bak")
+        print("Kept the old file as %s.bak" % args.update)
+    config.write(cfg, out)
+    print("Wrote %s" % out)
+    return 0
 
 
 def import_file(args):

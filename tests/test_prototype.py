@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from ecatsetup import coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
+from ecatsetup import update, coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
@@ -262,6 +262,75 @@ class TestIni(unittest.TestCase):
             self.assertEqual(servo_period(f.name), 1000000)
         finally:
             os.unlink(f.name)
+
+
+
+def slave(pos, name, vendor, product, revision="0x00000001"):
+    return {"position": pos, "name": name, "device": "dev %s" % product,
+            "identity": {"vendor": vendor, "product": product, "revision": revision},
+            "profile": "generic", "configure-pdos": False, "process-data": {},
+            "settings": []}
+
+
+class TestUpdate(unittest.TestCase):
+    def setUp(self):
+        # the file: the user's names and a setting
+        self.old = {"ecat": 1, "master": {"interface": "enp2s0", "transport": "raw"},
+                    "slaves": [slave(0, "x-drive", "0x1", "0xA"), slave(1, "y-drive", "0x1", "0xA"),
+                               slave(2, "io", "0x2", "0xB")]}
+        self.old["slaves"][0]["settings"] = [{"object": "0x2000:00", "type": "UINT", "value": 4000}]
+
+    def fresh(self, *slaves):
+        return {"ecat": 1, "master": {"transport": "raw"}, "slaves": list(slaves)}
+
+    def test_unchanged_bus_keeps_the_file(self):
+        cfg, notes = update.merge(self.old, self.fresh(
+            slave(0, "drive-0", "0x1", "0xA"), slave(1, "drive-1", "0x1", "0xA"),
+            slave(2, "io-2", "0x2", "0xB")))
+        self.assertEqual(cfg, self.old)
+        self.assertEqual(notes, [])
+
+    def test_new_moved_and_missing_slaves(self):
+        # a new I/O slave at 0 pushes the drives down; "io" is gone
+        cfg, notes = update.merge(self.old, self.fresh(
+            slave(0, "io-0", "0x3", "0xC"), slave(1, "drive-1", "0x1", "0xA"),
+            slave(2, "drive-2", "0x1", "0xA")))
+        self.assertEqual([(s["position"], s["name"]) for s in cfg["slaves"]],
+                         [(0, "io-0"), (1, "x-drive"), (2, "y-drive")])
+        self.assertEqual(cfg["slaves"][1]["settings"], self.old["slaves"][0]["settings"])
+        text = "\n".join(notes)
+        self.assertIn("x-drive (dev 0xA): moved from position 0 to 1", text)
+        self.assertIn("slave 0: new", text)
+        self.assertIn("io (dev 0xB) at position 2: not on the bus", text)
+
+    def test_inserted_slave_moves_nothing_else(self):
+        # file: X at 0, Z at 2 (Y was left out); bus: three drives
+        del self.old["slaves"][1]
+        self.old["slaves"][1]["position"] = 2  # "io"
+        self.old["slaves"].insert(1, slave(1, "z-drive", "0x1", "0xA"))
+        self.old["slaves"][1]["position"], self.old["slaves"][2]["position"] = 2, 3
+        cfg, notes = update.merge(self.old, self.fresh(
+            slave(0, "d0", "0x1", "0xA"), slave(1, "d1", "0x1", "0xA"),
+            slave(2, "d2", "0x1", "0xA"), slave(3, "i3", "0x2", "0xB")))
+        self.assertEqual([s["name"] for s in cfg["slaves"]], ["x-drive", "d1", "z-drive", "io"])
+        self.assertEqual(len(notes), 1)
+
+    def test_new_name_does_not_clash(self):
+        self.old["slaves"][2]["name"] = "io-3"
+        cfg, _ = update.merge(self.old, self.fresh(
+            slave(0, "drive-0", "0x1", "0xA"), slave(1, "drive-1", "0x1", "0xA"),
+            slave(2, "io-2", "0x2", "0xB"), slave(3, "io-3", "0x3", "0xC")))
+        self.assertEqual(cfg["slaves"][3]["name"], "io-3-2")
+
+    def test_revision_and_master_dc(self):
+        fresh = self.fresh(slave(0, "drive-0", "0x1", "0xA", "0x00000002"),
+                           slave(1, "drive-1", "0x1", "0xA"), slave(2, "io-2", "0x2", "0xB"))
+        fresh["master"]["dc"] = {"ref-clock-sync-cycles": 1000, "sync-to-ref-clock": True}
+        cfg, notes = update.merge(self.old, fresh)
+        self.assertEqual(cfg["slaves"][0]["identity"]["revision"], "0x00000002")
+        self.assertEqual(cfg["master"]["interface"], "enp2s0")
+        self.assertIn("dc", cfg["master"])
+        self.assertEqual(len(notes), 2)
 
 
 if __name__ == "__main__":

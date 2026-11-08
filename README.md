@@ -30,13 +30,18 @@ or LinuxCNC with `lcec_uspace`):
 python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
 python3 -m ecatsetup --ini <machine>.ini --write ethercat.yaml --interface enp2s0
 python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethercat.yaml
+python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
 python3 -m ecatsetup --check ethercat.yaml
 python3 -m unittest discover -s tests
 ```
 
 `--write` writes the proposals as an ecat configuration file, `--import`
 converts an lcec XML file, and `--check` checks a file and compares the bus
-with it. The file format: [docs/config-format.md](docs/config-format.md).
+with it. `--update` brings a file up to date with the bus and keeps what is
+in it: slaves still on the bus keep their entries (names, pins, settings,
+mapping), slaves moved by others put in or taken out before them keep
+theirs at the new position, new slaves get proposals, missing ones are
+left out, and each change is reported. The old file is kept as `.bak`. The file format: [docs/config-format.md](docs/config-format.md).
 What the prototype found on a real bus:
 [docs/prototype-step1.md](docs/prototype-step1.md).
 
