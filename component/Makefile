@@ -5,11 +5,12 @@
 #   sudo make install    install it in LinuxCNC's module directory
 #
 # Needs LinuxCNC's halcompile and headers (linuxcnc-uspace-dev), libyaml-dev,
-# and the userspace master installed in USPACE_ETHERCAT.
+# and the userspace master installed in USPACE_ETHERCAT: the package
+# linuxcnc-ethercat-uspace 0.3 or newer, or a master built from source.
 
 .DEFAULT_GOAL := all
 
-USPACE_ETHERCAT ?= /opt/ethercat-uspace
+USPACE_ETHERCAT ?= /opt/linuxcnc-ethercat-uspace
 # A package build can take the master's headers and libraries from a staging
 # directory, while the run-time path (rpath) stays USPACE_ETHERCAT.
 USPACE_SYSROOT ?=

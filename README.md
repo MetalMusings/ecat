@@ -18,13 +18,33 @@ built in steps.
 Read the design draft:
 [docs/design/ethercat-setup.md](docs/design/ethercat-setup.md).
 
+## Install
+
+Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer:
+
+1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 0.3 or newer,
+   from the `uspace-v*` releases of
+   [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases);
+2. `linuxcnc-ecat` from this repository's `ecat-v*`
+   [releases](https://github.com/MetalMusings/ecat/releases): the `ecat`
+   HAL component and the `ecatsetup` command.
+
+```
+sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb ./linuxcnc-ecat_*_amd64.deb
+```
+
+`scripts/build-deb.sh` builds the `linuxcnc-ecat` package on a machine with
+the master package, `linuxcnc-uspace-dev` and `libyaml-dev` installed
+(`-w` builds uncommitted changes, to try them out).
+
 ## Prototype
 
 `ecatsetup` is the first step: it reads the slaves on the bus (SII, CoE
 dictionary, ESI files) and proposes their process data, distributed clocks
 and HAL pins, optionally compared with an lcec XML file. It only reads from
 the bus. It needs a running userspace master (`sudo ethercat-uspace start`,
-or LinuxCNC with `lcec_uspace`):
+or LinuxCNC with `lcec_uspace` or `ecat`). Installed from the package it
+is the command `ecatsetup`; from this repository, `python3 -m ecatsetup`:
 
 ```
 python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
@@ -62,8 +82,9 @@ What the prototype found on a real bus:
 
 `component/` holds the `ecat` HAL component, lcec_uspace's code (moved here
 with its history) configured from `ethercat.yaml` instead of lcec's XML
-file. It needs the userspace master in `/opt/ethercat-uspace` (see
-Background), `linuxcnc-uspace-dev` and `libyaml-dev`:
+file. The package installs it; to build it from here, it needs the
+userspace master package (or a master built from source, with
+`USPACE_ETHERCAT=<its prefix>`), `linuxcnc-uspace-dev` and `libyaml-dev`:
 
 ```
 cd component

@@ -11,6 +11,7 @@ Only reads from the bus; nothing is written to the slaves.
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from dataclasses import asdict
@@ -154,7 +155,9 @@ def compare(p, coe, h, out):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="python3 -m ecatsetup", description=__doc__.split("\n")[0])
+    prog = os.path.basename(sys.argv[0])
+    prog = "python3 -m ecatsetup" if prog == "__main__.py" else prog
+    ap = argparse.ArgumentParser(prog=prog, description=__doc__.split("\n")[0])
     ap.add_argument("--esi", action="append", default=[], help="ESI file or folder (repeatable)")
     ap.add_argument("--ini", help="LinuxCNC INI file, for the servo period")
     ap.add_argument("--compare", help="lcec XML file (ethercat-conf.xml) to compare with")

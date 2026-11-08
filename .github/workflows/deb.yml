@@ -1,0 +1,110 @@
+# Builds linuxcnc-ecat_*.deb (the ecat HAL component and the ecatsetup
+# command) for Debian 12 and 13, with scripts/build-deb.sh.
+#
+# - "Run workflow" on the Actions tab: the packages are kept as artifacts of
+#   the run (90 days, downloadable when logged in).
+# - A pushed tag ecat-v* (git tag ecat-v0.1 && git push github ecat-v0.1):
+#   the packages are also put on a pre-release for the tag. The prefix keeps
+#   these apart from the v* tags of lcec's history.
+#
+# The package is built against the userspace master package
+# linuxcnc-ethercat-uspace from a release of MetalMusings/linuxcnc-ethercat,
+# and LinuxCNC 2.9.4: from linuxcnc.org on Debian 12, Debian's own on 13.
+
+name: Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      master_release:
+        description: Release of MetalMusings/linuxcnc-ethercat with the master package
+        default: uspace-v0.3
+  push:
+    tags: ['ecat-v*']
+
+permissions:
+  contents: read
+
+env:
+  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v0.3' }}
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - debian: bookworm
+            id: debian12
+            linuxcnc: '=1:2.9.4'
+          - debian: trixie
+            id: debian13
+            linuxcnc: ''  # Debian's own 2.9.4 with its updates
+    container: debian:${{ matrix.debian }}
+    steps:
+      - name: Build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential git dpkg-dev libyaml-dev python3 python3-yaml \
+            ca-certificates curl gnupg dirmngr
+
+      - name: LinuxCNC 2.9 (linuxcnc.org on Debian 12)
+        if: matrix.debian == 'bookworm'
+        run: |
+          export GNUPGHOME=$(mktemp -d)
+          gpg --keyserver hkp://keyserver.ubuntu.com --recv-key 3cb9fd148f374fef
+          gpg --export 'EMC Archive Signing Key' > /usr/share/keyrings/linuxcnc-old.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/linuxcnc-old.gpg] https://www.linuxcnc.org/ bookworm base 2.9-uspace" \
+            > /etc/apt/sources.list.d/linuxcnc.list
+          apt-get update
+
+      - name: linuxcnc-uspace-dev ${{ matrix.linuxcnc }}
+        run: |
+          apt-get install -y --no-install-recommends \
+            linuxcnc-uspace${{ matrix.linuxcnc }} linuxcnc-uspace-dev${{ matrix.linuxcnc }}
+
+      - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
+        run: |
+          url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/linuxcnc-ethercat/releases/tags/$MASTER_RELEASE" \
+            | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p')
+          test -n "$url" || { echo "no ${{ matrix.id }} package in $MASTER_RELEASE"; exit 1; }
+          curl -fsSL -o /tmp/master.deb "$url"
+          apt-get install -y --no-install-recommends /tmp/master.deb
+
+      - uses: actions/checkout@v4
+
+      - name: Build the package
+        run: |
+          # The checkout belongs to another user than the container's root.
+          git config --global --add safe.directory '*'
+          scripts/build-deb.sh -o out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.debian }}
+          path: out/*.deb
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/ecat-v')
+    needs: deb
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Release ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Pre-release while ecat is in early development.
+          gh release create "${{ github.ref_name }}" out/*.deb \
+            --repo "${{ github.repository }}" --prerelease \
+            --title "ecat ${{ github.ref_name }}" \
+            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.9.4 or newer: debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). They need linuxcnc-ethercat-uspace ${{ env.MASTER_RELEASE }} or newer from [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."
