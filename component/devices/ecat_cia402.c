@@ -30,8 +30,9 @@
 ///   actual position (CSP) or the target velocity 0 (CSV), so it does not
 ///   move when it is enabled.
 /// - If the drive faults, leaves "Operation enabled" by itself, does not
-///   get there within `enable-timeout-ms`, the bus stops exchanging data, or
-///   the `watchdog` pin stops changing, the drive is shut down and
+///   get there within `enable-timeout-ms`, the bus stops exchanging data,
+///   the `watchdog` pin stops changing, or the command is not a finite
+///   number (NaN or infinite), the drive is shut down and
 ///   `drv-fault` is set. It stays shut down until `enable` goes false;
 ///   `fault-reason` says why.
 
@@ -87,6 +88,7 @@ enum {
   WHY_LEFT_ENABLED,      // the drive left "Operation enabled" by itself
   WHY_WATCHDOG,          // the watchdog pin stopped changing
   WHY_WRONG_MODE,        // the drive does not report the configured mode
+  WHY_BAD_COMMAND,       // pos-cmd or velocity-cmd is not a finite number
 };
 
 #define FAULT_RESET_NS 100000000LL  // how long fault reset is held at most
@@ -349,6 +351,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   int reset_edge = *d->fault_reset && !d->fault_reset_old;
   int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
   int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->mode;
+  double cmd = d->mode == MODE_CSV ? *d->velocity_cmd : *d->pos_cmd;
   int run;
   uint16_t cw;
 
@@ -380,6 +383,10 @@ static void cia402_write(lcec_slave_t *slave, long period) {
       block(d, WHY_BUS);
     } else if (d->watchdog_ms != 0 && d->watchdog_ns >= (long long)d->watchdog_ms * 1000000LL) {
       block(d, WHY_WATCHDOG);
+    } else if (!isfinite(cmd)) {
+      // never clamped into a target: that would be a jump to the end of
+      // the range
+      block(d, WHY_BAD_COMMAND);
     } else if (faulted && d->reset_ns <= 0) {
       block(d, WHY_DRIVE_FAULT);
     } else if (d->was_enabled && d->state != ST_OPERATION_ENABLED) {
