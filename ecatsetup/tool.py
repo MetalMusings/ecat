@@ -30,6 +30,16 @@ def slave_positions():
     return [int(line.split()[0]) for line in run("slaves").splitlines() if line.strip()]
 
 
+def slave_list():
+    """Position -> (name, master's error flag), from the slave list."""
+    slaves = {}
+    for line in run("slaves").splitlines():
+        f = line.split(None, 4)
+        if len(f) >= 4:
+            slaves[int(f[0])] = (f[4] if len(f) > 4 else "", f[3] == "E")
+    return slaves
+
+
 def slave_info(pos):
     """Identity and state from "slaves -v" for one slave."""
     text = run("slaves", "-v", "-p", pos)

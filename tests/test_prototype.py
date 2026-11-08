@@ -7,10 +7,11 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from ecatsetup import update, coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
+from ecatsetup import update, diagnose, coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
@@ -333,5 +334,68 @@ class TestUpdate(unittest.TestCase):
         self.assertEqual(len(notes), 2)
 
 
+
+class FakeBus:
+    """Registers and SDOs of one slave, as the ethercat tool would give them."""
+
+    def __init__(self, regs, sdos, later=None, slave_line="0  0:0  OP  +  Some Drive"):
+        self.regs, self.sdos, self.later, self.reads = regs, sdos, later or {}, 0
+        self.slave_line = slave_line
+
+    def run(self, *args, binary=False):
+        if args[0] == "slaves":
+            return self.slave_line + "\n"
+        if args[0] == "diag":
+            return "Slave does not provide a diagnosis history (0x10F3).\n"
+        if args[0] == "reg_read":
+            address, length = int(args[3], 16), int(args[4])
+            if address == 0x0300:
+                self.reads += 1
+            regs = dict(self.regs)
+            if address == 0x0300 and self.reads > 1:
+                regs.update(self.later)
+            return " ".join("0x%02x" % regs.get(address + i, 0) for i in range(length))
+        raise AssertionError(args)
+
+    def upload(self, pos, index, subindex, dtype):
+        return self.sdos.get(index)
+
+
+class TestDiagnose(unittest.TestCase):
+    def run_diagnose(self, bus):
+        lines = []
+        with mock.patch.object(diagnose.tool, "run", bus.run), \
+                mock.patch.object(diagnose.tool, "upload", bus.upload):
+            found = diagnose.diagnose([0], seconds=0, out=lines.append)
+        return found, "\n".join(lines)
+
+    def test_state_error_cable_and_drive_fault(self):
+        regs = {0x0130: 0x14, 0x0134: 0x1D,          # SAFEOP + error, invalid output configuration
+                0x0110: 0x30, 0x0303: 3}             # link on ports 0 and 1; port 1 phy errors
+        later = {0x0303: 9}                          # ... which grow
+        sdos = {0x1000: 0x00020192, 0x6041: 0x0218, 0x603F: 0x7305, 0x6061: 8, 0x6060: 8}
+        found, text = self.run_diagnose(FakeBus(regs, sdos, later))
+        self.assertIn("State: SAFEOP, error 0x001D: Invalid output configuration", text)
+        self.assertIn("Port 1: link; since power-on: phy 9", text)
+        self.assertIn("phy increased by 6", text)
+        self.assertIn("CiA 402: Fault (status word 0x0218), mode CSP", text)
+        self.assertIn("0x7305 incremental sensor 1 fault", text)
+        self.assertEqual(found, 4)  # state, cable, error code, fault
+
+    def test_healthy_slave(self):
+        regs = {0x0130: 0x08, 0x0110: 0x10, 0x0301: 255}   # OP; old saturated phy count
+        found, text = self.run_diagnose(FakeBus(regs, {}))
+        self.assertEqual(found, 0)
+        self.assertIn("phy 255+", text)
+        self.assertNotIn("->", text)
+
+    def test_error_acknowledged_by_the_master(self):
+        regs = {0x0130: 0x02, 0x0110: 0x10}                # PREOP, no error flag, no code
+        found, text = self.run_diagnose(FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO"))
+        self.assertEqual(found, 1)
+        self.assertIn("only in the master's log", text)
+
+
 if __name__ == "__main__":
     unittest.main()
+

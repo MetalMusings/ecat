@@ -17,7 +17,7 @@ from dataclasses import asdict
 
 import yaml
 
-from . import coe as coe_mod, config, esi, importxml, lcecxml, propose, sii as sii_mod, tool, update
+from . import coe as coe_mod, config, diagnose, esi, importxml, lcecxml, propose, sii as sii_mod, tool, update
 
 
 def ini_value(ini_path, section, key):
@@ -166,6 +166,10 @@ def main(argv=None):
     ap.add_argument("--update", metavar="FILE",
                     help="update an ecat configuration from the bus, keeping its choices; "
                          "written back with a .bak copy, or to --write")
+    ap.add_argument("--diagnose", action="store_true",
+                    help="diagnose the slaves: state, cables, the slave's messages, CiA 402")
+    ap.add_argument("--seconds", type=float, default=2.0,
+                    help="for --diagnose, how long to watch the error counters")
     ap.add_argument("--check", metavar="FILE", help="check an ecat configuration, and the bus against it")
     ap.add_argument("--import", dest="import_xml", metavar="XML",
                     help="import an lcec XML file; with --write, write it as an ecat configuration")
@@ -173,6 +177,8 @@ def main(argv=None):
 
     if args.check:
         sys.exit(check_file(args.check))
+    if args.diagnose:
+        sys.exit(diagnose_bus(args))
     if args.import_xml:
         sys.exit(import_file(args))
 
@@ -208,6 +214,18 @@ def main(argv=None):
         except ValueError as e:
             sys.exit(str(e))
         print("Wrote %s" % args.write)
+
+
+def diagnose_bus(args):
+    """Diagnose the slaves on the bus. Returns an exit code."""
+    try:
+        positions = args.position or tool.slave_positions()
+        found = diagnose.diagnose(positions, args.seconds)
+    except tool.ToolError as e:
+        print("Cannot reach a master: %s\nStart one with: sudo ethercat-uspace start" % e)
+        return 2
+    print("No problems found" if not found else "%d problem%s found" % (found, "" if found == 1 else "s"))
+    return 1 if found else 0
 
 
 def update_file(args, proposals, period):
