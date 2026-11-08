@@ -17,6 +17,21 @@ with the design draft; code follows in steps.
 Read the design draft:
 [docs/design/ethercat-setup.md](docs/design/ethercat-setup.md).
 
+## Prototype
+
+`ecatsetup` is the first step: it reads the slaves on the bus (SII, CoE
+dictionary, ESI files) and proposes their process data, distributed clocks
+and HAL pins, optionally compared with an lcec XML file. It only reads from
+the bus. It needs a running userspace master (`sudo ethercat-uspace start`,
+or LinuxCNC with `lcec_uspace`):
+
+```
+python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
+python3 -m unittest discover -s tests
+```
+
+What it found on a real bus: [docs/prototype-step1.md](docs/prototype-step1.md).
+
 ## Background
 
 `ecat` grows out of `lcec_uspace`, a build of
