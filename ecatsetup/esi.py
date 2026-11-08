@@ -38,6 +38,14 @@ class EsiPdo:
 
 
 @dataclass
+class EsiPdoSet:
+    """A predefined PDO assignment (AlternativeSmMapping), as TwinCAT offers."""
+    name: str
+    default: bool
+    sms: dict            # sync manager -> PDO indexes
+
+
+@dataclass
 class EsiDcMode:
     name: str
     desc: str
@@ -58,6 +66,7 @@ class EsiDevice:
     pdos: list = field(default_factory=list)
     dc_modes: list = field(default_factory=list)
     init_cmds: list = field(default_factory=list)   # (transition, index, subindex, data hex)
+    pdo_sets: list = field(default_factory=list)
 
 
 def _text(el, path):
@@ -93,6 +102,11 @@ def _device(path, vendor_id, dev):
             number(_text(m, "AssignActivate") or "0"),
             number(c0.get("Factor")) if c0 is not None and c0.get("Factor") else 1,
             number(_text(m, "ShiftTimeSync0") or "0")))
+    for a in dev.findall("Info/VendorSpecific/TwinCAT/AlternativeSmMapping"):
+        sms = {}
+        for sm in a.findall("Sm"):
+            sms[number(sm.get("No"))] = [number(x.text) for x in sm.findall("Pdo") if x.text]
+        d.pdo_sets.append(EsiPdoSet(_text(a, "Name"), a.get("Default") in ("1", "true"), sms))
     for c in dev.findall("Mailbox/CoE/InitCmd"):
         d.init_cmds.append((",".join(t.text for t in c.findall("Transition")),
                             number(_text(c, "Index")), number(_text(c, "SubIndex") or "0"),

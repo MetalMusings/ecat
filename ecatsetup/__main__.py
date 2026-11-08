@@ -44,7 +44,7 @@ def servo_period(ini_path):
         return None
 
 
-def read_slave(pos, esi_devices, mode):
+def read_slave(pos, esi_devices, mode, pdo_set=None):
     info = tool.slave_info(pos)
     sii = sii_mod.parse(tool.sii(pos))
     coe = coe_mod.Dictionary(tool.sdos(pos)) if sii.has_coe else coe_mod.Dictionary()
@@ -53,7 +53,7 @@ def read_slave(pos, esi_devices, mode):
     if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in coe.objects:
         modes = tool.upload(pos, 0x6502, 0, "uint32")
     dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
-    p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode)
+    p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
     return info, coe, p
 
 
@@ -79,6 +79,8 @@ def report(info, coe, p, period, hand, out):
         w("  Drive modes (0x6502): %s; using %s" % (" ".join(p.drive_modes), p.mode.upper()))
     w("  ESI: %s" % (p.esi_path or "no matching file"))
     w("  Process data (%s):" % p.pdo_source)
+    if p.pdo_sets:
+        w("    predefined in the ESI: %s" % "; ".join(p.pdo_sets))
     for pd in p.pdos:
         w("    SM%d %s 0x%04X \"%s\"" % (pd.sm, "out" if pd.direction == "rx" else "in",
                                         pd.index, pd.name))
@@ -157,6 +159,8 @@ def main(argv=None):
     ap.add_argument("--compare", help="lcec XML file (ethercat-conf.xml) to compare with")
     ap.add_argument("--mode", default="csp", choices=sorted(propose.CIA402_MODES),
                     help="cyclic mode for CiA 402 drives")
+    ap.add_argument("--pdo-set", action="append", default=[], metavar="POS=NAME",
+                    help="use the ESI's predefined PDO assignment NAME for slave POS")
     ap.add_argument("-p", "--position", type=int, action="append", help="only these slaves")
     ap.add_argument("--json", action="store_true", help="the proposals as JSON")
     ap.add_argument("--write", metavar="FILE", help="write the proposals as an ecat configuration")
@@ -184,6 +188,12 @@ def main(argv=None):
 
     esi_devices = esi.load_dirs(args.esi)
     period = servo_period(args.ini) if args.ini else None
+    pdo_sets = {}
+    for a in args.pdo_set:
+        pos, _, name = a.partition("=")
+        if not pos.isdigit() or not name:
+            sys.exit("--pdo-set takes POS=NAME, such as 3=\"Standard 32 Bit (MDP 511)\"")
+        pdo_sets[int(pos)] = name
     hand = {s.idx: s for s in lcecxml.load(args.compare).slaves} if args.compare else {}
 
     try:
@@ -198,7 +208,7 @@ def main(argv=None):
         out.append("Servo period: %d ns (from %s)" % (period, args.ini))
     out.append("")
     for pos in positions:
-        info, coe, p = read_slave(pos, esi_devices, args.mode)
+        info, coe, p = read_slave(pos, esi_devices, args.mode, pdo_sets.get(pos))
         proposals.append(p)
         report(info, coe, p, period, hand.get(pos) if args.compare else None, out)
 

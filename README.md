@@ -29,6 +29,7 @@ or LinuxCNC with `lcec_uspace`):
 ```
 python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
 python3 -m ecatsetup --ini <machine>.ini --write ethercat.yaml --interface enp2s0
+python3 -m ecatsetup --esi <ESI folder> --pdo-set "3=Standard 32 Bit (MDP 511)" --write ethercat.yaml
 python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethercat.yaml
 python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
 python3 -m ecatsetup --check ethercat.yaml
@@ -36,6 +37,9 @@ python3 -m ecatsetup --diagnose
 python3 -m unittest discover -s tests
 ```
 
+With ESI files, a slave gets the ESI's predefined PDO assignment that
+the ESI marks as default (TwinCAT's "Predefined PDO Assignment"), or the
+one named with `--pdo-set`; the report lists them.
 `--write` writes the proposals as an ecat configuration file, `--import`
 converts an lcec XML file, and `--check` checks a file and compares the bus
 with it. `--update` brings a file up to date with the bus and keeps what is

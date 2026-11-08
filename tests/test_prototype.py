@@ -64,6 +64,14 @@ class TestPropose(unittest.TestCase):
         self.assertEqual(entries[(0x7000, 0)].pin, "output4")
         self.assertTrue(any("subindexes taken from the CoE dictionary" in n for n in p.notes))
         self.assertIsNone(p.dc_assign)
+
+    def test_optional_dc_is_not_used(self):
+        # An I/O terminal such as the EL5101 lists free run first, DC as an option.
+        s, d = easercat()
+        s.dc_modes = [sii.DcMode("Synchron", 0, 0, 0, 0), sii.DcMode("DC", 0x320, 0, 0, 1)]
+        p = propose.propose({"position": 3, "dc": True}, s, d, device_type=5001)
+        self.assertIsNone(p.dc_assign)
+        self.assertTrue(any("DC is optional" in n for n in p.notes))
         self.assertEqual(len(p.settings), 10)
 
     def cia402_sii(self, tx_entries):
@@ -123,7 +131,43 @@ ESI = """<?xml version="1.0"?>
 """
 
 
+ENCODER_ESI = """<?xml version="1.0"?>
+<EtherCATInfo><Vendor><Id>2</Id></Vendor><Descriptions><Devices>
+<Device><Type ProductCode="#x13ed3052" RevisionNo="#x03ff0000">EL5101</Type><Name>Encoder</Name>
+ <Info><VendorSpecific><TwinCAT>
+  <AlternativeSmMapping><Name>Legacy</Name><Sm No="3"><Pdo>#x1a00</Pdo></Sm></AlternativeSmMapping>
+  <AlternativeSmMapping Default="1"><Name>Standard 16 Bit</Name><Sm No="3"><Pdo>#x1a03</Pdo></Sm></AlternativeSmMapping>
+  <AlternativeSmMapping><Name>Standard 32 Bit</Name><Sm No="3"><Pdo>#x1a04</Pdo></Sm></AlternativeSmMapping>
+ </TwinCAT></VendorSpecific></Info>
+ <TxPdo Sm="3" Fixed="1"><Index>#x1a00</Index><Name>Inputs</Name>
+  <Entry><Index>#x6000</Index><SubIndex>2</SubIndex><BitLen>16</BitLen><Name>Value</Name><DataType>UINT</DataType></Entry></TxPdo>
+ <TxPdo Fixed="1"><Index>#x1a03</Index><Name>ENC Status compact</Name>
+  <Entry><Index>#x6010</Index><SubIndex>17</SubIndex><BitLen>16</BitLen><Name>Counter value</Name><DataType>UINT</DataType></Entry></TxPdo>
+ <TxPdo Fixed="1"><Index>#x1a04</Index><Name>ENC Status</Name>
+  <Entry><Index>#x6010</Index><SubIndex>1</SubIndex><BitLen>1</BitLen><Name>Status__Latch C valid</Name><DataType>BOOL</DataType></Entry>
+  <Entry><Index>#x6010</Index><SubIndex>17</SubIndex><BitLen>32</BitLen><Name>Counter value</Name><DataType>UDINT</DataType></Entry></TxPdo>
+</Device></Devices></Descriptions></EtherCATInfo>
+"""
+
+
 class TestEsi(unittest.TestCase):
+    def test_predefined_pdo_assignments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "enc.xml")
+            with open(path, "w") as f:
+                f.write(ENCODER_ESI)
+            dev = esi.load_file(path)[0]
+        self.assertEqual([(s.name, s.default) for s in dev.pdo_sets],
+                         [("Legacy", False), ("Standard 16 Bit", True), ("Standard 32 Bit", False)])
+        s = sii.Sii(2, 0x13ED3052, 0x03FF0000, 0, 0, name="EL5101")
+        info = {"position": 3, "dc": False}
+        p = propose.propose(info, s, coe.Dictionary(), esi_dev=dev, esi_exact=True)
+        self.assertEqual([pd.index for pd in p.pdos], [0x1A03])          # the ESI's default
+        p = propose.propose(info, s, coe.Dictionary(), esi_dev=dev, esi_exact=True,
+                            pdo_set="standard 32 bit")
+        self.assertEqual([(pd.sm, pd.index) for pd in p.pdos], [(3, 0x1A04)])
+        self.assertEqual([e.pin for e in p.pdos[0].entries], ["latch-c-valid", "counter-value"])
+
     def test_parse_and_find(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ect.xml")
