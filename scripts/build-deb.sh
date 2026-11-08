@@ -8,7 +8,8 @@
 #
 #   -o  directory for the .deb. Default: the current directory.
 #   -w  build the working tree, with uncommitted changes, to try them out;
-#       the version then ends in "+dirty".
+#       the version gets "~dirty" after the date, so that such a build sorts
+#       before a real one from the same day and is replaced by it.
 #
 # Otherwise the committed state of this repository is built, from a fresh
 # clone, so uncommitted changes are not packaged. The package is built for the Debian
@@ -31,7 +32,7 @@ WORKTREE=
 while getopts "o:wh" opt; do
     case $opt in
         o) OUTDIR=$(realpath "$OPTARG") ;;
-        w) WORKTREE=+dirty ;;
+        w) WORKTREE=~dirty ;;
         *) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 1 ;;
     esac
 done
@@ -98,7 +99,9 @@ echo "ecat: $(git -C "$SRC" rev-parse HEAD)$WORKTREE" >"$DOC/VERSION"
 step "Control file"
 . /etc/os-release
 ARCH=$(dpkg --print-architecture)
-VERSION=$BASE_VERSION+git$(date +%Y%m%d).$REV$WORKTREE~$ID$VERSION_ID
+# The date is UTC, as on the CI machines, so that a local build late in the
+# evening does not get a later date than a release built at the same time.
+VERSION=$BASE_VERSION+git$(date -u +%Y%m%d)$WORKTREE.$REV~$ID$VERSION_ID
 MAINTAINER="$(git -C "$SRC" log -1 --format='%an <%ae>')"
 
 # Library dependencies of ecat.so, without libethercat.so.2 (from
