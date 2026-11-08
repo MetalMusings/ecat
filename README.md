@@ -88,6 +88,9 @@ addf ecat.write-all servo-thread
   gets the CiA 402 state machine and scaled position and velocity pins in
   the component, with the pins of the cia402 HAL component:
   [docs/cia402.md](docs/cia402.md).
+- Incremental encoder channels laid out as in MDP 511 (EL5101, EL5151,
+  EL5152, EL7041, ...) get position, velocity, index and latch pins, like
+  LinuxCNC's encoder component: [docs/encoder.md](docs/encoder.md).
 
 A configuration imported from lcec can keep lcec's pin names by naming
 the slaves `lcec.0.<name>`, so that existing HAL files work with only the

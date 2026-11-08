@@ -49,7 +49,7 @@ class Entry:
     bitlen: int
     name: str
     data_type: str
-    role: str            # "profile", "pin" or "gap"
+    role: str            # "profile" (cia402), "encoder", "pin" or "gap"
     pin: str = ""
     hal_type: str = ""
 
@@ -84,7 +84,38 @@ class Proposal:
     dc_source: str = ""
     esi_path: str = ""
     settings: list = field(default_factory=list)   # writable vendor objects
+    encoders: list = field(default_factory=list)   # (name, status index) of encoder channels
     notes: list = field(default_factory=list)
+
+
+# Encoder channels laid out as in ETG.5001 MDP 511: inputs at a status
+# index S, outputs at S + 0x1000. The ecat encoder function handles these.
+ENCODER_INPUTS = {0x01, 0x02, 0x03, 0x11, 0x12}
+ENCODER_OUTPUTS = {0x01, 0x02, 0x03, 0x04, 0x11}
+
+
+def _short(name):
+    return (name or "").split("__")[-1].strip().lower()
+
+
+def encoder_channels(entries):
+    """Status indexes of the encoder channels among the mapped entries: a
+    16 or 32-bit "Counter value" at S:11 and "Latch C valid" at S:01."""
+    by = {(e.index, e.subindex): e for e in entries}
+    found = []
+    for (index, sub), e in sorted(by.items()):
+        if (sub == 0x11 and 0x6000 <= index <= 0x6FF0 and index & 0xF == 0
+                and e.bitlen in (16, 32) and _short(e.name) == "counter value"
+                and _short(getattr(by.get((index, 0x01)), "name", "")) == "latch c valid"):
+            found.append(index)
+    return found
+
+
+def encoder_owned(index, entries):
+    """The entries of the channel at status index `index` that it handles."""
+    return {(e.index, e.subindex) for e in entries
+            if (e.index == index and e.subindex in ENCODER_INPUTS)
+            or (e.index == index + 0x1000 and e.subindex in ENCODER_OUTPUTS)}
 
 
 def kebab(name):
@@ -191,6 +222,18 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
             p.notes.append("the default PDOs lack %s for %s; the mapping must be changed"
                            % (", ".join("0x%04X" % i for i in sorted(missing)), mode.upper()))
 
+    # Encoder channels: the encoder function handles their counter and latches.
+    mapped = [e for pd in pdos for e in pd.entries]
+    enc_owned = set()
+    channels = encoder_channels(mapped)
+    for n, index in enumerate(channels, 1):
+        name = "enc" if len(channels) == 1 else "enc-%d" % n
+        p.encoders.append((name, index))
+        enc_owned |= encoder_owned(index, mapped)
+        bits = next(e.bitlen for e in mapped if (e.index, e.subindex) == (index, 0x11))
+        p.notes.append("encoder %s: channel 0x%04X, %d-bit counter; position, velocity, index "
+                       "and latch pins from the encoder function" % (name, index, bits))
+
     # Names that occur in more than one PDO get the PDO's name as a prefix.
     counts = {}
     for pd in pdos:
@@ -210,6 +253,8 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                 e.data_type = coe_t
             if p.profile == 402 and e.index in CIA402_PROFILE:
                 e.role = "profile"
+            elif (e.index, e.subindex) in enc_owned:
+                e.role = "encoder"
             elif p.profile == 402 and e.index in CIA402_PINS:
                 e.pin, e.hal_type = CIA402_PINS[e.index]
             else:

@@ -11,7 +11,7 @@ import re
 
 import yaml
 
-from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS
+from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS, ENCODER_INPUTS, ENCODER_OUTPUTS
 
 FORMAT_VERSION = 1
 
@@ -42,6 +42,11 @@ def obj(index, subindex):
     return "0x%04X:%02X" % (index, subindex)
 
 
+# the encoder function's pins and parameters, after "<slave>.<channel>."
+ENCODER_PINS = ("reset", "counts", "raw-count", "pos", "velocity", "ok", "index-enable",
+                "latch-enable-pos", "latch-enable-neg", "latch-pos")
+
+
 def parse_obj(text):
     """"0x6040:00" -> (0x6040, 0)."""
     m = _OBJECT.match(str(text))
@@ -61,7 +66,7 @@ def _entry(e):
         d["use"] = "gap"
         return d
     d["type"] = e.data_type
-    if e.role == "profile":
+    if e.role in ("profile", "encoder"):
         d["use"] = "profile"
     elif e.pin:
         d["pin"] = e.pin
@@ -80,6 +85,8 @@ def slave_from_proposal(p, name=None):
     }
     if p.profile == 402:
         s["cia402"] = {"mode": p.mode}
+    if p.encoders:
+        s["encoders"] = [{"name": n, "index": "0x%04X" % i} for n, i in p.encoders]
     pd = {"outputs": [], "inputs": []}
     for c in p.pdos:
         pd["outputs" if c.direction == "rx" else "inputs"].append(
@@ -184,6 +191,39 @@ def check(cfg):
         if profile == "cia402" and (s.get("cia402") or {}).get("mode") not in CIA402_MODES:
             err("%s: cia402 mode must be one of %s" % (where, ", ".join(sorted(CIA402_MODES))))
 
+        # encoder channels: status index -> name
+        encoders = {}
+        enc = s.get("encoders") or []
+        if not isinstance(enc, list):
+            err("%s: encoders must be a list" % where)
+            enc = []
+        for ch in enc:
+            ch = ch if isinstance(ch, dict) else {}
+            cname = ch.get("name")
+            try:
+                index = int(str(ch.get("index")), 16)
+            except ValueError:
+                index = -1
+            if not isinstance(cname, str) or not _NAME.match(cname):
+                err("%s: encoder name %r is not valid" % (where, cname))
+                continue
+            if not (0x6000 <= index <= 0x6FF0 and index & 0xF == 0):
+                err("%s: encoder %s: index must be the channel's status index, 0x6000 to 0x6FF0 "
+                    "in steps of 0x10" % (where, cname))
+                continue
+            if index in encoders or cname in encoders.values():
+                err("%s: encoder %s: index or name used twice" % (where, cname))
+            encoders[index] = cname
+            for pin in ENCODER_PINS:
+                pins.add("%s.%s.%s" % (name, cname, pin))
+
+        def encoder_of(o):
+            if o[0] in encoders and o[1] in ENCODER_INPUTS:
+                return encoders[o[0]]
+            if o[0] - 0x1000 in encoders and o[1] in ENCODER_OUTPUTS:
+                return encoders[o[0] - 0x1000]
+            return None
+
         seen = set()
         owned = set()
         for direction in ("outputs", "inputs"):
@@ -201,9 +241,14 @@ def check(cfg):
                             err("%s: %s is handled by the cia402 profile; give it use: profile"
                                 % (where, e["object"]))
                         owned.add(o[0])
+                    elif encoder_of(o):
+                        if e.get("use") != "profile":
+                            err("%s: %s is handled by encoder %s; give it use: profile"
+                                % (where, e["object"], encoder_of(o)))
+                        owned.add(o)
                     elif e.get("use") == "profile":
-                        err("%s: %s: use: profile is only for the cia402 profile's objects"
-                            % (where, e["object"]))
+                        err("%s: %s: use: profile is only for objects of the cia402 profile or an "
+                            "encoder channel" % (where, e["object"]))
                     if o in seen:
                         err("%s: %s mapped twice" % (where, e["object"]))
                     seen.add(o)
@@ -234,6 +279,10 @@ def check(cfg):
                         elif full in pins:
                             err("%s: pin %s used twice" % (where, full))
                         pins.add(full)
+        for index, cname in encoders.items():
+            if (index, 0x11) not in owned:
+                err("%s: encoder %s needs 0x%04X:11 (counter value) in the process data"
+                    % (where, cname, index))
         if profile == "cia402":
             rx, tx = CIA402_NEEDS.get((s.get("cia402") or {}).get("mode"), (set(), set()))
             for i in sorted((rx | tx) - owned):

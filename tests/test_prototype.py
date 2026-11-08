@@ -167,9 +167,35 @@ class TestEsi(unittest.TestCase):
         p = propose.propose(info, s, coe.Dictionary(), esi_dev=dev, esi_exact=True,
                             pdo_set="standard 32 bit")
         self.assertEqual([(pd.sm, pd.index) for pd in p.pdos], [(3, 0x1A04)])
-        self.assertEqual([e.pin for e in p.pdos[0].entries], ["latch-c-valid", "counter-value"])
-        # a 32-bit counter counts down past 0: signed
-        self.assertEqual([e.hal_type for e in p.pdos[0].entries], ["bit", "s32"])
+        # an MDP 511 encoder channel: the encoder function handles it
+        self.assertEqual(p.encoders, [("enc", 0x6010)])
+        self.assertEqual([e.role for e in p.pdos[0].entries], ["encoder", "encoder"])
+        s = config.slave_from_proposal(p)
+        self.assertEqual(s["encoders"], [{"name": "enc", "index": "0x6010"}])
+        self.assertEqual(config.check({"ecat": 1, "master": {}, "slaves": [s]}), [])
+
+    def test_encoder_rules(self):
+        def slave(entries, encoders=({"name": "enc", "index": "0x6000"},)):
+            return {"ecat": 1, "master": {}, "slaves": [{
+                "position": 0, "name": "e", "identity": {"vendor": "0x2", "product": "0x13ed3052"},
+                "profile": "mdp", "encoders": list(encoders),
+                "process-data": {"inputs": [{"pdo": "0x1A04", "sm": 3, "entries": entries}]}}]}
+        counter = {"object": "0x6000:11", "bits": 32, "type": "UDINT", "use": "profile"}
+        self.assertEqual(config.check(slave([counter])), [])
+        pinned = dict(counter, pin="count", **{"hal-type": "s32"})
+        del pinned["use"]
+        self.assertTrue(any("handled by encoder enc" in e for e in config.check(slave([pinned]))))
+        valid = {"object": "0x6000:01", "bits": 1, "type": "BOOL", "use": "profile"}
+        self.assertTrue(any("needs 0x6000:11" in e for e in config.check(slave([valid]))))
+        self.assertTrue(any("status index" in e for e in config.check(
+            slave([counter], [{"name": "enc", "index": "0x6001"}]))))
+        self.assertTrue(any("only for objects" in e for e in config.check(slave([counter], []))))
+
+    def test_a_pulse_counter_is_not_an_encoder(self):
+        # EL2521: a "Counter value" without "Latch C valid"
+        e = [propose.Entry(0x6020, 0x11, 32, "Counter value", "UDINT", "pin"),
+             propose.Entry(0x6020, 0x03, 1, "Set counter done", "BOOL", "pin")]
+        self.assertEqual(propose.encoder_channels(e), [])
 
     def test_parse_and_find(self):
         with tempfile.TemporaryDirectory() as tmp:

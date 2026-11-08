@@ -325,6 +325,7 @@ typedef struct lcec_slave {
   uint64_t flags;                            ///< Flags, as defined by the driver itself.
   lcec_pdo_entry_reg_t *regs;
   void *profile_data;                        ///< Data of the slave's profile (ecat), if any.
+  void *encoder_data;                        ///< Data of the slave's encoder channels (ecat), if any.
 } lcec_slave_t;
 
 /// @brief HAL pin description.

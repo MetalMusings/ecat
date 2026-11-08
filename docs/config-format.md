@@ -111,6 +111,7 @@ run in.
 | `identity` | `vendor`, `product`, and optionally `revision`. At start the component compares them with the bus. |
 | `profile` | `cia402` (CiA 402 drive), `mdp` (modular device, ETG.5001) or `generic`. |
 | `cia402.mode` | For `cia402`: the cyclic mode, `csp` or `csv`. |
+| `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder.md](encoder.md). |
 | `configure-pdos` | `true`: the master writes the PDO assignment and mapping below to the slave; `false`: the slave's own mapping is used and the entries below are only located in it. |
 | `process-data` | `outputs` (master to slave) and `inputs` (slave to master): lists of PDOs. |
 | `dc` | Distributed clocks; leave out for none. |
@@ -126,7 +127,7 @@ entry has:
 | `object` | `"0xINDEX:SUB"`, or `"0x0000:00"` for a gap. |
 | `bits` | Bit length. |
 | `type` | Data type: `BOOL`, `SINT`, `INT`, `DINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `REAL`, `LREAL`. |
-| `use` | `profile`: handled by the profile, no pin (for `cia402`, see [cia402.md](cia402.md)). `gap`: padding. Left out: an ordinary entry. |
+| `use` | `profile`: handled by the profile or an encoder channel, no pin (see [cia402.md](cia402.md), [encoder.md](encoder.md)). `gap`: padding. Left out: an ordinary entry. |
 | `pin`, `hal-type` | One pin for the whole entry; `hal-type` is `bit`, `s32`, `u32`, `s64`, `u64` or `float`. A `float` pin of a `REAL`/`LREAL` entry carries the value as it is; of an integer entry it is scaled. |
 | `scale`, `offset` | For a `float` pin of an integer entry: pin = value × scale + offset. |
 | `split` | One `bit` pin per bit, from bit 0; `null` for a bit without a pin. Instead of `pin`. |
@@ -167,7 +168,7 @@ yet.
 
 The `ecat` component reads the file with `loadrt ecat config=<file>`. It
 supports the profiles `cia402` ([cia402.md](cia402.md)), `mdp` and
-`generic`. `hal-type` `s64` and `u64` are not supported yet.
+`generic`, and encoder channels on any of them ([encoder.md](encoder.md)). `hal-type` `s64` and `u64` are not supported yet.
 
 ## Open
 

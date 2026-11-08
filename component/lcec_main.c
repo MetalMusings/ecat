@@ -27,6 +27,7 @@
 
 #include "devices/lcec_generic.h"
 #include "devices/ecat_cia402.h"
+#include "devices/ecat_encoder.h"
 #include "ecat_config.h"
 #include "lcec.h"
 #include "rtapi_app.h"
@@ -609,6 +610,10 @@ int rtapi_app_main(void) {
           rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure in proc_init for slave %s.%s\n", master->name, slave->name);
           goto fail2;
         }
+      }
+      if (ecat_encoder_init(lcec_comp_id, slave) != 0) {
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure setting up the encoders of slave %s.%s\n", master->name, slave->name);
+        goto fail2;
       }
 
       // DC is configured at the first call of the read function, when the

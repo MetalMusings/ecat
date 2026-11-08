@@ -20,6 +20,7 @@
 #include <yaml.h>
 
 #include "devices/ecat_cia402.h"
+#include "devices/ecat_encoder.h"
 #include "lcec.h"
 
 #define ECAT_FORMAT_VERSION 1
@@ -29,6 +30,8 @@ typedef struct {
   size_t len, cap;
 } buf_t;
 
+#define MAX_ENCODERS 16
+
 typedef struct {
   yaml_document_t *doc;
   const char *path;
@@ -36,6 +39,11 @@ typedef struct {
   int errors;
   int cia402;         // the slave being read has the cia402 profile
   unsigned int owned; // which of the profile's objects it has (bits of cia402_objects)
+  int n_enc;          // the slave's encoder channels
+  uint16_t enc_index[MAX_ENCODERS];   // their status indexes
+  unsigned int enc_owned[MAX_ENCODERS];  // which of enc_objects each has
+  int enc_bits[MAX_ENCODERS];            // their counters' bits
+  char enc_name[MAX_ENCODERS][LCEC_CONF_STR_MAXLEN];
 } ctx_t;
 
 // ---- the cia402 profile's objects ----
@@ -61,6 +69,45 @@ static int cia402_object(uint16_t index, uint8_t subindex) {
   int i;
   for (i = 0; i < N_CIA402_OBJECTS; i++)
     if (cia402_objects[i].index == index && subindex == 0) return i;
+  return -1;
+}
+
+// ---- encoder channels' objects (MDP 511), at the status index S and
+// the control index S + 0x1000 ----
+
+static const struct {
+  uint8_t subindex;
+  int output;
+  int bits;  // 0: 16 or 32
+} enc_objects[] = {
+    {0x01, 0, 1},  // latch C valid
+    {0x02, 0, 1},  // latch extern valid
+    {0x03, 0, 1},  // set counter done
+    {0x11, 0, 0},  // counter value
+    {0x12, 0, 0},  // latch value
+    {0x01, 1, 1},  // enable latch C
+    {0x02, 1, 1},  // enable latch extern on positive edge
+    {0x03, 1, 1},  // set counter
+    {0x04, 1, 1},  // enable latch extern on negative edge
+    {0x11, 1, 0},  // set counter value
+};
+#define N_ENC_OBJECTS (int)(sizeof(enc_objects) / sizeof(enc_objects[0]))
+#define ENC_COUNTER 3
+
+/// The encoder object at index:subindex: its number in enc_objects, and
+/// the channel in *ch; or -1.
+static int enc_object(ctx_t *c, uint16_t index, uint8_t subindex, int *ch) {
+  int i, k;
+  for (i = 0; i < c->n_enc; i++) {
+    int output = index == c->enc_index[i] + 0x1000;
+    if (index != c->enc_index[i] && !output) continue;
+    for (k = 0; k < N_ENC_OBJECTS; k++) {
+      if (enc_objects[k].output == output && enc_objects[k].subindex == subindex) {
+        *ch = i;
+        return k;
+      }
+    }
+  }
   return -1;
 }
 
@@ -220,7 +267,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   long long bits = get_int(c, e, "bits", 0);
   uint16_t index = 0;
   uint8_t subindex = 0;
-  int i;
+  int i, k, ch = 0;
 
   if ((pe = append(b, sizeof(*pe))) == NULL) {
     error(c, "out of memory");
@@ -240,19 +287,36 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   pe->floatOffset = 0.0;
   if (use != NULL && !strcmp(use, "gap")) return;
   i = cia402_object(index, subindex);
+  k = enc_object(c, index, subindex, &ch);
   if (use != NULL && !strcmp(use, "profile")) {
-    if (!c->cia402) {
-      error(c, "%s: \"use: profile\" needs profile cia402", object);
-    } else if (i < 0) {
-      error(c, "%s: the cia402 profile does not handle this object; give it a pin", object);
-    } else if (cia402_objects[i].output != output) {
-      error(c, "%s: belongs in the %s", object, cia402_objects[i].output ? "outputs" : "inputs");
-    } else if (cia402_objects[i].bits != bits) {
-      error(c, "%s: the cia402 profile needs %d bits", object, cia402_objects[i].bits);
-    } else if (pin != NULL || get(c, e, "split") != NULL) {
+    if (pin != NULL || get(c, e, "split") != NULL) {
       error(c, "%s: an entry with \"use: profile\" has no pin", object);
+    } else if (c->cia402 && i >= 0) {
+      if (cia402_objects[i].output != output) {
+        error(c, "%s: belongs in the %s", object, cia402_objects[i].output ? "outputs" : "inputs");
+      } else if (cia402_objects[i].bits != bits) {
+        error(c, "%s: the cia402 profile needs %d bits", object, cia402_objects[i].bits);
+      } else {
+        c->owned |= 1u << i;
+      }
+    } else if (k >= 0) {
+      if (enc_objects[k].output != output) {
+        error(c, "%s: belongs in the %s", object, enc_objects[k].output ? "outputs" : "inputs");
+      } else if (enc_objects[k].bits ? bits != enc_objects[k].bits : bits != 16 && bits != 32) {
+        error(c, "%s: the encoder needs %s bits", object, enc_objects[k].bits ? "1" : "16 or 32");
+      } else {
+        c->enc_owned[ch] |= 1u << k;
+        if (enc_objects[k].bits == 0) {
+          if (c->enc_bits[ch] && c->enc_bits[ch] != bits) error(c, "%s: the encoder's counter, latch and set value need the same bits", object);
+          c->enc_bits[ch] = bits;
+        }
+      }
+    } else if (c->cia402) {
+      error(c, "%s: the cia402 profile does not handle this object; give it a pin", object);
+    } else if (c->n_enc) {
+      error(c, "%s: no encoder channel handles this object; give it a pin", object);
     } else {
-      c->owned |= 1u << i;
+      error(c, "%s: \"use: profile\" needs profile cia402 or an encoder channel", object);
     }
     return;
   } else if (use != NULL) {
@@ -261,6 +325,10 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   }
   if (c->cia402 && i >= 0) {
     error(c, "%s: the cia402 profile handles this object; give it \"use: profile\" instead of a pin", object);
+    return;
+  }
+  if (k >= 0) {
+    error(c, "%s: encoder channel %s handles this object; give it \"use: profile\" instead of a pin", object, c->enc_name[ch]);
     return;
   }
   if (dt == NULL) {
@@ -452,6 +520,58 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
 
 // ---- slaves and master ----
 
+/// The slave's encoder channels: [{name: enc, index: '0x6010'}, ...]; a
+/// modParam record each.
+static void encoders(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
+  int i, j, n;
+
+  c->n_enc = 0;
+  if (list == NULL || is_null(list)) return;
+  if (list->type != YAML_SEQUENCE_NODE) {
+    error(c, "encoders must be a list");
+    return;
+  }
+  n = seq_len(list);
+  for (i = 0; i < n; i++) {
+    yaml_node_t *e = seq_item(c, list, i);
+    const char *name = get_str(c, e, "name");
+    long long index = get_int(c, e, "index", -1);
+    LCEC_CONF_MODPARAM_T *mp;
+
+    if (c->n_enc == MAX_ENCODERS) {
+      error(c, "more than %d encoder channels", MAX_ENCODERS);
+      return;
+    }
+    if (name == NULL || !name[0] || strlen(name) >= LCEC_CONF_STR_MAXLEN) {
+      error(c, "encoder %d: name missing or too long", i + 1);
+      continue;
+    }
+    if (index < 0x6000 || index > 0x6FF0 || (index & 0xF) != 0) {
+      error(c, "encoder %s: index must be the channel's status index, 0x6000 to 0x6FF0 in steps of 0x10", name);
+      continue;
+    }
+    for (j = 0; j < c->n_enc; j++) {
+      if (c->enc_index[j] == index) error(c, "encoder %s: index 0x%04llX is used twice", name, index);
+      if (!strcmp(c->enc_name[j], name)) error(c, "encoder %s: the name is used twice", name);
+    }
+    if ((mp = append(b, sizeof(*mp))) == NULL) {
+      error(c, "out of memory");
+      return;
+    }
+    mp->confType = lcecConfTypeModParam;
+    mp->id = ECAT_MP_ENCODER + (int)((index - 0x6000) / 0x10);
+    copy_str(mp->name, "encoder");
+    copy_str(mp->value.str, name);
+    ((LCEC_CONF_SLAVE_T *)(b->data + slave_off))->modParamCount++;
+
+    c->enc_index[c->n_enc] = index;
+    c->enc_owned[c->n_enc] = 0;
+    c->enc_bits[c->n_enc] = 0;
+    copy_str(c->enc_name[c->n_enc], name);
+    c->n_enc++;
+  }
+}
+
 static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   yaml_node_t *ident = get(c, s, "identity");
   yaml_node_t *dc = get(c, s, "dc");
@@ -459,6 +579,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   const char *profile = get_str(c, s, "profile");
   size_t off = b->len;
   LCEC_CONF_SLAVE_T *sc;
+  int i;
 
   snprintf(c->where, sizeof(c->where), "slave %lld", get_int(c, s, "position", -1));
   if ((sc = append(b, sizeof(*sc))) == NULL) {
@@ -499,6 +620,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   } else if (profile == NULL || (strcmp(profile, "generic") && strcmp(profile, "mdp"))) {
     error(c, "profile \"%s\" is not supported (cia402, mdp, generic)", profile ? profile : "");
   }
+  encoders(c, b, get(c, s, "encoders"), off);
 
   if (dc != NULL) {
     LCEC_CONF_DC_T *dcc = append(b, sizeof(*dcc));
@@ -515,7 +637,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   if (c->cia402) {
     const char *mode = get_str(c, get(c, s, "cia402"), "mode");
     uint16_t need[4] = {0x6040, 0x6041, 0, 0};
-    int i, j;
+    int j;
     if (mode != NULL && !strcmp(mode, "csv")) {
       need[2] = 0x60FF;
       need[3] = 0x606C;
@@ -526,6 +648,11 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     for (j = 0; j < 4; j++) {
       i = cia402_object(need[j], 0);
       if (!(c->owned & (1u << i))) error(c, "the cia402 profile needs 0x%04X:00 with \"use: profile\"", need[j]);
+    }
+  }
+  for (i = 0; i < c->n_enc; i++) {
+    if (!(c->enc_owned[i] & (1u << ENC_COUNTER))) {
+      error(c, "encoder %s needs 0x%04X:11 (counter value) with \"use: profile\"", c->enc_name[i], c->enc_index[i]);
     }
   }
   settings(c, b, get(c, s, "settings"), off);
