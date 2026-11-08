@@ -163,10 +163,13 @@ class TestEsi(unittest.TestCase):
         info = {"position": 3, "dc": False}
         p = propose.propose(info, s, coe.Dictionary(), esi_dev=dev, esi_exact=True)
         self.assertEqual([pd.index for pd in p.pdos], [0x1A03])          # the ESI's default
+        self.assertEqual(len([n for n in p.notes if "16-bit counter" in n]), 1)
         p = propose.propose(info, s, coe.Dictionary(), esi_dev=dev, esi_exact=True,
                             pdo_set="standard 32 bit")
         self.assertEqual([(pd.sm, pd.index) for pd in p.pdos], [(3, 0x1A04)])
         self.assertEqual([e.pin for e in p.pdos[0].entries], ["latch-c-valid", "counter-value"])
+        # a 32-bit counter counts down past 0: signed
+        self.assertEqual([e.hal_type for e in p.pdos[0].entries], ["bit", "s32"])
 
     def test_parse_and_find(self):
         with tempfile.TemporaryDirectory() as tmp:

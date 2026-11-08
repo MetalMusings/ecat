@@ -40,6 +40,8 @@ python3 -m unittest discover -s tests
 With ESI files, a slave gets the ESI's predefined PDO assignment that
 the ESI marks as default (TwinCAT's "Predefined PDO Assignment"), or the
 one named with `--pdo-set`; the report lists them.
+Unsigned 32-bit counters, latches and positions get `s32` pins, since they
+count down past 0; a 16-bit counter is noted, as it wraps at 65536.
 `--write` writes the proposals as an ecat configuration file, `--import`
 converts an lcec XML file, and `--check` checks a file and compares the bus
 with it. `--update` brings a file up to date with the bus and keeps what is

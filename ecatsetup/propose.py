@@ -33,6 +33,10 @@ HAL_TYPES = {"BOOL": "bit", "SINT": "s32", "INT": "s32", "DINT": "s32",
              "USINT": "u32", "UINT": "u32", "UDINT": "u32", "REAL": "float",
              "LINT": "s64", "ULINT": "u64", "LREAL": "float"}
 # The ethercat tool's CoE type names, in ESI/SII terms.
+# Unsigned 32-bit entries that are counts which wrap, such as encoder
+# counters and latched positions: proposed as s32 pins.
+WRAPPING = re.compile(r"counter|latch|position", re.I)
+
 COE_TYPES = {"bool": "BOOL", "int8": "SINT", "int16": "INT", "int32": "DINT",
              "uint8": "USINT", "uint16": "UINT", "uint32": "UDINT",
              "float": "REAL", "double": "LREAL", "int64": "LINT", "uint64": "ULINT"}
@@ -214,6 +218,14 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                 base = kebab(e.name.split("__")[-1]) or "0x%04x-%02x" % (e.index, e.subindex)
                 e.pin = "%s.%s" % (kebab(pd.name), base) if counts[e.name] > 1 else base
                 e.hal_type = "bit" if e.bitlen == 1 else HAL_TYPES.get(e.data_type, "u32")
+                if e.hal_type == "u32" and e.bitlen == 32 and WRAPPING.search(e.name):
+                    # an encoder counter or latch counts down past 0;
+                    # LinuxCNC's encoder and joint pins take it signed
+                    e.hal_type = "s32"
+                elif pd.direction == "tx" and e.bitlen == 16 and re.search(r"counter", e.name, re.I):
+                    p.notes.append("%s: a 16-bit counter, which wraps at 65536%s"
+                                   % (e.pin, "; a 32-bit set is offered with --pdo-set"
+                                      if esi_dev and len(esi_dev.pdo_sets) > 1 else ""))
     p.pdos = pdos
 
     # Distributed clocks: an ESI operation mode, else the SII's.
