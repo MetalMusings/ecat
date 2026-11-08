@@ -225,6 +225,109 @@ Moving a CiA 402 drive from a test program needs care:
 
 ![Testing a CiA 402 drive](images/setup-test.png)
 
+## CiA 402 drives and their modes
+
+The `cia402` profile runs CSP and CSV so far. Machines also need profile
+position (PP), profile velocity (PV) and the drive's own homing (HM).
+What each mode is for in LinuxCNC decides how it is done:
+
+| Mode | Used for | Who plans the motion |
+|---|---|---|
+| CSP (8) | a joint | LinuxCNC |
+| CSV (9) | a joint with the position loop in LinuxCNC, or a spindle | LinuxCNC |
+| PV (3) | a spindle, a conveyor, a pump | the drive (its ramps) |
+| PP (1) | positioning that is not coordinated motion: tool changer, indexer, stop, loader; jogging in test mode | the drive (its trajectory) |
+| HM (6) | homing a joint or a PP drive by the drive's own method | the drive |
+| CST (10) | later | LinuxCNC |
+
+**Principles**
+
+- **A joint stays in a cyclic mode.** LinuxCNC must be the only one that
+  plans a joint's motion. PP and PV are for drives that are not joints.
+  The exception is homing, below.
+- **The modes are in the file.** `cia402: {mode: csp, modes: [hm]}`:
+  `mode` is the mode when the drive is enabled, `modes` the others it may
+  switch to. The generator checks them against 0x6502 and the mapping;
+  the component refuses any other mode.
+- **One way to change mode.** The component changes mode in steps: stop
+  (halt bit in PP and PV, wait for standstill), write 0x6060, wait for
+  0x6061 to follow (a timeout is a fault), take the targets from the
+  actual values, run in the new mode. Going back is the same. The drive
+  does not jump, and a mode is never changed during a move.
+- **The same safety in every mode.** Enable, the shut-down reasons and the
+  latch until enable goes false are as for CSP. Added:
+  - PP and PV move only after a deliberate act: a rising edge of the start
+    pin, or a non-zero velocity command after enable.
+  - When enable goes false, a moving drive is halted (control word
+    bit 8) and then shut down.
+  - Homing and positioning have timeouts.
+  - A PP drive gets software limits (0x607D) and a maximum profile
+    velocity (0x607F) written to it. The generator proposes them.
+
+**What each mode needs**
+
+| Mode | Process data | Settings (SDOs at start) | Control and status bits |
+|---|---|---|---|
+| PP | 0x607A target position; 0x6081 profile velocity (or a setting) | 0x6083/0x6084 acceleration/deceleration, 0x607D, 0x607F | cw 4 new set-point, 5 change immediately, 6 relative, 8 halt; sw 10 target reached, 12 set-point acknowledge |
+| PV | 0x60FF target velocity; 0x606C actual velocity | 0x6083/0x6084 | cw 8 halt; sw 10 target reached (at speed), 12 speed zero |
+| HM | none beyond control and status words | 0x6098 method, 0x6099:01/02 speeds, 0x609A acceleration, 0x607C home offset | cw 4 start; sw 10 target reached, 12 homing attained, 13 homing error |
+
+0x6060 and 0x6061 are required when a drive has more than one mode. The
+settings are ordinary `settings` in the file. EtherCAT Setup shows them
+with their names, and the homing methods the drive supports (0x60E3)
+when it has that object.
+
+**Pins** (proposal; position and velocity in machine units through
+`pos-scale` and `velo-scale`):
+
+| Mode | Pins |
+|---|---|
+| PP | `pp-target`, `pp-velocity`, `pp-start` (rising edge; the set-point handshake is in the component), `pp-relative`, `pp-halt`, `pp-done` |
+| PV | `velocity-cmd`, `at-speed`, `zero-speed` |
+| HM | `home` (as in the cia402 component), `stat-homed`, `stat-homing`, `home-error` |
+| all | `opmode-cmd` to choose among `modes` (0 = `mode`) where that is not given by the pins above; `opmode-display` shows the result |
+
+A spindle in PV connects `spindle.N.speed-out-rps` to `velocity-cmd` and
+`at-speed` to `spindle.N.at-speed`. A PP drive is controlled from HAL, for
+example from an M-code, `motion.analog-out` or a tool-changer component.
+
+**Homing a joint with the drive's method** can be done in two ways:
+
+1. **Index-enable**, as the cia402 component does. The joint is set up to
+   home on an index pulse with zero search velocity. When motion sets
+   `index-enable`, the profile switches the drive to HM and starts it.
+   When the drive reports homing attained, the profile switches back to
+   CSP with the target at the actual position and clears `index-enable`.
+   Motion then takes the position as home. This works with existing
+   configurations. To check: motion moves the joint at the latch velocity
+   while the drive homes, so the following error must not trip.
+2. **A LinuxCNC homing module** (`[EMCMOT]HOMEMOD`, LinuxCNC 2.9 and
+   later) that hands homing of chosen joints to the drive and waits for
+   the profile's `stat-homed` or `home-error`. There is no fake index
+   pulse, and `HOME_SEQUENCE` keeps working. It is more work, and it would
+   ship with ecat.
+
+The proposal is the first way first, and the second when the first shows
+its limits. In both, the drive's actual position after homing is the
+home offset, and the profile returns to CSP without a jump.
+
+**Test mode** uses PP and PV to move a drive. The drive plans the ramp, so
+EtherCAT Setup can do "move 1 mm at 5 mm/s" or jog slowly without a
+trajectory planner in `halrun`, and can try homing methods with HM. It
+uses the same pins as a machine.
+
+**Order of work**:
+
+1. HM with index-enable.
+2. PV.
+3. PP with its set-point handshake.
+4. `opmode-cmd`.
+5. The homing module.
+
+In the component, each mode is an entry in a table: its number, the
+objects it needs, how it is entered, what it writes every cycle and when
+it is done. The mode change is then the same code for all modes.
+
 ## Integration with LinuxCNC
 
 The program writes, after showing the change and keeping a backup:
@@ -316,6 +419,11 @@ them. Which devices users actually run would decide the order.
 - **Devices without a profile**: C drivers as a fallback, or profiles
   only (see [Relation to lcec and its XML
   files](#relation-to-lcec-and-its-xml-files)).
+- **CiA 402 homing**: index-enable or a homing module (see [CiA 402
+  drives and their modes](#cia-402-drives-and-their-modes)). Drives also
+  differ in the PP set-point handshake (single set-points, buffered,
+  change immediately), and in whether the profile velocity is process
+  data or a setting.
 - **Upstream**: the new system is in practice a project of its own next to
   linuxcnc-ethercat, which keeps its XML-based setup.
 
@@ -332,7 +440,8 @@ Each step is useful on its own; the order may change as parts are tried.
 3. **Generator without GUI**: scan, match profiles, write the file (a
    successor to `lcec_configgen`).
 4. **Test mode and troubleshooting**: the GUI on top of `halrun` and the
-   master's IPC.
+   master's IPC. The CiA 402 modes PP, PV and HM come before or with it,
+   since test mode moves drives with them.
 5. **HAL and LinuxCNC integration**: `ethercat.hal`, INI changes, the start
    check.
 6. **Later**: ESI download links, user comments per device.
