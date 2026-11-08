@@ -30,15 +30,10 @@ extern "C" {
 #include "hal.h"
 #include "lcec_conf.h"
 
-/// HAL component name. halcmd requires it to match the module file name, so the
-/// build against the userspace EtherCAT master (lcec_uspace.so) registers as
-/// "lcec_uspace". Pins and functions keep the LCEC_MODULE_NAME prefix ("lcec"),
-/// so HAL files only change "loadrt lcec" to "loadrt lcec_uspace".
-#ifdef EC_USPACE_MASTER
-#define LCEC_COMP_NAME "lcec_uspace"
-#else
+/// HAL component name, the same as the module file (ecat.so) and the prefix of
+/// the component's own pins and functions (ecat.read-all, ecat.0.all-op).
+/// Slave pins are named <slave name>.<pin>, see docs/config-format.md.
 #define LCEC_COMP_NAME LCEC_MODULE_NAME
-#endif
 #include "lcec_rtapi.h"
 #include "rtapi_ctype.h"
 #include "rtapi_math.h"
@@ -60,7 +55,7 @@ extern "C" {
     (last) = (item);                        \
   } while (0);
 
-#define LCEC_MSG_PFX "LCEC: "
+#define LCEC_MSG_PFX "ecat: "
 
 // init macro; this will make GCC run calls to AddTypes() before
 // main() is called.  This is used to register new slave types

@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+*.o
+*.d
+*.so
+*.tmp
+*.sym
+*.ver

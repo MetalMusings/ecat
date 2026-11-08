@@ -163,6 +163,13 @@ them. The import prints a note for everything it changes or leaves out.
 lcec's `initCmds`, `modParam`, `idnConfig` and `watchdog` are not imported
 yet.
 
+## In the component
+
+The `ecat` component reads the file with `loadrt ecat config=<file>`. It
+supports the profiles `generic` and `mdp` so far; `use: profile` entries
+need the `cia402` profile, which is not there yet. `hal-type` `s64` and
+`u64` are not supported yet.
+
 ## Open
 
 - Scaling for `cia402` (counts per unit) and where it belongs.

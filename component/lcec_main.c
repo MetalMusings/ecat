@@ -26,6 +26,7 @@
 #endif
 
 #include "devices/lcec_generic.h"
+#include "ecat_config.h"
 #include "lcec.h"
 #include "rtapi_app.h"
 //#include <linuxcnc/rtapi_mutex.h>
@@ -33,6 +34,11 @@
 MODULE_LICENSE("GPL")
 MODULE_AUTHOR("Sascha Ittner <sascha.ittner@modusoft.de>")
 MODULE_DESCRIPTION("Driver for EtherCAT devices")
+
+/// @brief The configuration file (ethercat.yaml), relative to the
+/// directory LinuxCNC is started from: loadrt ecat config=ethercat.yaml
+static char *config = "";
+RTAPI_MP_STRING(config, "configuration file (ethercat.yaml)");
 
 /// @brief Global HAL Pins
 static const lcec_pindesc_t master_global_pins[] = {
@@ -71,12 +77,12 @@ static const lcec_paramdesc_t master_params[] = {
 
 /// @brief Basic Slave pins
 static const lcec_pindesc_t slave_pins[] = {
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, online), "%s.%s.%s.slave-online"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, operational), "%s.%s.%s.slave-oper"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_init), "%s.%s.%s.slave-state-init"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_preop), "%s.%s.%s.slave-state-preop"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_safeop), "%s.%s.%s.slave-state-safeop"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_op), "%s.%s.%s.slave-state-op"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, online), "%s.slave-online"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, operational), "%s.slave-oper"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_init), "%s.slave-state-init"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_preop), "%s.slave-state-preop"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_safeop), "%s.slave-state-safeop"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_op), "%s.slave-state-op"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -431,6 +437,60 @@ static ec_master_t *lcec_request_master(lcec_master_t *master) {
 }
 #endif
 
+/// @brief Configure distributed clocks and the PLL defaults, once the servo
+/// thread's period is known (the first call of the read function, before the
+/// master is activated). The configuration gives a slave's SYNC0 cycle in servo
+/// periods; here it becomes nanoseconds.
+static void ecat_config_dc(lcec_master_t *master) {
+  lcec_slave_t *slave;
+
+  rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "master %s: servo period %u ns\n", master->name, master->app_time_period);
+  for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+    if (slave->dc_conf == NULL) {
+      continue;
+    }
+    slave->dc_conf->sync0Cycle *= master->app_time_period;
+    ecrt_slave_config_dc(slave->config, slave->dc_conf->assignActivate, slave->dc_conf->sync0Cycle, slave->dc_conf->sync0Shift,
+        slave->dc_conf->sync1Cycle, slave->dc_conf->sync1Shift);
+    rtapi_print_msg(RTAPI_MSG_DBG,
+        LCEC_MSG_PFX "configuring DC for slave %s.%s: assignActivate=x%x sync0Cycle=%d sync0Shift=%d sync1Cycle=%d sync1Shift=%d\n",
+        master->name, slave->name, slave->dc_conf->assignActivate, slave->dc_conf->sync0Cycle, slave->dc_conf->sync0Shift,
+        slave->dc_conf->sync1Cycle, slave->dc_conf->sync1Shift);
+    // SYNC0 can only keep a fixed phase to the servo thread if one period is a multiple of the other
+    if (slave->dc_conf->sync0Cycle > 0 && master->app_time_period > 0 &&
+        (slave->dc_conf->sync0Cycle % master->app_time_period) != 0 &&
+        (master->app_time_period % slave->dc_conf->sync0Cycle) != 0) {
+      rtapi_print_msg(RTAPI_MSG_WARN,
+          LCEC_MSG_PFX "slave %s.%s: sync0Cycle=%u is not a multiple or divisor of appTimePeriod=%u, SYNC0 phase to the servo thread will drift\n",
+          master->name, slave->name, slave->dc_conf->sync0Cycle, master->app_time_period);
+    }
+    // Where SYNC0 fires in the servo thread period (only if SYNC0 is activated, 0x0981 bit 1).
+    // The master's globalShiftTime is in app_start_time, and the EtherCAT master adds this
+    // slave's sync0Shift to the start time in 0x0990 (see documentation/distributed-clocks.md).
+    if ((slave->dc_conf->assignActivate & 0x0200) != 0) {
+      long long sync0_pos = (long long)master->global_shift_time + slave->dc_conf->sync0Shift;
+      rtapi_print_msg(RTAPI_MSG_INFO,
+          LCEC_MSG_PFX "slave %s.%s: SYNC0 at globalShiftTime + sync0Shift = %u + %d = %lld ns after the servo period start\n",
+          master->name, slave->name, master->global_shift_time, slave->dc_conf->sync0Shift, sync0_pos);
+      if (slave->dc_conf->sync0Cycle > 0 && (sync0_pos < 0 || sync0_pos >= (long long)slave->dc_conf->sync0Cycle)) {
+        rtapi_print_msg(RTAPI_MSG_WARN,
+            LCEC_MSG_PFX "slave %s.%s: globalShiftTime + sync0Shift = %lld ns is outside 0..sync0Cycle (%u ns), SYNC0 falls in another "
+                         "cycle. Is the same shift given in both globalShiftTime and sync0Shift?\n",
+            master->name, slave->name, sync0_pos, slave->dc_conf->sync0Cycle);
+      }
+    }
+  }
+
+#ifdef RTAPI_TASK_PLL_SUPPORT
+  // set default PLL_STEP: use +/-0.1% of period
+  master->hal_data->pll_step = master->app_time_period / 1000;
+  // set default PLL_MAX_ERR: one period
+  master->hal_data->pll_max_err = master->app_time_period;
+  // set default DC_PHASE_MAX_ERR: 10% of period
+  master->hal_data->dc_phase_max_err = master->app_time_period / 10;
+#endif
+}
+
 /// @brief Main entrypoint from LinuxCNC
 int rtapi_app_main(void) {
   int slave_count;
@@ -439,7 +499,6 @@ int rtapi_app_main(void) {
   char name[HAL_NAME_LEN + 1];
   lcec_slave_sdoconf_t *sdo_config;
   lcec_slave_idnconf_t *idn_config;
-  struct timeval tv;
   int pdo_entry_count = 0;
 
 #ifndef __KERNEL
@@ -551,38 +610,8 @@ int rtapi_app_main(void) {
         }
       }
 
-      // configure dc for this slave
-      if (slave->dc_conf != NULL) {
-        ecrt_slave_config_dc(slave->config, slave->dc_conf->assignActivate, slave->dc_conf->sync0Cycle, slave->dc_conf->sync0Shift,
-            slave->dc_conf->sync1Cycle, slave->dc_conf->sync1Shift);
-        rtapi_print_msg(RTAPI_MSG_DBG,
-            LCEC_MSG_PFX "configuring DC for slave %s.%s: assignActivate=x%x sync0Cycle=%d sync0Shift=%d sync1Cycle=%d sync1Shift=%d\n",
-            master->name, slave->name, slave->dc_conf->assignActivate, slave->dc_conf->sync0Cycle, slave->dc_conf->sync0Shift,
-            slave->dc_conf->sync1Cycle, slave->dc_conf->sync1Shift);
-        // SYNC0 can only keep a fixed phase to the servo thread if one period is a multiple of the other
-        if (slave->dc_conf->sync0Cycle > 0 && master->app_time_period > 0 &&
-            (slave->dc_conf->sync0Cycle % master->app_time_period) != 0 &&
-            (master->app_time_period % slave->dc_conf->sync0Cycle) != 0) {
-          rtapi_print_msg(RTAPI_MSG_WARN,
-              LCEC_MSG_PFX "slave %s.%s: sync0Cycle=%u is not a multiple or divisor of appTimePeriod=%u, SYNC0 phase to the servo thread will drift\n",
-              master->name, slave->name, slave->dc_conf->sync0Cycle, master->app_time_period);
-        }
-        // Where SYNC0 fires in the servo thread period (only if SYNC0 is activated, 0x0981 bit 1).
-        // The master's globalShiftTime is in app_start_time, and the EtherCAT master adds this
-        // slave's sync0Shift to the start time in 0x0990 (see documentation/distributed-clocks.md).
-        if ((slave->dc_conf->assignActivate & 0x0200) != 0) {
-          long long sync0_pos = (long long)master->global_shift_time + slave->dc_conf->sync0Shift;
-          rtapi_print_msg(RTAPI_MSG_INFO,
-              LCEC_MSG_PFX "slave %s.%s: SYNC0 at globalShiftTime + sync0Shift = %u + %d = %lld ns after the servo period start\n",
-              master->name, slave->name, master->global_shift_time, slave->dc_conf->sync0Shift, sync0_pos);
-          if (slave->dc_conf->sync0Cycle > 0 && (sync0_pos < 0 || sync0_pos >= (long long)slave->dc_conf->sync0Cycle)) {
-            rtapi_print_msg(RTAPI_MSG_WARN,
-                LCEC_MSG_PFX "slave %s.%s: globalShiftTime + sync0Shift = %lld ns is outside 0..sync0Cycle (%u ns), SYNC0 falls in another "
-                             "cycle. Is the same shift given in both globalShiftTime and sync0Shift?\n",
-                master->name, slave->name, sync0_pos, slave->dc_conf->sync0Cycle);
-          }
-        }
-      }
+      // DC is configured at the first call of the read function, when the
+      // servo thread's period is known (ecat_config_dc).
 
       // Configure the slave's watchdog times.
       if (slave->wd_conf != NULL) {
@@ -634,15 +663,6 @@ int rtapi_app_main(void) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure to init hal pins for slave %s.%s\n", master->name, slave->name);
       goto fail2;
     }
-
-#ifdef RTAPI_TASK_PLL_SUPPORT
-    // set default PLL_STEP: use +/-0.1% of period
-    master->hal_data->pll_step = master->app_time_period / 1000;
-    // set default PLL_MAX_ERR: one period
-    master->hal_data->pll_max_err = master->app_time_period;
-    // set default DC_PHASE_MAX_ERR: 10% of period
-    master->hal_data->dc_phase_max_err = master->app_time_period / 10;
-#endif
 
     // export read function
     rtapi_snprintf(name, HAL_NAME_LEN, "%s.%s.read", LCEC_MODULE_NAME, master->name);
@@ -704,13 +724,10 @@ void rtapi_app_exit(void) {
   hal_exit(lcec_comp_id);
 }
 
-/// @brief Parse configuration from `lcec_conf`.
+/// @brief Parse the configuration file (see ecat_config.h).
 int lcec_parse_config(void) {
-  int shmem_id;
-  void *shmem_ptr;
-  LCEC_CONF_HEADER_T *header;
   size_t length;
-  char *conf;
+  char *conf_buf, *conf;
   int slave_count;
   const lcec_typelist_t *type;
   lcec_master_t *master;
@@ -742,39 +759,11 @@ int lcec_parse_config(void) {
   first_master = NULL;
   last_master = NULL;
 
-  // try to get config header
-  shmem_id = rtapi_shmem_new(LCEC_CONF_SHMEM_KEY, lcec_comp_id, sizeof(LCEC_CONF_HEADER_T));
-  if (shmem_id < 0) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "couldn't allocate user/RT shared memory\n");
+  // read the configuration file into lcec's configuration records
+  if ((conf_buf = ecat_config_load(config, &length)) == NULL) {
     goto fail0;
   }
-  if (lcec_rtapi_shmem_getptr(shmem_id, &shmem_ptr) < 0) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "couldn't map user/RT shared memory\n");
-    goto fail1;
-  }
-
-  // check magic, get length and close shmem
-  header = (LCEC_CONF_HEADER_T *)shmem_ptr;
-  if (header->magic != LCEC_CONF_SHMEM_MAGIC) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_conf is not loaded\n");
-    goto fail1;
-  }
-  length = header->length;
-  rtapi_shmem_delete(shmem_id, lcec_comp_id);
-
-  // reopen shmem with proper size
-  shmem_id = rtapi_shmem_new(LCEC_CONF_SHMEM_KEY, lcec_comp_id, sizeof(LCEC_CONF_HEADER_T) + length);
-  if (shmem_id < 0) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "couldn't allocate user/RT shared memory\n");
-    goto fail0;
-  }
-  if (lcec_rtapi_shmem_getptr(shmem_id, &shmem_ptr) < 0) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "couldn't map user/RT shared memory\n");
-    goto fail1;
-  }
-
-  // get pointer to config
-  conf = ((char *)shmem_ptr + sizeof(LCEC_CONF_HEADER_T));
+  conf = conf_buf;
 
   // process config items
   slave_count = 0;
@@ -832,17 +821,8 @@ int lcec_parse_config(void) {
           goto fail2;
         }
 
-        // check for valid slave type
-        if (!strcmp(slave_conf->type_name, "generic")) {
-          type = NULL;
-        } else {
-          type = lcec_findslavetype(slave_conf->type_name);
-
-          if (type == NULL) {
-            rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "Invalid slave name \"%s\"\n", slave_conf->type_name);
-            continue;
-          }
-        }
+        // ecat configures every slave from its process data (generic)
+        type = NULL;
 
         // create new slave
         slave = LCEC_ALLOCATE(lcec_slave_t);
@@ -1232,8 +1212,8 @@ int lcec_parse_config(void) {
     }
   }
 
-  // close shmem
-  rtapi_shmem_delete(shmem_id, lcec_comp_id);
+  free(conf_buf);
+  conf_buf = NULL;
 
   // allocate PDO entity memory
   for (master = first_master; master != NULL; master = master->next) {
@@ -1260,8 +1240,7 @@ int lcec_parse_config(void) {
 
 fail2:
   lcec_clear_config();
-fail1:
-  rtapi_shmem_delete(shmem_id, lcec_comp_id);
+  free(conf_buf);
 fail0:
   return -1;
 }
@@ -1368,7 +1347,7 @@ lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_nam
   memset(hal_data, 0, sizeof(lcec_slave_state_t));
 
   // export pins
-  if (lcec_pin_newf_list(hal_data, slave_pins, LCEC_MODULE_NAME, master_name, slave_name) != 0) {
+  if (lcec_pin_newf_list(hal_data, slave_pins, slave_name) != 0) {
     return NULL;
   }
 
@@ -1520,6 +1499,12 @@ void lcec_read_master(void *arg, long period) {
   lcec_master_t *master = (lcec_master_t *)arg;
   lcec_slave_t *slave;
   int check_states;
+
+  // The servo thread's period is the cycle time (see ecat_config.h)
+  if (master->app_time_period == 0) {
+    master->app_time_period = period;
+    ecat_config_dc(master);
+  }
 
   // Delayed activation: activate master on first read call
   // Per EtherCAT standard, the cycle starts with receive, so activate here

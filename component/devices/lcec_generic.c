@@ -42,7 +42,6 @@ void lcec_generic_write_u32(uint8_t *pd, lcec_generic_pin_t *hal_data, hal_u32_t
 /// Not static because it's called directly from `lcec_main`, unlike
 /// "normal" devices.
 int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
-  lcec_master_t *master = slave->master;
   lcec_generic_pin_t *hal_data = (lcec_generic_pin_t *)slave->hal_data;
   int i, j;
   int err;
@@ -61,15 +60,14 @@ int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
         if (hal_data->bitLength == 1) {
           // single bit pin
           err = lcec_pin_newf(
-              hal_data->type, hal_data->dir, &hal_data->pin[0], "%s.%s.%s.%s", LCEC_MODULE_NAME, master->name, slave->name, hal_data->name);
+              hal_data->type, hal_data->dir, &hal_data->pin[0], "%s.%s", slave->name, hal_data->name);
           if (err != 0) {
             return err;
           }
         } else {
           // bit pin array
           for (j = 0; j < LCEC_CONF_GENERIC_MAX_SUBPINS && j < hal_data->bitLength; j++) {
-            err = lcec_pin_newf(hal_data->type, hal_data->dir, &hal_data->pin[j], "%s.%s.%s.%s-%d", LCEC_MODULE_NAME, master->name,
-                slave->name, hal_data->name, j);
+            err = lcec_pin_newf(hal_data->type, hal_data->dir, &hal_data->pin[j], "%s.%s-%d", slave->name, hal_data->name, j);
             if (err != 0) {
               return err;
             }
@@ -81,14 +79,13 @@ int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
       case HAL_U32:
         // check data size
         if (hal_data->bitLength > 32) {
-          rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "unable to export pin %s.%s.%s.%s: invalid process data bitlen!\n", LCEC_MODULE_NAME,
-              master->name, slave->name, hal_data->name);
+          rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "unable to export pin %s.%s: invalid process data bitlen!\n", slave->name, hal_data->name);
           continue;
         }
 
         // export pin
         err = lcec_pin_newf(
-            hal_data->type, hal_data->dir, &hal_data->pin[0], "%s.%s.%s.%s", LCEC_MODULE_NAME, master->name, slave->name, hal_data->name);
+            hal_data->type, hal_data->dir, &hal_data->pin[0], "%s.%s", slave->name, hal_data->name);
         if (err != 0) {
           return err;
         }
@@ -97,14 +94,13 @@ int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
       case HAL_FLOAT:
         // check data size
         if ((hal_data->bitLength > 32) && (hal_data->subType != lcecPdoEntTypeFloatDoubleIeee)) {
-          rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "unable to export pin %s.%s.%s.%s: invalid process data bitlen!\n", LCEC_MODULE_NAME,
-              master->name, slave->name, hal_data->name);
+          rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "unable to export pin %s.%s: invalid process data bitlen!\n", slave->name, hal_data->name);
           continue;
         }
 
         // export pin
         err = lcec_pin_newf(
-            hal_data->type, hal_data->dir, &hal_data->pin[0], "%s.%s.%s.%s", LCEC_MODULE_NAME, master->name, slave->name, hal_data->name);
+            hal_data->type, hal_data->dir, &hal_data->pin[0], "%s.%s", slave->name, hal_data->name);
         if (err != 0) {
           return err;
         }

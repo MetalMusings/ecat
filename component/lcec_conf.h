@@ -24,7 +24,7 @@
 #include "ecrt.h"
 #include "hal.h"
 
-#define LCEC_MODULE_NAME "lcec"
+#define LCEC_MODULE_NAME "ecat"
 
 #define LCEC_CONF_SHMEM_KEY   0xACB572C7
 #define LCEC_CONF_SHMEM_MAGIC 0x036ED5A3

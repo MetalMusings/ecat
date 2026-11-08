@@ -39,6 +39,39 @@ with it. The file format: [docs/config-format.md](docs/config-format.md).
 What the prototype found on a real bus:
 [docs/prototype-step1.md](docs/prototype-step1.md).
 
+## The component
+
+`component/` holds the `ecat` HAL component, lcec_uspace's code (moved here
+with its history) configured from `ethercat.yaml` instead of lcec's XML
+file. It needs the userspace master in `/opt/ethercat-uspace` (see
+Background), `linuxcnc-uspace-dev` and `libyaml-dev`:
+
+```
+cd component
+make
+sudo make install
+```
+
+In a HAL file, instead of `lcec_conf` and `lcec`:
+
+```
+loadrt ecat config=ethercat.yaml
+addf ecat.read-all  servo-thread
+addf ecat.write-all servo-thread
+```
+
+- Slave pins are `<slave name>.<pin>` as named in the file; the master's
+  are `ecat.0.*` (`ecat.0.all-op`, ...) and `ecat.*`.
+- The cycle time is the servo thread's period, taken at the first call
+  of `ecat.read-all`; distributed clocks are configured then, before the
+  master is activated.
+- Profiles `generic` and `mdp` are supported; `cia402` is next.
+
+A configuration imported from lcec can keep lcec's pin names by naming
+the slaves `lcec.0.<name>`, so that existing HAL files work with only the
+lines above changed. It has run a plasma cutter's LinuxCNC configuration
+(three CiA 402 drives driven through HAL, one I/O slave) this way.
+
 ## Background
 
 `ecat` grows out of `lcec_uspace`, a build of
