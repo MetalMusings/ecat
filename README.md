@@ -90,7 +90,12 @@ userspace master package (or a master built from source, with
 cd component
 make
 sudo make install
+make check     # unit tests of the cia402 profile and the encoder function
 ```
+
+`make check` runs the profile's and the encoder function's read and write
+functions cycle by cycle against a fake of HAL and the master
+(`component/tests/fake.c`), without a bus.
 
 In a HAL file, instead of `lcec_conf` and `lcec`:
 

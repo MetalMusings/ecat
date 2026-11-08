@@ -3,6 +3,7 @@
 #
 #   make                 build ecat.so
 #   sudo make install    install it in LinuxCNC's module directory
+#   make check           build and run the unit tests in tests/
 #
 # Needs LinuxCNC's halcompile and headers (linuxcnc-uspace-dev), libyaml-dev,
 # and the userspace master installed in USPACE_ETHERCAT: the package
@@ -32,7 +33,7 @@ CFLAGS_ECAT := $(EXTRA_CFLAGS) -Wall -I. -I$(USPACE_BUILD)/include -MMD -MP
 objs := lcec_main.o lcec_ethercat.o lcec_pins.o lcec_malloc.o lcec_lookup.o \
 	lcec_modparam.o lcec_devicelist.o ecat_config.o devices/lcec_generic.o devices/ecat_cia402.o devices/ecat_encoder.o
 
-.PHONY: all install clean
+.PHONY: all install clean check
 all: ecat.so
 
 %.o: %.c
@@ -53,10 +54,24 @@ ecat.so: $(objs)
 	@chmod -x $@
 	@rm -f $@.tmp $@.sym $@.ver
 
+# Unit tests: a device's code with a fake of HAL, the master and lcec
+# (tests/fake.c), so that its read and write functions run without a bus.
+tests := tests/test_cia402 tests/test_encoder
+tests/test_cia402: tests/test_cia402.o tests/fake.o devices/ecat_cia402.o
+tests/test_encoder: tests/test_encoder.o tests/fake.o devices/ecat_encoder.o
+-include tests/*.d
+
+$(tests):
+	@echo Linking $@
+	@$(CC) -o $@ $^ -lm
+
+check: $(tests)
+	@for t in $(tests); do $$t || exit 1; done
+
 # Makefile.modinc has an install target of its own; this one replaces it.
 install: ecat.so
 	install -d $(DESTDIR)$(RTLIBDIR)
 	install -m 644 ecat.so $(DESTDIR)$(RTLIBDIR)/
 
 clean:
-	rm -f ecat.so *.o *.d devices/*.o devices/*.d *.tmp *.sym *.ver
+	rm -f ecat.so *.o *.d devices/*.o devices/*.d tests/*.o tests/*.d $(tests) *.tmp *.sym *.ver

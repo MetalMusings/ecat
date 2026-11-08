@@ -6,3 +6,5 @@ __pycache__/
 *.tmp
 *.sym
 *.ver
+component/tests/test_*
+!component/tests/test_*.c

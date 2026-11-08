@@ -69,6 +69,7 @@ echo "ecat $REV"
 
 step "Tests"
 (cd "$WORK/ecat" && python3 -m unittest discover -s tests -q) 2>&1 | tail -3
+make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER check 2>&1 | grep -v -e '^Compiling' -e '^Linking' -e 'warning:' -e 'varning:'
 
 step "Component"
 make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER \
