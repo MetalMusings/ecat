@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from ecatsetup import coe, esi, lcecxml, propose, sii  # noqa: E402
+from ecatsetup import coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
@@ -171,6 +171,76 @@ class TestLcecXml(unittest.TestCase):
         self.assertEqual(s.sdos, [(0x2000, 0, b"\xa0\x0f")])
         # "#" is not an XML comment: lcec maps the entry, and so does the reader.
         self.assertEqual([e.index for e in s.pdos[(2, 0x1600)]], [0x607A, 0x60FF])
+
+
+class TestConfig(unittest.TestCase):
+    def easercat_config(self):
+        s, d = easercat()
+        p = propose.propose({"position": 3, "dc": False}, s, d, device_type=5001)
+        return config.from_proposals([p], "enp2s0", "xdp-native")
+
+    def test_round_trip(self):
+        cfg = self.easercat_config()
+        self.assertEqual(config.check(cfg), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "ethercat.yaml")
+            config.write(cfg, path)
+            self.assertEqual(config.load(path), cfg)
+        self.assertEqual(cfg["slaves"][0]["name"], "io-3")
+        self.assertEqual(cfg["slaves"][0]["profile"], "mdp")
+
+    def test_check_finds_errors(self):
+        cfg = self.easercat_config()
+        s = cfg["slaves"][0]
+        cfg["slaves"].append(dict(s))
+        entries = s["process-data"]["inputs"][0]["entries"]
+        entries[0]["split"] = ["a"] * 40
+        entries[0]["scale"] = 2.0
+        s["settings"] = [{"object": "0x2000:01"}]
+        errors = "\n".join(config.check(cfg))
+        self.assertIn("position used twice", errors)
+        self.assertIn("name 'io-3' used twice", errors)
+        self.assertIn("split has more pins than bits", errors)
+        self.assertIn("scale and offset need", errors)
+        self.assertIn("neither value nor data", errors)
+
+
+class TestImport(unittest.TestCase):
+    def test_generic_slave(self):
+        xml = LCEC.replace("<master idx", '<master interface="enp2s0" globalShiftTime="300000" idx')
+        xml = xml.replace("</syncManager>", """</syncManager>
+      <syncManager idx="3" dir="in">
+        <pdo idx="1a00">
+          <pdoEntry idx="6000" subIdx="00" bitLen="8" halType="complex">
+            <complexEntry bitLen="1" halPin="in-1" halType="bit"/>
+            <complexEntry bitLen="1"/>
+            <complexEntry bitLen="1" halPin="in-3" halType="bit"/>
+            <complexEntry bitLen="5"/>
+          </pdoEntry>
+          <pdoEntry idx="6001" subIdx="01" bitLen="16" halPin="analog" halType="float" scale="0.5"/>
+        </pdo>
+      </syncManager>
+      <initCmds filename="x.xml"/>""")
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as f:
+            f.write(xml)
+        try:
+            cfg, notes = importxml.import_lcec(lcecxml.load(f.name), None, 1000000)
+        finally:
+            os.unlink(f.name)
+        self.assertEqual(config.check(cfg), [])
+        m = cfg["master"]
+        self.assertEqual((m["interface"], m["dc"]["sync0-shift-ns"]), ("enp2s0", 300000))
+        self.assertTrue(m["dc"]["sync-to-ref-clock"])          # negative refClockSyncCycles
+        s = cfg["slaves"][0]
+        self.assertTrue(s["configure-pdos"])
+        self.assertEqual(s["dc"], {"assign-activate": "0x0300", "sync0-cycles": 1, "sync0-shift-ns": 0})
+        self.assertEqual(s["settings"], [{"object": "0x2000:00", "data": "a0 0f"}])
+        inputs = s["process-data"]["inputs"][0]["entries"]
+        self.assertEqual(inputs[0]["split"], ["in-1", None, "in-3"])
+        self.assertEqual((inputs[1]["type"], inputs[1]["hal-type"], inputs[1]["scale"]),
+                         ("INT", "float", 0.5))
+        self.assertTrue(any("<initCmds> not imported" in n for n in notes))
+        self.assertTrue(any("no transport" in n for n in notes))
 
 
 class TestIni(unittest.TestCase):

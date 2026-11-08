@@ -27,10 +27,17 @@ or LinuxCNC with `lcec_uspace`):
 
 ```
 python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
+python3 -m ecatsetup --ini <machine>.ini --write ethercat.yaml --interface enp2s0
+python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethercat.yaml
+python3 -m ecatsetup --check ethercat.yaml
 python3 -m unittest discover -s tests
 ```
 
-What it found on a real bus: [docs/prototype-step1.md](docs/prototype-step1.md).
+`--write` writes the proposals as an ecat configuration file, `--import`
+converts an lcec XML file, and `--check` checks a file and compares the bus
+with it. The file format: [docs/config-format.md](docs/config-format.md).
+What the prototype found on a real bus:
+[docs/prototype-step1.md](docs/prototype-step1.md).
 
 ## Background
 

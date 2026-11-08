@@ -2,6 +2,9 @@
 from their own data and ESI files, and compare it with an lcec XML file.
 
     python3 -m ecatsetup [--esi DIR] [--ini FILE] [--compare XML] [-p POS]
+    python3 -m ecatsetup ... --write ethercat.yaml [--interface IF] [--transport T]
+    python3 -m ecatsetup --check ethercat.yaml
+    python3 -m ecatsetup --import ethercat-conf.xml --write ethercat.yaml
 
 Only reads from the bus; nothing is written to the slaves.
 """
@@ -11,7 +14,9 @@ import json
 import sys
 from dataclasses import asdict
 
-from . import coe as coe_mod, esi, lcecxml, propose, sii as sii_mod, tool
+import yaml
+
+from . import coe as coe_mod, config, esi, importxml, lcecxml, propose, sii as sii_mod, tool
 
 
 def ini_value(ini_path, section, key):
@@ -120,7 +125,7 @@ def compare(p, coe, h, out):
     for k in sorted(set(mine) & set(theirs)):
         e, x = mine[k], theirs[k]
         if x.bits:
-            pins = [b[1] for b in x.bits if b[1]]
+            pins = [b.pin for b in x.bits if b.pin]
             used = "%d bit pins (%s ... %s)" % (len(pins), pins[0], pins[-1]) if len(pins) > 1 \
                 else "one bit pin (%s), the other bits unused" % pins[0]
             w("    Pins: the XML file splits 0x%04X:%02X into %s; proposal: one %s pin \"%s\""
@@ -153,7 +158,19 @@ def main(argv=None):
                     help="cyclic mode for CiA 402 drives")
     ap.add_argument("-p", "--position", type=int, action="append", help="only these slaves")
     ap.add_argument("--json", action="store_true", help="the proposals as JSON")
+    ap.add_argument("--write", metavar="FILE", help="write the proposals as an ecat configuration")
+    ap.add_argument("--interface", help="network interface, for --write")
+    ap.add_argument("--transport", default="raw", choices=sorted(config.TRANSPORTS),
+                    help="master transport, for --write")
+    ap.add_argument("--check", metavar="FILE", help="check an ecat configuration, and the bus against it")
+    ap.add_argument("--import", dest="import_xml", metavar="XML",
+                    help="import an lcec XML file; with --write, write it as an ecat configuration")
     args = ap.parse_args(argv)
+
+    if args.check:
+        sys.exit(check_file(args.check))
+    if args.import_xml:
+        sys.exit(import_file(args))
 
     esi_devices = esi.load_dirs(args.esi)
     period = servo_period(args.ini) if args.ini else None
@@ -179,6 +196,83 @@ def main(argv=None):
         print(json.dumps([asdict(p) for p in proposals], indent=2, default=str))
     else:
         print("\n".join(out))
+    if args.write:
+        try:
+            config.write(config.from_proposals(proposals, args.interface, args.transport), args.write)
+        except ValueError as e:
+            sys.exit(str(e))
+        print("Wrote %s" % args.write)
+
+
+def import_file(args):
+    """Import an lcec XML file, using the bus if a master runs."""
+    xml_cfg = lcecxml.load(args.import_xml)
+    period = servo_period(args.ini) if args.ini else None
+    bus = {}
+    try:
+        positions = set(tool.slave_positions())
+        esi_devices = esi.load_dirs(args.esi)
+        for x in xml_cfg.slaves:
+            if x.idx in positions:
+                bus[x.idx] = read_slave(x.idx, esi_devices, args.mode)
+        print("Read %d slaves from the bus" % len(bus))
+    except tool.ToolError:
+        print("No master running: imported from the XML file alone")
+    cfg, notes = importxml.import_lcec(xml_cfg, bus, period)
+    for n in notes:
+        print("Note: %s" % n)
+    errors = config.check(cfg)
+    for e in errors:
+        print("Error: %s" % e)
+    if args.write and not errors:
+        config.write(cfg, args.write)
+        print("Wrote %s" % args.write)
+    elif not args.write:
+        print(config.dumps(cfg))
+    return 1 if errors else 0
+
+
+def check_file(path):
+    """Check a configuration file, then the bus against it. Returns an exit code."""
+    try:
+        cfg = config.load(path)
+    except (OSError, yaml.YAMLError) as e:
+        print("Cannot read %s: %s" % (path, e))
+        return 1
+    errors = config.check(cfg)
+    for e in errors:
+        print("Error: %s" % e)
+    if errors:
+        return 1
+    print("%s: %d slaves, no errors in the file" % (path, len(cfg["slaves"])))
+    try:
+        positions = set(tool.slave_positions())
+    except tool.ToolError:
+        print("No master running: the bus was not checked")
+        return 0
+    bad = 0
+    for s in cfg["slaves"]:
+        pos, ident = s["position"], s["identity"]
+        if pos not in positions:
+            print("Bus: slave %d (%s) is missing" % (pos, s["name"]))
+            bad += 1
+            continue
+        info = tool.slave_info(pos)
+        want = (int(ident["vendor"], 16), int(ident["product"], 16))
+        if (info["vendor_id"], info["product_code"]) != want:
+            print("Bus: slave %d is 0x%08X/0x%08X, the file expects %s/%s (%s)"
+                  % (pos, info["vendor_id"], info["product_code"], ident["vendor"],
+                     ident["product"], s.get("device", "")))
+            bad += 1
+        elif "revision" in ident and info["revision"] != int(ident["revision"], 16):
+            print("Bus: slave %d has revision 0x%08X, the file expects %s"
+                  % (pos, info["revision"], ident["revision"]))
+    extra = positions - {s["position"] for s in cfg["slaves"]}
+    for pos in sorted(extra):
+        print("Bus: slave %d is not in the file" % pos)
+    if not bad:
+        print("Bus: matches the file")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
