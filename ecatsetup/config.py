@@ -93,13 +93,21 @@ def slave_from_proposal(p, name=None):
     return s
 
 
-def from_proposals(proposals, interface=None, transport="raw"):
+def from_proposals(proposals, interface=None, transport="raw", servo_period=None):
     master = {}
     if interface:
         master["interface"] = interface
     master["transport"] = transport
-    return {"ecat": FORMAT_VERSION, "master": master,
-            "slaves": [slave_from_proposal(p) for p in proposals]}
+    slaves = [slave_from_proposal(p) for p in proposals]
+    if any("dc" in s for s in slaves):
+        # Without these the DC slaves' clocks are not kept in step with the
+        # servo thread. The values ran a plasma cutter's bus: the thread
+        # follows the reference clock, and SYNC0 comes 30 % into the period.
+        dc = {"ref-clock-sync-cycles": 1000, "sync-to-ref-clock": True}
+        if servo_period:
+            dc["sync0-shift-ns"] = servo_period * 3 // 10
+        master["dc"] = dc
+    return {"ecat": FORMAT_VERSION, "master": master, "slaves": slaves}
 
 
 class _Dumper(yaml.SafeDumper):

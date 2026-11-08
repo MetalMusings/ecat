@@ -189,6 +189,16 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg["slaves"][0]["name"], "io-3")
         self.assertEqual(cfg["slaves"][0]["profile"], "mdp")
 
+    def test_master_dc_with_dc_slaves(self):
+        self.assertNotIn("dc", self.easercat_config()["master"])
+        s, d = easercat()
+        p = propose.propose({"position": 3, "dc": False}, s, d, device_type=5001)
+        p.dc_assign, p.dc_sync0_factor, p.dc_shift = 0x300, 1, 0
+        cfg = config.from_proposals([p], "enp2s0", "xdp-native", 1000000)
+        self.assertEqual(cfg["master"]["dc"], {"ref-clock-sync-cycles": 1000,
+                                               "sync-to-ref-clock": True,
+                                               "sync0-shift-ns": 300000})
+
     def test_check_finds_errors(self):
         cfg = self.easercat_config()
         s = cfg["slaves"][0]

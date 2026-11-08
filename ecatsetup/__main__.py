@@ -198,7 +198,7 @@ def main(argv=None):
         print("\n".join(out))
     if args.write:
         try:
-            config.write(config.from_proposals(proposals, args.interface, args.transport), args.write)
+            config.write(config.from_proposals(proposals, args.interface, args.transport, period), args.write)
         except ValueError as e:
             sys.exit(str(e))
         print("Wrote %s" % args.write)
