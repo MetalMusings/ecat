@@ -52,6 +52,10 @@ def slave_info(pos):
         info[key] = int(m.group(1), 16) if m else None
     m = re.search(r"^State:\s+(\S+)", text, re.M)
     info["state"] = m.group(1) if m else "?"
+    # kept by the master since the slave's own code is cleared when the
+    # error is acknowledged (MetalMusings/ethercat)
+    m = re.search(r"^Last AL status code:\s+(0x[0-9a-f]+)", text, re.M)
+    info["al_status_code"] = int(m.group(1), 16) if m else None
     return info
 
 

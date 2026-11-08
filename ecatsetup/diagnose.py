@@ -165,9 +165,17 @@ def diagnose(positions, seconds=2.0, out=print):
         if err and hint:
             out("    -> %s" % hint)
         elif flagged and not err and state != 8:
-            out("    -> the slave refused a state change and the master stopped it; acknowledging the"
-                " error cleared the slave's code, so it is only in the master's log"
-                " (\"AL status message 0x....\")")
+            last = tool.slave_info(pos).get("al_status_code")
+            if last:
+                text, hint = AL_CODES.get(last, ("unknown code", ""))
+                out("    -> refused with 0x%04X: %s (kept by the master; the slave's own code was "
+                    "cleared when the master acknowledged the error)" % (last, text))
+                if hint:
+                    out("    -> %s" % hint)
+            else:
+                out("    -> the slave refused a state change and the master stopped it; acknowledging"
+                    " the error cleared the slave's code, so it is only in the master's log"
+                    " (\"AL status message 0x....\")")
 
         # links and error counters
         dl, now, then = dl_status(pos), counters(pos), first[pos]

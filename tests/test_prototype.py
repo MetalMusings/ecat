@@ -341,8 +341,11 @@ class FakeBus:
     def __init__(self, regs, sdos, later=None, slave_line="0  0:0  OP  +  Some Drive"):
         self.regs, self.sdos, self.later, self.reads = regs, sdos, later or {}, 0
         self.slave_line = slave_line
+        self.verbose = "State: PREOP\nFlag: E\n"
 
     def run(self, *args, binary=False):
+        if args[0] == "slaves" and "-v" in args:
+            return self.verbose
         if args[0] == "slaves":
             return self.slave_line + "\n"
         if args[0] == "diag":
@@ -394,6 +397,14 @@ class TestDiagnose(unittest.TestCase):
         found, text = self.run_diagnose(FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO"))
         self.assertEqual(found, 1)
         self.assertIn("only in the master's log", text)
+
+    def test_error_code_kept_by_the_master(self):
+        regs = {0x0130: 0x02, 0x0110: 0x10}
+        bus = FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO")
+        bus.verbose = "State: PREOP\nFlag: E\nLast AL status code: 0x001d\n"
+        found, text = self.run_diagnose(bus)
+        self.assertIn("refused with 0x001D: Invalid output configuration", text)
+        self.assertIn("the output mapping is not accepted", text)
 
 
 if __name__ == "__main__":
