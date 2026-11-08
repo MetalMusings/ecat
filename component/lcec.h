@@ -217,6 +217,7 @@ typedef struct lcec_master {
   unsigned long mutex;              ///< Mutex for locking operations.
   ec_pdo_entry_reg_t *pdo_entry_regs;
   ec_domain_t *domain;
+  ec_domain_state_t domain_state;  ///< Domain state, updated every cycle.
   uint8_t *process_data;
   int process_data_len;
   lcec_slave_t *first_slave;
@@ -323,6 +324,7 @@ typedef struct lcec_slave {
   unsigned int *fsoe_master_offset;          ///< FSoE master offset.
   uint64_t flags;                            ///< Flags, as defined by the driver itself.
   lcec_pdo_entry_reg_t *regs;
+  void *profile_data;                        ///< Data of the slave's profile (ecat), if any.
 } lcec_slave_t;
 
 /// @brief HAL pin description.

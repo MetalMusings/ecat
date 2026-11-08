@@ -11,6 +11,8 @@ import re
 
 import yaml
 
+from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS
+
 FORMAT_VERSION = 1
 
 HEADER = """\
@@ -175,6 +177,7 @@ def check(cfg):
             err("%s: cia402 mode must be one of %s" % (where, ", ".join(sorted(CIA402_MODES))))
 
         seen = set()
+        owned = set()
         for direction in ("outputs", "inputs"):
             for pdo in (s.get("process-data") or {}).get(direction, []):
                 for e in pdo.get("entries", []):
@@ -185,6 +188,14 @@ def check(cfg):
                         continue
                     if e.get("use") == "gap":
                         continue
+                    if profile == "cia402" and o[1] == 0 and o[0] in CIA402_PROFILE:
+                        if e.get("use") != "profile":
+                            err("%s: %s is handled by the cia402 profile; give it use: profile"
+                                % (where, e["object"]))
+                        owned.add(o[0])
+                    elif e.get("use") == "profile":
+                        err("%s: %s: use: profile is only for the cia402 profile's objects"
+                            % (where, e["object"]))
                     if o in seen:
                         err("%s: %s mapped twice" % (where, e["object"]))
                     seen.add(o)
@@ -215,6 +226,10 @@ def check(cfg):
                         elif full in pins:
                             err("%s: pin %s used twice" % (where, full))
                         pins.add(full)
+        if profile == "cia402":
+            rx, tx = CIA402_NEEDS.get((s.get("cia402") or {}).get("mode"), (set(), set()))
+            for i in sorted((rx | tx) - owned):
+                err("%s: the cia402 profile needs 0x%04X:00 in the process data" % (where, i))
         dc = s.get("dc")
         if dc is not None:
             try:

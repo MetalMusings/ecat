@@ -26,6 +26,7 @@
 #endif
 
 #include "devices/lcec_generic.h"
+#include "devices/ecat_cia402.h"
 #include "ecat_config.h"
 #include "lcec.h"
 #include "rtapi_app.h"
@@ -866,10 +867,11 @@ int lcec_parse_config(void) {
           slave->vid = slave_conf->vid;
           slave->pid = slave_conf->pid;
           slave->generic_pdo_entry_count = slave_conf->pdoMappingCount;
-          slave->proc_init = lcec_generic_init;
+          // a profile sets up the generic pins and then its own
+          slave->proc_init = strcmp(slave_conf->type_name, "cia402") ? lcec_generic_init : ecat_cia402_init;
 
-          // alloc hal memory
-          if ((generic_hal_data = LCEC_HAL_ALLOCATE_ARRAY(lcec_generic_pin_t, slave_conf->pdoMappingCount)) == NULL) {
+          // alloc hal memory (one more: a cia402 slave may have no generic pins)
+          if ((generic_hal_data = LCEC_HAL_ALLOCATE_ARRAY(lcec_generic_pin_t, (slave_conf->pdoMappingCount + 1))) == NULL) {
             rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "hal_malloc() for slave %s.%s failed\n", master->name, slave_conf->name);
             goto fail2;
           }
@@ -1537,6 +1539,7 @@ void lcec_read_master(void *arg, long period) {
   rtapi_mutex_get(&master->mutex);
   ecrt_master_receive(master->master);
   ecrt_domain_process(master->domain);
+  ecrt_domain_state(master->domain, &master->domain_state);
   if (check_states) {
     ecrt_master_state(master->master, &master->ms);
   }

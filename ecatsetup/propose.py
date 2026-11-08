@@ -8,12 +8,12 @@ slave can be configured without a hand-written mapping.
 import re
 from dataclasses import dataclass, field
 
-# CiA 402 objects that the drive profile handles itself (no HAL pin).
-CIA402_PROFILE = {0x6040, 0x6041, 0x6060, 0x6061}
-# CiA 402 process data with fixed pin names and types.
+# CiA 402 objects that the drive profile handles itself (no HAL pin); the
+# profile gives them its own pins (component/devices/ecat_cia402.c).
+CIA402_PROFILE = {0x603F, 0x6040, 0x6041, 0x6060, 0x6061,
+                  0x6064, 0x606C, 0x607A, 0x60FF}
+# Other CiA 402 process data, with fixed pin names and types.
 CIA402_PINS = {
-    0x607A: ("pos-cmd", "s32"), 0x6064: ("pos-fb", "s32"),
-    0x60FF: ("vel-cmd", "s32"), 0x606C: ("vel-fb", "s32"),
     0x6071: ("torque-cmd", "s32"), 0x6077: ("torque-fb", "s32"),
     0x60F4: ("following-error", "s32"), 0x60FD: ("digital-inputs", "u32"),
     0x60FE: ("digital-outputs", "u32"), 0x6063: ("encoder-fb", "s32"),

@@ -19,6 +19,7 @@
 #include <string.h>
 #include <yaml.h>
 
+#include "devices/ecat_cia402.h"
 #include "lcec.h"
 
 #define ECAT_FORMAT_VERSION 1
@@ -33,7 +34,35 @@ typedef struct {
   const char *path;
   char where[64];  // "slave 3", for messages
   int errors;
+  int cia402;         // the slave being read has the cia402 profile
+  unsigned int owned; // which of the profile's objects it has (bits of cia402_objects)
 } ctx_t;
+
+// ---- the cia402 profile's objects ----
+
+static const struct {
+  uint16_t index;
+  int bits;
+  int output;
+} cia402_objects[] = {
+    {0x603F, 16, 0},  // error code
+    {0x6040, 16, 1},  // control word
+    {0x6041, 16, 0},  // status word
+    {0x6060, 8, 1},   // modes of operation
+    {0x6061, 8, 0},   // modes of operation display
+    {0x6064, 32, 0},  // position actual value
+    {0x606C, 32, 0},  // velocity actual value
+    {0x607A, 32, 1},  // target position
+    {0x60FF, 32, 1},  // target velocity
+};
+#define N_CIA402_OBJECTS (int)(sizeof(cia402_objects) / sizeof(cia402_objects[0]))
+
+static int cia402_object(uint16_t index, uint8_t subindex) {
+  int i;
+  for (i = 0; i < N_CIA402_OBJECTS; i++)
+    if (cia402_objects[i].index == index && subindex == 0) return i;
+  return -1;
+}
 
 static void error(ctx_t *c, const char *fmt, ...) {
   char msg[256];
@@ -181,7 +210,7 @@ static const dtype_t *find_dtype(const char *name) {
 // ---- process data ----
 
 /// Fill one PDO entry record (and complex records for "split"); count pins.
-static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, unsigned int *pins) {
+static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned int *pins) {
   LCEC_CONF_PDOENTRY_T *pe;
   yaml_node_t *split;
   const char *use = get_str(c, e, "use");
@@ -210,8 +239,28 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, unsigned int *pins) {
   pe->floatScale = 1.0;
   pe->floatOffset = 0.0;
   if (use != NULL && !strcmp(use, "gap")) return;
+  i = cia402_object(index, subindex);
   if (use != NULL && !strcmp(use, "profile")) {
-    error(c, "%s: \"use: profile\" needs a profile that ecat does not have yet; use profile generic", object);
+    if (!c->cia402) {
+      error(c, "%s: \"use: profile\" needs profile cia402", object);
+    } else if (i < 0) {
+      error(c, "%s: the cia402 profile does not handle this object; give it a pin", object);
+    } else if (cia402_objects[i].output != output) {
+      error(c, "%s: belongs in the %s", object, cia402_objects[i].output ? "outputs" : "inputs");
+    } else if (cia402_objects[i].bits != bits) {
+      error(c, "%s: the cia402 profile needs %d bits", object, cia402_objects[i].bits);
+    } else if (pin != NULL || get(c, e, "split") != NULL) {
+      error(c, "%s: an entry with \"use: profile\" has no pin", object);
+    } else {
+      c->owned |= 1u << i;
+    }
+    return;
+  } else if (use != NULL) {
+    error(c, "%s: unknown use \"%s\" (profile, gap)", object, use);
+    return;
+  }
+  if (c->cia402 && i >= 0) {
+    error(c, "%s: the cia402 profile handles this object; give it \"use: profile\" instead of a pin", object);
     return;
   }
   if (dt == NULL) {
@@ -321,7 +370,7 @@ static void process_data(ctx_t *c, buf_t *b, yaml_node_t *pd, LCEC_CONF_SLAVE_T 
         pc->index = get_int(c, pdo, "pdo", 0);
         pc->pdoEntryCount = seq_len(entries);
         ((LCEC_CONF_SYNCMANAGER_T *)(b->data + sm_off))->pdoCount++;
-        for (k = 0; k < seq_len(entries); k++) pdo_entry(c, b, seq_item(c, entries, k), &pins);
+        for (k = 0; k < seq_len(entries); k++) pdo_entry(c, b, seq_item(c, entries, k), d == 0, &pins);
         s = (LCEC_CONF_SLAVE_T *)(b->data + slave_off);  // the buffer may have moved
         s->pdoCount++;
         s->pdoEntryCount += ((LCEC_CONF_PDO_T *)(b->data + pdo_off))->pdoEntryCount;
@@ -426,8 +475,29 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   sc->vid = get_int(c, ident, "vendor", 0);
   sc->pid = get_int(c, ident, "product", 0);
   sc->configPdos = get_bool(c, s, "configure-pdos", 1);
-  if (profile == NULL || (strcmp(profile, "generic") && strcmp(profile, "mdp"))) {
-    error(c, "profile \"%s\" is not supported yet (generic, mdp)", profile ? profile : "");
+  c->cia402 = profile != NULL && !strcmp(profile, "cia402");
+  c->owned = 0;
+  if (c->cia402) {
+    const char *mode = get_str(c, get(c, s, "cia402"), "mode");
+    LCEC_CONF_MODPARAM_T *mp;
+    copy_str(sc->type_name, "cia402");
+    if ((mp = append(b, sizeof(*mp))) == NULL) {
+      error(c, "out of memory");
+      return;
+    }
+    mp->confType = lcecConfTypeModParam;
+    mp->id = ECAT_MP_CIA402_MODE;
+    copy_str(mp->name, "cia402.mode");
+    if (mode != NULL && !strcmp(mode, "csp")) {
+      mp->value.u32 = 8;
+    } else if (mode != NULL && !strcmp(mode, "csv")) {
+      mp->value.u32 = 9;
+    } else {
+      error(c, "cia402.mode must be csp or csv");
+    }
+    ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount = 1;
+  } else if (profile == NULL || (strcmp(profile, "generic") && strcmp(profile, "mdp"))) {
+    error(c, "profile \"%s\" is not supported (cia402, mdp, generic)", profile ? profile : "");
   }
 
   if (dc != NULL) {
@@ -442,6 +512,22 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     dcc->sync0Shift = get_int(c, dc, "sync0-shift-ns", 0);
   }
   process_data(c, b, get(c, s, "process-data"), (LCEC_CONF_SLAVE_T *)(b->data + off), off);
+  if (c->cia402) {
+    const char *mode = get_str(c, get(c, s, "cia402"), "mode");
+    uint16_t need[4] = {0x6040, 0x6041, 0, 0};
+    int i, j;
+    if (mode != NULL && !strcmp(mode, "csv")) {
+      need[2] = 0x60FF;
+      need[3] = 0x606C;
+    } else {
+      need[2] = 0x607A;
+      need[3] = 0x6064;
+    }
+    for (j = 0; j < 4; j++) {
+      i = cia402_object(need[j], 0);
+      if (!(c->owned & (1u << i))) error(c, "the cia402 profile needs 0x%04X:00 with \"use: profile\"", need[j]);
+    }
+  }
   settings(c, b, get(c, s, "settings"), off);
   c->where[0] = 0;
 }

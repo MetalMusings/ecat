@@ -42,5 +42,7 @@ typedef struct {
 } lcec_generic_pin_t;
 
 int lcec_generic_init(int comp_id, struct lcec_slave *slave);
+void lcec_generic_read(struct lcec_slave *slave, long period);
+void lcec_generic_write(struct lcec_slave *slave, long period);
 
 #endif

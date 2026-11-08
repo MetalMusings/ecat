@@ -2,8 +2,9 @@
 
 EtherCAT for LinuxCNC, configured without hand-written XML.
 
-**Status: design stage.** Nothing is built yet. This repository starts
-with the design draft; code follows in steps.
+**Status: early development.** The design draft, a prototype of the
+setup program's core (no GUI yet) and the HAL component exist; they are
+built in steps.
 
 `ecat` is planned as:
 
@@ -65,12 +66,16 @@ addf ecat.write-all servo-thread
 - The cycle time is the servo thread's period, taken at the first call
   of `ecat.read-all`; distributed clocks are configured then, before the
   master is activated.
-- Profiles `generic` and `mdp` are supported; `cia402` is next.
+- Profiles `cia402`, `mdp` and `generic` are supported. A `cia402` drive
+  gets the CiA 402 state machine and scaled position and velocity pins in
+  the component, with the pins of the cia402 HAL component:
+  [docs/cia402.md](docs/cia402.md).
 
 A configuration imported from lcec can keep lcec's pin names by naming
 the slaves `lcec.0.<name>`, so that existing HAL files work with only the
 lines above changed. It has run a plasma cutter's LinuxCNC configuration
-(three CiA 402 drives driven through HAL, one I/O slave) this way.
+(three CiA 402 drives driven through HAL, one I/O slave) this way, and
+with the drives as `cia402` slaves instead of the cia402 HAL component.
 
 ## Background
 

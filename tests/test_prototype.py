@@ -86,8 +86,8 @@ class TestPropose(unittest.TestCase):
         self.assertEqual(p.drive_modes, ["PP", "PV", "TQ", "HM", "CSP", "CSV"])
         roles = {e.index: (e.role, e.pin) for pd in p.pdos for e in pd.entries}
         self.assertEqual(roles[0x6040], ("profile", ""))
-        self.assertEqual(roles[0x607A], ("pin", "pos-cmd"))
-        self.assertEqual(roles[0x6064], ("pin", "pos-fb"))
+        self.assertEqual(roles[0x607A], ("profile", ""))
+        self.assertEqual(roles[0x6064], ("profile", ""))
         self.assertEqual((p.dc_assign, p.dc_sync0_factor), (0x300, 1))
         self.assertEqual(p.notes, [])
 

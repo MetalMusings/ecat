@@ -29,7 +29,7 @@ endif
 CFLAGS_ECAT := $(EXTRA_CFLAGS) -Wall -I. -I$(USPACE_BUILD)/include -MMD -MP
 
 objs := lcec_main.o lcec_ethercat.o lcec_pins.o lcec_malloc.o lcec_lookup.o \
-	lcec_modparam.o lcec_devicelist.o ecat_config.o devices/lcec_generic.o
+	lcec_modparam.o lcec_devicelist.o ecat_config.o devices/lcec_generic.o devices/ecat_cia402.o
 
 .PHONY: all install clean
 all: ecat.so

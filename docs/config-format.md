@@ -45,14 +45,14 @@ slaves:
       entries:
       - {object: '0x6040:00', bits: 16, type: UINT, use: profile}
       - {object: '0x6060:00', bits: 8, type: SINT, use: profile}
-      - {object: '0x607A:00', bits: 32, type: DINT, pin: pos-cmd, hal-type: s32}
+      - {object: '0x607A:00', bits: 32, type: DINT, use: profile}
     inputs:
     - pdo: '0x1A00'
       sm: 3
       entries:
       - {object: '0x6041:00', bits: 16, type: UINT, use: profile}
       - {object: '0x6061:00', bits: 8, type: SINT, use: profile}
-      - {object: '0x6064:00', bits: 32, type: DINT, pin: pos-fb, hal-type: s32}
+      - {object: '0x6064:00', bits: 32, type: DINT, use: profile}
   dc:
     assign-activate: '0x0300'
     sync0-cycles: 1
@@ -126,7 +126,7 @@ entry has:
 | `object` | `"0xINDEX:SUB"`, or `"0x0000:00"` for a gap. |
 | `bits` | Bit length. |
 | `type` | Data type: `BOOL`, `SINT`, `INT`, `DINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `REAL`, `LREAL`. |
-| `use` | `profile`: handled by the profile, no pin. `gap`: padding. Left out: an ordinary entry. |
+| `use` | `profile`: handled by the profile, no pin (for `cia402`, see [cia402.md](cia402.md)). `gap`: padding. Left out: an ordinary entry. |
 | `pin`, `hal-type` | One pin for the whole entry; `hal-type` is `bit`, `s32`, `u32`, `s64`, `u64` or `float`. A `float` pin of a `REAL`/`LREAL` entry carries the value as it is; of an integer entry it is scaled. |
 | `scale`, `offset` | For a `float` pin of an integer entry: pin = value × scale + offset. |
 | `split` | One `bit` pin per bit, from bit 0; `null` for a bit without a pin. Instead of `pin`. |
@@ -166,12 +166,12 @@ yet.
 ## In the component
 
 The `ecat` component reads the file with `loadrt ecat config=<file>`. It
-supports the profiles `generic` and `mdp` so far; `use: profile` entries
-need the `cia402` profile, which is not there yet. `hal-type` `s64` and
-`u64` are not supported yet.
+supports the profiles `cia402` ([cia402.md](cia402.md)), `mdp` and
+`generic`. `hal-type` `s64` and `u64` are not supported yet.
 
 ## Open
 
-- Scaling for `cia402` (counts per unit) and where it belongs.
+- Scaling for `cia402` (counts per unit): a HAL parameter for now; it may
+  belong in the file.
 - Options for profiles beyond `cia402.mode`.
 - Several masters (only one bus is supported).
