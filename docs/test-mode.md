@@ -19,7 +19,7 @@ the process data, and a drive's CiA 402 objects are refused.
 
 When the test stops, every drive is disabled, the outputs go to zero, and
 the slaves are taken to PREOP while process data still flows
-(`ecat.take-down`, as `ecat-take-down` does when LinuxCNC stops), so that
+(`ecat.take-down`; the component's stop guard would do it too), so that
 they stop without an error.
 
 ## Moving a drive

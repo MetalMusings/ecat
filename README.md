@@ -138,17 +138,25 @@ addf ecat.write-all servo-thread
 
 - Slave pins are `<slave name>.<pin>` as named in the file; the master's
   are `ecat.0.*` (`ecat.0.all-op`, ...) and `ecat.*`.
-- For an orderly stop, put `loadusr -w ecat-take-down` in the HAL file
-  named by `[HAL]SHUTDOWN` in the INI file (such as
-  `SHUTDOWN = shutdown.hal`), which LinuxCNC runs before it stops its
-  threads. It sets `ecat.take-down`: every output becomes zero and the
-  slaves go to PREOP while process data still flows (with
-  linuxcnc-ethercat-uspace 0.7 or newer; before that only the outputs).
-  Without it, the slaves lose their process data in OP when LinuxCNC
-  stops, and stop with an error (sync manager watchdog 0x001B,
-  synchronization error 0x001A); CiA 402 drives also latch a
-  communication fault (such as 0x7500). The test mode of EtherCAT Setup
-  does the same before it stops.
+- The bus stops in order by itself when LinuxCNC (or `halcmd stop`)
+  stops the threads. Otherwise the slaves would lose their process data
+  in OP and stop with an error (sync manager watchdog 0x001B,
+  synchronization error 0x001A), and CiA 402 drives latch a
+  communication fault (0x7500 on the ECT60, after one or two missed
+  cycles). A stop guard, an RTAPI task with the servo period beside the
+  servo thread, sends the process data unchanged when `ecat.write-all`
+  is more than a quarter period late; after 10 such cycles in a row it
+  sets every output to zero and takes the slaves to PREOP, and unloading
+  waits for it. `ecat.0.guard-state` shows it (0 the servo thread runs, 1
+  taking the slaves down, 2 done) and `ecat.0.guard-cycles` counts the
+  cycles it sent; while the machine runs that stays 0. It needs
+  linuxcnc-ethercat-uspace 0.7 or newer. After `halcmd stop` and `start`
+  the slaves are asked back to OP; DC slaves (such as the ECT60) then stop
+  in SAFEOP with a synchronization error, as they did before the guard:
+  restart instead.
+- `ecat.take-down` does the same on request while the thread runs, and
+  `ecat-take-down` sets it and waits for PREOP; it is no longer needed in
+  `[HAL]SHUTDOWN`.
 - The cycle time is the servo thread's period, taken at the first call
   of `ecat.read-all`; distributed clocks are configured then, before the
   master is activated.
