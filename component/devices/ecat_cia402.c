@@ -31,7 +31,9 @@
 ///   move when it is enabled.
 /// - If the drive faults, leaves "Operation enabled" by itself, does not
 ///   get there within `enable-timeout-ms`, the bus stops exchanging data,
-///   the `watchdog` pin stops changing, or the command is not a finite
+///   the master's DC sync check for the drive timed out (its SYNC0 runs on
+///   an unsynchronized clock), the `watchdog` pin stops changing, or the
+///   command is not a finite
 ///   number (NaN or infinite), the drive is shut down and
 ///   `drv-fault` is set. It stays shut down until `enable` goes false;
 ///   `fault-reason` says why.
@@ -138,6 +140,7 @@ enum {
   WHY_HOMING_ERROR,      // the drive reports a homing error
   WHY_HOMING_TIMEOUT,    // homing not done within home-timeout-ms
   WHY_PP_TIMEOUT,        // a PP move not done within pp-timeout-ms
+  WHY_DC_SYNC,           // the master's DC sync check timed out: SYNC0 on an unsynchronized clock
 };
 
 // Profile position (PP): the set-point handshake.
@@ -816,6 +819,11 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   int reset_edge = *d->fault_reset && !d->fault_reset_old;
   int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
   int homing_now = d->hs != HS_IDLE;
+#ifdef EC_HAVE_DC_SYNC_FAILED
+  int dc_failed = slave->state.dc_sync_failed;
+#else
+  int dc_failed = 0;
+#endif
   int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->active || homing_now;
   double cmd = (d->active == MODE_CSV || d->active == MODE_PV) ? *d->velocity_cmd
                 : d->active == MODE_PP                         ? *d->pp_target
@@ -850,6 +858,10 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   } else if (!d->blocked) {
     if (!d->bus_ok) {
       block(d, WHY_BUS);
+    } else if (dc_failed) {
+      // the drive's SYNC0 does not follow the other slaves and the servo
+      // thread: not run at all
+      block(d, WHY_DC_SYNC);
     } else if (d->watchdog_ms != 0 && d->watchdog_ns >= (long long)d->watchdog_ms * 1000000LL) {
       block(d, WHY_WATCHDOG);
     } else if (!isfinite(cmd) || (d->pp_velocity != NULL && !isfinite(*d->pp_velocity))) {

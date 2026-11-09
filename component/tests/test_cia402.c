@@ -364,6 +364,48 @@ static void test_bus_loss(void) {
   CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
 }
 
+#ifdef EC_HAVE_DC_SYNC_FAILED
+static void test_dc_sync_failed_is_not_enabled(void) {
+  csp_drive();
+  S->state.dc_sync_failed = 1;  // the master's DC sync check timed out
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(10);
+  CHECK(sw_now != SW_ENABLED);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 11);
+  // synchronized after a new configuration: enabled on a new enable
+  S->state.dc_sync_failed = 0;
+  run(5);
+  CHECK(sw_now != SW_ENABLED);
+  PIN_BIT("x.enable") = 0;
+  run(2);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 0);
+  PIN_BIT("x.enable") = 1;
+  run(5);
+  CHECK_EQ(sw_now, SW_ENABLED);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
+static void test_dc_sync_failed_while_running(void) {
+  csp_drive();
+  PIN_BIT("x.enable") = 1;
+  PIN_FLOAT("x.pos-cmd") = 10;
+  fake_set(S, 0x6064, 0, 3);
+  start(SW_READY);
+  run(5);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 10);
+  S->state.dc_sync_failed = 1;  // reconfigured, e.g. after a bus loss
+  CHECK_EQ(cycle(SW_ENABLED), 0x06);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 11);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 3);
+}
+#define DC_SYNC_TESTS test_dc_sync_failed_is_not_enabled, test_dc_sync_failed_while_running,
+#else
+#define DC_SYNC_TESTS
+#endif
+
 static void test_watchdog(void) {
   int i;
   csp_drive();
@@ -1727,7 +1769,7 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
     test_fault_while_enabled_shuts_down_until_enable_drops, test_fault_reset_on_enable,
     test_no_fault_reset_on_enable_without_auto, test_fault_reset_is_held_at_most_100_ms,
-    test_fault_reset_pin_without_enable, test_drive_leaving_enabled, test_bus_loss, test_watchdog,
+    test_fault_reset_pin_without_enable, test_drive_leaving_enabled, test_bus_loss, DC_SYNC_TESTS test_watchdog,
     test_command_not_a_number, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
     test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_error, test_homing_timeout,
     test_homing_abandoned_by_motion, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
