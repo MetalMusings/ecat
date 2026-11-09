@@ -19,7 +19,7 @@ from dataclasses import asdict
 
 import yaml
 
-from . import config, diagnose, esi, importxml, lcecxml, propose, tool, update
+from . import config, diagnose, esi, importxml, integrate, lcecxml, propose, tool, update
 from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F401
 
 
@@ -148,6 +148,11 @@ def main(argv=None):
     ap.add_argument("--check", metavar="FILE", help="check an ecat configuration, and the bus against it")
     ap.add_argument("--import", dest="import_xml", metavar="XML",
                     help="import an lcec XML file; with --write, write it as an ecat configuration")
+    ap.add_argument("--apply", metavar="FILE",
+                    help="write an ecat configuration into the LinuxCNC configuration of --ini: "
+                         "the file, ethercat-load.hal, ethercat.hal and the INI changes, after "
+                         "showing them; joints connected to drives in your HAL files are taken over")
+    ap.add_argument("--yes", action="store_true", help="for --apply, write without asking")
     ap.add_argument("--gui", nargs="?", const="", metavar="FILE",
                     help="open the EtherCAT Setup window, with this configuration file if given")
     args = ap.parse_args(argv)
@@ -159,6 +164,8 @@ def main(argv=None):
             sys.exit("The window needs PyQt5 (apt install python3-pyqt5): %s" % e)
         sys.exit(gui.main(args.gui or None, args.esi, args.ini, args.mode))
 
+    if args.apply:
+        sys.exit(apply_file(args))
     if args.check:
         sys.exit(check_file(args.check))
     if args.diagnose:
@@ -204,6 +211,49 @@ def main(argv=None):
         except ValueError as e:
             sys.exit(str(e))
         print("Wrote %s" % args.write)
+
+
+def apply_file(args):
+    """Write a configuration into a LinuxCNC configuration. Returns an exit code."""
+    if not args.ini:
+        print("--apply needs --ini, the machine's INI file")
+        return 2
+    try:
+        cfg = config.load(args.apply)
+    except (OSError, ValueError) as e:
+        print("Cannot read %s: %s" % (args.apply, e))
+        return 1
+    for j, (name, scale) in sorted(integrate.propose_joints(args.ini, cfg).items()):
+        integrate.set_joint(cfg, j, name, scale)
+        print("joint %d -> %s, scale %g (as connected in your HAL files)" % (j, name, scale))
+    errors = config.check(cfg)
+    if errors:
+        print("The configuration has errors:\n  " + "\n  ".join(errors))
+        return 1
+    name = os.path.basename(args.apply)
+    p = integrate.plan(args.ini, cfg, name)
+    dest = os.path.join(os.path.dirname(os.path.abspath(args.ini)), name)
+    if not p.changes and not p.errors and os.path.exists(dest) and \
+            open(dest).read() == config.dumps(cfg):
+        print("Nothing to change: %s is up to date" % os.path.dirname(dest))
+        return 0
+    integrate.describe(p)
+    if p.errors:
+        return 1
+    if not args.yes:
+        try:
+            if input("\nWrite %s and these files? [y/N] " % dest).strip().lower() not in ("y", "yes"):
+                print("Nothing written.")
+                return 1
+        except EOFError:
+            print("Nothing written.")
+            return 1
+    if os.path.exists(dest):
+        shutil.copyfile(dest, dest + ".bak")
+    config.write(cfg, dest)
+    for path in [dest] + integrate.apply(p):
+        print("Wrote %s" % path)
+    return 0
 
 
 def diagnose_bus(args):

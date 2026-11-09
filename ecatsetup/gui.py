@@ -26,14 +26,14 @@ import sys
 from PyQt5.QtCore import QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-    QFormLayout,
+    QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QDoubleSpinBox, QFileDialog, QFormLayout,
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, drivetest, esi, propose, testmode, tool
+from . import config, diagnose, drivetest, esi, integrate, propose, testmode, tool
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -61,6 +61,10 @@ QFrame#card[tone="amber"] { border: 1px solid #f2c46d; background: #fff8e8; }
 QFrame#card[tone="grey"] { background: #f6f7f9; }
 QLabel#cardTitle { color: #4b5563; font-weight: 600; font-size: 11px; letter-spacing: 1px; }
 QLabel#hint { color: #6b7280; }
+QLabel#axisBadge { background: #dbe8ff; color: #1f4fbf; font-weight: 700; font-size: 16px;
+                   border-radius: 6px; }
+QLabel#jointName { font-weight: 600; }
+QLabel#problemText { color: #b42318; }
 QLabel#bigTitle { font-size: 19px; font-weight: 600; color: #111827; }
 QLabel#fieldName { color: #6b7280; font-size: 11px; letter-spacing: 1px; }
 QLabel#value { font-family: monospace; font-size: 18px; }
@@ -947,7 +951,10 @@ class SlaveView(QWidget):
         s = self.win.session.slave(self.position)
         if s is None:
             return
+        old = s.get("name")
         s["name"] = self.name.text().strip()
+        if old != s["name"]:
+            integrate.rename_slave(self.win.session.cfg, old, s["name"])
         if s.get("profile") == "cia402":
             c = s.setdefault("cia402", {})
             c["mode"] = self.mode.currentData()
@@ -1565,6 +1572,7 @@ class MoveCard(Card):
         try:
             dt.enable(True)
             dt.jog(sign * self.step.currentData())
+            self.win.tested_drives.add(dt.name)
         except testmode.TestError as e:
             self.win.status(str(e))
 
@@ -1974,10 +1982,85 @@ def config_pins(cfg):
     return rows
 
 
+class JointRow(QWidget):
+    """One joint of the INI file and the drive it is connected to."""
+
+    def __init__(self, page, joint, letter, jtype):
+        super().__init__()
+        self.page, self.joint = page, joint
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 4, 0, 4)
+        badge = label(letter or "–", "axisBadge")
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setFixedSize(34, 34)
+        lay.addWidget(badge)
+        text = QVBoxLayout()
+        text.setSpacing(0)
+        text.addWidget(label("joint.%d" % joint, "jointName"))
+        text.addWidget(label(jtype.lower(), "hint"))
+        lay.addLayout(text)
+        lay.addSpacing(12)
+        lay.addWidget(label("→", "hint"))
+        self.drive = QComboBox()
+        self.drive.setMinimumWidth(220)
+        self.drive.currentIndexChanged.connect(self.edited)
+        lay.addWidget(self.drive)
+        lay.addWidget(label("counts per unit", "hint"))
+        self.scale = QDoubleSpinBox()
+        self.scale.setRange(-1e9, 1e9)
+        self.scale.setDecimals(6)
+        self.scale.setMinimumWidth(130)
+        self.scale.setToolTip("The drive's pos-scale: counts per machine unit (mm or degree)")
+        self.scale.valueChanged.connect(self.edited)
+        lay.addWidget(self.scale)
+        self.tested = pill("", "green")
+        lay.addWidget(self.tested)
+        lay.addStretch(1)
+
+    def fill(self, cfg, tested):
+        """Fill from the configuration without editing it."""
+        self.drive.blockSignals(True)
+        self.scale.blockSignals(True)
+        self.drive.clear()
+        self.drive.addItem("not connected here", None)
+        for name in integrate.drives(cfg):
+            self.drive.addItem(name, name)
+        j = next((j for j in integrate.joints(cfg) if j.get("joint") == self.joint), None)
+        i = self.drive.findData(j["slave"]) if j else 0
+        self.drive.setCurrentIndex(max(i, 0))
+        self.scale.setValue(float(j.get("scale", 1.0)) if j else 1.0)
+        self.scale.setEnabled(j is not None)
+        name = j["slave"] if j else None
+        set_pill(self.tested, "moved in the test" if name in tested else "", "green")
+        self.drive.blockSignals(False)
+        self.scale.blockSignals(False)
+
+    def edited(self, *_):
+        cfg = self.page.win.session.cfg
+        if cfg is None:
+            return
+        name = self.drive.currentData()
+        scale = self.scale.value()
+        if name and scale == 0:
+            scale = 1.0
+        if name and not any(j.get("joint") == self.joint for j in integrate.joints(cfg)):
+            # a drive newly chosen: its scale as the test or the HAL files had it
+            known = self.page.known_scales.get(name)
+            if known:
+                scale = known
+        integrate.set_joint(cfg, self.joint, name, scale)
+        self.page.win.changed()
+
+
 class HalPage(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
+        self.rows = []
+        self.rows_for = None
+        self.known_scales = {}
+        self.proposal = {}
+        self.plan = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         content = QWidget()
@@ -1988,6 +2071,30 @@ class HalPage(QWidget):
 
         left = QVBoxLayout()
         left.setSpacing(16)
+        self.axes = Card("Joints", "Choose the drive for each joint.")
+        self.no_ini = QWidget()
+        nl = QHBoxLayout(self.no_ini)
+        nl.setContentsMargins(0, 0, 0, 0)
+        nl.addWidget(label("Choose the machine's INI file to connect its joints to drives.",
+                           "hint"))
+        choose = QPushButton("INI file...")
+        choose.clicked.connect(win.choose_ini)
+        nl.addWidget(choose)
+        nl.addStretch(1)
+        self.axes.add(self.no_ini)
+        self.rows_box = QVBoxLayout()
+        self.axes.lay.addLayout(self.rows_box)
+        row = QHBoxLayout()
+        self.take_over = QPushButton("Take over from the HAL files")
+        self.take_over.setToolTip("Connect the joints to the drives as your HAL files connect "
+                                  "them now, with their pos-scale")
+        self.take_over.clicked.connect(self.do_take_over)
+        row.addWidget(self.take_over)
+        self.take_over_text = label("", "hint", wrap=True)
+        row.addWidget(self.take_over_text, 1)
+        self.axes.lay.addLayout(row)
+        left.addWidget(self.axes)
+
         pins = Card("Inputs and outputs", "The pins this configuration gives, to connect in HAL.")
         self.pins = table(["Slave", "Signal", "HAL pin", "Type", "Direction"], 2)
         pins.add(self.pins)
@@ -2004,28 +2111,38 @@ class HalPage(QWidget):
 
         right = QVBoxLayout()
         apply = Card("Apply to LinuxCNC")
-        apply.add(label("Writing ethercat.hal and the INI changes into the configuration comes "
-                        "in step 5 of the plan. Until then, put these lines in the machine's HAL "
-                        "file, in place of lcec's:", wrap=True))
+        self.apply_text = apply.add(label("", wrap=True))
+        self.files = QVBoxLayout()
+        self.files.setSpacing(4)
+        apply.lay.addLayout(self.files)
         self.code = QPlainTextEdit()
         self.code.setObjectName("code")
         self.code.setReadOnly(True)
         self.code.setFont(mono())
-        self.code.setFixedHeight(110)
+        self.code.setMinimumHeight(260)
+        self.code.setLineWrapMode(QPlainTextEdit.NoWrap)
         apply.add(self.code)
-        apply.add(label("ecat.read-all goes first in the servo thread, ecat.write-all last.",
-                        "hint", wrap=True))
+        self.problems = apply.add(label("", "problemText", wrap=True))
+        self.notes = apply.add(label("", "hint", wrap=True))
+        buttons = QHBoxLayout()
+        self.write_button = QPushButton("Write")
+        self.write_button.setObjectName("primary")
+        self.write_button.clicked.connect(self.write)
+        buttons.addWidget(self.write_button)
+        self.show_button = QPushButton("Show all changes...")
+        self.show_button.clicked.connect(self.show_changes)
+        buttons.addWidget(self.show_button)
+        buttons.addStretch(1)
+        apply.lay.addLayout(buttons)
         right.addWidget(apply)
         right.addStretch(1)
         lay.addLayout(right, 2)
 
+    # what is shown
+
     def refresh(self):
         s = self.win.session
         self.yaml.setPlainText(s.dumps())
-        name = os.path.basename(s.path) if s.path else "ethercat.yaml"
-        self.code.setPlainText("loadrt ecat config=%s\naddf ecat.read-all  servo-thread\n"
-                               "# ... the other functions ...\naddf ecat.write-all servo-thread"
-                               % name)
         self.pins.setRowCount(0)
         for row in config_pins(s.cfg):
             r = self.pins.rowCount()
@@ -2033,6 +2150,175 @@ class HalPage(QWidget):
             for c, v in enumerate(row):
                 self.pins.setItem(r, c, item(v, font=mono() if c in (1, 2) else None))
         fit_table(self.pins, minimum=1)
+        if self.win.tabs.currentWidget() is self:
+            self.show_joints()
+            self.show_plan()
+
+    def ini(self):
+        p = self.win.session.ini_path
+        return p if p and os.path.exists(p) else None
+
+    def show_joints(self):
+        s, ini = self.win.session, self.ini()
+        self.no_ini.setVisible(ini is None)
+        joints = []
+        if ini:
+            try:
+                joints = integrate.ini_joints(ini)
+            except OSError:
+                joints = []
+        key = (ini, tuple(joints))
+        if key != self.rows_for:
+            for r in self.rows:
+                r.setParent(None)
+            self.rows = [JointRow(self, j, letter, jtype) for j, letter, jtype in joints]
+            for r in self.rows:
+                self.rows_box.addWidget(r)
+            self.rows_for = key
+            self.proposal = {}
+            self.known_scales = {}
+            if ini and s.cfg is not None:
+                try:
+                    self.proposal = integrate.propose_joints(ini, s.cfg)
+                    files = integrate.user_hal_files(ini)
+                    setp = integrate.setp_values(files)
+                    e = integrate.read_ini(ini)
+                    for name in integrate.drives(s.cfg):
+                        v = integrate.resolve(setp.get("%s.pos-scale" % name), e)
+                        try:
+                            if v is not None:
+                                self.known_scales[name] = float(v)
+                        except ValueError:
+                            pass
+                except OSError:
+                    pass
+        self.axes.hint.setText("Joints from %s. Choose the drive for each; ethercat.hal "
+                               "connects them." % os.path.basename(ini) if ini else "")
+        tested = set(self.win.tested_drives)
+        for r in self.rows:
+            r.fill(s.cfg, tested)
+            r.setEnabled(s.cfg is not None)
+        pending = {j: v for j, v in self.proposal.items()
+                   if j not in {x.get("joint") for x in integrate.joints(s.cfg)}}
+        self.take_over.setVisible(bool(pending))
+        self.take_over_text.setVisible(bool(pending))
+        self.take_over_text.setText("Your HAL files connect " + ", ".join(
+            "joint.%d to %s" % (j, name) for j, (name, _) in sorted(pending.items())) + ".")
+
+    def do_take_over(self):
+        cfg = self.win.session.cfg
+        for j, (name, scale) in sorted(self.proposal.items()):
+            if j not in {x.get("joint") for x in integrate.joints(cfg)}:
+                integrate.set_joint(cfg, j, name, scale)
+        self.win.changed()
+
+    def yaml_name(self):
+        return os.path.basename(self.win.session.path) if self.win.session.path \
+            else "ethercat.yaml"
+
+    def show_plan(self):
+        s, ini = self.win.session, self.ini()
+        while self.files.count():
+            w = self.files.takeAt(0).widget()
+            if w is not None:
+                w.setParent(None)
+        self.plan = None
+        if ini is None or s.cfg is None:
+            self.apply_text.setText("Choose the machine's INI file (Bus page, Master, or the "
+                                    "Joints card): the files are written in its folder.")
+            self.code.setPlainText("")
+            self.problems.setText("")
+            self.notes.setText("")
+            self.write_button.setEnabled(False)
+            self.show_button.setEnabled(False)
+            self.write_button.setText("Write")
+            return
+        d = os.path.dirname(os.path.abspath(ini))
+        try:
+            self.plan = p = integrate.plan(ini, s.cfg, self.yaml_name())
+        except OSError as e:
+            self.problems.setText(str(e))
+            self.write_button.setEnabled(False)
+            return
+        self.apply_text.setText(
+            "Written in the configuration folder %s. Your own HAL files are changed only where "
+            "they would clash with ethercat.hal: those lines are commented out. Every changed "
+            "file is kept as .bak." % d)
+        dest = os.path.join(d, self.yaml_name())
+        rows = [("change" if os.path.exists(dest) else "new", self.yaml_name(), "the bus")]
+        rows += [(c.kind, c.name, c.what) for c in p.changes]
+        for kind, name, what in rows:
+            r = QWidget()
+            rl = QHBoxLayout(r)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.addWidget(pill(kind, "blue" if kind == "new" else "amber"))
+            n = label(name)
+            n.setFont(mono())
+            rl.addWidget(n)
+            rl.addWidget(label(what, "hint"))
+            rl.addStretch(1)
+            self.files.addWidget(r)
+        main = next((c for c in p.changes if c.name == integrate.MAIN_FILE), None)
+        if main is None:
+            path = os.path.join(d, integrate.MAIN_FILE)
+            text = open(path, errors="replace").read() if os.path.exists(path) else ""
+        else:
+            text = main.new
+        self.code.setPlainText(text)
+        errors = list(p.errors) + config.check(s.cfg)
+        self.problems.setText("\n".join("✗ " + e for e in errors))
+        self.problems.setVisible(bool(errors))
+        self.notes.setText("\n".join("· " + n for n in p.notes))
+        self.write_button.setText("Write to %s" % os.path.basename(d))
+        self.write_button.setEnabled(not errors and not self.win.busy and self.win.test is None)
+        self.show_button.setEnabled(True)
+
+    def changes_text(self):
+        out = []
+        integrate.describe(self.plan, out.append)
+        return "\n".join(out)
+
+    def show_changes(self):
+        if self.plan is None:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Changes - %s" % TITLE)
+        dlg.resize(900, 650)
+        dl = QVBoxLayout(dlg)
+        text = QPlainTextEdit(self.changes_text())
+        text.setReadOnly(True)
+        text.setFont(mono())
+        dl.addWidget(text)
+        box = QDialogButtonBox(QDialogButtonBox.Close)
+        box.rejected.connect(dlg.reject)
+        dl.addWidget(box)
+        dlg.exec_()
+
+    def write(self):
+        s, ini = self.win.session, self.ini()
+        if self.plan is None or ini is None:
+            return
+        if self.win.test is not None:
+            QMessageBox.warning(self, TITLE, "Stop the test first.")
+            return
+        d = os.path.dirname(os.path.abspath(ini))
+        dest = os.path.join(d, self.yaml_name())
+        names = [self.yaml_name()] + [c.name for c in self.plan.changes]
+        if QMessageBox.question(
+                self, TITLE, "Write these files in %s?\n\n%s\n\nEvery existing file is kept as "
+                ".bak. LinuxCNC must not run with this configuration now." % (d, "\n".join(names)),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        try:
+            s.save(dest)
+            written = integrate.apply(self.plan)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, TITLE, "Not all was written:\n%s" % e)
+            self.win.refresh(keep_page=True)
+            return
+        self.win.status("Wrote %s" % ", ".join(os.path.basename(x) for x in [dest] + written))
+        self.rows_for = None
+        self.win.refresh(keep_page=True)
 
 
 # -- the window
@@ -2073,6 +2359,7 @@ class MainWindow(QMainWindow):
         self.test_timer.setInterval(200)
         self.test_timer.timeout.connect(self.poll_test)
         self.drive_tests = {}   # slave name -> drivetest.DriveTest
+        self.tested_drives = set()  # drives moved in the test since the program started
         # the heartbeat: a drive is shut down in the servo thread if it stops
         self.heartbeat = QTimer(self)
         self.heartbeat.setInterval(100)

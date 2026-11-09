@@ -86,6 +86,7 @@ slaves:
 | `ecat` | Format version, `1`. |
 | `master` | The master, below. |
 | `slaves` | The slaves, in any order. |
+| `linuxcnc` | How the configuration is connected in LinuxCNC; optional, below. |
 
 The cycle time is not in the file: it is the period of the servo thread
 (`[EMCMOT]SERVO_PERIOD` in the INI file) that the component's functions
@@ -178,6 +179,22 @@ Each setting is an SDO download: `object` and either `type` and `value`
 (written as that type, little endian), or `data` (raw bytes in hex, such
 as `"a0 0f"`). `name` is for people.
 
+## linuxcnc
+
+Written by EtherCAT Setup when joints are connected to drives
+([linuxcnc.md](linuxcnc.md)); the component does not read it.
+
+```yaml
+linuxcnc:
+  joints:
+  - {joint: 0, slave: lcec.0.X, scale: 100.0}
+  - {joint: 1, slave: lcec.0.Y, scale: 66.6666666666666}
+```
+
+| Key | Meaning |
+|---|---|
+| `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0). Each joint and each slave once. |
+
 ## Importing lcec XML files
 
 ```
@@ -202,7 +219,8 @@ supports the profiles `cia402` ([cia402.md](cia402.md)), `mdp` and
 
 ## Open
 
-- Scaling for `cia402` (counts per unit): a HAL parameter for now; it may
-  belong in the file.
+- Scaling for `cia402` (counts per unit): a HAL parameter, set from
+  `linuxcnc.joints` by the `ethercat.hal` EtherCAT Setup writes; drives
+  that are not joints set it in HAL.
 - Options for profiles beyond `cia402.mode` and `cia402.modes`.
 - Several masters (only one bus is supported).

@@ -129,7 +129,7 @@ def _flow_entries(dumper, data):
     # One line per PDO entry or setting: short dicts in flow style.
     flow = set(data) <= {"object", "bits", "type", "use", "pin", "hal-type", "split",
                          "scale", "offset", "name", "value", "data",
-                         "vendor", "product", "revision"}
+                         "vendor", "product", "revision", "joint", "slave"}
     return dumper.represent_mapping("tag:yaml.org,2002:map", data, flow_style=flow)
 
 
@@ -350,4 +350,39 @@ def check(cfg):
             for i, sub, _ in PP_LIMITS:
                 if (i, sub) not in set_objects:
                     err("%s: cia402 mode pp needs the setting %s" % (where, obj(i, sub)))
+    return errors + check_joints(cfg)
+
+
+def check_joints(cfg):
+    """Errors in the linuxcnc section: joints connected to drives."""
+    errors = []
+    lc = cfg.get("linuxcnc")
+    if lc is None:
+        return errors
+    if not isinstance(lc, dict):
+        return ["linuxcnc: must be a mapping"]
+    js = lc.get("joints") or []
+    if not isinstance(js, list):
+        return ["linuxcnc.joints: must be a list"]
+    csp = {s.get("name") for s in cfg.get("slaves") or []
+           if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp"}
+    numbers, slaves = set(), set()
+    for j in js:
+        n = j.get("joint") if isinstance(j, dict) else None
+        where = "linuxcnc.joints: joint %r" % (n,)
+        if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+            errors.append("%s: joint must be a number" % where)
+        elif n in numbers:
+            errors.append("%s: listed twice" % where)
+        numbers.add(n)
+        if not isinstance(j, dict):
+            continue
+        if j.get("slave") not in csp:
+            errors.append("%s: %r is not a cia402 drive in mode csp" % (where, j.get("slave")))
+        elif j["slave"] in slaves:
+            errors.append("%s: %s is connected to another joint too" % (where, j["slave"]))
+        slaves.add(j.get("slave"))
+        scale = j.get("scale", 1.0)
+        if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale == 0:
+            errors.append("%s: scale must be a number other than 0" % where)
     return errors

@@ -6,8 +6,9 @@ EtherCAT for LinuxCNC, configured without hand-written XML.
 (three CiA 402 drives in CSP, one I/O slave). EtherCAT Setup reads,
 proposes, checks, updates and diagnoses a configuration from the command
 line and in its window, and tests it: I/O, SDOs, and moving a CSP drive
-in small steps. Writing the result into a LinuxCNC configuration comes
-next. Everything is built in steps, following the design draft.
+in small steps, and writes it into a LinuxCNC configuration, with the
+joints connected to their drives. Everything is built in steps, following
+the design draft.
 
 `ecat` is planned as:
 
@@ -57,6 +58,7 @@ python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethe
 python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
 python3 -m ecatsetup --check ethercat.yaml
 python3 -m ecatsetup --diagnose
+python3 -m ecatsetup --apply ethercat.yaml --ini <machine>.ini
 python3 -m ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
 python3 -m unittest discover -s tests
 ```
@@ -88,8 +90,12 @@ proposes a slave again in another mode or PDO assignment, updates the
 file from the bus, imports lcec XML, and saves with a `.bak` copy. The
 Troubleshoot page shows a slave's way from INIT to OP, its AL status code
 in plain words, its CiA 402 state, the error counters per port, and its
-own messages (0x10F3). HAL & LinuxCNC lists the pins and the lines for a
-HAL file; writing them into the configuration is step 5 of the plan.
+own messages (0x10F3). HAL & LinuxCNC connects the INI file's joints to
+CSP drives and writes the configuration into the LinuxCNC configuration:
+`ethercat.yaml`, `ethercat-load.hal`, `ethercat.hal` and the INI changes,
+commenting out only the lines in your HAL files that would clash, each
+changed file kept as `.bak` (`--apply` does the same from the command
+line): [docs/linuxcnc.md](docs/linuxcnc.md).
 
 Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in CSP in
 small steps, hold-to-enable, with a heartbeat and limits written to the
@@ -131,7 +137,8 @@ and write functions cycle by cycle against a fake of HAL and the master
 into the records the component is set up from, checking the records and
 the errors.
 
-In a HAL file, instead of `lcec_conf` and `lcec`:
+EtherCAT Setup writes these lines itself ([docs/linuxcnc.md](docs/linuxcnc.md)).
+By hand, in a HAL file, instead of `lcec_conf` and `lcec`:
 
 ```
 loadrt ecat config=ethercat.yaml

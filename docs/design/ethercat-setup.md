@@ -356,6 +356,13 @@ changed. When an existing `lcec` configuration is moved over, the old
 `lcec_conf` and `lcec` lines in the user's HAL file are shown, and removed
 only if the user agrees.
 
+As built (step 5, [linuxcnc.md](../linuxcnc.md)): two files, since the
+servo thread exists only once `motmod` is loaded in the user's first HAL
+file. `ethercat-load.hal`, the first HALFILE, loads the component;
+`ethercat.hal`, the last, adds its functions and connects the joints.
+Lines in the user's HAL files that would clash are commented out, shown
+first, with a `.bak` copy; their signal names are kept.
+
 At start, `ecat` compares the bus with the file and stops with a
 clear message if they differ, such as "slave 2 is an EL2008, the
 configuration expects an EL1008; run EtherCAT Setup".
@@ -460,7 +467,11 @@ command line, `ethercat.yaml`, the `ecat` component, which runs the
 plasma cutter). Of step 4, the window has the Bus, Troubleshoot, Test
 and HAL & LinuxCNC pages; test mode covers I/O, SDOs and moving a CSP
 drive, tried on three axes. Moving a drive in PP, PV or HM from the
-window is not built; the profile has those modes. Step 5 is next.
+window is not built; the profile has those modes. Of step 5, writing the
+file, `ethercat-load.hal`, `ethercat.hal` (joints connected to CSP drives)
+and the INI changes is built and tried on a copy of the plasma cutter's
+configuration and run in LinuxCNC; connecting I/O pins from the program
+and the start check are not built.
 
 ## Mockups
 
