@@ -716,6 +716,222 @@ static void test_homing_with_stale_result_bits(void) {
   CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
 }
 
+// ---- profile velocity (PV) -------------------------------------------
+
+// A drive in PV: once enabled it ramps its actual velocity by pv.ramp per
+// cycle towards the target, or towards 0 while halted (control word bit 8).
+static struct {
+  int32_t vel, ramp;
+  int stuck;  // never slows down
+  unsigned sw;
+} pv;
+
+static const fake_entry_t pv_entries[] = {
+    {0x6040, 0, 16}, {0x6060, 0, 8}, {0x60FF, 0, 32}, {0x6041, 0, 16}, {0x6061, 0, 8}, {0x606C, 0, 32}, FAKE_END,
+};
+
+static lcec_slave_t *pv_drive(void) {
+  lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODE}, {.id = -1}};
+  mp[0].value.u32 = 3;
+  S = fake_slave("s", pv_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 3);
+  memset(&pv, 0, sizeof(pv));
+  pv.ramp = 100;
+  pv.sw = SW_READY;
+  return S;
+}
+
+/// One cycle; the control word.
+static unsigned pv_cycle(void) {
+  unsigned sw = pv.sw, cw;
+  int32_t target = (int32_t)fake_get(S, 0x60FF, 0), goal;
+  if (sw == SW_ENABLED) {
+    goal = (cw_now & 0x100) ? 0 : target;
+    if ((goal == 0 && pv.vel == 0) || (goal != 0 && pv.vel == goal)) sw |= 0x0400;  // reached
+    if (pv.vel == 0) sw |= 0x1000;                                                   // speed zero
+  }
+  fake_set(S, 0x606C, 0, (uint32_t)pv.vel);
+  cw = cycle(sw);
+  pv.sw = drive(pv.sw, cw, cw_now);
+  cw_now = cw;
+  // the drive keeps turning when it is switched off, and stops by itself
+  goal = pv.sw == SW_ENABLED && !(cw & 0x100) ? (int32_t)fake_get(S, 0x60FF, 0) : 0;
+  if (pv.stuck) goal = pv.vel;
+  if (pv.vel < goal) pv.vel = pv.vel + pv.ramp > goal ? goal : pv.vel + pv.ramp;
+  if (pv.vel > goal) pv.vel = pv.vel - pv.ramp < goal ? goal : pv.vel - pv.ramp;
+  return cw;
+}
+
+static void pv_run(int n) {
+  while (n-- > 0) pv_cycle();
+}
+
+static void test_pv_pins(void) {
+  csp_drive();
+  CHECK(fake_find("x.at-speed") == NULL && fake_find("x.stop-timeout-ms") == NULL);
+  pv_drive();
+  CHECK(fake_find("s.at-speed") && fake_find("s.zero-speed"));
+  CHECK_EQ(PIN_U32("s.stop-timeout-ms"), 10000);
+  CHECK_EQ(PIN_S32("s.mode"), 3);
+}
+
+static void test_pv_needs_target_velocity(void) {
+  static const fake_entry_t e[] = {{0x6040, 0, 16}, {0x6041, 0, 16}, {0x606C, 0, 32}, FAKE_END};
+  lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODE}, {.id = -1}};
+  mp[0].value.u32 = 3;
+  S = fake_slave("s", e, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
+  CHECK(strstr(fake_msgs, "PV needs 0x60FF") != NULL);
+  mp[0].value.u32 = 1;  // PP: not yet
+  S = fake_slave("s", pv_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
+}
+
+static void test_pv_runs_at_the_command(void) {
+  int i;
+  pv_drive();
+  PIN_FLOAT("s.velo-scale") = 100;
+  PIN_FLOAT("s.velocity-cmd") = 10;
+  pv_run(2);
+  CHECK_EQ((int32_t)fake_get(S, 0x60FF, 0), 0);  // not enabled: no target
+  PIN_BIT("s.enable") = 1;
+  pv_run(3);
+  CHECK_EQ(pv.sw, SW_ENABLED);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 3);
+  CHECK_EQ((int32_t)fake_get(S, 0x60FF, 0), 1000);
+  CHECK_EQ(PIN_BIT("s.at-speed"), 0);  // ramping
+  // the status word still shows the old target, 0, as reached: not at speed
+  // until it answers the new one
+  for (i = 0; i < 20; i++) {
+    pv_run(1);
+    if (pv.vel != 1000) CHECK_EQ(PIN_BIT("s.at-speed"), 0);
+  }
+  CHECK_EQ(pv.vel, 1000);
+  CHECK_EQ(PIN_BIT("s.at-speed"), 1);
+  CHECK_EQ(PIN_BIT("s.zero-speed"), 0);
+  CHECK_NEAR(PIN_FLOAT("s.velocity-fb"), 10, 1e-12);
+  CHECK_EQ(cw_now, 0x0F);
+  // a new command: not at speed until the drive is there
+  PIN_FLOAT("s.velocity-cmd") = -5;
+  pv_run(1);
+  CHECK_EQ((int32_t)fake_get(S, 0x60FF, 0), -500);
+  CHECK_EQ(PIN_BIT("s.at-speed"), 0);
+  pv_run(30);
+  CHECK_EQ(PIN_BIT("s.at-speed"), 1);
+}
+
+static void test_pv_halts_before_switching_off(void) {
+  int i, halted = 0;
+  pv_drive();
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  PIN_BIT("s.enable") = 1;
+  pv_run(20);
+  CHECK_EQ(pv.vel, 1000);
+  PIN_BIT("s.enable") = 0;
+  for (i = 0; i < 9; i++) {
+    CHECK_EQ(pv_cycle(), 0x010F);  // halt, still enabled
+    halted++;
+    CHECK_EQ(PIN_BIT("s.at-speed"), 0);
+  }
+  CHECK_EQ((int32_t)fake_get(S, 0x60FF, 0), 0);
+  pv_run(2);
+  CHECK_EQ(pv.vel, 0);
+  CHECK_EQ(PIN_BIT("s.zero-speed"), 1);
+  CHECK_EQ(pv_cycle(), 0x06);  // stopped: switched off
+  CHECK_EQ(PIN_BIT("s.drv-fault"), 0);
+  CHECK(halted == 9);
+}
+
+static void test_pv_enable_again_while_halting(void) {
+  pv_drive();
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  PIN_BIT("s.enable") = 1;
+  pv_run(20);
+  PIN_BIT("s.enable") = 0;
+  pv_run(3);
+  CHECK(pv.vel < 1000 && pv.vel > 0);
+  PIN_BIT("s.enable") = 1;
+  CHECK_EQ(pv_cycle(), 0x0F);
+  pv_run(10);
+  CHECK_EQ(pv.vel, 1000);
+  CHECK_EQ(PIN_BIT("s.at-speed"), 1);
+}
+
+static void test_pv_stop_timeout(void) {
+  int i;
+  pv_drive();
+  PIN_U32("s.stop-timeout-ms") = 50;
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  PIN_BIT("s.enable") = 1;
+  pv_run(20);
+  pv.stuck = 1;
+  PIN_BIT("s.enable") = 0;
+  for (i = 0; i < 50; i++) CHECK_EQ(pv_cycle(), 0x010F);
+  CHECK_EQ(pv_cycle(), 0x06);  // switched off anyway
+  // 0: switched off at once
+  pv_drive();
+  PIN_U32("s.stop-timeout-ms") = 0;
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  PIN_BIT("s.enable") = 1;
+  pv_run(20);
+  PIN_BIT("s.enable") = 0;
+  CHECK_EQ(pv_cycle(), 0x06);
+}
+
+static void test_pv_standstill_switches_off_at_once(void) {
+  pv_drive();
+  PIN_BIT("s.enable") = 1;
+  pv_run(10);
+  CHECK_EQ(PIN_BIT("s.zero-speed"), 1);
+  PIN_BIT("s.enable") = 0;
+  CHECK_EQ(pv_cycle(), 0x06);
+}
+
+static void test_pv_halts_on_a_fault(void) {
+  int i;
+  pv_drive();
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  PIN_BIT("s.enable") = 1;
+  pv_run(20);
+  PIN_FLOAT("s.velocity-cmd") = NAN;
+  CHECK_EQ(pv_cycle(), 0x010F);
+  CHECK_EQ(PIN_BIT("s.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("s.fault-reason"), 7);
+  CHECK_EQ((int32_t)fake_get(S, 0x60FF, 0), 0);
+  for (i = 0; i < 20 && pv_cycle() == 0x010F; i++) {
+  }
+  CHECK_EQ(cw_now, 0x06);
+  CHECK_EQ(pv.vel, 0);
+  // the bus lost: nothing can be commanded, no halt
+  pv_drive();
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  PIN_BIT("s.enable") = 1;
+  pv_run(20);
+  fake_bus(S, 0);
+  CHECK_EQ(pv_cycle(), 0x00);
+}
+
+static void test_pv_not_at_speed_in_another_mode(void) {
+  pv_drive();
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  PIN_BIT("s.enable") = 1;
+  pv_run(20);
+  CHECK_EQ(PIN_BIT("s.at-speed"), 1);
+  fake_set(S, 0x6061, 0, 9);
+  pv_run(1);
+  CHECK_EQ(PIN_BIT("s.at-speed"), 0);
+  CHECK_EQ(PIN_BIT("s.zero-speed"), 0);
+  // bit 12 means "speed zero" only in PV
+  fake_set(S, 0x6061, 0, 3);
+  PIN_FLOAT("s.velocity-cmd") = 0;
+  pv_run(20);
+  CHECK_EQ(PIN_BIT("s.zero-speed"), 1);
+  fake_set(S, 0x6061, 0, 9);
+  pv_run(1);
+  CHECK_EQ(PIN_BIT("s.zero-speed"), 0);
+}
+
 RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
@@ -725,4 +941,7 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_command_not_a_number, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
     test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_error, test_homing_timeout,
     test_homing_abandoned_by_motion, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
-    test_homing_not_while_disabled, test_homing_with_stale_result_bits)
+    test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_pv_pins, test_pv_needs_target_velocity,
+    test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,
+    test_pv_stop_timeout, test_pv_standstill_switches_off_at_once, test_pv_halts_on_a_fault,
+    test_pv_not_at_speed_in_another_mode)

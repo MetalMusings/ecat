@@ -162,7 +162,8 @@ def main(argv=None):
     ap.add_argument("--ini", help="LinuxCNC INI file, for the servo period")
     ap.add_argument("--compare", help="lcec XML file (ethercat-conf.xml) to compare with")
     ap.add_argument("--mode", default="csp", choices=sorted(propose.CIA402_MODES),
-                    help="cyclic mode for CiA 402 drives")
+                    help="mode for CiA 402 drives: csp or csv for joints, pv (profile "
+                         "velocity) for a spindle or conveyor")
     ap.add_argument("--pdo-set", action="append", default=[], metavar="POS=NAME",
                     help="use the ESI's predefined PDO assignment NAME for slave POS")
     ap.add_argument("-p", "--position", type=int, action="append", help="only these slaves")

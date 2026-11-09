@@ -642,8 +642,10 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       mp->value.u32 = 8;
     } else if (mode != NULL && !strcmp(mode, "csv")) {
       mp->value.u32 = 9;
+    } else if (mode != NULL && !strcmp(mode, "pv")) {
+      mp->value.u32 = 3;
     } else {
-      error(c, "cia402.mode must be csp or csv");
+      error(c, "cia402.mode must be csp, csv or pv");
     }
     ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount = 1;
     c->cia402_modes = cia402_modes(c, get(c, get(c, s, "cia402"), "modes"));
@@ -680,7 +682,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     uint16_t need[6] = {0x6040, 0x6041, 0, 0, 0, 0};
     int n_need = 4;
     int j;
-    if (mode != NULL && !strcmp(mode, "csv")) {
+    if (mode != NULL && (!strcmp(mode, "csv") || !strcmp(mode, "pv"))) {
       need[2] = 0x60FF;
       need[3] = 0x606C;
     } else {

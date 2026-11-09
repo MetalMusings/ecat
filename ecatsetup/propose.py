@@ -23,6 +23,7 @@ CIA402_PINS = {
 CIA402_MODES = {
     "csp": ({0x6040, 0x607A}, {0x6041, 0x6064}),
     "csv": ({0x6040, 0x60FF}, {0x6041, 0x606C}),
+    "pv": ({0x6040, 0x60FF}, {0x6041, 0x606C}),
 }
 # 0x6502 "supported drive modes", bit -> name.
 CIA402_MODE_BITS = {0: "PP", 1: "VL", 2: "PV", 3: "TQ", 5: "HM", 6: "IP",

@@ -416,10 +416,17 @@ static void test_cia402_csv(void) {
                   P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT")),
       "needs 0x607A:00");
   CHECK(strstr(fake_msgs, "needs 0x6064:00") != NULL);
+  // PV needs what CSV needs
+  CHECK_EQ(load(CIA402("pv", P("0x6040:00", 16, "UINT") P("0x60FF:00", 32, "DINT"),
+               P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT"))),
+      0);
+  CHECK_EQ(MODPARAM(0)->value.u32, 3);
+  CHECK_FAILS(CIA402("pv", P("0x6040:00", 16, "UINT"), P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT")),
+      "needs 0x60FF:00");
 }
 
 static void test_cia402_errors(void) {
-  CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN), "cia402.mode must be csp or csv");
+  CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN), "cia402.mode must be csp, csv or pv");
   CHECK_FAILS(CIA402("csp", P("0x6060:00", 8, "SINT") P("0x607A:00", 32, "DINT"), CSP_IN), "needs 0x6040:00");
   // a profile object with a pin
   CHECK_FAILS(CIA402("csp", CSP_OUT, P("0x6041:00", 16, "UINT") P("0x6064:00", 32, "DINT")

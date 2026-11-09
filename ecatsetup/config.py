@@ -26,7 +26,7 @@ PROFILES = {402: "cia402", 5001: "mdp"}
 DATA_TYPES = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT",
               "ULINT", "REAL", "LREAL"}
 HAL_TYPES = {"bit", "s32", "u32", "s64", "u64", "float"}
-CIA402_MODES = {"csp", "csv"}
+CIA402_MODES = {"csp", "csv", "pv"}
 # other modes a cia402 drive may switch to (cia402.modes); they need the
 # mode objects to change modes
 CIA402_OTHER_MODES = {"hm"}

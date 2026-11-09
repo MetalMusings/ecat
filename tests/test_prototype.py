@@ -126,6 +126,13 @@ class TestPropose(unittest.TestCase):
         self.assertTrue(all("changing modes needs 0x606" in e for e in errors))
         self.assertTrue(any("'pp' is not supported" in e for e in config.check(drive({"mode": "csp", "modes": ["pp"]}))))
         self.assertTrue(any("must be a list" in e for e in config.check(drive({"mode": "csp", "modes": "hm"}))))
+        # PV needs the velocity objects, not the position ones
+        pv = drive({"mode": "pv"})
+        self.assertTrue(any("needs 0x60FF" in e for e in config.check(pv)))
+        for pdo, obj in (("outputs", "0x60FF:00"), ("inputs", "0x606C:00")):
+            pv["slaves"][0]["process-data"][pdo][0]["entries"].append(
+                {"object": obj, "bits": 32, "type": "DINT", "use": "profile"})
+        self.assertEqual(config.check(pv), [])
 
     def test_kebab(self):
         self.assertEqual(propose.kebab("LowpassFilteredVoltage"), "lowpass-filtered-voltage")
