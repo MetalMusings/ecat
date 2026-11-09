@@ -76,3 +76,17 @@ def upload(pos, index, subindex, dtype):
     if dtype == "string":
         return out
     return int(out.split()[0], 0)
+
+
+def upload_text(pos, index, subindex, dtype=None):
+    """One SDO value as the tool shows it (such as "0x0010 16"). Raises ToolError."""
+    args = ["upload", "-p", pos] + (["-t", dtype] if dtype else []) + ["0x%04x" % index, subindex]
+    return run(*args).strip()
+
+
+def download(pos, index, subindex, value, dtype=None):
+    """Write one SDO. The type comes from the slave's dictionary unless given.
+    Raises ToolError if the slave refuses."""
+    args = ["download", "-p", pos] + (["-t", dtype] if dtype else []) + \
+        ["0x%04x" % index, subindex, value]
+    run(*args)

@@ -84,6 +84,19 @@ proposes a slave again in another mode or PDO assignment, updates the
 file from the bus, imports lcec XML, saves with a `.bak` copy, and
 diagnoses the slaves. Like the rest of `ecatsetup`, it only reads from
 the bus; nothing moves.
+
+Part 2 adds the I/O test (Test > Start test): the `ecat` component runs
+the configuration being edited (saved or not) in `halrun` with a servo
+thread, without LinuxCNC. Each slave's Test tab shows its pins live and
+sets the outputs of I/O slaves; pins set during the test go back to 0
+before it stops. SDOs can be read and written from the same tab whenever
+a master runs. CiA 402 drives stay disabled: their pins are shown, not
+set, and their CiA 402 objects are not written; objects that are
+commands rather than settings (such as 0x2010 on the ECT60) and objects
+in the process data are refused too. The kernel master must be stopped
+(`sudo systemctl stop ethercat`) and LinuxCNC must not run. The
+free-running master hands the bus over to the test and does not come
+back when it stops.
 The file format: [docs/config-format.md](docs/config-format.md).
 What the prototype found on a real bus:
 [docs/prototype-step1.md](docs/prototype-step1.md).

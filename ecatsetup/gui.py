@@ -14,7 +14,7 @@ import os
 import re
 import sys
 
-from PyQt5.QtCore import QThread, Qt, pyqtSignal
+from PyQt5.QtCore import QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFont, QFontDatabase, QKeySequence
 from PyQt5.QtWidgets import (
     QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDockWidget, QFileDialog,
@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (
     QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget)
 
-from . import config, diagnose, propose, tool
+from . import config, diagnose, propose, testmode, tool
 from .session import Session
 
 TITLE = "EtherCAT Setup"
@@ -82,6 +82,8 @@ class Worker(QThread):
             self.done.emit(self.fn(self.progress.emit))
         except tool.ToolError as e:
             self.failed.emit("Cannot reach a master: %s\nStart one with: sudo ethercat-uspace start" % e)
+        except testmode.TestError as e:
+            self.failed.emit("Test mode: %s" % e)
         except Exception as e:  # shown to the user rather than lost in a thread
             self.failed.emit("%s: %s" % (type(e).__name__, e))
 
@@ -196,6 +198,8 @@ class SlavePage(QWidget):
                   "Scale", "Offset", "Bit pins"]
     PIN, HALTYPE, SCALE, OFFSET, SPLIT = 7, 8, 9, 10, 11
     SET_COLUMNS = ["Object", "Name", "Type", "Value"]
+    TEST_COLUMNS = ["Pin", "Type", "Direction", "Value", "Set"]
+    TEST_TAB = 4
 
     def __init__(self, win):
         super().__init__()
@@ -215,6 +219,8 @@ class SlavePage(QWidget):
         self.tabs.addTab(self._process_data(), "Process data")
         self.tabs.addTab(self._settings(), "Settings")
         self.tabs.addTab(self._diagnosis(), "Diagnosis")
+        self.tabs.addTab(self._test(), "Test")
+        self.tabs.currentChanged.connect(lambda i: self.show_test() if i == self.TEST_TAB else None)
 
     # -- building
 
@@ -368,6 +374,47 @@ class SlavePage(QWidget):
         lay.addWidget(self.diag)
         return w
 
+    def _test(self):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        self.test_state = QLabel()
+        self.test_state.setWordWrap(True)
+        lay.addWidget(self.test_state)
+        self.tp = QTableWidget(0, len(self.TEST_COLUMNS))
+        self.tp.setHorizontalHeaderLabels(self.TEST_COLUMNS)
+        self.tp.verticalHeader().hide()
+        self.tp.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tp.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tp.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        lay.addWidget(self.tp, 1)
+        self.tp_rows = {}
+
+        box = QGroupBox("SDO (CoE object)")
+        form = QHBoxLayout(box)
+        self.sdo_obj = QLineEdit()
+        self.sdo_obj.setPlaceholderText("0x2000:01")
+        self.sdo_obj.setMaximumWidth(110)
+        self.sdo_obj.editingFinished.connect(self.sdo_object_typed)
+        form.addWidget(self.sdo_obj)
+        self.sdo_type = QComboBox()
+        self.sdo_type.addItem("type from the slave", None)
+        for t in sorted(testmode.TOOL_TYPES.values()) + ["string"]:
+            self.sdo_type.addItem(t, t)
+        form.addWidget(self.sdo_type)
+        read = QPushButton("Read")
+        read.clicked.connect(self.sdo_read)
+        form.addWidget(read)
+        self.sdo_value = QLineEdit()
+        self.sdo_value.setPlaceholderText("value")
+        form.addWidget(self.sdo_value, 1)
+        write = QPushButton("Write...")
+        write.clicked.connect(self.sdo_write)
+        form.addWidget(write)
+        self.sdo_name = QLabel()
+        lay.addWidget(box)
+        lay.addWidget(self.sdo_name)
+        return w
+
     # -- showing
 
     def show_slave(self, position):
@@ -391,7 +438,7 @@ class SlavePage(QWidget):
             where.append("not read from the bus")
         where.append("in the file" if s else "not in the file: add it with Update from bus")
         self.subtitle.setText("; ".join(where))
-        for i in range(3):
+        for i in (0, 1, 2, self.TEST_TAB):
             self.tabs.setTabEnabled(i, s is not None)
         if s is None:
             self.tabs.setCurrentIndex(3)
@@ -447,6 +494,7 @@ class SlavePage(QWidget):
         self.show_process_data(s)
         self.show_settings(s)
         self.show_diagnosis()
+        self.show_test()
 
     def _item(self, text, editable=False, tip=None):
         it = QTableWidgetItem("" if text is None else str(text))
@@ -519,6 +567,129 @@ class SlavePage(QWidget):
                 self.st.setItem(r, c, self._item(v, editable=True))
         self.st.resizeColumnsToContents()
         self.loading = False
+
+    def _prefix(self):
+        s = self.win.session.slave(self.position)
+        return "%s." % s["name"] if s and s.get("name") else None
+
+    def show_test(self):
+        """Build the pin table of the running test for this slave."""
+        self.tp.setRowCount(0)
+        self.tp_rows = {}
+        run = self.win.test
+        prefix = self._prefix()
+        if run is None or not run.running:
+            self.test_state.setText(
+                "The I/O test is off. Start it with Test > Start test: the ecat component runs "
+                "this configuration in halrun, so inputs show here live and outputs can be set. "
+                "Drives stay disabled. SDOs can be read and written whenever a master runs.")
+            return
+        if prefix is None:
+            return
+        try:
+            pins = run.pins(prefix)
+        except testmode.TestError as e:
+            self.test_state.setText(str(e))
+            return
+        drive = prefix.startswith(run.read_only)
+        self.test_state.setText(
+            "Test running. " + ("This is a CiA 402 drive: its pins are shown, not set; drives are "
+                                "tested with motion in the CiA 402 test mode." if drive else
+                                "Pins set here go back to 0 when the test stops. Mind what is "
+                                "wired to the outputs."))
+        for name in sorted(pins):
+            pin = pins[name]
+            r = self.tp.rowCount()
+            self.tp.insertRow(r)
+            self.tp_rows[name] = r
+            # HAL's direction is the component's: its IN pins are the slave's outputs
+            direction = {"IN": "to the slave", "OUT": "from the slave"}.get(pin.dir, pin.dir)
+            for c, v in enumerate((name[len(prefix):], pin.type, direction, pin.value)):
+                self.tp.setItem(r, c, self._item(v))
+            if run.writable(pin):
+                self.tp.setCellWidget(r, 4, self._setter(pin))
+
+    def _setter(self, pin):
+        if pin.type == "bit":
+            w = QCheckBox()
+            w.setChecked(pin.value == "TRUE")
+            w.toggled.connect(lambda on, p=pin: self.win.set_pin(p, on))
+            return w
+        w = QLineEdit(pin.value)
+        w.setToolTip("Type a value and press Enter")
+        w.returnPressed.connect(lambda p=pin, e=w: self.win.set_pin(p, e.text()))
+        return w
+
+    def update_test(self):
+        """Refresh the values of the pin table (timer)."""
+        run, prefix = self.win.test, self._prefix()
+        if run is None or prefix is None:
+            return
+        try:
+            pins = run.pins(prefix)
+        except testmode.TestError:
+            return
+        if set(pins) != set(self.tp_rows):
+            self.show_test()
+            return
+        for name, r in self.tp_rows.items():
+            it = self.tp.item(r, 3)
+            if it.text() != pins[name].value:
+                it.setText(pins[name].value)
+
+    def _sdo_target(self):
+        try:
+            index, sub = config.parse_obj(self.sdo_obj.text().strip())
+        except ValueError:
+            self.win.status("Type an object as 0xIIII:SS, such as 0x2000:01")
+            return None
+        return index, sub
+
+    def sdo_object_typed(self):
+        t = self._sdo_target()
+        if t:
+            b = self.win.session.bus.get(self.position)
+            entry = b.coe.entries.get(t) if b and b.coe else None
+            self.sdo_name.setText("%s (%s, %s)" % (
+                self.win.session.object_name(self.position, *t), entry.data_type, entry.access)
+                if entry else "Not in the dictionary read from the slave: choose a type")
+
+    def sdo_read(self):
+        t = self._sdo_target()
+        if not t:
+            return
+        try:
+            text = tool.upload_text(self.position, t[0], t[1], self.sdo_type.currentData())
+        except tool.ToolError as e:
+            self.win.status(str(e).splitlines()[-1])
+            return
+        if self.sdo_type.currentData() != "string" and len(text.split()) == 2:
+            text = text.split()[-1]     # "0x0010 16": hex and decimal
+        self.sdo_value.setText(text)
+        self.win.status("0x%04X:%02X = %s" % (t[0], t[1], text))
+
+    def sdo_write(self):
+        t = self._sdo_target()
+        value = self.sdo_value.text().strip()
+        s = self.win.session.slave(self.position) or {}
+        if not t or not value:
+            return
+        why = testmode.sdo_write_refused(s, *t)
+        if why:
+            QMessageBox.warning(self, TITLE, "Not written: %s" % why)
+            return
+        if QMessageBox.question(
+                self, TITLE, "Write %s to 0x%04X:%02X of slave %d?\n\nThe slave keeps it until "
+                "it restarts (or for good, if it stores it). To have it written at every start, "
+                "add it under Settings." % (value, t[0], t[1], self.position),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        try:
+            tool.download(self.position, t[0], t[1], value, self.sdo_type.currentData())
+        except tool.ToolError as e:
+            QMessageBox.warning(self, TITLE, "The slave refused:\n%s" % e)
+            return
+        self.win.status("Wrote 0x%04X:%02X = %s to slave %d" % (t[0], t[1], value, self.position))
 
     def show_diagnosis(self):
         b = self.win.session.bus.get(self.position)
@@ -686,6 +857,10 @@ class MainWindow(QMainWindow):
         self.session = session
         self.diagnoses = {}     # position -> diagnosis text
         self.worker = None
+        self.test = None        # testmode.TestRun while the I/O test runs
+        self.test_timer = QTimer(self)
+        self.test_timer.setInterval(200)
+        self.test_timer.timeout.connect(self.poll_test)
         self.messages_by_slave = {}
         self.resize(1300, 850)
 
@@ -768,7 +943,13 @@ class MainWindow(QMainWindow):
                            "Check the file, and the bus against it")
         self.a_diag = act("Diagnose", lambda: self.diagnose(None), (busm, tb), None,
                           "State, cable errors, the slaves' own messages and CiA 402 state")
-        self.bus_actions = (self.a_read, self.a_update, self.a_diag, self.a_import)
+        testm = self.menuBar().addMenu("&Test")
+        tb.addSeparator()
+        self.a_test = act("Start test", self.start_test, (testm, tb), None,
+                          "Run this configuration in halrun: read inputs, set outputs. "
+                          "Drives stay disabled.")
+        self.a_test_stop = act("Stop test", self.stop_test, (testm, tb), None,
+                               "Put set outputs back to 0 and stop halrun")
 
     # -- state shown
 
@@ -802,6 +983,11 @@ class MainWindow(QMainWindow):
         self.a_update.setEnabled(bool(s.bus) and not self.busy)
         for a in (self.a_read, self.a_diag, self.a_import, self.a_open):
             a.setEnabled(not self.busy)
+        testing = self.test is not None
+        self.a_test.setEnabled(has_cfg and not self.busy and not testing)
+        self.a_test_stop.setEnabled(testing and not self.busy)
+        if testing:
+            self.bus_label.setText("Test running")
         self.fill_list(keep_page)
 
     def fill_list(self, keep_page):
@@ -1033,6 +1219,85 @@ class MainWindow(QMainWindow):
                 self.slave_page.tabs.setCurrentIndex(3)
         self.run("Diagnosing...", work, done)
 
+    # -- the I/O test
+
+    def start_test(self):
+        errors = config.check(self.session.cfg)
+        if errors:
+            self.check()
+            QMessageBox.warning(self, TITLE, "The configuration has errors; fix them first.")
+            return
+        if QMessageBox.question(
+                self, TITLE, "Start the I/O test?\n\nThe ecat component runs this configuration "
+                "(as edited, saved or not) in halrun with a servo thread of %d ns, and takes the "
+                "slaves to OP. LinuxCNC must not run.\n\nOutputs of I/O slaves can then be set "
+                "from each slave's Test tab: make sure nothing wired to them can do harm. "
+                "CiA 402 drives stay disabled." % (self.session.period or 1000000),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        try:
+            run = testmode.TestRun(copy.deepcopy(self.session.cfg), self.session.period)
+        except testmode.TestError as e:
+            QMessageBox.warning(self, TITLE, str(e))
+            return
+
+        def started(_):
+            self.test = run
+            self.test_timer.start()
+            self.set_messages([(GREEN, "", ["Test running; log: %s" % run.log_path])])
+        self.run("Starting the test...", lambda progress: run.start(progress), started)
+
+    def stop_test(self):
+        if self.test is None:
+            return
+        self.test_timer.stop()
+        run = self.test
+
+        def stopped(_):
+            self.test = None
+            self.set_messages([(GREY, "", [
+                "Test stopped. The free-running master does not come back by itself: to read "
+                "the bus again, sudo ethercat-uspace start"])])
+        self.run("Stopping the test...", lambda progress: run.stop(), stopped)
+
+    def set_pin(self, pin, value):
+        if self.test is None:
+            return
+        try:
+            self.test.set_pin(pin, value)
+        except (testmode.TestError, ValueError) as e:
+            self.status(str(e))
+
+    def poll_test(self):
+        run = self.test
+        if run is None or self.busy:
+            return
+        if not run.running:
+            self.test_timer.stop()
+            tail = run.log_tail()
+            run.stop()
+            self.test = None
+            self.set_messages([(RED, "", ["The test stopped by itself (halrun ended):"] +
+                                tail.splitlines())])
+            self.refresh(keep_page=True)
+            return
+        try:
+            m = run.pins("ecat.0.")
+        except testmode.TestError:
+            return
+        get = lambda n: m["ecat.0." + n].value if "ecat.0." + n in m else "?"
+        responding = get("slaves-responding")
+        try:
+            responding = int(responding, 0)
+        except ValueError:
+            pass
+        self.bus_label.setText("Test running: %s, %s slaves responding, link %s" % (
+            "all OP" if get("all-op") == "TRUE" else "NOT all OP", responding,
+            "up" if get("link-up") == "TRUE" else "DOWN"))
+        if self.pages.currentWidget() is self.slave_page and \
+                self.slave_page.tabs.currentIndex() == SlavePage.TEST_TAB:
+            self.slave_page.update_test()
+
     def ask_save(self):
         """True if it is fine to drop the configuration being edited."""
         if not self.session.dirty:
@@ -1121,8 +1386,12 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.busy or not self.ask_save():
             event.ignore()
-        else:
-            event.accept()
+            return
+        if self.test is not None:
+            self.test_timer.stop()
+            self.test.stop()
+            self.test = None
+        event.accept()
 
 
 def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
