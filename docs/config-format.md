@@ -111,6 +111,7 @@ run in.
 | `identity` | `vendor`, `product`, and optionally `revision`. At start the component compares them with the bus. |
 | `profile` | `cia402` (CiA 402 drive), `mdp` (modular device, ETG.5001) or `generic`. |
 | `cia402.mode` | For `cia402`: the cyclic mode, `csp` or `csv`. |
+| `cia402.modes` | For `cia402`: other modes the drive may switch to, `[hm]` for homing by the drive's own method. It needs `0x6060` and `0x6061` in the process data. |
 | `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder.md](encoder.md). |
 | `configure-pdos` | `true`: the master writes the PDO assignment and mapping below to the slave; `false`: the slave's own mapping is used and the entries below are only located in it. |
 | `process-data` | `outputs` (master to slave) and `inputs` (slave to master): lists of PDOs. |
@@ -175,5 +176,5 @@ supports the profiles `cia402` ([cia402.md](cia402.md)), `mdp` and
 
 - Scaling for `cia402` (counts per unit): a HAL parameter for now; it may
   belong in the file.
-- Options for profiles beyond `cia402.mode`.
+- Options for profiles beyond `cia402.mode` and `cia402.modes`.
 - Several masters (only one bus is supported).

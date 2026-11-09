@@ -35,6 +35,16 @@
 ///   number (NaN or infinite), the drive is shut down and
 ///   `drv-fault` is set. It stays shut down until `enable` goes false;
 ///   `fault-reason` says why.
+///
+/// Homing by the drive's own method (HM), when the file allows mode `hm`:
+/// a rising edge of `index-enable` (from LinuxCNC's motion, homing on an
+/// index pulse) or of `home` switches the drive to HM, starts it, waits for
+/// "homing attained" and "target reached", and switches it back with the
+/// target at the actual position. Started by `index-enable`, `pos-fb`
+/// follows `pos-cmd` while the drive homes, so that motion sees no
+/// following error, and `index-enable` is cleared at the end: `pos-fb`
+/// then jumps to the drive's new position, as an encoder's count does at
+/// its index. A homing error or timeout shuts the drive down.
 
 #include "ecat_cia402.h"
 
@@ -89,7 +99,24 @@ enum {
   WHY_WATCHDOG,          // the watchdog pin stopped changing
   WHY_WRONG_MODE,        // the drive does not report the configured mode
   WHY_BAD_COMMAND,       // pos-cmd or velocity-cmd is not a finite number
+  WHY_HOMING_ERROR,      // the drive reports a homing error
+  WHY_HOMING_TIMEOUT,    // homing not done within home-timeout-ms
 };
+
+// Homing, by the drive's method (HM).
+enum {
+  HS_IDLE = 0,
+  HS_TO_HM,    // 0x6060 = 6 written, waiting for 0x6061 to follow
+  HS_HOMING,   // started (control word bit 4), waiting for the result
+  HS_BACK,     // back to the cyclic mode, waiting for 0x6061 to follow
+};
+
+#define MODE_CHANGE_NS 1000000000LL  // a mode change must be done within this
+#define HOMING_SETTLE_NS 20000000LL  // see the homing result no earlier, unless homing was seen
+#define SW_TARGET_REACHED 0x0400
+#define SW_HOMING_ATTAINED 0x1000
+#define SW_HOMING_ERROR 0x2000
+#define CW_HOMING_START 0x0010
 
 #define FAULT_RESET_NS 100000000LL  // how long fault reset is held at most
 
@@ -134,6 +161,12 @@ typedef struct {
   hal_bit_t *opmode_homing;
   hal_bit_t *opmode_cyclic_position;
   hal_bit_t *opmode_cyclic_velocity;
+  // homing, only with mode hm
+  hal_bit_t *index_enable;
+  hal_bit_t *home;
+  hal_bit_t *stat_homing;
+  hal_bit_t *stat_homed;
+  hal_bit_t *home_error;
   // parameters
   hal_float_t pos_scale;
   hal_float_t velo_scale;
@@ -141,6 +174,7 @@ typedef struct {
   hal_u32_t enable_timeout_ms;
   hal_u32_t watchdog_ms;
   hal_s32_t mode;  // read only: 8 CSP, 9 CSV
+  hal_u32_t home_timeout_ms;
 
   // process data
   obj_t error_code_o, controlword_o, statusword_o, modes_o, modes_display_o;
@@ -158,6 +192,12 @@ typedef struct {
   int reset_start;      // first cycle of a fault reset: bit 7 low
   uint32_t watchdog_old;
   long long watchdog_ns;
+  int can_home;         // mode hm is allowed
+  int hs;               // HS_*
+  long long hs_ns;      // time in this homing step
+  int hs_seen;          // the drive was seen homing (not yet attained and reached)
+  int hs_index;         // started by index-enable
+  int index_old, home_old;
 } cia402_t;
 
 static const lcec_pindesc_t pins[] = {
@@ -194,6 +234,20 @@ static const lcec_pindesc_t pins[] = {
     {HAL_BIT, HAL_OUT, offsetof(cia402_t, opmode_homing), "%s.opmode-homing"},
     {HAL_BIT, HAL_OUT, offsetof(cia402_t, opmode_cyclic_position), "%s.opmode-cyclic-position"},
     {HAL_BIT, HAL_OUT, offsetof(cia402_t, opmode_cyclic_velocity), "%s.opmode-cyclic-velocity"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_pindesc_t homing_pins[] = {
+    {HAL_BIT, HAL_IO, offsetof(cia402_t, index_enable), "%s.index-enable"},
+    {HAL_BIT, HAL_IN, offsetof(cia402_t, home), "%s.home"},
+    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_homing), "%s.stat-homing"},
+    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_homed), "%s.stat-homed"},
+    {HAL_BIT, HAL_OUT, offsetof(cia402_t, home_error), "%s.home-error"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_paramdesc_t homing_params[] = {
+    {HAL_U32, HAL_RW, offsetof(cia402_t, home_timeout_ms), "%s.home-timeout-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -254,14 +308,28 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
     return -EINVAL;
   }
 
+  for (p = slave->modparams; p != NULL && p->id != -1; p++) {
+    if (p->id == ECAT_MP_CIA402_MODES) d->can_home = (p->value.u32 >> MODE_HOMING) & 1;
+  }
+  // ecat_config.c has checked this too
+  if (d->can_home && (!d->modes_o.mapped || !d->modes_display_o.mapped)) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: homing needs 0x6060 and 0x6061 in the process data\n", slave->name);
+    return -EINVAL;
+  }
+
   if ((err = lcec_pin_newf_list(d, pins, slave->name)) != 0) return err;
   if ((err = lcec_param_newf_list(d, params, slave->name)) != 0) return err;
+  if (d->can_home) {
+    if ((err = lcec_pin_newf_list(d, homing_pins, slave->name)) != 0) return err;
+    if ((err = lcec_param_newf_list(d, homing_params, slave->name)) != 0) return err;
+  }
 
   // after the parameters are made, which zeroes them
   d->mode = MODE_CSP;
   for (p = slave->modparams; p != NULL && p->id != -1; p++) {
     if (p->id == ECAT_MP_CIA402_MODE) d->mode = p->value.u32;
   }
+  d->home_timeout_ms = 60000;
   d->pos_scale = 1.0;
   d->velo_scale = 1.0;
   d->auto_fault_reset = 1;
@@ -330,6 +398,8 @@ static void cia402_read(lcec_slave_t *slave, long period) {
     *d->drv_actual_position = EC_READ_S32(&pd[d->actual_position_o.os]);
     *d->pos_fb = *d->drv_actual_position / scale_or_one(d->pos_scale);
   }
+  // homing for motion: no following error until index-enable is cleared
+  if (d->hs != HS_IDLE && d->hs_index) *d->pos_fb = *d->pos_cmd;
   if (d->actual_velocity_o.mapped) {
     *d->drv_actual_velocity = EC_READ_S32(&pd[d->actual_velocity_o.os]);
     *d->velocity_fb = *d->drv_actual_velocity / scale_or_one(d->velo_scale);
@@ -343,6 +413,89 @@ static void block(cia402_t *d, int why) {
   }
 }
 
+/// Homing: start, follow and end it; called while the drive may run.
+/// Returns the control word bits to add.
+static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
+  int index = *d->index_enable, home = *d->home;
+  int index_edge = index && !d->index_old;
+  int home_edge = home && !d->home_old;
+  uint16_t bits = 0;
+
+  d->index_old = index;
+  d->home_old = home;
+  if (!run || d->state != ST_OPERATION_ENABLED) {
+    // disabled or shut down: homing is abandoned, the mode goes back
+    d->hs = HS_IDLE;
+    *d->stat_homing = 0;
+    return 0;
+  }
+  d->hs_ns += period;
+  switch (d->hs) {
+    case HS_IDLE:
+      if (index_edge || home_edge) {
+        d->hs = HS_TO_HM;
+        d->hs_ns = 0;
+        d->hs_index = index_edge;
+        *d->stat_homed = 0;
+        *d->home_error = 0;
+      }
+      break;
+    case HS_TO_HM:
+      if (d->hs_index && !index) {
+        d->hs = HS_BACK;  // motion gave up
+        d->hs_ns = 0;
+      } else if (*d->opmode_display == MODE_HOMING) {
+        d->hs = HS_HOMING;
+        d->hs_ns = 0;
+        d->hs_seen = 0;
+        bits = CW_HOMING_START;
+      } else if (d->hs_ns > MODE_CHANGE_NS) {
+        block(d, WHY_WRONG_MODE);
+      }
+      break;
+    case HS_HOMING:
+      bits = CW_HOMING_START;
+      if (d->hs_index && !index) {
+        d->hs = HS_BACK;  // motion gave up; bit 4 low interrupts homing
+        d->hs_ns = 0;
+        bits = 0;
+      } else if (sw & SW_HOMING_ERROR) {
+        *d->home_error = 1;
+        block(d, WHY_HOMING_ERROR);
+      } else if ((sw & (SW_HOMING_ATTAINED | SW_TARGET_REACHED)) != (SW_HOMING_ATTAINED | SW_TARGET_REACHED)) {
+        d->hs_seen = 1;
+        if (d->home_timeout_ms != 0 && d->hs_ns > (long long)d->home_timeout_ms * 1000000LL) {
+          *d->home_error = 1;
+          block(d, WHY_HOMING_TIMEOUT);
+        }
+      } else if (d->hs_seen || d->hs_ns >= HOMING_SETTLE_NS) {
+        // attained and reached: a drive that keeps these bits from an
+        // earlier homing gets HOMING_SETTLE_NS to clear them
+        *d->stat_homed = 1;
+        d->hs = HS_BACK;
+        d->hs_ns = 0;
+        bits = 0;
+      }
+      break;
+    case HS_BACK:
+      if (*d->opmode_display == d->mode) {
+        d->hs = HS_IDLE;
+        if (d->hs_index) *d->index_enable = 0;
+        d->index_old = 0;
+      } else if (d->hs_ns > MODE_CHANGE_NS) {
+        block(d, WHY_WRONG_MODE);
+      }
+      break;
+  }
+  if (d->blocked) {
+    // shut down by homing: the mode goes back in this cycle
+    d->hs = HS_IDLE;
+    bits = 0;
+  }
+  *d->stat_homing = d->hs != HS_IDLE;
+  return bits;
+}
+
 static void cia402_write(lcec_slave_t *slave, long period) {
   cia402_t *d = slave->profile_data;
   uint8_t *pd = slave->master->process_data;
@@ -350,10 +503,11 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   int enable_edge = enable && !d->enable_old;
   int reset_edge = *d->fault_reset && !d->fault_reset_old;
   int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
-  int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->mode;
+  int homing_now = d->hs != HS_IDLE;
+  int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->mode || homing_now;
   double cmd = d->mode == MODE_CSV ? *d->velocity_cmd : *d->pos_cmd;
   int run;
-  uint16_t cw;
+  uint16_t cw, hbits = 0;
 
   d->enable_old = enable;
   d->fault_reset_old = *d->fault_reset;
@@ -399,6 +553,11 @@ static void cia402_write(lcec_slave_t *slave, long period) {
     }
   }
   run = enable && !d->blocked;
+  if (d->can_home) {
+    uint16_t sw = *d->statusword;
+    hbits = homing(d, run, sw, period);
+    run = enable && !d->blocked;  // homing may have shut it down
+  }
 
   // control word
   switch (d->state) {
@@ -423,7 +582,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
       cw = (run && mode_ok) ? CW_ENABLE_OPERATION : run ? CW_SWITCH_ON : CW_SHUTDOWN;
       break;
     case ST_OPERATION_ENABLED:
-      cw = run ? CW_ENABLE_OPERATION : CW_SHUTDOWN;
+      cw = run ? (CW_ENABLE_OPERATION | hbits) : CW_SHUTDOWN;
       break;
     default:
       cw = CW_DISABLE_VOLTAGE;
@@ -435,13 +594,14 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   *d->controlword = cw;
   EC_WRITE_U16(&pd[d->controlword_o.os], cw);
   if (d->modes_o.mapped) {
-    EC_WRITE_S8(&pd[d->modes_o.os], d->mode);
-    *d->opmode = d->mode;
+    int8_t m = (d->hs == HS_TO_HM || d->hs == HS_HOMING) ? MODE_HOMING : d->mode;
+    EC_WRITE_S8(&pd[d->modes_o.os], m);
+    *d->opmode = m;
   }
 
   // Targets: follow the commands only in "Operation enabled", for this
   // enable; otherwise hold the actual position or stand still.
-  run = run && d->state == ST_OPERATION_ENABLED;
+  run = run && d->state == ST_OPERATION_ENABLED && d->hs == HS_IDLE && !homing_now;
   if (d->target_position_o.mapped) {
     if (run && d->mode == MODE_CSP) {
       *d->drv_target_position = clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale));

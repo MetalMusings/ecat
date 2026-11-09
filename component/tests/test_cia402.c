@@ -443,10 +443,286 @@ static void test_csv(void) {
   CHECK_EQ((int32_t)fake_get(S, 0x60FF, 0), 0);
 }
 
+// ---- homing (HM) -----------------------------------------------------
+
+// A drive that homes: it follows 0x6060 one cycle later, homes for
+// hm.cycles cycles after a rising edge of control word bit 4 in mode 6,
+// and then has its position at hm.home.
+static struct {
+  int cycles, left, active, done, error, stuck_mode, stale;
+  int32_t home;
+  unsigned cw_old;
+} hm;
+
+static lcec_slave_t *homing_drive(void) {
+  lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODES}, {.id = -1}};
+  mp[0].value.u32 = 1u << 6;
+  S = fake_slave("x", csp_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 8);
+  memset(&hm, 0, sizeof(hm));
+  hm.cycles = 30;
+  return S;
+}
+
+/// One cycle of an enabled drive; the control word.
+static unsigned hm_cycle(void) {
+  int display = (int8_t)fake_get(S, 0x6061, 0);
+  unsigned sw = SW_ENABLED, cw;
+  if (display == 6) {
+    if (hm.error) sw |= 0x2000;
+    else if (hm.active) sw |= 0;
+    else if (hm.done || hm.stale) sw |= 0x1400;  // attained, reached
+    else sw |= 0x0400;                            // not started
+  } else {
+    sw |= 0x1400;  // in CSP bit 12 means "follows the target"
+  }
+  cw = cycle(sw);
+  if (!hm.stuck_mode) fake_set(S, 0x6061, 0, fake_get(S, 0x6060, 0));
+  if (display == 6 && (cw & 0x10) && !(hm.cw_old & 0x10)) {
+    hm.active = 1;
+    hm.left = hm.cycles;
+    hm.done = 0;
+  }
+  if (hm.active && !(cw & 0x10)) hm.active = 0;  // interrupted
+  if (hm.active && --hm.left <= 0) {
+    hm.active = 0;
+    hm.done = 1;
+    fake_set(S, 0x6064, 0, (uint32_t)hm.home);
+  }
+  hm.cw_old = cw;
+  return cw;
+}
+
+static void hm_enable(void) {
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(5);
+  CHECK_EQ(sw_now, SW_ENABLED);
+}
+
+static void test_homing_pins_only_with_hm(void) {
+  csp_drive();
+  CHECK(fake_find("x.index-enable") == NULL && fake_find("x.home") == NULL);
+  homing_drive();
+  CHECK(fake_find("x.index-enable") && fake_find("x.home") && fake_find("x.stat-homed") && fake_find("x.home-error"));
+  CHECK_EQ(PIN_U32("x.home-timeout-ms"), 60000);
+}
+
+static void test_homing_needs_the_mode_objects(void) {
+  static const fake_entry_t e[] = {{0x6040, 0, 16}, {0x607A, 0, 32}, {0x6041, 0, 16}, {0x6064, 0, 32}, FAKE_END};
+  lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODES}, {.id = -1}};
+  mp[0].value.u32 = 1u << 6;
+  S = fake_slave("x", e, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
+  CHECK(strstr(fake_msgs, "homing needs 0x6060 and 0x6061") != NULL);
+}
+
+static void test_homing_by_index_enable(void) {
+  int i;
+  homing_drive();
+  hm.home = 0;
+  PIN_FLOAT("x.pos-scale") = 100;
+  fake_set(S, 0x6064, 0, 12345);
+  PIN_FLOAT("x.pos-cmd") = 123.45;
+  hm_enable();
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 12345);
+
+  // motion arms the index and moves the joint slowly
+  PIN_BIT("x.index-enable") = 1;
+  CHECK_EQ(hm_cycle(), 0x0F);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 6);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 1);
+  CHECK_EQ(hm_cycle() & 0x1F, 0x1F);  // started
+  for (i = 0; i < 10; i++) {
+    PIN_FLOAT("x.pos-cmd") += 0.01;
+    CHECK_EQ(hm_cycle() & 0x1F, 0x1F);
+    // no following error for motion, no target from motion for the drive
+    CHECK_NEAR(PIN_FLOAT("x.pos-fb"), PIN_FLOAT("x.pos-cmd"), 0);
+    CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), (int32_t)fake_get(S, 0x6064, 0));
+  }
+  CHECK_EQ(PIN_BIT("x.index-enable"), 1);
+  for (i = 0; i < 40 && PIN_BIT("x.index-enable"); i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.index-enable"), 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+  CHECK_EQ(fake_get(S, 0x6040, 0), 0x0F);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 0);  // held at the actual position
+  // the next cycle, pos-fb is the drive's new position, as an encoder's
+  // count at its index; then the target follows motion again
+  PIN_FLOAT("x.pos-cmd") = 0.02;
+  hm_cycle();
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0, 0);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 2);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
+static void test_homing_by_the_home_pin(void) {
+  int i;
+  homing_drive();
+  hm.home = 500;
+  fake_set(S, 0x6064, 0, 77);
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 5; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 1);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 77, 0);  // not started by motion: the real position
+  for (i = 0; i < 40 && PIN_BIT("x.stat-homing"); i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK_EQ(PIN_BIT("x.index-enable"), 0);
+  hm_cycle();
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 500, 0);
+  // home held high does not start it again
+  for (i = 0; i < 40; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+}
+
+static void test_homing_error(void) {
+  int i;
+  homing_drive();
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 5; i++) hm_cycle();
+  hm.error = 1;
+  CHECK_EQ(hm_cycle(), 0x06);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 8);
+  CHECK_EQ(PIN_BIT("x.home-error"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 0);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);  // back to the configured mode
+}
+
+static void test_homing_timeout(void) {
+  int i;
+  homing_drive();
+  hm.cycles = 1000000;
+  PIN_U32("x.home-timeout-ms") = 50;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 45; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  for (i = 0; i < 10; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 9);
+}
+
+static void test_homing_abandoned_by_motion(void) {
+  int i;
+  homing_drive();
+  hm_enable();
+  PIN_BIT("x.index-enable") = 1;
+  for (i = 0; i < 5; i++) hm_cycle();
+  CHECK(hm.active);
+  PIN_BIT("x.index-enable") = 0;
+  CHECK_EQ(hm_cycle() & 0x10, 0);  // bit 4 low: the drive stops homing
+  CHECK(!hm.active);
+  for (i = 0; i < 3; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 0);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+}
+
+static void test_homing_mode_not_taken(void) {
+  int i;
+  homing_drive();
+  hm_enable();
+  hm.stuck_mode = 1;
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 1000; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  for (i = 0; i < 2; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 6);
+}
+
+static void test_homing_slow_way_back(void) {
+  int i;
+  homing_drive();
+  hm.cycles = 3;
+  hm_enable();
+  PIN_BIT("x.index-enable") = 1;
+  for (i = 0; i < 6 && !hm.done; i++) hm_cycle();
+  CHECK(hm.done);
+  // the drive is slow to go back to CSP: index-enable stays set and the
+  // target is held, and after a second it is a fault
+  hm.stuck_mode = 1;
+  for (i = 0; i < 900; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.index-enable"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 1);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  PIN_FLOAT("x.pos-cmd") = 50;
+  hm_cycle();
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), (int32_t)fake_get(S, 0x6064, 0));
+  for (i = 0; i < 110; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 6);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);  // the drive did home
+}
+
+static void test_homing_stopped_by_disable(void) {
+  int i;
+  homing_drive();
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 5; i++) hm_cycle();
+  PIN_BIT("x.enable") = 0;
+  CHECK_EQ(hm_cycle(), 0x06);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
+static void test_homing_not_while_disabled(void) {
+  int i;
+  homing_drive();
+  PIN_BIT("x.index-enable") = 1;
+  start(SW_READY);
+  run(5);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  // enabling later does not start it: only a new edge does
+  PIN_BIT("x.enable") = 1;
+  run(5);
+  CHECK_EQ(sw_now, SW_ENABLED);
+  for (i = 0; i < 5; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+}
+
+static void test_homing_with_stale_result_bits(void) {
+  int i, n;
+  // a drive that shows "attained and reached" from an earlier homing and
+  // homes in one cycle: done after the settle time, not at once
+  homing_drive();
+  hm.stale = 1;
+  hm.cycles = 1000000;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  hm_cycle();  // to HM
+  for (n = 0; n < 100 && PIN_BIT("x.stat-homing"); n++) {
+    hm.active = 0;  // never reports "homing"
+    hm_cycle();
+  }
+  CHECK(n >= 19 && n <= 23);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  // seen homing first: done as soon as the drive reports it
+  homing_drive();
+  hm.cycles = 3;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 8; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+}
+
 RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
     test_fault_while_enabled_shuts_down_until_enable_drops, test_fault_reset_on_enable,
     test_no_fault_reset_on_enable_without_auto, test_fault_reset_is_held_at_most_100_ms,
     test_fault_reset_pin_without_enable, test_drive_leaving_enabled, test_bus_loss, test_watchdog,
-    test_command_not_a_number, test_csv)
+    test_command_not_a_number, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
+    test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_error, test_homing_timeout,
+    test_homing_abandoned_by_motion, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
+    test_homing_not_while_disabled, test_homing_with_stale_result_bits)

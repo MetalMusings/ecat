@@ -27,6 +27,10 @@ DATA_TYPES = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT",
               "ULINT", "REAL", "LREAL"}
 HAL_TYPES = {"bit", "s32", "u32", "s64", "u64", "float"}
 CIA402_MODES = {"csp", "csv"}
+# other modes a cia402 drive may switch to (cia402.modes); they need the
+# mode objects to change modes
+CIA402_OTHER_MODES = {"hm"}
+CIA402_MODE_OBJECTS = {0x6060, 0x6061}
 TRANSPORTS = {"raw", "xdp-native", "xdp-skb"}
 
 _OBJECT = re.compile(r"^0x([0-9a-fA-F]{4}):([0-9a-fA-F]{2})$")
@@ -190,6 +194,14 @@ def check(cfg):
             err("%s: unknown profile %r" % (where, profile))
         if profile == "cia402" and (s.get("cia402") or {}).get("mode") not in CIA402_MODES:
             err("%s: cia402 mode must be one of %s" % (where, ", ".join(sorted(CIA402_MODES))))
+        other_modes = (s.get("cia402") or {}).get("modes") or [] if profile == "cia402" else []
+        if not isinstance(other_modes, list):
+            err("%s: cia402 modes must be a list, such as [hm]" % where)
+            other_modes = []
+        for m in other_modes:
+            if m not in CIA402_OTHER_MODES:
+                err("%s: cia402 mode %r is not supported in modes (%s)"
+                    % (where, m, ", ".join(sorted(CIA402_OTHER_MODES))))
 
         # encoder channels: status index -> name
         encoders = {}
@@ -295,6 +307,9 @@ def check(cfg):
             rx, tx = CIA402_NEEDS.get((s.get("cia402") or {}).get("mode"), (set(), set()))
             for i in sorted((rx | tx) - owned):
                 err("%s: the cia402 profile needs 0x%04X:00 in the process data" % (where, i))
+            if other_modes:
+                for i in sorted(CIA402_MODE_OBJECTS - owned - rx - tx):
+                    err("%s: changing modes needs 0x%04X:00 in the process data" % (where, i))
         dc = s.get("dc")
         if dc is not None:
             try:

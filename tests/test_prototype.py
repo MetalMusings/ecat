@@ -105,6 +105,28 @@ class TestPropose(unittest.TestCase):
         p = propose.propose({"position": 0, "dc": True}, s, coe.Dictionary(), device_type=0x192)
         self.assertTrue(any("lack 0x6064" in n for n in p.notes))
 
+    def test_cia402_modes(self):
+        def drive(cia402, with_mode_objects=True):
+            def e(obj, bits, t):
+                return {"object": obj, "bits": bits, "type": t, "use": "profile"}
+            out = [e("0x6040:00", 16, "UINT"), e("0x607A:00", 32, "DINT")]
+            inp = [e("0x6041:00", 16, "UINT"), e("0x6064:00", 32, "DINT")]
+            if with_mode_objects:
+                out.append(e("0x6060:00", 8, "SINT"))
+                inp.append(e("0x6061:00", 8, "SINT"))
+            return {"ecat": 1, "master": {}, "slaves": [{
+                "position": 0, "name": "x", "identity": {"vendor": "0xa88", "product": "0xa880002"},
+                "profile": "cia402", "cia402": cia402, "process-data": {
+                    "outputs": [{"pdo": "0x1600", "sm": 2, "entries": out}],
+                    "inputs": [{"pdo": "0x1A00", "sm": 3, "entries": inp}]}}]}
+        self.assertEqual(config.check(drive({"mode": "csp", "modes": ["hm"]})), [])
+        self.assertEqual(config.check(drive({"mode": "csp"}, False)), [])
+        errors = config.check(drive({"mode": "csp", "modes": ["hm"]}, False))
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(all("changing modes needs 0x606" in e for e in errors))
+        self.assertTrue(any("'pp' is not supported" in e for e in config.check(drive({"mode": "csp", "modes": ["pp"]}))))
+        self.assertTrue(any("must be a list" in e for e in config.check(drive({"mode": "csp", "modes": "hm"}))))
+
     def test_kebab(self):
         self.assertEqual(propose.kebab("LowpassFilteredVoltage"), "lowpass-filtered-voltage")
         self.assertEqual(propose.kebab("Out_Unit1"), "out-unit1")
