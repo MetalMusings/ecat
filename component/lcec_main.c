@@ -1696,10 +1696,15 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
       master->autoshift.input_margin = hal_data->auto_shift_input_margin;
       if (lcec_autoshift_update(&master->autoshift, *(hal_data->dc_phased) && *(hal_data->all_op), *(hal_data->send_offset))) {
         master->global_shift_time = master->autoshift.shift;
-        rtapi_print_msg(master->autoshift.fits ? RTAPI_MSG_INFO : RTAPI_MSG_ERR,
+        // two cycles is the aim; the cia402 profile counts on it
+        // (STATUS_CYCLES), so three is reported as an error
+        rtapi_print_msg(master->autoshift.fits && master->autoshift.state == LCEC_AUTOSHIFT_TWO ? RTAPI_MSG_INFO : RTAPI_MSG_ERR,
             LCEC_MSG_PFX "master %s: send-offset %lld..%lld ns, globalShiftTime %u ns, turn-around %d cycles%s\n", master->name,
             (long long)master->autoshift.send_min, (long long)master->autoshift.send_max, master->global_shift_time,
-            master->autoshift.state, master->autoshift.fits ? "" : ", but the send-offset varies too much for it to be the same in every cycle");
+            master->autoshift.state,
+            !master->autoshift.fits ? ", but the send-offset varies too much for it to be the same in every cycle"
+            : master->autoshift.state != LCEC_AUTOSHIFT_TWO ? ", not 2: the send-offset varies too much (servo thread latency); drive profiles count on 2"
+                                                            : "");
       }
       *(hal_data->turnaround_cycles) = master->autoshift.state >= LCEC_AUTOSHIFT_TWO ? master->autoshift.state : 0;
       *(hal_data->shift_time) = master->global_shift_time;

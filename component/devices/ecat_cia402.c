@@ -102,10 +102,20 @@
 #define CW_HALT 0x0100
 #define SW_SPEED_ZERO 0x1000  // in PV
 // The status word answers a new control word or target this many cycles
-// later at the latest (the frame of cycle n is used by the drive at the
-// next SYNC0, and its answer comes back two frames later), so a status bit
-// is not taken as the answer before
-#define STATUS_CYCLES 3
+// later, so a status bit is not taken as the answer before. Two cycles when
+// SYNC0 falls after the frame has reached the drive (the frame of cycle n
+// is used at SYNC0 in cycle n, and the answer comes with the frame of cycle
+// n + 1, read in cycle n + 2); master.dc.sync0-shift-ns: auto places SYNC0
+// so (ecat.0.turnaround-cycles = 2). Three cycles means a configuration
+// error, such as SYNC0 before the frame: then status bits can be taken
+// one cycle too early.
+//
+// To be confirmed in use (2026-11-09): two cycles is a choice, measured
+// only with 0x6061 on ECT60 drives. A drive may need longer to update
+// status bits such as "target reached" or "speed zero" (a slower internal
+// cycle). If use shows that, allow or use more: a per-drive parameter, or
+// a larger value here.
+#define STATUS_CYCLES 2
 #define CW_NEW_SET_POINT 0x0010       // PP
 #define CW_CHANGE_IMMEDIATELY 0x0020  // PP
 #define CW_RELATIVE 0x0040            // PP

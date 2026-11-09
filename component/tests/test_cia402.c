@@ -929,7 +929,8 @@ static void test_pv_standstill_switches_off_after_the_status_answers(void) {
   pv_run(10);
   CHECK_EQ(PIN_BIT("s.zero-speed"), 1);
   PIN_BIT("s.enable") = 0;
-  for (i = 0; i < 3; i++) CHECK_EQ(pv_cycle(), 0x010F);
+  // halted until the status can answer the halt, two cycles
+  for (i = 0; i < 2; i++) CHECK_EQ(pv_cycle(), 0x010F);
   CHECK_EQ(pv_cycle(), 0x06);
   // started and stopped at once: "speed zero" is still the old answer, and
   // the drive has begun to turn; it is halted until it really stands still
@@ -1678,7 +1679,7 @@ static void test_homing_halts_pp_first(void) {
     }
     if (switched < 0) CHECK_EQ(cw & 0x100, 0x100);
   }
-  CHECK(switched >= 3);  // the status answers after three cycles
+  CHECK(switched >= 2);  // the status answers after two cycles
   for (i = 0; i < 40 && PIN_BIT("m.stat-homing"); i++) mm_cycle();
   CHECK_EQ(PIN_BIT("m.stat-homed"), 1);
   CHECK_EQ(mm_mode(), 1);

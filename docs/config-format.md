@@ -118,7 +118,8 @@ result; the parameters `ecat.0.auto-shift-margin` (time between a frame
 and SYNC0) and `ecat.0.auto-shift-input-margin` (time from SYNC0 until
 the inputs are ready) are 50000 ns by default. This is the same code as
 lcec's `globalShiftTime="auto"` (see linuxcnc-ethercat's
-`documentation/distributed-clocks.md`).
+`documentation/distributed-clocks.md`). The cia402 profile counts on two cycles
+(see docs/cia402.md); three is reported as an error.
 
 Before SYNC0 starts in a DC slave, the master waits up to 5 s for the
 slave's clock to be within 10 us of the reference clock, and starts SYNC0
