@@ -124,7 +124,11 @@ class TestPropose(unittest.TestCase):
         errors = config.check(drive({"mode": "csp", "modes": ["hm"]}, False))
         self.assertEqual(len(errors), 2)
         self.assertTrue(all("changing modes needs 0x606" in e for e in errors))
-        self.assertTrue(any("'pp' is not supported" in e for e in config.check(drive({"mode": "csp", "modes": ["pp"]}))))
+        self.assertTrue(any("'cst' is not supported" in e for e in config.check(drive({"mode": "csp", "modes": ["cst"]}))))
+        # other modes need their objects, and PP its limits
+        self.assertTrue(any("needs 0x60FF" in e for e in config.check(drive({"mode": "csp", "modes": ["pv"]}))))
+        self.assertTrue(any("needs the setting 0x607D:01" in e
+                            for e in config.check(drive({"mode": "csp", "modes": ["pp"]}))))
         self.assertTrue(any("must be a list" in e for e in config.check(drive({"mode": "csp", "modes": "hm"}))))
         # PV needs the velocity objects, not the position ones
         pv = drive({"mode": "pv"})

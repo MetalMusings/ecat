@@ -473,13 +473,21 @@ static void test_cia402_modes(void) {
   // without modes: no record
   CHECK_EQ(load(CIA402("csp, modes: []", CSP_OUT, CSP_IN)), 0);
   CHECK_EQ(SLAVE(0)->modParamCount, 1);
-  CHECK_FAILS(CIA402("csp, modes: [pp]", CSP_OUT, CSP_IN), "cia402.modes: \"pp\" is not supported (hm)");
+  CHECK_FAILS(CIA402("csp, modes: [cst]", CSP_OUT, CSP_IN), "cia402.modes: \"cst\" is not supported (csp, csv, pv, pp, hm)");
   CHECK_FAILS(CIA402("csp, modes: hm", CSP_OUT, CSP_IN), "cia402.modes must be a list");
   // changing modes needs the mode and its display
   CHECK_FAILS(CIA402("csp, modes: [hm]", P("0x6040:00", 16, "UINT") P("0x607A:00", 32, "DINT"),
                   P("0x6041:00", 16, "UINT") P("0x6064:00", 32, "DINT")),
       "needs 0x6060:00 with \"use: profile\" to change modes");
   CHECK(strstr(fake_msgs, "needs 0x6061:00") != NULL);
+  // other modes: what each needs
+  CHECK_EQ(load(CIA402("csp, modes: [pv]", CSP_OUT P("0x60FF:00", 32, "DINT"), CSP_IN P("0x606C:00", 32, "DINT"))), 0);
+  CHECK_EQ(MODPARAM(1)->value.u32, 1u << 3);
+  CHECK_FAILS(CIA402("csp, modes: [pv]", CSP_OUT, CSP_IN), "needs 0x60FF:00");
+  CHECK_FAILS(CIA402("csp, modes: [pp]", CSP_OUT, CSP_IN), "cia402 mode pp needs the settings");
+  CHECK_EQ(load(CIA402("csp, modes: [pp, hm]", CSP_OUT, CSP_IN) PP_LIMITS), 0);
+  CHECK_EQ(MODPARAM(1)->value.u32, (1u << 1) | (1u << 6));
+  CHECK_FAILS(CIA402("hm", CSP_OUT, CSP_IN), "cia402.mode must be csp, csv, pv or pp");
 }
 
 // ---- encoder channels -------------------------------------------------

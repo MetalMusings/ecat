@@ -39,6 +39,7 @@ typedef struct {
   int errors;
   int cia402;         // the slave being read has the cia402 profile
   unsigned int cia402_modes;  // the other modes it may switch to (bit n: mode n)
+  unsigned int cia402_all;    // mode and modes
   unsigned int pp_limits;     // settings 0x607D:01, 0x607D:02, 0x607F:00 seen (bits 0-2)
   unsigned int owned; // which of the profile's objects it has (bits of cia402_objects)
   int n_enc;          // the slave's encoder channels
@@ -226,7 +227,19 @@ static void copy_str(char *dst, const char *src) {
   dst[LCEC_CONF_STR_MAXLEN - 1] = 0;
 }
 
-/// cia402.modes: [hm] -> a bit mask, bit n for mode n.
+/// A cia402 mode's name -> its number, or 0.
+static int cia402_mode_number(const char *name) {
+  static const struct {
+    const char *name;
+    int number;
+  } modes[] = {{"pp", 1}, {"pv", 3}, {"hm", 6}, {"csp", 8}, {"csv", 9}};
+  unsigned int i;
+  for (i = 0; name != NULL && i < sizeof(modes) / sizeof(modes[0]); i++)
+    if (!strcmp(modes[i].name, name)) return modes[i].number;
+  return 0;
+}
+
+/// cia402.modes: [hm, pv] -> a bit mask, bit n for mode n.
 static unsigned int cia402_modes(ctx_t *c, yaml_node_t *list) {
   unsigned int m = 0;
   int i;
@@ -237,10 +250,11 @@ static unsigned int cia402_modes(ctx_t *c, yaml_node_t *list) {
   }
   for (i = 0; i < seq_len(list); i++) {
     const char *name = scalar(seq_item(c, list, i));
-    if (name != NULL && !strcmp(name, "hm")) {
-      m |= 1u << 6;
+    int n = cia402_mode_number(name);
+    if (n) {
+      m |= 1u << n;
     } else {
-      error(c, "cia402.modes: \"%s\" is not supported (hm)", name ? name : "");
+      error(c, "cia402.modes: \"%s\" is not supported (csp, csv, pv, pp, hm)", name ? name : "");
     }
   }
   return m;
@@ -630,6 +644,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   sc->configPdos = get_bool(c, s, "configure-pdos", 1);
   c->cia402 = profile != NULL && !strcmp(profile, "cia402");
   c->cia402_modes = 0;
+  c->cia402_all = 0;
   c->owned = 0;
   if (c->cia402) {
     const char *mode = get_str(c, get(c, s, "cia402"), "mode");
@@ -642,19 +657,15 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     mp->confType = lcecConfTypeModParam;
     mp->id = ECAT_MP_CIA402_MODE;
     copy_str(mp->name, "cia402.mode");
-    if (mode != NULL && !strcmp(mode, "csp")) {
-      mp->value.u32 = 8;
-    } else if (mode != NULL && !strcmp(mode, "csv")) {
-      mp->value.u32 = 9;
-    } else if (mode != NULL && !strcmp(mode, "pv")) {
-      mp->value.u32 = 3;
-    } else if (mode != NULL && !strcmp(mode, "pp")) {
-      mp->value.u32 = 1;
-    } else {
+    mp->value.u32 = cia402_mode_number(mode);
+    if (mp->value.u32 == 0 || mp->value.u32 == 6) {
       error(c, "cia402.mode must be csp, csv, pv or pp");
+      mp->value.u32 = 8;
     }
+    c->cia402_all = 1u << mp->value.u32;
     ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount = 1;
     c->cia402_modes = cia402_modes(c, get(c, get(c, s, "cia402"), "modes"));
+    c->cia402_all |= c->cia402_modes;
     if (c->cia402_modes) {
       if ((mp = append(b, sizeof(*mp))) == NULL) {
         error(c, "out of memory");
@@ -684,26 +695,27 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   }
   process_data(c, b, get(c, s, "process-data"), (LCEC_CONF_SLAVE_T *)(b->data + off), off);
   if (c->cia402) {
-    const char *mode = get_str(c, get(c, s, "cia402"), "mode");
-    uint16_t need[6] = {0x6040, 0x6041, 0, 0, 0, 0};
-    int n_need = 4;
+    // what each allowed mode needs, and changing modes the mode objects
+    uint16_t need[8] = {0x6040, 0x6041};
+    int n_need = 2, n_mode_objects;
     int j;
-    if (mode != NULL && (!strcmp(mode, "csv") || !strcmp(mode, "pv"))) {
-      need[2] = 0x60FF;
-      need[3] = 0x606C;
-    } else {
-      need[2] = 0x607A;
-      need[3] = 0x6064;
+    if (c->cia402_all & ((1u << 8) | (1u << 1))) {  // CSP, PP
+      need[n_need++] = 0x607A;
+      need[n_need++] = 0x6064;
     }
+    if (c->cia402_all & ((1u << 9) | (1u << 3))) {  // CSV, PV
+      need[n_need++] = 0x60FF;
+      need[n_need++] = 0x606C;
+    }
+    n_mode_objects = n_need;
     if (c->cia402_modes) {
-      // switching modes needs the mode and its display
       need[n_need++] = 0x6060;
       need[n_need++] = 0x6061;
     }
     for (j = 0; j < n_need; j++) {
       i = cia402_object(need[j], 0);
       if (!(c->owned & (1u << i))) error(c, "the cia402 profile needs 0x%04X:00 with \"use: profile\"%s", need[j],
-                                          j >= 4 ? " to change modes" : "");
+                                          j >= n_mode_objects ? " to change modes" : "");
     }
   }
   for (i = 0; i < c->n_enc; i++) {
@@ -714,9 +726,8 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   c->pp_limits = 0;
   settings(c, b, get(c, s, "settings"), off);
   if (c->cia402) {
-    const char *mode = get_str(c, get(c, s, "cia402"), "mode");
     // the drive plans PP moves itself: it must know its limits
-    if (mode != NULL && !strcmp(mode, "pp") && c->pp_limits != 7) {
+    if ((c->cia402_all & (1u << 1)) && c->pp_limits != 7) {
       error(c, "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02 (software position limits) "
                "and 0x607F:00 (max profile velocity)");
     }

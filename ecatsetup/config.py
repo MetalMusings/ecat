@@ -29,7 +29,7 @@ HAL_TYPES = {"bit", "s32", "u32", "s64", "u64", "float"}
 CIA402_MODES = {"csp", "csv", "pv", "pp"}
 # other modes a cia402 drive may switch to (cia402.modes); they need the
 # mode objects to change modes
-CIA402_OTHER_MODES = {"hm"}
+CIA402_OTHER_MODES = {"hm", "csp", "csv", "pv", "pp"}
 CIA402_MODE_OBJECTS = {0x6060, 0x6061}
 TRANSPORTS = {"raw", "xdp-native", "xdp-skb"}
 
@@ -305,7 +305,10 @@ def check(cfg):
                 err("%s: encoder %s needs 0x%04X:11 (counter value) in the process data"
                     % (where, cname, index))
         if profile == "cia402":
-            rx, tx = CIA402_NEEDS.get((s.get("cia402") or {}).get("mode"), (set(), set()))
+            rx, tx = set(), set()
+            for m in [(s.get("cia402") or {}).get("mode")] + other_modes:
+                r, t = CIA402_NEEDS.get(m, (set(), set()))
+                rx, tx = rx | r, tx | t
             for i in sorted((rx | tx) - owned):
                 err("%s: the cia402 profile needs 0x%04X:00 in the process data" % (where, i))
             if other_modes:
@@ -333,7 +336,7 @@ def check(cfg):
                     err("%s: setting %s data %r is not hex bytes" % (where, st.get("object"), st["data"]))
             else:
                 err("%s: setting %s has neither value nor data" % (where, st.get("object")))
-        if profile == "cia402" and (s.get("cia402") or {}).get("mode") == "pp":
+        if profile == "cia402" and "pp" in [(s.get("cia402") or {}).get("mode")] + other_modes:
             # the drive plans PP moves itself: it must know its limits
             for i, sub, _ in PP_LIMITS:
                 if (i, sub) not in set_objects:

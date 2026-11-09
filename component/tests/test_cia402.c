@@ -8,6 +8,7 @@
 //
 
 #include <errno.h>
+#include <stdlib.h>
 #include <math.h>
 #include <string.h>
 
@@ -515,7 +516,7 @@ static void test_homing_needs_the_mode_objects(void) {
   mp[0].value.u32 = 1u << 6;
   S = fake_slave("x", e, mp);
   CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
-  CHECK(strstr(fake_msgs, "homing needs 0x6060 and 0x6061") != NULL);
+  CHECK(strstr(fake_msgs, "changing modes needs 0x6060 and 0x6061") != NULL);
 }
 
 static void test_homing_by_index_enable(void) {
@@ -782,7 +783,7 @@ static void test_pv_needs_target_velocity(void) {
   mp[0].value.u32 = 3;
   S = fake_slave("s", e, mp);
   CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
-  CHECK(strstr(fake_msgs, "PV needs 0x60FF") != NULL);
+  CHECK(strstr(fake_msgs, "PV and CSV need 0x60FF") != NULL);
   mp[0].value.u32 = 1;  // PP: not yet
   S = fake_slave("s", pv_entries, mp);
   CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
@@ -1040,7 +1041,7 @@ static void test_pp_needs_positions(void) {
   mp[0].value.u32 = 1;
   S = fake_slave("t", e, mp);
   CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
-  CHECK(strstr(fake_msgs, "PP needs 0x607A and 0x6064") != NULL);
+  CHECK(strstr(fake_msgs, "PP and CSP need 0x607A and 0x6064") != NULL);
 }
 
 static void test_pp_moves_only_on_start(void) {
@@ -1256,6 +1257,313 @@ static void test_pp_bad_command(void) {
   CHECK(!ppd.moving);
 }
 
+// ---- changing modes (opmode-cmd) -------------------------------------
+
+// A drive with CSP, CSV, PV and PP: it shows 0x6060 in 0x6061 a cycle
+// later (unless mm.stuck), and moves as each mode says: CSP to the target
+// position, CSV at the target velocity, PV ramping by mm.ramp, PP to an
+// acknowledged set-point; halted (bit 8) it ramps down to a stop.
+static struct {
+  int32_t pos, vel, ramp, pp_target;
+  int stuck, never_stops, ack, mode_old;
+  unsigned sw, cw_old;
+} mm;
+
+static const fake_entry_t mm_entries[] = {
+    {0x6040, 0, 16}, {0x6060, 0, 8}, {0x607A, 0, 32}, {0x60FF, 0, 32}, {0x6081, 0, 32},
+    {0x6041, 0, 16}, {0x6061, 0, 8}, {0x6064, 0, 32}, {0x606C, 0, 32}, FAKE_END,
+};
+
+/// A drive in mode, allowed to change to the modes in others (bit n: mode n).
+static lcec_slave_t *mm_drive(int mode, unsigned others) {
+  lcec_slave_modparam_t mp[3] = {{.id = ECAT_MP_CIA402_MODE}, {.id = ECAT_MP_CIA402_MODES}, {.id = -1}};
+  mp[0].value.u32 = mode;
+  mp[1].value.u32 = others;
+  S = fake_slave("m", mm_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, mode);
+  memset(&mm, 0, sizeof(mm));
+  mm.ramp = 100;
+  mm.sw = SW_READY;
+  cw_now = 0;
+  return S;
+}
+
+static int8_t mm_mode(void) { return (int8_t)fake_get(S, 0x6061, 0); }
+
+static unsigned mm_cycle(void) {
+  unsigned sw = mm.sw, cw;
+  int m = mm_mode();
+  int halted = (cw_now & 0x100) != 0;
+  int32_t tv = (int32_t)fake_get(S, 0x60FF, 0);
+  if (m == 1 && mm.mode_old != 1) mm.pp_target = mm.pos;  // PP starts where it is
+  mm.mode_old = m;
+  if (sw == SW_ENABLED) {
+    if (m == 3) {
+      int32_t goal = halted ? 0 : tv;
+      if (mm.vel == goal) sw |= 0x0400;
+      if (mm.vel == 0) sw |= 0x1000;
+    } else if (m == 1) {
+      if (mm.ack) sw |= 0x1000;
+      if ((mm.pos == mm.pp_target && !halted) || (halted && mm.vel == 0)) sw |= 0x0400;
+    } else {
+      sw |= 0x1400;
+    }
+  }
+  fake_set(S, 0x6064, 0, (uint32_t)mm.pos);
+  fake_set(S, 0x606C, 0, (uint32_t)mm.vel);
+  cw = cycle(sw);
+  mm.sw = drive(mm.sw, cw, cw_now);
+  cw_now = cw;
+  if (!mm.stuck) fake_set(S, 0x6061, 0, fake_get(S, 0x6060, 0));
+  if (mm.sw != SW_ENABLED) {
+    mm.vel = 0;
+  } else if (m == 8) {
+    int32_t t = (int32_t)fake_get(S, 0x607A, 0);
+    mm.vel = t - mm.pos;
+    mm.pos = t;
+  } else if (m == 9) {
+    mm.vel = tv;
+    mm.pos += tv;
+  } else {
+    int32_t goal = m == 3 ? tv : 0;
+    if (m == 1) {
+      if ((cw & 0x10) && !(mm.cw_old & 0x10)) {
+        mm.pp_target = (int32_t)fake_get(S, 0x607A, 0);
+        mm.ack = 1;
+      }
+      if (!(cw & 0x10)) mm.ack = 0;
+      goal = mm.pp_target > mm.pos ? 10 : mm.pp_target < mm.pos ? -10 : 0;
+      if (abs(mm.pp_target - mm.pos) < 10) goal = mm.pp_target - mm.pos;
+    }
+    if (cw & 0x100) goal = 0;
+    if (mm.never_stops) goal = mm.vel;
+    if (m == 1) {
+      mm.vel = goal;
+    } else {
+      if (mm.vel < goal) mm.vel = mm.vel + mm.ramp > goal ? goal : mm.vel + mm.ramp;
+      if (mm.vel > goal) mm.vel = mm.vel - mm.ramp < goal ? goal : mm.vel - mm.ramp;
+    }
+    mm.pos += mm.vel;
+  }
+  mm.cw_old = cw;
+  return cw;
+}
+
+static void mm_run(int n) {
+  while (n-- > 0) mm_cycle();
+}
+
+#define BIT(m) (1u << (m))
+
+static void test_opmode_cmd_only_with_more_modes(void) {
+  csp_drive();
+  CHECK(fake_find("x.opmode-cmd") == NULL);
+  homing_drive();
+  CHECK(fake_find("x.opmode-cmd") == NULL);
+  mm_drive(8, BIT(3));
+  CHECK(fake_find("m.opmode-cmd") != NULL);
+  CHECK(fake_find("m.at-speed") != NULL);       // PV is allowed
+  CHECK(fake_find("m.pp-start") == NULL);       // PP is not
+}
+
+static void test_opmode_cmd_not_in_the_file(void) {
+  mm_drive(8, BIT(3));
+  PIN_S32("m.opmode-cmd") = 1;  // PP: not allowed
+  mm_run(3);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);  // not enabled: no fault
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+  PIN_BIT("m.enable") = 1;
+  mm_run(1);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("m.fault-reason"), 7);
+  PIN_S32("m.opmode-cmd") = 6;  // homing goes by its own pins
+  PIN_BIT("m.enable") = 0;
+  mm_run(1);
+  PIN_BIT("m.enable") = 1;
+  mm_run(1);
+  CHECK_EQ(PIN_S32("m.fault-reason"), 7);
+}
+
+static void test_mode_change_while_disabled(void) {
+  int i;
+  mm_drive(8, BIT(3));
+  PIN_S32("m.opmode-cmd") = 3;
+  mm_run(1);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 3);
+  PIN_FLOAT("m.velocity-cmd") = 500;
+  PIN_BIT("m.enable") = 1;
+  for (i = 0; i < 20; i++) mm_cycle();
+  CHECK_EQ(mm.sw, SW_ENABLED);
+  CHECK_EQ(mm.vel, 500);
+  CHECK_EQ(PIN_BIT("m.at-speed"), 1);
+  // 0: back to the file's mode
+  PIN_BIT("m.enable") = 0;
+  mm_run(20);
+  PIN_S32("m.opmode-cmd") = 0;
+  mm_run(1);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+}
+
+static void test_mode_change_halts_first(void) {
+  int i, switched = -1;
+  mm_drive(3, BIT(1));
+  PIN_FLOAT("m.velocity-cmd") = 500;
+  PIN_BIT("m.enable") = 1;
+  mm_run(20);
+  CHECK_EQ(mm.vel, 500);
+  // to PP while turning: halted, then switched when it stands still
+  PIN_S32("m.opmode-cmd") = 1;
+  for (i = 0; i < 30; i++) {
+    unsigned cw = mm_cycle();
+    if (switched < 0 && fake_get(S, 0x6060, 0) == 1) switched = i;
+    if (switched < 0) {
+      CHECK_EQ(cw & 0x100, 0x100);
+      CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 3);
+    }
+  }
+  CHECK(switched >= 5);
+  CHECK_EQ(mm.vel, 0);
+  CHECK_EQ(mm_mode(), 1);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+  CHECK_EQ(PIN_BIT("m.at-speed"), 0);
+  // in PP: no move until pp-start
+  int32_t at = mm.pos;
+  PIN_FLOAT("m.pp-target") = at + 200;
+  mm_run(20);
+  CHECK_EQ(mm.pos, at);
+  PIN_BIT("m.pp-start") = 1;
+  for (i = 0; i < 60 && !PIN_BIT("m.pp-done"); i++) mm_cycle();
+  CHECK_EQ(mm.pos, at + 200);
+}
+
+static void test_mode_change_waits_for_the_answer(void) {
+  int i;
+  // started from standstill and changed at once: "speed zero" is still the
+  // old answer while the drive has begun to turn
+  mm_drive(3, BIT(8));
+  PIN_BIT("m.enable") = 1;
+  mm_run(10);
+  PIN_FLOAT("m.velocity-cmd") = 500;
+  mm_run(1);
+  PIN_S32("m.opmode-cmd") = 8;
+  for (i = 0; i < 30; i++) {
+    mm_cycle();
+    if (fake_get(S, 0x6060, 0) == 8) CHECK_EQ(mm.vel, 0);
+  }
+  CHECK_EQ(mm_mode(), 8);
+}
+
+static void test_mode_change_from_csp_holds_the_position(void) {
+  int i;
+  mm_drive(8, BIT(3));
+  PIN_BIT("m.enable") = 1;
+  mm_run(5);
+  PIN_FLOAT("m.pos-cmd") = 100;
+  mm_run(1);
+  CHECK_EQ(mm.pos, 100);
+  // to PV: the target is held at the actual position while pos-cmd moves on
+  PIN_S32("m.opmode-cmd") = 3;
+  for (i = 0; i < 6; i++) {
+    PIN_FLOAT("m.pos-cmd") += 10;
+    mm_cycle();
+  }
+  CHECK_EQ(mm.pos, 100);
+  CHECK_EQ(mm_mode(), 3);
+  PIN_FLOAT("m.velocity-cmd") = 300;
+  mm_run(10);
+  CHECK_EQ(mm.vel, 300);
+}
+
+static void test_mode_change_into_csp_waits_for_the_command(void) {
+  int i;
+  mm_drive(3, BIT(8));
+  PIN_BIT("m.enable") = 1;
+  PIN_FLOAT("m.velocity-cmd") = 50;
+  mm_run(20);
+  PIN_FLOAT("m.velocity-cmd") = 0;
+  mm_run(10);
+  int32_t at = mm.pos;
+  CHECK(at > 100);
+  // to CSP with pos-cmd far away: held at the actual position
+  PIN_FLOAT("m.pos-cmd") = 0;
+  PIN_S32("m.opmode-cmd") = 8;
+  mm_run(20);
+  CHECK_EQ(mm_mode(), 8);
+  CHECK_EQ(mm.pos, at);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), at);
+  // pos-cmd brought to the drive: followed from then on
+  PIN_FLOAT("m.pos-cmd") = at + 5;
+  mm_run(1);
+  CHECK_EQ(mm.pos, at + 5);
+  for (i = 0; i < 10; i++) {
+    PIN_FLOAT("m.pos-cmd") += 3;
+    mm_run(1);
+  }
+  CHECK_EQ(mm.pos, at + 35);
+}
+
+static void test_mode_change_into_csv_waits_for_zero(void) {
+  mm_drive(3, BIT(9));
+  PIN_BIT("m.enable") = 1;
+  mm_run(5);
+  PIN_FLOAT("m.velocity-cmd") = 200;  // for PV and, later, CSV
+  PIN_S32("m.opmode-cmd") = 9;
+  mm_run(20);
+  CHECK_EQ(mm_mode(), 9);
+  CHECK_EQ(mm.vel, 0);  // not a step to 200
+  PIN_FLOAT("m.velocity-cmd") = 0;
+  mm_run(1);
+  PIN_FLOAT("m.velocity-cmd") = 7;
+  mm_run(2);
+  CHECK_EQ(mm.vel, 7);
+}
+
+static void test_mode_change_not_taken(void) {
+  int i;
+  mm_drive(8, BIT(3));
+  PIN_BIT("m.enable") = 1;
+  mm_run(5);
+  mm.stuck = 1;
+  PIN_S32("m.opmode-cmd") = 3;
+  for (i = 0; i < 1000; i++) mm_cycle();
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+  mm_run(10);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("m.fault-reason"), 6);
+}
+
+static void test_mode_change_drive_does_not_stop(void) {
+  mm_drive(3, BIT(8));
+  PIN_U32("m.stop-timeout-ms") = 50;
+  PIN_FLOAT("m.velocity-cmd") = 500;
+  PIN_BIT("m.enable") = 1;
+  mm_run(20);
+  mm.never_stops = 1;
+  PIN_S32("m.opmode-cmd") = 8;
+  mm_run(45);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+  mm_run(10);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("m.fault-reason"), 6);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 3);  // never switched while turning
+}
+
+static void test_mode_change_asked_back(void) {
+  mm_drive(3, BIT(8));
+  PIN_FLOAT("m.velocity-cmd") = 500;
+  PIN_BIT("m.enable") = 1;
+  mm_run(20);
+  PIN_S32("m.opmode-cmd") = 8;
+  mm_run(2);
+  CHECK(mm.vel < 500);
+  PIN_S32("m.opmode-cmd") = 0;
+  mm_run(20);
+  CHECK_EQ(mm_mode(), 3);
+  CHECK_EQ(mm.vel, 500);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+}
+
 RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
@@ -1271,4 +1579,8 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_pv_not_at_speed_in_another_mode, test_pp_pins, test_pp_needs_positions, test_pp_moves_only_on_start,
     test_pp_done_not_from_an_old_target_reached, test_pp_relative_and_a_new_move, test_pp_start_while_acknowledging, test_pp_halt,
     test_pp_halts_before_switching_off, test_pp_timeouts, test_pp_timeout_paused_while_halted,
-    test_pp_start_waits_for_the_mode, test_pp_bad_command)
+    test_pp_start_waits_for_the_mode, test_pp_bad_command, test_opmode_cmd_only_with_more_modes,
+    test_opmode_cmd_not_in_the_file, test_mode_change_while_disabled, test_mode_change_halts_first, test_mode_change_waits_for_the_answer,
+    test_mode_change_from_csp_holds_the_position, test_mode_change_into_csp_waits_for_the_command,
+    test_mode_change_into_csv_waits_for_zero, test_mode_change_not_taken, test_mode_change_drive_does_not_stop,
+    test_mode_change_asked_back)

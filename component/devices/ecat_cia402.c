@@ -42,6 +42,16 @@
 /// (control word bit 8) with its own deceleration, and switched off when
 /// it reports zero speed or after `stop-timeout-ms`, instead of coasting.
 ///
+/// Profile position (PP), for positioning that is not a joint: the drive
+/// moves to `pp-target` on a rising edge of `pp-start`, with the set-point
+/// handshake done here.
+///
+/// Changing modes (`opmode-cmd`, among the file's `mode` and `modes`): a
+/// running drive is stopped first (halted in PV and PP), then 0x6060 is
+/// written and 0x6061 must follow within a second, and the new mode starts
+/// from the actual values: CSP follows `pos-cmd` only once it is within
+/// SYNC_COUNTS of the actual position, CSV only once `velocity-cmd` is 0.
+///
 /// Homing by the drive's own method (HM), when the file allows mode `hm`:
 /// a rising edge of `index-enable` (from LinuxCNC's motion, homing on an
 /// index pulse) or of `home` switches the drive to HM, starts it, waits for
@@ -77,6 +87,7 @@
 #define MODE_CSP 8
 #define MODE_CSV 9
 #define MODE_HOMING 6
+#define MODE_BIT(m) (1u << (m))
 
 // Control words (ETG.6010 table 3)
 #define CW_DISABLE_VOLTAGE 0x0000
@@ -95,6 +106,9 @@
 #define CW_CHANGE_IMMEDIATELY 0x0020  // PP
 #define CW_RELATIVE 0x0040            // PP
 #define SW_SET_POINT_ACK 0x1000       // in PP
+// After a mode change into CSP, pos-cmd is followed once it is this close
+// to the actual position, in counts
+#define SYNC_COUNTS 10
 
 // States, from the status word; the value of the cia-state pin.
 enum {
@@ -117,7 +131,7 @@ enum {
   WHY_ENABLE_TIMEOUT,    // "Operation enabled" not reached in time
   WHY_LEFT_ENABLED,      // the drive left "Operation enabled" by itself
   WHY_WATCHDOG,          // the watchdog pin stopped changing
-  WHY_WRONG_MODE,        // the drive does not report the configured mode
+  WHY_WRONG_MODE,        // the drive does not report the mode, or a mode change failed
   WHY_BAD_COMMAND,       // pos-cmd or velocity-cmd is not a finite number
   WHY_HOMING_ERROR,      // the drive reports a homing error
   WHY_HOMING_TIMEOUT,    // homing not done within home-timeout-ms
@@ -130,6 +144,13 @@ enum {
   PP_SET,       // new set-point (bit 4) given, waiting for acknowledge (bit 12)
   PP_MOVING,    // acknowledged; waiting for target reached
   PP_DONE,      // at the target
+};
+
+// Changing modes (opmode-cmd).
+enum {
+  MC_RUN = 0,  // in the active mode
+  MC_STOP,     // stopping the drive in the old mode
+  MC_SWITCH,   // the new mode written, waiting for 0x6061 to follow
 };
 
 // Homing, by the drive's method (HM).
@@ -206,6 +227,8 @@ typedef struct {
   hal_bit_t *pp_relative;
   hal_bit_t *pp_halt;
   hal_bit_t *pp_done;
+  // with more than one mode
+  hal_s32_t *opmode_cmd;
   // parameters
   hal_float_t pos_scale;
   hal_float_t velo_scale;
@@ -233,6 +256,13 @@ typedef struct {
   int reset_start;      // first cycle of a fault reset: bit 7 low
   uint32_t watchdog_old;
   long long watchdog_ns;
+  unsigned int allowed; // the modes the file allows, bit n for mode n
+  int active;           // the mode in use
+  int mc;               // MC_*
+  int mc_to;            // the mode being changed to
+  long long mc_ns;
+  int mc_cycles;
+  int sync;             // after a mode change: not following the command yet
   int can_home;         // mode hm is allowed
   int hs;               // HS_*
   long long hs_ns;      // time in this homing step
@@ -325,6 +355,11 @@ static const lcec_pindesc_t pp_velocity_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
+static const lcec_pindesc_t mode_pins[] = {
+    {HAL_S32, HAL_IN, offsetof(cia402_t, opmode_cmd), "%s.opmode-cmd"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
 static const lcec_paramdesc_t stop_params[] = {
     {HAL_U32, HAL_RW, offsetof(cia402_t, stop_timeout_ms), "%s.stop-timeout-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
@@ -371,6 +406,7 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   lcec_slave_modparam_t *p;
   cia402_t *d;
   int err, mode = MODE_CSP;
+  unsigned int others = 0;
 
   if ((err = lcec_generic_init(comp_id, slave)) != 0) return err;
 
@@ -393,7 +429,7 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   }
 
   for (p = slave->modparams; p != NULL && p->id != -1; p++) {
-    if (p->id == ECAT_MP_CIA402_MODES) d->can_home = (p->value.u32 >> MODE_HOMING) & 1;
+    if (p->id == ECAT_MP_CIA402_MODES) others = p->value.u32;
     if (p->id == ECAT_MP_CIA402_MODE) mode = p->value.u32;
   }
   // ecat_config.c has checked these too
@@ -401,17 +437,24 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 mode %d is not supported\n", slave->name, mode);
     return -EINVAL;
   }
-  if (mode == MODE_PV && !d->target_velocity_o.mapped) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PV needs 0x60FF in the process data\n", slave->name);
+  if (others & ~(MODE_BIT(MODE_PP) | MODE_BIT(MODE_PV) | MODE_BIT(MODE_HOMING) | MODE_BIT(MODE_CSP) | MODE_BIT(MODE_CSV))) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 modes 0x%x are not supported\n", slave->name, others);
     return -EINVAL;
   }
-  if (mode == MODE_PP && (!d->target_position_o.mapped || !d->actual_position_o.mapped)) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PP needs 0x607A and 0x6064 in the process data\n", slave->name);
+  d->allowed = MODE_BIT(mode) | others;
+  d->can_home = (d->allowed & MODE_BIT(MODE_HOMING)) != 0;
+  if ((d->allowed & (MODE_BIT(MODE_PV) | MODE_BIT(MODE_CSV))) && !d->target_velocity_o.mapped) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PV and CSV need 0x60FF in the process data\n", slave->name);
     return -EINVAL;
   }
-  // ecat_config.c has checked this too
-  if (d->can_home && (!d->modes_o.mapped || !d->modes_display_o.mapped)) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: homing needs 0x6060 and 0x6061 in the process data\n", slave->name);
+  if ((d->allowed & (MODE_BIT(MODE_PP) | MODE_BIT(MODE_CSP))) &&
+      (!d->target_position_o.mapped || !d->actual_position_o.mapped)) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PP and CSP need 0x607A and 0x6064 in the process data\n", slave->name);
+    return -EINVAL;
+  }
+  // changing modes needs the mode and its display; ecat_config.c has checked this too
+  if (others && (!d->modes_o.mapped || !d->modes_display_o.mapped)) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: changing modes needs 0x6060 and 0x6061 in the process data\n", slave->name);
     return -EINVAL;
   }
 
@@ -421,20 +464,24 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
     if ((err = lcec_pin_newf_list(d, homing_pins, slave->name)) != 0) return err;
     if ((err = lcec_param_newf_list(d, homing_params, slave->name)) != 0) return err;
   }
-  if (mode == MODE_PV) {
+  if (d->allowed & MODE_BIT(MODE_PV)) {
     if ((err = lcec_pin_newf_list(d, pv_pins, slave->name)) != 0) return err;
   }
-  if (mode == MODE_PP) {
+  if (d->allowed & MODE_BIT(MODE_PP)) {
     if ((err = lcec_pin_newf_list(d, pp_pins, slave->name)) != 0) return err;
     if (d->profile_velocity_o.mapped && (err = lcec_pin_newf_list(d, pp_velocity_pins, slave->name)) != 0) return err;
     if ((err = lcec_param_newf_list(d, pp_params, slave->name)) != 0) return err;
   }
-  if (mode == MODE_PV || mode == MODE_PP) {
+  if (d->allowed & (MODE_BIT(MODE_PV) | MODE_BIT(MODE_PP))) {
     if ((err = lcec_param_newf_list(d, stop_params, slave->name)) != 0) return err;
+  }
+  if (d->allowed & ~MODE_BIT(MODE_HOMING) & ~MODE_BIT(mode)) {
+    if ((err = lcec_pin_newf_list(d, mode_pins, slave->name)) != 0) return err;
   }
 
   // after the parameters are made, which zeroes them
   d->mode = mode;
+  d->active = mode;
   d->home_timeout_ms = 60000;
   d->stop_timeout_ms = 10000;
   d->pp_timeout_ms = 60000;
@@ -500,8 +547,8 @@ static void cia402_read(lcec_slave_t *slave, long period) {
   *d->opmode_cyclic_position = md == MODE_CSP;
   *d->opmode_cyclic_velocity = md == MODE_CSV;
   *d->stat_target_reached = (md == MODE_CSP || md == MODE_CSV || md == MODE_PV || md == MODE_PP) && ((sw >> 10) & 1);
-  if (d->mode == MODE_PV) {
-    int pv = d->state == ST_OPERATION_ENABLED && (!d->modes_display_o.mapped || md == MODE_PV);
+  if (d->zero_speed != NULL) {
+    int pv = d->state == ST_OPERATION_ENABLED && d->active == MODE_PV && (!d->modes_display_o.mapped || md == MODE_PV);
     *d->zero_speed = pv && (sw & SW_SPEED_ZERO);
     // at-speed only while running at the command, see cia402_write
     if (!pv) *d->at_speed = 0;
@@ -592,7 +639,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       }
       break;
     case HS_BACK:
-      if (*d->opmode_display == d->mode) {
+      if (*d->opmode_display == d->active) {
         d->hs = HS_IDLE;
         if (d->hs_index) *d->index_enable = 0;
         d->index_old = 0;
@@ -672,6 +719,69 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
   return bits;
 }
 
+/// Changing modes on opmode-cmd. Returns the control word bits to add.
+static uint16_t mode_change(cia402_t *d, int run, int enable, long period) {
+  int want = *d->opmode_cmd == 0 ? d->mode : *d->opmode_cmd;
+  int still;
+
+  if (want <= 0 || want >= 32 || want == MODE_HOMING || !(d->allowed & MODE_BIT(want))) {
+    // not a mode of the file: like any other bad command
+    if (enable) block(d, WHY_BAD_COMMAND);
+    d->mc = MC_RUN;
+    return 0;
+  }
+  if (d->hs != HS_IDLE) return 0;  // homing changes modes itself
+  if (d->state != ST_OPERATION_ENABLED) {
+    // not enabled: nothing moves, change at once (enabling waits for 0x6061)
+    d->active = want;
+    d->mc = MC_RUN;
+    return 0;
+  }
+  d->mc_ns += period;
+  switch (d->mc) {
+    case MC_RUN:
+      if (want == d->active) return 0;
+      d->mc = MC_STOP;
+      d->mc_to = want;
+      d->mc_ns = 0;
+      d->mc_cycles = 0;
+      // fall through
+    case MC_STOP:
+      d->mc_to = want;
+      if (want == d->active) {
+        d->mc = MC_RUN;  // asked back before the change
+        return 0;
+      }
+      d->mc_cycles++;
+      // standing still: PV reports zero speed, PP target reached while
+      // halted; in CSP and CSV the targets are held from the first cycle
+      still = d->active == MODE_PV   ? (*d->statusword & SW_SPEED_ZERO) != 0
+              : d->active == MODE_PP ? (*d->statusword & SW_TARGET_REACHED) != 0
+                                     : 1;
+      if (d->mc_cycles > STATUS_CYCLES && still) {
+        d->mc = MC_SWITCH;
+        d->mc_ns = 0;
+      } else if (d->stop_timeout_ms != 0 && d->mc_ns > (long long)d->stop_timeout_ms * 1000000LL) {
+        block(d, WHY_WRONG_MODE);
+      }
+      break;
+    case MC_SWITCH:
+      if (*d->opmode_display == d->mc_to) {
+        d->active = d->mc_to;
+        d->mc = MC_RUN;
+        d->sync = 1;  // PP needs a new pp-start anyway
+      } else if (d->mc_ns > MODE_CHANGE_NS) {
+        block(d, WHY_WRONG_MODE);
+      }
+      break;
+  }
+  if (d->blocked) {
+    d->mc = MC_RUN;
+    return 0;
+  }
+  return (d->mc == MC_STOP && (d->active == MODE_PV || d->active == MODE_PP)) ? CW_HALT : 0;
+}
+
 static void cia402_write(lcec_slave_t *slave, long period) {
   cia402_t *d = slave->profile_data;
   uint8_t *pd = slave->master->process_data;
@@ -680,13 +790,13 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   int reset_edge = *d->fault_reset && !d->fault_reset_old;
   int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
   int homing_now = d->hs != HS_IDLE;
-  int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->mode || homing_now;
-  double cmd = (d->mode == MODE_CSV || d->mode == MODE_PV) ? *d->velocity_cmd
-                : d->mode == MODE_PP                       ? *d->pp_target
-                                                           : *d->pos_cmd;
+  int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->active || homing_now;
+  double cmd = (d->active == MODE_CSV || d->active == MODE_PV) ? *d->velocity_cmd
+                : d->active == MODE_PP                         ? *d->pp_target
+                                                               : *d->pos_cmd;
   int halt = 0;
   int run;
-  uint16_t cw, hbits = 0, pbits = 0;
+  uint16_t cw, hbits = 0, pbits = 0, mbits = 0;
 
   d->enable_old = enable;
   d->fault_reset_old = *d->fault_reset;
@@ -732,14 +842,18 @@ static void cia402_write(lcec_slave_t *slave, long period) {
     }
   }
   run = enable && !d->blocked;
+  if (d->opmode_cmd != NULL) {
+    mbits = mode_change(d, run, enable, period);
+    run = enable && !d->blocked;  // a mode change may have failed
+  }
   if (d->can_home) {
     uint16_t sw = *d->statusword;
-    hbits = homing(d, run, sw, period);
+    hbits = homing(d, run && d->mc == MC_RUN, sw, period);
     run = enable && !d->blocked;  // homing may have shut it down
   }
 
-  if (d->mode == MODE_PP) {
-    pbits = pp_move(d, run, *d->statusword, period);
+  if (d->pp_start != NULL) {
+    pbits = pp_move(d, run && d->active == MODE_PP && d->mc == MC_RUN, *d->statusword, period);
     run = enable && !d->blocked;  // a move may have timed out
   }
 
@@ -747,8 +861,8 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   // it reports zero speed (PV) or target reached, which while halted means
   // standing still (PP); the status word is taken as the answer only after
   // STATUS_CYCLES
-  if ((d->mode == MODE_PV || d->mode == MODE_PP) && !run && d->state == ST_OPERATION_ENABLED) {
-    int still = d->mode == MODE_PV ? (*d->statusword & SW_SPEED_ZERO) != 0 : (*d->statusword & SW_TARGET_REACHED) != 0;
+  if ((d->active == MODE_PV || d->active == MODE_PP) && !run && d->state == ST_OPERATION_ENABLED) {
+    int still = d->active == MODE_PV ? (*d->statusword & SW_SPEED_ZERO) != 0 : (*d->statusword & SW_TARGET_REACHED) != 0;
     d->stop_ns += period;
     d->stop_cycles++;
     halt = (d->stop_cycles <= STATUS_CYCLES || !still) && d->stop_ns <= (long long)d->stop_timeout_ms * 1000000LL;
@@ -780,7 +894,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
       cw = (run && mode_ok) ? CW_ENABLE_OPERATION : run ? CW_SWITCH_ON : CW_SHUTDOWN;
       break;
     case ST_OPERATION_ENABLED:
-      cw = run ? (CW_ENABLE_OPERATION | hbits | pbits) : halt ? (CW_ENABLE_OPERATION | CW_HALT) : CW_SHUTDOWN;
+      cw = run ? (CW_ENABLE_OPERATION | hbits | pbits | mbits) : halt ? (CW_ENABLE_OPERATION | CW_HALT) : CW_SHUTDOWN;
       break;
     default:
       cw = CW_DISABLE_VOLTAGE;
@@ -792,18 +906,31 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   *d->controlword = cw;
   EC_WRITE_U16(&pd[d->controlword_o.os], cw);
   if (d->modes_o.mapped) {
-    int8_t m = (d->hs == HS_TO_HM || d->hs == HS_HOMING) ? MODE_HOMING : d->mode;
+    int8_t m = (d->hs == HS_TO_HM || d->hs == HS_HOMING) ? MODE_HOMING : d->mc == MC_SWITCH ? d->mc_to : d->active;
     EC_WRITE_S8(&pd[d->modes_o.os], m);
     *d->opmode = m;
   }
 
   // Targets: follow the commands only in "Operation enabled", for this
   // enable; otherwise hold the actual position or stand still.
-  run = run && d->state == ST_OPERATION_ENABLED && d->hs == HS_IDLE && !homing_now;
+  run = run && d->state == ST_OPERATION_ENABLED && d->hs == HS_IDLE && !homing_now && d->mc == MC_RUN;
+  if (!run && !enable) d->sync = 0;
+  if (run && d->sync) {
+    // after a mode change: start from the actual values, without a jump
+    if (d->active == MODE_CSP) {
+      long long dist = (long long)clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale)) - *d->drv_actual_position;
+      if (dist >= -SYNC_COUNTS && dist <= SYNC_COUNTS) d->sync = 0;
+    } else if (d->active == MODE_CSV) {
+      if (clamp_s32(*d->velocity_cmd * scale_or_one(d->velo_scale)) == 0) d->sync = 0;
+    } else {
+      d->sync = 0;
+    }
+  }
+  run = run && !d->sync;
   if (d->target_position_o.mapped) {
-    if (run && d->mode == MODE_CSP) {
+    if (run && d->active == MODE_CSP) {
       *d->drv_target_position = clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale));
-    } else if (run && d->mode == MODE_PP && d->pp != PP_IDLE) {
+    } else if (run && d->active == MODE_PP && d->pp != PP_IDLE) {
       *d->drv_target_position = d->pp_set;
     } else {
       *d->drv_target_position = *d->drv_actual_position;
@@ -811,7 +938,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
     EC_WRITE_S32(&pd[d->target_position_o.os], *d->drv_target_position);
   }
   if (d->target_velocity_o.mapped) {
-    if (run && (d->mode == MODE_CSV || d->mode == MODE_PV)) {
+    if (run && (d->active == MODE_CSV || d->active == MODE_PV)) {
       *d->drv_target_velocity = clamp_s32(*d->velocity_cmd * scale_or_one(d->velo_scale));
     } else {
       *d->drv_target_velocity = 0;
@@ -820,17 +947,17 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   }
 
   if (d->profile_velocity_o.mapped) {
-    EC_WRITE_U32(&pd[d->profile_velocity_o.os], (run && d->mode == MODE_PP) ? d->pp_vel : 0);
+    EC_WRITE_U32(&pd[d->profile_velocity_o.os], (run && d->active == MODE_PP) ? d->pp_vel : 0);
   }
 
-  if (d->mode == MODE_PV) {
+  if (d->at_speed != NULL) {
     if (*d->drv_target_velocity != d->pv_target) {
       d->pv_target = *d->drv_target_velocity;
       d->pv_wait = STATUS_CYCLES;
     } else if (d->pv_wait > 0) {
       d->pv_wait--;
     }
-    *d->at_speed = run && d->pv_wait == 0 && (*d->statusword & SW_TARGET_REACHED) &&
+    *d->at_speed = run && d->active == MODE_PV && d->pv_wait == 0 && (*d->statusword & SW_TARGET_REACHED) &&
                    (!d->modes_display_o.mapped || *d->opmode_display == MODE_PV);
   }
 
