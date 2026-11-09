@@ -56,7 +56,9 @@
 /// a rising edge of `index-enable` (from LinuxCNC's motion, homing on an
 /// index pulse) or of `home` switches the drive to HM, starts it, waits for
 /// "homing attained" and "target reached", and switches it back with the
-/// target at the actual position. Started by `index-enable`, `pos-fb`
+/// target at the actual position. In PV and PP the drive is halted first,
+/// as for a mode change, and after homing CSP follows `pos-cmd` again only
+/// once it is within SYNC_COUNTS of the new position. Started by `index-enable`, `pos-fb`
 /// follows `pos-cmd` while the drive homes, so that motion sees no
 /// following error, and `index-enable` is cleared at the end: `pos-fb`
 /// then jumps to the drive's new position, as an encoder's count does at
@@ -156,6 +158,7 @@ enum {
 // Homing, by the drive's method (HM).
 enum {
   HS_IDLE = 0,
+  HS_STOP,     // PV, PP: halted, waiting for the drive to stand still
   HS_TO_HM,    // 0x6060 = 6 written, waiting for 0x6061 to follow
   HS_HOMING,   // started (control word bit 4), waiting for the result
   HS_BACK,     // back to the cyclic mode, waiting for 0x6061 to follow
@@ -268,6 +271,7 @@ typedef struct {
   long long hs_ns;      // time in this homing step
   int hs_seen;          // the drive was seen homing (not yet attained and reached)
   int hs_index;         // started by index-enable
+  int hs_cycles;        // cycles in HS_STOP
   int index_old, home_old;
   long long stop_ns;    // PV, PP: time halting before switching off
   int stop_cycles;      // PV, PP: cycles halting
@@ -567,6 +571,14 @@ static void cia402_read(lcec_slave_t *slave, long period) {
   }
 }
 
+/// PV, PP: whether the drive stands still (zero speed in PV, target
+/// reached, which while halted means standing still, in PP); other modes
+/// hold their targets and count as still.
+static int standing_still(cia402_t *d) {
+  uint16_t sw = *d->statusword;
+  return d->active == MODE_PV ? (sw & SW_SPEED_ZERO) != 0 : d->active == MODE_PP ? (sw & SW_TARGET_REACHED) != 0 : 1;
+}
+
 static void block(cia402_t *d, int why) {
   if (!d->blocked) {
     d->blocked = 1;
@@ -594,11 +606,28 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
   switch (d->hs) {
     case HS_IDLE:
       if (index_edge || home_edge) {
-        d->hs = HS_TO_HM;
+        // a running PV or PP drive is halted first
+        d->hs = (d->active == MODE_PV || d->active == MODE_PP) ? HS_STOP : HS_TO_HM;
         d->hs_ns = 0;
+        d->hs_cycles = 0;
         d->hs_index = index_edge;
         *d->stat_homed = 0;
         *d->home_error = 0;
+      }
+      if (d->hs != HS_STOP) break;
+      // fall through
+    case HS_STOP:
+      // the status word answers the halt only after STATUS_CYCLES
+      d->hs_cycles++;
+      bits = CW_HALT;
+      if (d->hs_index && !index) {
+        d->hs = HS_IDLE;  // motion gave up; the mode was not changed
+        bits = 0;
+      } else if (d->hs_cycles > STATUS_CYCLES && standing_still(d)) {
+        d->hs = HS_TO_HM;
+        d->hs_ns = 0;
+      } else if (d->stop_timeout_ms != 0 && d->hs_ns > (long long)d->stop_timeout_ms * 1000000LL) {
+        block(d, WHY_WRONG_MODE);
       }
       break;
     case HS_TO_HM:
@@ -643,6 +672,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
         d->hs = HS_IDLE;
         if (d->hs_index) *d->index_enable = 0;
         d->index_old = 0;
+        // the position has changed: CSP must not jump to an old command
+        if (d->active == MODE_CSP) d->sync = 1;
       } else if (d->hs_ns > MODE_CHANGE_NS) {
         block(d, WHY_WRONG_MODE);
       }
@@ -722,7 +753,6 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
 /// Changing modes on opmode-cmd. Returns the control word bits to add.
 static uint16_t mode_change(cia402_t *d, int run, int enable, long period) {
   int want = *d->opmode_cmd == 0 ? d->mode : *d->opmode_cmd;
-  int still;
 
   if (want <= 0 || want >= 32 || want == MODE_HOMING || !(d->allowed & MODE_BIT(want))) {
     // not a mode of the file: like any other bad command
@@ -753,12 +783,8 @@ static uint16_t mode_change(cia402_t *d, int run, int enable, long period) {
         return 0;
       }
       d->mc_cycles++;
-      // standing still: PV reports zero speed, PP target reached while
-      // halted; in CSP and CSV the targets are held from the first cycle
-      still = d->active == MODE_PV   ? (*d->statusword & SW_SPEED_ZERO) != 0
-              : d->active == MODE_PP ? (*d->statusword & SW_TARGET_REACHED) != 0
-                                     : 1;
-      if (d->mc_cycles > STATUS_CYCLES && still) {
+      // in CSP and CSV the targets are held from the first cycle
+      if (d->mc_cycles > STATUS_CYCLES && standing_still(d)) {
         d->mc = MC_SWITCH;
         d->mc_ns = 0;
       } else if (d->stop_timeout_ms != 0 && d->mc_ns > (long long)d->stop_timeout_ms * 1000000LL) {
@@ -862,10 +888,9 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   // standing still (PP); the status word is taken as the answer only after
   // STATUS_CYCLES
   if ((d->active == MODE_PV || d->active == MODE_PP) && !run && d->state == ST_OPERATION_ENABLED) {
-    int still = d->active == MODE_PV ? (*d->statusword & SW_SPEED_ZERO) != 0 : (*d->statusword & SW_TARGET_REACHED) != 0;
     d->stop_ns += period;
     d->stop_cycles++;
-    halt = (d->stop_cycles <= STATUS_CYCLES || !still) && d->stop_ns <= (long long)d->stop_timeout_ms * 1000000LL;
+    halt = (d->stop_cycles <= STATUS_CYCLES || !standing_still(d)) && d->stop_ns <= (long long)d->stop_timeout_ms * 1000000LL;
   } else {
     d->stop_ns = 0;
     d->stop_cycles = 0;

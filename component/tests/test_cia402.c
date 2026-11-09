@@ -1266,6 +1266,8 @@ static void test_pp_bad_command(void) {
 static struct {
   int32_t pos, vel, ramp, pp_target;
   int stuck, never_stops, ack, mode_old;
+  int home_left, homed;  // HM: cycles left homing, done
+  int32_t home;          // HM: the position after homing
   unsigned sw, cw_old;
 } mm;
 
@@ -1306,6 +1308,9 @@ static unsigned mm_cycle(void) {
     } else if (m == 1) {
       if (mm.ack) sw |= 0x1000;
       if ((mm.pos == mm.pp_target && !halted) || (halted && mm.vel == 0)) sw |= 0x0400;
+    } else if (m == 6) {
+      if (mm.homed) sw |= 0x1400;
+      else if (!mm.home_left) sw |= 0x0400;
     } else {
       sw |= 0x1400;
     }
@@ -1325,6 +1330,19 @@ static unsigned mm_cycle(void) {
   } else if (m == 9) {
     mm.vel = tv;
     mm.pos += tv;
+  } else if (m == 6) {
+    // homes in 10 cycles after a rising edge of bit 4; it does not move
+    // in the model, it only gets its new position
+    mm.vel = 0;
+    if ((cw & 0x10) && !(mm.cw_old & 0x10)) {
+      mm.home_left = 10;
+      mm.homed = 0;
+    }
+    if (!(cw & 0x10)) mm.home_left = 0;
+    if (mm.home_left > 0 && --mm.home_left == 0) {
+      mm.homed = 1;
+      mm.pos = mm.home;
+    }
   } else {
     int32_t goal = m == 3 ? tv : 0;
     if (m == 1) {
@@ -1564,6 +1582,146 @@ static void test_mode_change_asked_back(void) {
   CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
 }
 
+// ---- homing among the modes ------------------------------------------
+
+static void test_homing_halts_pv_first(void) {
+  int i, switched = -1;
+  mm_drive(3, BIT(6));
+  mm.home = 4000;
+  PIN_FLOAT("m.velocity-cmd") = 500;
+  PIN_BIT("m.enable") = 1;
+  mm_run(20);
+  CHECK_EQ(mm.vel, 500);
+  // homing while turning: halted, then HM once it stands still
+  PIN_BIT("m.home") = 1;
+  for (i = 0; i < 30 && switched < 0; i++) {
+    unsigned cw = mm_cycle();
+    if (switched < 0 && fake_get(S, 0x6060, 0) == 6) {
+      switched = i;
+      CHECK_EQ(mm.vel, 0);
+    }
+    if (switched < 0) {
+      CHECK_EQ(cw & 0x110, 0x100);
+      CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 3);
+      CHECK_EQ((int32_t)fake_get(S, 0x60FF, 0), 0);
+      CHECK_EQ(PIN_BIT("m.stat-homing"), 1);
+    }
+  }
+  CHECK(switched >= 5);
+  for (i = 0; i < 40 && PIN_BIT("m.stat-homing"); i++) mm_cycle();
+  CHECK_EQ(PIN_BIT("m.stat-homed"), 1);
+  CHECK_EQ(mm_mode(), 3);
+  CHECK_EQ(mm.pos, 4000);
+  // back in PV: it ramps to the command again
+  mm_run(20);
+  CHECK_EQ(mm.vel, 500);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+}
+
+static void test_homing_halts_pp_first(void) {
+  int i, switched = -1;
+  mm_drive(1, BIT(6));
+  PIN_BIT("m.enable") = 1;
+  mm_run(10);
+  PIN_FLOAT("m.pp-target") = 1000;
+  PIN_BIT("m.pp-start") = 1;
+  mm_run(20);
+  CHECK(mm.vel != 0);
+  PIN_BIT("m.home") = 1;
+  for (i = 0; i < 20; i++) {
+    unsigned cw = mm_cycle();
+    if (switched < 0 && fake_get(S, 0x6060, 0) == 6) {
+      switched = i;
+      CHECK_EQ(mm.vel, 0);
+    }
+    if (switched < 0) CHECK_EQ(cw & 0x100, 0x100);
+  }
+  CHECK(switched >= 3);  // the status answers after three cycles
+  for (i = 0; i < 40 && PIN_BIT("m.stat-homing"); i++) mm_cycle();
+  CHECK_EQ(PIN_BIT("m.stat-homed"), 1);
+  CHECK_EQ(mm_mode(), 1);
+  // the move does not go on by itself
+  int32_t at = mm.pos;
+  mm_run(20);
+  CHECK_EQ(mm.pos, at);
+  CHECK_EQ(PIN_BIT("m.pp-done"), 0);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+}
+
+static void test_homing_pv_drive_does_not_stop(void) {
+  int i;
+  mm_drive(3, BIT(6));
+  PIN_FLOAT("m.velocity-cmd") = 500;
+  PIN_BIT("m.enable") = 1;
+  mm_run(20);
+  mm.never_stops = 1;
+  PIN_U32("m.stop-timeout-ms") = 20;
+  PIN_BIT("m.home") = 1;
+  for (i = 0; i < 40 && !PIN_BIT("m.drv-fault"); i++) {
+    mm_cycle();
+    CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 3);
+  }
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("m.fault-reason"), 6);
+  CHECK_EQ(PIN_BIT("m.stat-homing"), 0);
+}
+
+static void test_homing_csp_waits_for_the_command(void) {
+  int i;
+  homing_drive();
+  hm.home = 500;
+  fake_set(S, 0x6064, 0, 77);
+  PIN_FLOAT("x.pos-cmd") = 77;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 60 && !PIN_BIT("x.stat-homed"); i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  // pos-cmd is still where the drive was before homing: no jump back
+  for (i = 0; i < 5; i++) {
+    hm_cycle();
+    CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 500);
+  }
+  PIN_FLOAT("x.pos-cmd") = 505;
+  hm_cycle();
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 505);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
+static void test_homing_pp_drive_does_not_stop(void) {
+  int i;
+  mm_drive(1, BIT(6));
+  PIN_BIT("m.enable") = 1;
+  mm_run(10);
+  PIN_FLOAT("m.pp-target") = 100000;
+  PIN_BIT("m.pp-start") = 1;
+  mm_run(20);
+  mm.never_stops = 1;
+  PIN_U32("m.stop-timeout-ms") = 20;
+  PIN_BIT("m.home") = 1;
+  for (i = 0; i < 40 && !PIN_BIT("m.drv-fault"); i++) {
+    mm_cycle();
+    CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 1);
+  }
+  CHECK_EQ(PIN_S32("m.fault-reason"), 6);
+}
+
+static void test_homing_abandoned_while_halting(void) {
+  int i;
+  mm_drive(1, BIT(6));
+  PIN_BIT("m.enable") = 1;
+  mm_run(10);
+  PIN_BIT("m.index-enable") = 1;
+  mm_cycle();
+  CHECK_EQ(PIN_BIT("m.stat-homing"), 1);
+  PIN_BIT("m.index-enable") = 0;
+  for (i = 0; i < 20; i++) {
+    CHECK_EQ(mm_cycle() & 0x100, 0);  // no longer halted
+    CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 1);
+  }
+  CHECK_EQ(PIN_BIT("m.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+}
+
 RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
@@ -1583,4 +1741,6 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_opmode_cmd_not_in_the_file, test_mode_change_while_disabled, test_mode_change_halts_first, test_mode_change_waits_for_the_answer,
     test_mode_change_from_csp_holds_the_position, test_mode_change_into_csp_waits_for_the_command,
     test_mode_change_into_csv_waits_for_zero, test_mode_change_not_taken, test_mode_change_drive_does_not_stop,
-    test_mode_change_asked_back)
+    test_mode_change_asked_back, test_homing_halts_pv_first, test_homing_halts_pp_first,
+    test_homing_pv_drive_does_not_stop, test_homing_csp_waits_for_the_command,
+    test_homing_pp_drive_does_not_stop, test_homing_abandoned_while_halting)
