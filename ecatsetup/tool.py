@@ -95,7 +95,8 @@ def upload(pos, index, subindex, dtype):
         return None
     if dtype == "string":
         return out
-    return int(out.split()[0], 0)
+    # "0xffffffff -1": hex, then the value as the type reads it (signed)
+    return int(out.split()[-1], 0)
 
 
 def upload_text(pos, index, subindex, dtype=None):
@@ -107,6 +108,7 @@ def upload_text(pos, index, subindex, dtype=None):
 def download(pos, index, subindex, value, dtype=None):
     """Write one SDO. The type comes from the slave's dictionary unless given.
     Raises ToolError if the slave refuses."""
+    # "--": a negative value is not an option
     args = ["download", "-p", pos] + (["-t", dtype] if dtype else []) + \
-        ["0x%04x" % index, subindex, value]
+        ["--", "0x%04x" % index, subindex, value]
     run(*args)

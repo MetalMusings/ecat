@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# ecat-take-down: stop the EtherCAT bus in order before LinuxCNC stops its
+# threads. It sets ecat.take-down, so that every output is zero and the
+# slaves go to PREOP while process data still flows, and waits until no
+# slave is above PREOP. Without it, slaves lose their process data in OP
+# and stop with an error (sync manager watchdog 0x001B, synchronization
+# error 0x001A), and CiA 402 drives latch a communication fault (0x7500).
+#
+# Use it from the HAL file named by [HAL]SHUTDOWN in the INI file, which
+# LinuxCNC runs before it stops the threads:
+#
+#   loadusr -w ecat-take-down
+#
+# Usage: ecat-take-down [timeout in seconds, default 2]
+#
+# It never fails the shutdown: without ecat it does nothing, and after the
+# timeout it gives up with a warning.
+
+TIMEOUT=${1:-2}
+HALCMD=${HALCMD:-halcmd}
+
+if ! "$HALCMD" setp ecat.take-down 1 2>/dev/null; then
+    exit 0  # ecat is not loaded
+fi
+
+end=$(( $(date +%s%N) + ${TIMEOUT%.*} * 1000000000 ))
+while :; do
+    safeop=$("$HALCMD" getp ecat.state-safeop 2>/dev/null)
+    op=$("$HALCMD" getp ecat.state-op 2>/dev/null)
+    if [ "$safeop" = FALSE ] && [ "$op" = FALSE ]; then
+        exit 0
+    fi
+    if [ "$(date +%s%N)" -ge "$end" ]; then
+        echo "ecat-take-down: slaves still above PREOP after ${TIMEOUT} s" \
+             "(ecat.state-safeop=$safeop, ecat.state-op=$op)" >&2
+        exit 0
+    fi
+    sleep 0.02
+done

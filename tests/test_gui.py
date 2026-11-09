@@ -63,6 +63,19 @@ class BusTest(unittest.TestCase):
 
 
 class TestTool(unittest.TestCase):
+    def test_signed_upload(self):
+        with mock.patch.object(tool, "run", lambda *a, **k: "0xffffffff -1\n"):
+            self.assertEqual(tool.upload(0, 0x607D, 1, "int32"), -1)
+        with mock.patch.object(tool, "run", lambda *a, **k: "0x00000fa0 4000\n"):
+            self.assertEqual(tool.upload(0, 0x2022, 0, "uint32"), 4000)
+
+    def test_negative_download(self):
+        calls = []
+        with mock.patch.object(tool, "run", lambda *a, **k: calls.append(a) or ""):
+            tool.download(0, 0x607D, 1, "-2000", "int32")
+        # "--" keeps the value from being read as an option
+        self.assertEqual(calls[0], ("download", "-p", 0, "-t", "int32", "--", "0x607d", 1, "-2000"))
+
     def test_dictionary_read_once_settled(self):
         # after a start the master lists the dictionary bit by bit
         answers = iter(["", "", "SDO 0x1000\n", "SDO 0x1000\nSDO 0x1008\n",

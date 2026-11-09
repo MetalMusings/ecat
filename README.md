@@ -89,13 +89,15 @@ own messages (0x10F3). HAL & LinuxCNC lists the pins and the lines for a
 HAL file; writing them into the configuration is step 5 of the plan. Like the rest of `ecatsetup`, it only reads from
 the bus; nothing moves.
 
-Part 2 adds the I/O test (Test > Start test): the `ecat` component runs
+Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in CSP in
+small steps, hold-to-enable, with a heartbeat and limits written to the
+drive: [docs/test-mode.md](docs/test-mode.md). The `ecat` component runs
 the configuration being edited (saved or not) in `halrun` with a servo
 thread, without LinuxCNC. Each slave's Test tab shows its pins live and
 sets the outputs of I/O slaves; pins set during the test go back to 0
 before it stops. SDOs can be read and written from the same tab whenever
-a master runs. CiA 402 drives stay disabled: their pins are shown, not
-set, and their CiA 402 objects are not written; objects that are
+a master runs. CiA 402 drives stay disabled unless moved as above: their
+pins are shown, not set, and their CiA 402 objects are not written; objects that are
 commands rather than settings (such as 0x2010 on the ECT60) and objects
 in the process data are refused too. The kernel master must be stopped
 (`sudo systemctl stop ethercat`) and LinuxCNC must not run. The
@@ -136,6 +138,17 @@ addf ecat.write-all servo-thread
 
 - Slave pins are `<slave name>.<pin>` as named in the file; the master's
   are `ecat.0.*` (`ecat.0.all-op`, ...) and `ecat.*`.
+- For an orderly stop, put `loadusr -w ecat-take-down` in the HAL file
+  named by `[HAL]SHUTDOWN` in the INI file (such as
+  `SHUTDOWN = shutdown.hal`), which LinuxCNC runs before it stops its
+  threads. It sets `ecat.take-down`: every output becomes zero and the
+  slaves go to PREOP while process data still flows (with
+  linuxcnc-ethercat-uspace 0.7 or newer; before that only the outputs).
+  Without it, the slaves lose their process data in OP when LinuxCNC
+  stops, and stop with an error (sync manager watchdog 0x001B,
+  synchronization error 0x001A); CiA 402 drives also latch a
+  communication fault (such as 0x7500). The test mode of EtherCAT Setup
+  does the same before it stops.
 - The cycle time is the servo thread's period, taken at the first call
   of `ecat.read-all`; distributed clocks are configured then, before the
   master is activated.

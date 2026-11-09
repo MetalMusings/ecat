@@ -34,6 +34,15 @@ import json, os, sys
 state = os.environ["FAKE_HAL_STATE"]
 pins = json.load(open(state)) if os.path.exists(state) else {}
 a = sys.argv[1:]
+if a[:2] == ["-k", "-f"]:
+    for line in sys.stdin:
+        f = line.split()
+        if len(f) == 3 and f[0] == "setp":
+            pins.setdefault(f[1], ["param", "IN", ""])[2] = f[2]
+            with open(state + ".setp", "a") as log:
+                log.write("%s %s\\n" % (f[1], f[2]))
+    json.dump(pins, open(state, "w"))
+    sys.exit(0)
 if a[:3] == ["-s", "show", "comp"]:
     print("    2  User  halcmd%d   %d ready" % (os.getpid(), os.getpid()))
     if pins:
@@ -48,6 +57,9 @@ elif a[0] == "setp":
         print("pin '%s' is not writable" % a[1], file=sys.stderr)
         sys.exit(1)
     pins[a[1]][2] = a[2]
+    if a[1] == "ecat.take-down" and a[2] == "TRUE":
+        pins["ecat.state-op"][2] = "FALSE"
+        pins["ecat.state-preop"][2] = "TRUE"
     json.dump(pins, open(state, "w"))
     with open(state + ".setp", "a") as f:
         f.write("%s %s\\n" % (a[1], a[2]))
@@ -56,6 +68,10 @@ elif a[0] == "setp":
 PINS = {
     "ecat.0.all-op": ["bit", "OUT", "TRUE"],
     "ecat.0.slaves-responding": ["u32", "OUT", "0x00000002"],
+    "ecat.take-down": ["bit", "IN", "FALSE"],
+    "ecat.state-op": ["bit", "OUT", "TRUE"],
+    "ecat.state-safeop": ["bit", "OUT", "FALSE"],
+    "ecat.state-preop": ["bit", "OUT", "FALSE"],
     "io.out-1": ["bit", "IN", "FALSE"],
     "io.level": ["float", "IN", "0"],
     "io.in-1": ["bit", "OUT", "TRUE"],
@@ -126,7 +142,10 @@ class TestTestMode(unittest.TestCase):
         with open(self.state + ".setp") as f:
             setp = f.read().splitlines()
         # set during the test, then back to 0 before the thread stops
-        self.assertEqual(setp, ["io.out-1 TRUE", "io.level 2.5", "io.out-1 FALSE", "io.level 0"])
+        # first every drive disabled, then the slaves to PREOP while process
+        # data still flows
+        self.assertEqual(setp, ["io.out-1 TRUE", "io.level 2.5", "x.enable FALSE",
+                                "io.out-1 FALSE", "io.level 0", "ecat.take-down TRUE"])
         with open(self.state + ".cmds") as f:
             self.assertEqual(f.read(), "stop\nexit\n")
 
@@ -162,6 +181,31 @@ class TestTestMode(unittest.TestCase):
         self.assertIn("process data", testmode.sdo_write_refused(io, 0x7000, 1))
         self.assertIn("CiA 402", testmode.sdo_write_refused(x, 0x6081, 0))
         self.assertIsNone(testmode.sdo_write_refused(x, 0x2000, 1))
+
+    def test_hal_file(self):
+        hal = testmode.hal_file(cfg(), "/t/ethercat.yaml", 500000)
+        lines = hal.splitlines()
+        self.assertIn("loadrt limit3 names=ecatjog0", lines)
+        # pos-cmd comes from the limit3, which follows pos-fb until the
+        # drive is in "Operation enabled"
+        self.assertIn("net ecatjog0-cmd ecatjog0.out => x.pos-cmd", lines)
+        self.assertIn("net ecatjog0-fb x.pos-fb => ecatsel0.in0", lines)
+        self.assertIn("net ecatjog0-enabled x.stat-op-enabled => ecatsel0.sel ecatnot0.in", lines)
+        self.assertIn("net ecatjog0-load ecatnot0.out => ecatjog0.load", lines)
+        self.assertIn("setp ecatjog0.maxv 0", lines)
+        self.assertIn("setp x.watchdog-ms %d" % testmode.WATCHDOG_MS, lines)
+        # the jog runs between reading and writing the bus
+        order = [l for l in lines if l.startswith("addf")]
+        self.assertEqual(order, ["addf ecat.read-all servo-thread", "addf ecatsel0 servo-thread",
+                                 "addf ecatnot0 servo-thread", "addf ecatjog0 servo-thread",
+                                 "addf ecat.write-all servo-thread"])
+
+    def test_heartbeat(self):
+        run = self.started()
+        run.tick_watchdogs()
+        run.tick_watchdogs()
+        with open(self.state + ".setp") as f:
+            self.assertEqual(f.read().splitlines(), ["x.watchdog 1", "x.watchdog 2"])
 
     def test_parse_pins(self):
         pins = testmode.parse_pins("ecat float IN 0 lcec.0.E7000.Level-1\n\n")

@@ -90,6 +90,7 @@ from ecatsetup.__main__ import main
 sys.exit(main())
 EOF
 chmod 755 "$ROOT/usr/bin/ecatsetup"
+install -m 755 "$WORK/ecat/scripts/ecat-take-down" "$ROOT/usr/bin/"
 
 install -m 644 "$WORK/ecat/README.md" "$DOC/"
 install -d "$DOC/docs"
