@@ -39,6 +39,7 @@ typedef struct {
   int errors;
   int cia402;         // the slave being read has the cia402 profile
   unsigned int cia402_modes;  // the other modes it may switch to (bit n: mode n)
+  unsigned int pp_limits;     // settings 0x607D:01, 0x607D:02, 0x607F:00 seen (bits 0-2)
   unsigned int owned; // which of the profile's objects it has (bits of cia402_objects)
   int n_enc;          // the slave's encoder channels
   uint16_t enc_index[MAX_ENCODERS];   // their status indexes
@@ -62,6 +63,7 @@ static const struct {
     {0x6064, 32, 0},  // position actual value
     {0x606C, 32, 0},  // velocity actual value
     {0x607A, 32, 1},  // target position
+    {0x6081, 32, 1},  // profile velocity (PP)
     {0x60FF, 32, 1},  // target velocity
 };
 #define N_CIA402_OBJECTS (int)(sizeof(cia402_objects) / sizeof(cia402_objects[0]))
@@ -491,6 +493,8 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
     LCEC_CONF_SDOCONF_T *sc;
 
     if (parse_object(c, object, &index, &subindex) < 0) continue;
+    if (index == 0x607D && (subindex == 1 || subindex == 2)) c->pp_limits |= 1u << (subindex - 1);
+    if (index == 0x607F && subindex == 0) c->pp_limits |= 4;
     if (get(c, st, "value") != NULL) {
       const dtype_t *dt = find_dtype(get_str(c, st, "type"));
       if (dt == NULL) {
@@ -644,8 +648,10 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       mp->value.u32 = 9;
     } else if (mode != NULL && !strcmp(mode, "pv")) {
       mp->value.u32 = 3;
+    } else if (mode != NULL && !strcmp(mode, "pp")) {
+      mp->value.u32 = 1;
     } else {
-      error(c, "cia402.mode must be csp, csv or pv");
+      error(c, "cia402.mode must be csp, csv, pv or pp");
     }
     ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount = 1;
     c->cia402_modes = cia402_modes(c, get(c, get(c, s, "cia402"), "modes"));
@@ -705,7 +711,16 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       error(c, "encoder %s needs 0x%04X:11 (counter value) with \"use: profile\"", c->enc_name[i], c->enc_index[i]);
     }
   }
+  c->pp_limits = 0;
   settings(c, b, get(c, s, "settings"), off);
+  if (c->cia402) {
+    const char *mode = get_str(c, get(c, s, "cia402"), "mode");
+    // the drive plans PP moves itself: it must know its limits
+    if (mode != NULL && !strcmp(mode, "pp") && c->pp_limits != 7) {
+      error(c, "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02 (software position limits) "
+               "and 0x607F:00 (max profile velocity)");
+    }
+  }
   c->where[0] = 0;
 }
 

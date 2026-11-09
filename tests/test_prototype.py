@@ -133,6 +133,16 @@ class TestPropose(unittest.TestCase):
             pv["slaves"][0]["process-data"][pdo][0]["entries"].append(
                 {"object": obj, "bits": 32, "type": "DINT", "use": "profile"})
         self.assertEqual(config.check(pv), [])
+        # PP needs the positions and the drive's limits as settings
+        pp = drive({"mode": "pp"})
+        self.assertEqual(sorted(e.split(": ", 1)[1] for e in config.check(pp)), [
+            "cia402 mode pp needs the setting 0x607D:01", "cia402 mode pp needs the setting 0x607D:02",
+            "cia402 mode pp needs the setting 0x607F:00"])
+        p = propose.Proposal(0, 0xa88, 0xa880002, 0, 0, "ECT60", profile=402, mode="pp")
+        p.pp_limits = {(0x607D, 1): -1000, (0x607D, 2): 1000, (0x607F, 0): 500}
+        pp["slaves"][0]["settings"] = config.slave_from_proposal(p)["settings"]
+        self.assertEqual(config.check(pp), [])
+        self.assertEqual(pp["slaves"][0]["settings"][0], {"object": "0x607D:01", "type": "DINT", "value": -1000})
 
     def test_kebab(self):
         self.assertEqual(propose.kebab("LowpassFilteredVoltage"), "lowpass-filtered-voltage")

@@ -70,7 +70,9 @@
 #define OBJ_ACTUAL_VELOCITY 0x606C
 #define OBJ_TARGET_POSITION 0x607A
 #define OBJ_TARGET_VELOCITY 0x60FF
+#define OBJ_PROFILE_VELOCITY 0x6081
 
+#define MODE_PP 1
 #define MODE_PV 3
 #define MODE_CSP 8
 #define MODE_CSV 9
@@ -84,9 +86,15 @@
 #define CW_FAULT_RESET 0x0080
 #define CW_HALT 0x0100
 #define SW_SPEED_ZERO 0x1000  // in PV
-// PV: the status word answers a new target this many cycles later at the
-// latest, so "target reached" is not taken from it before
-#define PV_TARGET_CYCLES 3
+// The status word answers a new control word or target this many cycles
+// later at the latest (the frame of cycle n is used by the drive at the
+// next SYNC0, and its answer comes back two frames later), so a status bit
+// is not taken as the answer before
+#define STATUS_CYCLES 3
+#define CW_NEW_SET_POINT 0x0010       // PP
+#define CW_CHANGE_IMMEDIATELY 0x0020  // PP
+#define CW_RELATIVE 0x0040            // PP
+#define SW_SET_POINT_ACK 0x1000       // in PP
 
 // States, from the status word; the value of the cia-state pin.
 enum {
@@ -113,6 +121,15 @@ enum {
   WHY_BAD_COMMAND,       // pos-cmd or velocity-cmd is not a finite number
   WHY_HOMING_ERROR,      // the drive reports a homing error
   WHY_HOMING_TIMEOUT,    // homing not done within home-timeout-ms
+  WHY_PP_TIMEOUT,        // a PP move not done within pp-timeout-ms
+};
+
+// Profile position (PP): the set-point handshake.
+enum {
+  PP_IDLE = 0,  // no move since enable
+  PP_SET,       // new set-point (bit 4) given, waiting for acknowledge (bit 12)
+  PP_MOVING,    // acknowledged; waiting for target reached
+  PP_DONE,      // at the target
 };
 
 // Homing, by the drive's method (HM).
@@ -182,6 +199,13 @@ typedef struct {
   // PV only
   hal_bit_t *at_speed;
   hal_bit_t *zero_speed;
+  // PP only
+  hal_float_t *pp_target;
+  hal_float_t *pp_velocity;
+  hal_bit_t *pp_start;
+  hal_bit_t *pp_relative;
+  hal_bit_t *pp_halt;
+  hal_bit_t *pp_done;
   // parameters
   hal_float_t pos_scale;
   hal_float_t velo_scale;
@@ -191,10 +215,11 @@ typedef struct {
   hal_s32_t mode;  // read only: 8 CSP, 9 CSV
   hal_u32_t home_timeout_ms;
   hal_u32_t stop_timeout_ms;
+  hal_u32_t pp_timeout_ms;
 
   // process data
   obj_t error_code_o, controlword_o, statusword_o, modes_o, modes_display_o;
-  obj_t actual_position_o, actual_velocity_o, target_position_o, target_velocity_o;
+  obj_t actual_position_o, actual_velocity_o, target_position_o, target_velocity_o, profile_velocity_o;
 
   // state
   int state;
@@ -214,7 +239,16 @@ typedef struct {
   int hs_seen;          // the drive was seen homing (not yet attained and reached)
   int hs_index;         // started by index-enable
   int index_old, home_old;
-  long long stop_ns;    // PV: time halting before switching off
+  long long stop_ns;    // PV, PP: time halting before switching off
+  int stop_cycles;      // PV, PP: cycles halting
+  int pp;               // PP_*
+  long long pp_ns;      // PP: time of this move
+  int pp_start_old;
+  int pp_pending;       // PP: a start not yet given to the drive
+  int32_t pp_set;       // PP: the set-point given, counts
+  uint32_t pp_vel;      // PP: its profile velocity
+  int pp_rel;           // PP: relative
+  int pp_halt_wait;     // PP: cycles until target reached answers the end of a halt
   int32_t pv_target;    // PV: the target velocity written last
   int pv_wait;          // PV: cycles until "target reached" answers it
 } cia402_t;
@@ -276,8 +310,28 @@ static const lcec_pindesc_t pv_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
-static const lcec_paramdesc_t pv_params[] = {
+static const lcec_pindesc_t pp_pins[] = {
+    {HAL_FLOAT, HAL_IN, offsetof(cia402_t, pp_target), "%s.pp-target"},
+    {HAL_BIT, HAL_IN, offsetof(cia402_t, pp_start), "%s.pp-start"},
+    {HAL_BIT, HAL_IN, offsetof(cia402_t, pp_relative), "%s.pp-relative"},
+    {HAL_BIT, HAL_IN, offsetof(cia402_t, pp_halt), "%s.pp-halt"},
+    {HAL_BIT, HAL_OUT, offsetof(cia402_t, pp_done), "%s.pp-done"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+// only with 0x6081 in the process data
+static const lcec_pindesc_t pp_velocity_pins[] = {
+    {HAL_FLOAT, HAL_IN, offsetof(cia402_t, pp_velocity), "%s.pp-velocity"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_paramdesc_t stop_params[] = {
     {HAL_U32, HAL_RW, offsetof(cia402_t, stop_timeout_ms), "%s.stop-timeout-ms"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_paramdesc_t pp_params[] = {
+    {HAL_U32, HAL_RW, offsetof(cia402_t, pp_timeout_ms), "%s.pp-timeout-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -329,7 +383,7 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
       find(slave, OBJ_STATUSWORD, &d->statusword_o) || find(slave, OBJ_MODES, &d->modes_o) ||
       find(slave, OBJ_MODES_DISPLAY, &d->modes_display_o) || find(slave, OBJ_ACTUAL_POSITION, &d->actual_position_o) ||
       find(slave, OBJ_ACTUAL_VELOCITY, &d->actual_velocity_o) || find(slave, OBJ_TARGET_POSITION, &d->target_position_o) ||
-      find(slave, OBJ_TARGET_VELOCITY, &d->target_velocity_o)) {
+      find(slave, OBJ_TARGET_VELOCITY, &d->target_velocity_o) || find(slave, OBJ_PROFILE_VELOCITY, &d->profile_velocity_o)) {
     return -EIO;
   }
   // ecat_config.c has checked these; a safety net
@@ -343,12 +397,16 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
     if (p->id == ECAT_MP_CIA402_MODE) mode = p->value.u32;
   }
   // ecat_config.c has checked these too
-  if (mode != MODE_CSP && mode != MODE_CSV && mode != MODE_PV) {
+  if (mode != MODE_CSP && mode != MODE_CSV && mode != MODE_PV && mode != MODE_PP) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 mode %d is not supported\n", slave->name, mode);
     return -EINVAL;
   }
   if (mode == MODE_PV && !d->target_velocity_o.mapped) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PV needs 0x60FF in the process data\n", slave->name);
+    return -EINVAL;
+  }
+  if (mode == MODE_PP && (!d->target_position_o.mapped || !d->actual_position_o.mapped)) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PP needs 0x607A and 0x6064 in the process data\n", slave->name);
     return -EINVAL;
   }
   // ecat_config.c has checked this too
@@ -365,13 +423,21 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   }
   if (mode == MODE_PV) {
     if ((err = lcec_pin_newf_list(d, pv_pins, slave->name)) != 0) return err;
-    if ((err = lcec_param_newf_list(d, pv_params, slave->name)) != 0) return err;
+  }
+  if (mode == MODE_PP) {
+    if ((err = lcec_pin_newf_list(d, pp_pins, slave->name)) != 0) return err;
+    if (d->profile_velocity_o.mapped && (err = lcec_pin_newf_list(d, pp_velocity_pins, slave->name)) != 0) return err;
+    if ((err = lcec_param_newf_list(d, pp_params, slave->name)) != 0) return err;
+  }
+  if (mode == MODE_PV || mode == MODE_PP) {
+    if ((err = lcec_param_newf_list(d, stop_params, slave->name)) != 0) return err;
   }
 
   // after the parameters are made, which zeroes them
   d->mode = mode;
   d->home_timeout_ms = 60000;
   d->stop_timeout_ms = 10000;
+  d->pp_timeout_ms = 60000;
   d->pos_scale = 1.0;
   d->velo_scale = 1.0;
   d->auto_fault_reset = 1;
@@ -433,7 +499,7 @@ static void cia402_read(lcec_slave_t *slave, long period) {
   *d->opmode_homing = md == MODE_HOMING;
   *d->opmode_cyclic_position = md == MODE_CSP;
   *d->opmode_cyclic_velocity = md == MODE_CSV;
-  *d->stat_target_reached = (md == MODE_CSP || md == MODE_CSV || md == MODE_PV) && ((sw >> 10) & 1);
+  *d->stat_target_reached = (md == MODE_CSP || md == MODE_CSV || md == MODE_PV || md == MODE_PP) && ((sw >> 10) & 1);
   if (d->mode == MODE_PV) {
     int pv = d->state == ST_OPERATION_ENABLED && (!d->modes_display_o.mapped || md == MODE_PV);
     *d->zero_speed = pv && (sw & SW_SPEED_ZERO);
@@ -544,6 +610,68 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
   return bits;
 }
 
+/// PP: the set-point handshake. Returns the control word bits to add.
+static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
+  int start = *d->pp_start;
+  int start_edge = start && !d->pp_start_old;
+  int ack = (sw & SW_SET_POINT_ACK) != 0;
+  int in_pp = !d->modes_display_o.mapped || *d->opmode_display == MODE_PP;
+  uint16_t bits = 0;
+
+  d->pp_start_old = start;
+  if (!run || d->state != ST_OPERATION_ENABLED || d->hs != HS_IDLE) {
+    d->pp = PP_IDLE;
+    d->pp_pending = 0;
+    *d->pp_done = 0;
+    return 0;
+  }
+  if (start_edge) d->pp_pending = 1;
+  if (*d->pp_halt) {
+    bits |= CW_HALT;
+    d->pp_halt_wait = STATUS_CYCLES;
+  } else if (d->pp_halt_wait > 0) {
+    d->pp_halt_wait--;
+  }
+  // a new move: on a rising edge of pp-start, as soon as the drive is ready
+  // for a set-point (acknowledge low); it replaces a move in progress
+  if (d->pp_pending && in_pp && !ack && d->pp != PP_SET) {
+    d->pp_pending = 0;
+    d->pp_set = clamp_s32(*d->pp_target * scale_or_one(d->pos_scale));
+    d->pp_rel = *d->pp_relative;
+    d->pp_vel = d->pp_velocity != NULL ? (uint32_t)clamp_s32(fabs(*d->pp_velocity) * scale_or_one(d->velo_scale)) : 0;
+    d->pp = PP_SET;
+    d->pp_ns = 0;
+    *d->pp_done = 0;
+  }
+  switch (d->pp) {
+    case PP_SET:
+      if (ack) {
+        d->pp = PP_MOVING;  // bit 4 low: the drive drops the acknowledge
+      } else {
+        bits |= CW_NEW_SET_POINT;
+      }
+      break;
+    case PP_MOVING:
+      // after the acknowledge, "target reached" answers this set-point;
+      // while halted it means standing still, not at the target
+      if (!ack && (sw & SW_TARGET_REACHED) && !*d->pp_halt && d->pp_halt_wait == 0) {
+        d->pp = PP_DONE;
+        *d->pp_done = 1;
+      }
+      break;
+  }
+  if (d->pp == PP_SET || d->pp == PP_MOVING) {
+    bits |= CW_CHANGE_IMMEDIATELY | (d->pp_rel ? CW_RELATIVE : 0);
+    if (!*d->pp_halt) d->pp_ns += period;
+    if (d->pp_timeout_ms != 0 && d->pp_ns > (long long)d->pp_timeout_ms * 1000000LL) block(d, WHY_PP_TIMEOUT);
+  }
+  if (d->blocked) {
+    d->pp = PP_IDLE;
+    bits = 0;
+  }
+  return bits;
+}
+
 static void cia402_write(lcec_slave_t *slave, long period) {
   cia402_t *d = slave->profile_data;
   uint8_t *pd = slave->master->process_data;
@@ -553,10 +681,12 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
   int homing_now = d->hs != HS_IDLE;
   int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->mode || homing_now;
-  double cmd = (d->mode == MODE_CSV || d->mode == MODE_PV) ? *d->velocity_cmd : *d->pos_cmd;
+  double cmd = (d->mode == MODE_CSV || d->mode == MODE_PV) ? *d->velocity_cmd
+                : d->mode == MODE_PP                       ? *d->pp_target
+                                                           : *d->pos_cmd;
   int halt = 0;
   int run;
-  uint16_t cw, hbits = 0;
+  uint16_t cw, hbits = 0, pbits = 0;
 
   d->enable_old = enable;
   d->fault_reset_old = *d->fault_reset;
@@ -586,7 +716,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
       block(d, WHY_BUS);
     } else if (d->watchdog_ms != 0 && d->watchdog_ns >= (long long)d->watchdog_ms * 1000000LL) {
       block(d, WHY_WATCHDOG);
-    } else if (!isfinite(cmd)) {
+    } else if (!isfinite(cmd) || (d->pp_velocity != NULL && !isfinite(*d->pp_velocity))) {
       // never clamped into a target: that would be a jump to the end of
       // the range
       block(d, WHY_BAD_COMMAND);
@@ -608,12 +738,23 @@ static void cia402_write(lcec_slave_t *slave, long period) {
     run = enable && !d->blocked;  // homing may have shut it down
   }
 
-  // PV: a running drive is halted before it is switched off
-  if (d->mode == MODE_PV && !run && d->state == ST_OPERATION_ENABLED) {
+  if (d->mode == MODE_PP) {
+    pbits = pp_move(d, run, *d->statusword, period);
+    run = enable && !d->blocked;  // a move may have timed out
+  }
+
+  // PV and PP: a moving drive is halted before it is switched off, until
+  // it reports zero speed (PV) or target reached, which while halted means
+  // standing still (PP); the status word is taken as the answer only after
+  // STATUS_CYCLES
+  if ((d->mode == MODE_PV || d->mode == MODE_PP) && !run && d->state == ST_OPERATION_ENABLED) {
+    int still = d->mode == MODE_PV ? (*d->statusword & SW_SPEED_ZERO) != 0 : (*d->statusword & SW_TARGET_REACHED) != 0;
     d->stop_ns += period;
-    halt = !(*d->statusword & SW_SPEED_ZERO) && d->stop_ns <= (long long)d->stop_timeout_ms * 1000000LL;
+    d->stop_cycles++;
+    halt = (d->stop_cycles <= STATUS_CYCLES || !still) && d->stop_ns <= (long long)d->stop_timeout_ms * 1000000LL;
   } else {
     d->stop_ns = 0;
+    d->stop_cycles = 0;
   }
 
   // control word
@@ -639,7 +780,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
       cw = (run && mode_ok) ? CW_ENABLE_OPERATION : run ? CW_SWITCH_ON : CW_SHUTDOWN;
       break;
     case ST_OPERATION_ENABLED:
-      cw = run ? (CW_ENABLE_OPERATION | hbits) : halt ? (CW_ENABLE_OPERATION | CW_HALT) : CW_SHUTDOWN;
+      cw = run ? (CW_ENABLE_OPERATION | hbits | pbits) : halt ? (CW_ENABLE_OPERATION | CW_HALT) : CW_SHUTDOWN;
       break;
     default:
       cw = CW_DISABLE_VOLTAGE;
@@ -662,6 +803,8 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   if (d->target_position_o.mapped) {
     if (run && d->mode == MODE_CSP) {
       *d->drv_target_position = clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale));
+    } else if (run && d->mode == MODE_PP && d->pp != PP_IDLE) {
+      *d->drv_target_position = d->pp_set;
     } else {
       *d->drv_target_position = *d->drv_actual_position;
     }
@@ -676,10 +819,14 @@ static void cia402_write(lcec_slave_t *slave, long period) {
     EC_WRITE_S32(&pd[d->target_velocity_o.os], *d->drv_target_velocity);
   }
 
+  if (d->profile_velocity_o.mapped) {
+    EC_WRITE_U32(&pd[d->profile_velocity_o.os], (run && d->mode == MODE_PP) ? d->pp_vel : 0);
+  }
+
   if (d->mode == MODE_PV) {
     if (*d->drv_target_velocity != d->pv_target) {
       d->pv_target = *d->drv_target_velocity;
-      d->pv_wait = PV_TARGET_CYCLES;
+      d->pv_wait = STATUS_CYCLES;
     } else if (d->pv_wait > 0) {
       d->pv_wait--;
     }

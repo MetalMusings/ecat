@@ -426,7 +426,7 @@ static void test_cia402_csv(void) {
 }
 
 static void test_cia402_errors(void) {
-  CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN), "cia402.mode must be csp, csv or pv");
+  CHECK_FAILS(CIA402("cst", CSP_OUT, CSP_IN), "cia402.mode must be csp, csv, pv or pp");
   CHECK_FAILS(CIA402("csp", P("0x6060:00", 8, "SINT") P("0x607A:00", 32, "DINT"), CSP_IN), "needs 0x6040:00");
   // a profile object with a pin
   CHECK_FAILS(CIA402("csp", CSP_OUT, P("0x6041:00", 16, "UINT") P("0x6064:00", 32, "DINT")
@@ -440,6 +440,28 @@ static void test_cia402_errors(void) {
   CHECK_FAILS(CIA402("csp", CSP_OUT, CSP_IN E("0x603F:00", 16, "UINT", "use: profile, pin: e")), "has no pin");
   // a subindex other than 0 is not the profile's
   CHECK_FAILS(CIA402("csp", CSP_OUT, CSP_IN P("0x6041:01", 16, "UINT")), "does not handle this object");
+}
+
+#define PP_LIMITS                                                     \
+  "  settings:\n"                                                     \
+  "  - {object: '0x607D:01', type: DINT, value: -100000}\n"           \
+  "  - {object: '0x607D:02', type: DINT, value: 100000}\n"            \
+  "  - {object: '0x607F:00', type: UDINT, value: 50000}\n"
+
+static void test_cia402_pp(void) {
+  CHECK_EQ(load(CIA402("pp", CSP_OUT P("0x6081:00", 32, "UDINT"), CSP_IN) PP_LIMITS), 0);
+  CHECK_EQ(MODPARAM(0)->value.u32, 1);
+  CHECK_EQ(count(lcecConfTypeSdoConfig), 3);
+  // the drive plans the move: it must have its limits
+  CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN), "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02");
+  CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN) "  settings:\n  - {object: '0x607D:01', type: DINT, value: -1}\n"
+                                            "  - {object: '0x607D:02', type: DINT, value: 1}\n",
+      "0x607F:00 (max profile velocity)");
+  // and the positions
+  CHECK_FAILS(CIA402("pp", P("0x6040:00", 16, "UINT"), P("0x6041:00", 16, "UINT")) PP_LIMITS, "needs 0x607A:00");
+  // 0x6081 is the profile's, not a pin
+  CHECK_FAILS(CIA402("pp", CSP_OUT E("0x6081:00", 32, "UDINT", "pin: v, hal-type: u32"), CSP_IN) PP_LIMITS,
+      "the cia402 profile handles this object");
 }
 
 static void test_cia402_modes(void) {
@@ -564,5 +586,5 @@ static void test_too_many_encoders(void) {
 
 RUN_TESTS("config", test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_types, test_entry_errors, test_split, test_file_errors, test_slave_errors, test_dc, test_settings,
-    test_cia402_csp, test_cia402_csv, test_cia402_errors, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
+    test_cia402_csp, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders)

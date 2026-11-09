@@ -11,7 +11,7 @@ import re
 
 import yaml
 
-from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS, ENCODER_INPUTS, ENCODER_OUTPUTS
+from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS, ENCODER_INPUTS, ENCODER_OUTPUTS, PP_LIMITS
 
 FORMAT_VERSION = 1
 
@@ -26,7 +26,7 @@ PROFILES = {402: "cia402", 5001: "mdp"}
 DATA_TYPES = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT",
               "ULINT", "REAL", "LREAL"}
 HAL_TYPES = {"bit", "s32", "u32", "s64", "u64", "float"}
-CIA402_MODES = {"csp", "csv", "pv"}
+CIA402_MODES = {"csp", "csv", "pv", "pp"}
 # other modes a cia402 drive may switch to (cia402.modes); they need the
 # mode objects to change modes
 CIA402_OTHER_MODES = {"hm"}
@@ -100,7 +100,8 @@ def slave_from_proposal(p, name=None):
     if p.dc_assign is not None:
         s["dc"] = {"assign-activate": "0x%04X" % p.dc_assign,
                    "sync0-cycles": p.dc_sync0_factor, "sync0-shift-ns": p.dc_shift}
-    s["settings"] = []
+    s["settings"] = [{"object": obj(i, sub), "type": t, "value": p.pp_limits[(i, sub)]}
+                     for i, sub, t in PP_LIMITS if (i, sub) in p.pp_limits]
     return s
 
 
@@ -316,9 +317,10 @@ def check(cfg):
                 int(str(dc.get("assign-activate")), 16)
             except ValueError:
                 err("%s: dc assign-activate %r is not a number" % (where, dc.get("assign-activate")))
+        set_objects = set()
         for st in s.get("settings") or []:
             try:
-                parse_obj(st.get("object"))
+                set_objects.add(parse_obj(st.get("object")))
             except ValueError as x:
                 err("%s: setting: %s" % (where, x))
             if "value" in st:
@@ -331,4 +333,9 @@ def check(cfg):
                     err("%s: setting %s data %r is not hex bytes" % (where, st.get("object"), st["data"]))
             else:
                 err("%s: setting %s has neither value nor data" % (where, st.get("object")))
+        if profile == "cia402" and (s.get("cia402") or {}).get("mode") == "pp":
+            # the drive plans PP moves itself: it must know its limits
+            for i, sub, _ in PP_LIMITS:
+                if (i, sub) not in set_objects:
+                    err("%s: cia402 mode pp needs the setting %s" % (where, obj(i, sub)))
     return errors

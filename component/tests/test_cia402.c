@@ -879,13 +879,27 @@ static void test_pv_stop_timeout(void) {
   CHECK_EQ(pv_cycle(), 0x06);
 }
 
-static void test_pv_standstill_switches_off_at_once(void) {
+static void test_pv_standstill_switches_off_after_the_status_answers(void) {
+  int i;
   pv_drive();
   PIN_BIT("s.enable") = 1;
   pv_run(10);
   CHECK_EQ(PIN_BIT("s.zero-speed"), 1);
   PIN_BIT("s.enable") = 0;
+  for (i = 0; i < 3; i++) CHECK_EQ(pv_cycle(), 0x010F);
   CHECK_EQ(pv_cycle(), 0x06);
+  // started and stopped at once: "speed zero" is still the old answer, and
+  // the drive has begun to turn; it is halted until it really stands still
+  pv_drive();
+  PIN_BIT("s.enable") = 1;
+  pv_run(10);
+  PIN_FLOAT("s.velocity-cmd") = 1000;
+  pv_run(1);
+  PIN_BIT("s.enable") = 0;
+  for (i = 0; i < 20 && pv_cycle() == 0x010F; i++) {
+  }
+  CHECK_EQ(cw_now, 0x06);
+  CHECK_EQ(pv.vel, 0);
 }
 
 static void test_pv_halts_on_a_fault(void) {
@@ -932,6 +946,316 @@ static void test_pv_not_at_speed_in_another_mode(void) {
   CHECK_EQ(PIN_BIT("s.zero-speed"), 0);
 }
 
+// ---- profile position (PP) -------------------------------------------
+
+// A drive in PP: after a rising edge of control word bit 4 it acknowledges
+// (status word bit 12) and takes the set-point; it drops the acknowledge
+// when bit 4 is low, and moves pp.step counts per cycle towards the
+// target; halted (bit 8), it stops.
+static struct {
+  int32_t pos, target, step;
+  int ack, moving, no_ack;
+  int ack_hold;   // cycles the acknowledge stays after bit 4 goes low
+  int start_in;   // cycles until an accepted set-point starts to move
+  unsigned sw, cw_old;
+} ppd;
+
+static const fake_entry_t pp_entries[] = {
+    {0x6040, 0, 16}, {0x6060, 0, 8}, {0x607A, 0, 32}, {0x6081, 0, 32},
+    {0x6041, 0, 16}, {0x6061, 0, 8}, {0x6064, 0, 32}, FAKE_END,
+};
+
+static lcec_slave_t *pp_drive(const fake_entry_t *entries) {
+  lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODE}, {.id = -1}};
+  mp[0].value.u32 = 1;
+  S = fake_slave("t", entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  if (entries == pp_entries) fake_set(S, 0x6061, 0, 1);
+  memset(&ppd, 0, sizeof(ppd));
+  ppd.step = 10;
+  ppd.sw = SW_READY;
+  cw_now = 0;
+  return S;
+}
+
+static unsigned pp_cycle(void) {
+  unsigned sw = ppd.sw, cw;
+  if (sw == SW_ENABLED) {
+    if (ppd.ack) sw |= 0x1000;
+    if (!ppd.moving || (cw_now & 0x100)) sw |= 0x0400;  // halted: reached means standing still
+  }
+  fake_set(S, 0x6064, 0, (uint32_t)ppd.pos);
+  cw = cycle(sw);
+  ppd.sw = drive(ppd.sw, cw, cw_now);
+  cw_now = cw;
+  if (ppd.sw == SW_ENABLED) {
+    if (ppd.start_in > 0 && --ppd.start_in == 0) ppd.moving = ppd.pos != ppd.target;
+    if ((cw & 0x10) && !(ppd.cw_old & 0x10) && !ppd.ack && !ppd.no_ack) {
+      int32_t t = (int32_t)fake_get(S, 0x607A, 0);
+      ppd.target = (cw & 0x40) ? ppd.target + t : t;
+      ppd.ack = 1;
+      ppd.ack_hold = 2;
+      ppd.start_in = 2;  // target reached still shows the last move until then
+    }
+    if (!(cw & 0x10) && ppd.ack && ppd.ack_hold-- <= 0) ppd.ack = 0;
+    if (ppd.moving && !(cw & 0x100)) {
+      int32_t d = ppd.target - ppd.pos;
+      ppd.pos += d > ppd.step ? ppd.step : d < -ppd.step ? -ppd.step : d;
+      ppd.moving = ppd.pos != ppd.target;
+    }
+  } else {
+    ppd.moving = 0;
+  }
+  ppd.cw_old = cw;
+  return cw;
+}
+
+static void pp_run(int n) {
+  while (n-- > 0) pp_cycle();
+}
+
+static void pp_enable(void) {
+  ppd.target = ppd.pos;
+  PIN_BIT("t.enable") = 1;
+  pp_run(4);
+  CHECK_EQ(ppd.sw, SW_ENABLED);
+}
+
+static void test_pp_pins(void) {
+  static const fake_entry_t no_velocity[] = {
+      {0x6040, 0, 16}, {0x607A, 0, 32}, {0x6041, 0, 16}, {0x6064, 0, 32}, FAKE_END,
+  };
+  pp_drive(pp_entries);
+  CHECK(fake_find("t.pp-target") && fake_find("t.pp-start") && fake_find("t.pp-done") && fake_find("t.pp-velocity"));
+  CHECK_EQ(PIN_U32("t.pp-timeout-ms"), 60000);
+  CHECK_EQ(PIN_U32("t.stop-timeout-ms"), 10000);
+  CHECK(fake_find("t.at-speed") == NULL);
+  pp_drive(no_velocity);
+  CHECK(fake_find("t.pp-velocity") == NULL);
+}
+
+static void test_pp_needs_positions(void) {
+  static const fake_entry_t e[] = {{0x6040, 0, 16}, {0x6041, 0, 16}, {0x6064, 0, 32}, FAKE_END};
+  lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODE}, {.id = -1}};
+  mp[0].value.u32 = 1;
+  S = fake_slave("t", e, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
+  CHECK(strstr(fake_msgs, "PP needs 0x607A and 0x6064") != NULL);
+}
+
+static void test_pp_moves_only_on_start(void) {
+  int i;
+  pp_drive(pp_entries);
+  PIN_FLOAT("t.pos-scale") = 10;
+  PIN_FLOAT("t.velo-scale") = 100;
+  PIN_FLOAT("t.pp-target") = 50;
+  PIN_FLOAT("t.pp-velocity") = 2;
+  ppd.pos = 123;
+  pp_enable();
+  pp_run(20);
+  CHECK_EQ(ppd.pos, 123);  // enabled, no start: still
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 123);
+  CHECK_EQ(fake_get(S, 0x6081, 0), 0);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 0);
+  // start: set-point 500 at 200 counts/s, with the handshake
+  PIN_BIT("t.pp-start") = 1;
+  CHECK_EQ(pp_cycle(), 0x003F);  // enable operation, new set-point, change immediately
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 500);
+  CHECK_EQ(fake_get(S, 0x6081, 0), 200);
+  CHECK_EQ(pp_cycle() & 0x10, 0);  // acknowledged: bit 4 low
+  CHECK_EQ(PIN_BIT("t.pp-done"), 0);
+  for (i = 0; i < 100 && !PIN_BIT("t.pp-done"); i++) {
+    pp_cycle();
+    if (!PIN_BIT("t.pp-done")) CHECK(ppd.pos != 500 || i > 0);
+  }
+  CHECK_EQ(ppd.pos, 500);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 1);
+  CHECK_NEAR(PIN_FLOAT("t.pos-fb"), 50, 1e-12);
+  // pp-start held high: no new move
+  PIN_FLOAT("t.pp-target") = 0;
+  pp_run(20);
+  CHECK_EQ(ppd.pos, 500);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 1);
+}
+
+static void test_pp_done_not_from_an_old_target_reached(void) {
+  int i;
+  pp_drive(pp_entries);
+  pp_enable();
+  // the drive stands at its last target: target reached is set
+  PIN_FLOAT("t.pp-target") = 300;
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 4; i++) {
+    pp_cycle();
+    CHECK_EQ(PIN_BIT("t.pp-done"), 0);
+  }
+  CHECK(ppd.moving);
+}
+
+static void test_pp_relative_and_a_new_move(void) {
+  int i;
+  pp_drive(pp_entries);
+  ppd.pos = 100;
+  pp_enable();
+  PIN_FLOAT("t.pp-target") = 30;
+  PIN_BIT("t.pp-relative") = 1;
+  PIN_BIT("t.pp-start") = 1;
+  CHECK_EQ(pp_cycle(), 0x007F);  // relative
+  for (i = 0; i < 20; i++) pp_cycle();
+  CHECK_EQ(ppd.pos, 130);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 1);
+  // a new start during a move replaces it
+  PIN_BIT("t.pp-start") = 0;
+  PIN_BIT("t.pp-relative") = 0;
+  PIN_FLOAT("t.pp-target") = 1000;
+  pp_cycle();
+  PIN_BIT("t.pp-start") = 1;
+  pp_run(5);
+  CHECK(ppd.moving && ppd.target == 1000);
+  PIN_BIT("t.pp-start") = 0;
+  pp_cycle();
+  PIN_FLOAT("t.pp-target") = 0;
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 100 && !PIN_BIT("t.pp-done"); i++) pp_cycle();
+  CHECK_EQ(ppd.pos, 0);
+}
+
+static void test_pp_start_while_acknowledging(void) {
+  int i;
+  pp_drive(pp_entries);
+  pp_enable();
+  PIN_FLOAT("t.pp-target") = 100;
+  PIN_BIT("t.pp-start") = 1;
+  pp_cycle();  // set-point
+  pp_cycle();  // acknowledged
+  // a new start at once, while the drive still acknowledges: not lost
+  PIN_BIT("t.pp-start") = 0;
+  PIN_FLOAT("t.pp-target") = -100;
+  ppd.ack = 1;
+  pp_cycle();
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 100 && !PIN_BIT("t.pp-done"); i++) pp_cycle();
+  CHECK_EQ(ppd.target, -100);
+  CHECK_EQ(ppd.pos, -100);
+}
+
+static void test_pp_halt(void) {
+  int i;
+  pp_drive(pp_entries);
+  pp_enable();
+  PIN_FLOAT("t.pp-target") = 1000;
+  PIN_BIT("t.pp-start") = 1;
+  pp_run(10);
+  PIN_BIT("t.pp-halt") = 1;
+  pp_run(2);
+  int32_t at = ppd.pos;
+  pp_run(20);
+  CHECK_EQ(ppd.pos, at);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 0);  // standing still, not at the target
+  CHECK_EQ(cw_now & 0x100, 0x100);
+  // released: it goes on to the target
+  PIN_BIT("t.pp-halt") = 0;
+  for (i = 0; i < 200 && !PIN_BIT("t.pp-done"); i++) pp_cycle();
+  CHECK_EQ(ppd.pos, 1000);
+}
+
+static void test_pp_halts_before_switching_off(void) {
+  int i;
+  pp_drive(pp_entries);
+  pp_enable();
+  PIN_FLOAT("t.pp-target") = 1000;
+  PIN_FLOAT("t.pp-velocity") = 5;
+  PIN_BIT("t.pp-start") = 1;
+  pp_run(10);
+  CHECK(ppd.moving);
+  CHECK_EQ(fake_get(S, 0x6081, 0), 5);
+  PIN_BIT("t.enable") = 0;
+  CHECK_EQ(pp_cycle(), 0x010F);
+  for (i = 0; i < 10 && pp_cycle() == 0x010F; i++) {
+  }
+  CHECK_EQ(cw_now, 0x06);
+  CHECK(ppd.pos < 1000);
+  CHECK_EQ(PIN_BIT("t.drv-fault"), 0);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 0);
+  CHECK_EQ(fake_get(S, 0x6081, 0), 0);  // no profile velocity while off
+  // enabled again: no move until a new start
+  PIN_BIT("t.enable") = 1;
+  pp_run(20);
+  CHECK(!ppd.moving);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), ppd.pos);
+}
+
+static void test_pp_timeouts(void) {
+  int i;
+  pp_drive(pp_entries);
+  PIN_U32("t.pp-timeout-ms") = 30;
+  pp_enable();
+  // no acknowledge
+  ppd.no_ack = 1;
+  PIN_FLOAT("t.pp-target") = 1000;
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 29; i++) CHECK_EQ(pp_cycle() & 0x10, 0x10);
+  pp_run(3);
+  CHECK_EQ(PIN_BIT("t.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("t.fault-reason"), 10);
+  // too slow
+  pp_drive(pp_entries);
+  PIN_U32("t.pp-timeout-ms") = 30;
+  ppd.step = 1;
+  pp_enable();
+  PIN_FLOAT("t.pp-target") = 1000;
+  PIN_BIT("t.pp-start") = 1;
+  pp_run(40);
+  CHECK_EQ(PIN_S32("t.fault-reason"), 10);
+  CHECK(cw_now == 0x010F || cw_now == 0x06);  // halted, then off
+}
+
+static void test_pp_timeout_paused_while_halted(void) {
+  pp_drive(pp_entries);
+  PIN_U32("t.pp-timeout-ms") = 30;
+  pp_enable();
+  PIN_FLOAT("t.pp-target") = 100;
+  PIN_BIT("t.pp-start") = 1;
+  pp_run(3);
+  PIN_BIT("t.pp-halt") = 1;
+  pp_run(100);
+  CHECK_EQ(PIN_BIT("t.drv-fault"), 0);
+  PIN_BIT("t.pp-halt") = 0;
+  pp_run(20);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 1);
+  CHECK_EQ(PIN_BIT("t.drv-fault"), 0);
+}
+
+static void test_pp_start_waits_for_the_mode(void) {
+  int i;
+  pp_drive(pp_entries);
+  pp_enable();
+  fake_set(S, 0x6061, 0, 8);  // the drive shows another mode
+  PIN_FLOAT("t.pp-target") = 100;
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 10; i++) CHECK_EQ(pp_cycle() & 0x10, 0);
+  CHECK(!ppd.ack);
+  // in PP: the start is given now
+  fake_set(S, 0x6061, 0, 1);
+  for (i = 0; i < 40 && !PIN_BIT("t.pp-done"); i++) pp_cycle();
+  CHECK_EQ(ppd.pos, 100);
+}
+
+static void test_pp_bad_command(void) {
+  pp_drive(pp_entries);
+  pp_enable();
+  PIN_FLOAT("t.pp-velocity") = NAN;
+  pp_cycle();
+  CHECK_EQ(PIN_S32("t.fault-reason"), 7);
+  pp_drive(pp_entries);
+  pp_enable();
+  PIN_FLOAT("t.pp-target") = INFINITY;
+  PIN_BIT("t.pp-start") = 1;
+  pp_cycle();
+  CHECK_EQ(PIN_S32("t.fault-reason"), 7);
+  CHECK(!ppd.moving);
+}
+
 RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
@@ -943,5 +1267,8 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_homing_abandoned_by_motion, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
     test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_pv_pins, test_pv_needs_target_velocity,
     test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,
-    test_pv_stop_timeout, test_pv_standstill_switches_off_at_once, test_pv_halts_on_a_fault,
-    test_pv_not_at_speed_in_another_mode)
+    test_pv_stop_timeout, test_pv_standstill_switches_off_after_the_status_answers, test_pv_halts_on_a_fault,
+    test_pv_not_at_speed_in_another_mode, test_pp_pins, test_pp_needs_positions, test_pp_moves_only_on_start,
+    test_pp_done_not_from_an_old_target_reached, test_pp_relative_and_a_new_move, test_pp_start_while_acknowledging, test_pp_halt,
+    test_pp_halts_before_switching_off, test_pp_timeouts, test_pp_timeout_paused_while_halted,
+    test_pp_start_waits_for_the_mode, test_pp_bad_command)

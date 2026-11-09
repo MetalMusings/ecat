@@ -110,7 +110,7 @@ run in.
 | `device` | Device name, for people. |
 | `identity` | `vendor`, `product`, and optionally `revision`. At start the component compares them with the bus. |
 | `profile` | `cia402` (CiA 402 drive), `mdp` (modular device, ETG.5001) or `generic`. |
-| `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint) or `pv` (profile velocity, for a spindle or conveyor). |
+| `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01`, `0x607D:02` and `0x607F:00`). |
 | `cia402.modes` | For `cia402`: other modes the drive may switch to, `[hm]` for homing by the drive's own method. It needs `0x6060` and `0x6061` in the process data. |
 | `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder.md](encoder.md). |
 | `configure-pdos` | `true`: the master writes the PDO assignment and mapping below to the slave; `false`: the slave's own mapping is used and the entries below are only located in it. |

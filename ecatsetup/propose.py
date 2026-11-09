@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 # CiA 402 objects that the drive profile handles itself (no HAL pin); the
 # profile gives them its own pins (component/devices/ecat_cia402.c).
 CIA402_PROFILE = {0x603F, 0x6040, 0x6041, 0x6060, 0x6061,
-                  0x6064, 0x606C, 0x607A, 0x60FF}
+                  0x6064, 0x606C, 0x607A, 0x6081, 0x60FF}
 # Other CiA 402 process data, with fixed pin names and types.
 CIA402_PINS = {
     0x6071: ("torque-cmd", "s32"), 0x6077: ("torque-fb", "s32"),
@@ -24,7 +24,11 @@ CIA402_MODES = {
     "csp": ({0x6040, 0x607A}, {0x6041, 0x6064}),
     "csv": ({0x6040, 0x60FF}, {0x6041, 0x606C}),
     "pv": ({0x6040, 0x60FF}, {0x6041, 0x606C}),
+    "pp": ({0x6040, 0x607A}, {0x6041, 0x6064}),
 }
+# The settings a PP drive must have, since it plans its moves itself: the
+# software position limits and the maximum profile velocity.
+PP_LIMITS = [(0x607D, 1, "DINT"), (0x607D, 2, "DINT"), (0x607F, 0, "UDINT")]
 # 0x6502 "supported drive modes", bit -> name.
 CIA402_MODE_BITS = {0: "PP", 1: "VL", 2: "PV", 3: "TQ", 5: "HM", 6: "IP",
                     7: "CSP", 8: "CSV", 9: "CST"}
@@ -86,6 +90,7 @@ class Proposal:
     esi_path: str = ""
     settings: list = field(default_factory=list)   # writable vendor objects
     encoders: list = field(default_factory=list)   # (name, status index) of encoder channels
+    pp_limits: dict = field(default_factory=dict)  # PP: (index, subindex) -> the drive's value
     notes: list = field(default_factory=list)
 
 

@@ -55,6 +55,16 @@ def read_slave(pos, esi_devices, mode, pdo_set=None):
         modes = tool.upload(pos, 0x6502, 0, "uint32")
     dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
+    if p.profile == 402 and mode == "pp":
+        # proposed from the drive's own values; the user must check them
+        for index, sub, dtype in propose.PP_LIMITS:
+            v = tool.upload(pos, index, sub, "int32" if dtype == "DINT" else "uint32")
+            if v is not None:
+                p.pp_limits[(index, sub)] = v
+        p.notes.append("PP: software limits 0x607D and max profile velocity 0x607F are the drive's "
+                       "present values (%s); check them" % (", ".join(
+                           "0x%04X:%02X=%d" % (i, s_, v) for (i, s_), v in sorted(p.pp_limits.items()))
+                           or "none could be read"))
     return info, coe, p
 
 
@@ -163,7 +173,8 @@ def main(argv=None):
     ap.add_argument("--compare", help="lcec XML file (ethercat-conf.xml) to compare with")
     ap.add_argument("--mode", default="csp", choices=sorted(propose.CIA402_MODES),
                     help="mode for CiA 402 drives: csp or csv for joints, pv (profile "
-                         "velocity) for a spindle or conveyor")
+                         "velocity) for a spindle or conveyor, pp (profile position) for "
+                         "positioning that is not a joint")
     ap.add_argument("--pdo-set", action="append", default=[], metavar="POS=NAME",
                     help="use the ESI's predefined PDO assignment NAME for slave POS")
     ap.add_argument("-p", "--position", type=int, action="append", help="only these slaves")
