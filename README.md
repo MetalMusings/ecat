@@ -3,7 +3,7 @@
 EtherCAT for LinuxCNC, configured without hand-written XML.
 
 **Status: early development.** The design draft, a prototype of the
-setup program's core (no GUI yet) and the HAL component exist; they are
+setup program's core, the first part of its window and the HAL component exist; they are
 built in steps.
 
 `ecat` is planned as:
@@ -54,6 +54,7 @@ python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethe
 python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
 python3 -m ecatsetup --check ethercat.yaml
 python3 -m ecatsetup --diagnose
+python3 -m ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
 python3 -m unittest discover -s tests
 ```
 
@@ -74,7 +75,16 @@ in plain words, with what usually lies behind it), its links and the
 error counters that grow while it watches (`--seconds`, pointing at a
 cable or connector), the slave's own diagnosis history and error
 register, and for a CiA 402 drive its state, error code and what is
-missing to reach "Operation enabled". The file format: [docs/config-format.md](docs/config-format.md).
+missing to reach "Operation enabled". `--gui` opens EtherCAT Setup's window (needs `python3-pyqt5`), part 1 of
+the GUI: it reads the bus, lists the slaves with their state and how they
+compare with the file, shows each slave's process data, pins, settings
+and DC, lets you edit them (name, CiA 402 mode, pins, bit pins, scaling,
+settings, DC, the master's interface and transport), checks as you edit,
+proposes a slave again in another mode or PDO assignment, updates the
+file from the bus, imports lcec XML, saves with a `.bak` copy, and
+diagnoses the slaves. Like the rest of `ecatsetup`, it only reads from
+the bus; nothing moves.
+The file format: [docs/config-format.md](docs/config-format.md).
 What the prototype found on a real bus:
 [docs/prototype-step1.md](docs/prototype-step1.md).
 

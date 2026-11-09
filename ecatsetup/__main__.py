@@ -5,6 +5,7 @@ from their own data and ESI files, and compare it with an lcec XML file.
     python3 -m ecatsetup ... --write ethercat.yaml [--interface IF] [--transport T]
     python3 -m ecatsetup --check ethercat.yaml
     python3 -m ecatsetup --import ethercat-conf.xml --write ethercat.yaml
+    python3 -m ecatsetup --gui [ethercat.yaml] [--ini FILE] [--esi DIR]
 
 Only reads from the bus; nothing is written to the slaves.
 """
@@ -18,54 +19,8 @@ from dataclasses import asdict
 
 import yaml
 
-from . import coe as coe_mod, config, diagnose, esi, importxml, lcecxml, propose, sii as sii_mod, tool, update
-
-
-def ini_value(ini_path, section, key):
-    """The first value of a key, read as LinuxCNC reads its INI files: text
-    before the first section and lines without "=" are ignored."""
-    current = None
-    with open(ini_path, errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("[") and "]" in line:
-                current = line[1:line.index("]")].strip()
-            elif current == section and "=" in line and not line.startswith(("#", ";")):
-                k, v = line.split("=", 1)
-                if k.strip() == key:
-                    return v.split("#")[0].strip()
-    return None
-
-
-def servo_period(ini_path):
-    """[EMCMOT]SERVO_PERIOD in ns, from a LinuxCNC INI file."""
-    try:
-        return int(float(ini_value(ini_path, "EMCMOT", "SERVO_PERIOD")))
-    except (OSError, TypeError, ValueError):
-        return None
-
-
-def read_slave(pos, esi_devices, mode, pdo_set=None):
-    info = tool.slave_info(pos)
-    sii = sii_mod.parse(tool.sii(pos))
-    coe = coe_mod.Dictionary(tool.sdos(pos)) if sii.has_coe else coe_mod.Dictionary()
-    device_type = tool.upload(pos, 0x1000, 0, "uint32") if coe else None
-    modes = None
-    if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in coe.objects:
-        modes = tool.upload(pos, 0x6502, 0, "uint32")
-    dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
-    p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
-    if p.profile == 402 and mode == "pp":
-        # proposed from the drive's own values; the user must check them
-        for index, sub, dtype in propose.PP_LIMITS:
-            v = tool.upload(pos, index, sub, "int32" if dtype == "DINT" else "uint32")
-            if v is not None:
-                p.pp_limits[(index, sub)] = v
-        p.notes.append("PP: software limits 0x607D and max profile velocity 0x607F are the drive's "
-                       "present values (%s); check them" % (", ".join(
-                           "0x%04X:%02X=%d" % (i, s_, v) for (i, s_), v in sorted(p.pp_limits.items()))
-                           or "none could be read"))
-    return info, coe, p
+from . import config, diagnose, esi, importxml, lcecxml, propose, tool, update
+from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F401
 
 
 def entry_line(e, coe):
@@ -193,7 +148,16 @@ def main(argv=None):
     ap.add_argument("--check", metavar="FILE", help="check an ecat configuration, and the bus against it")
     ap.add_argument("--import", dest="import_xml", metavar="XML",
                     help="import an lcec XML file; with --write, write it as an ecat configuration")
+    ap.add_argument("--gui", nargs="?", const="", metavar="FILE",
+                    help="open the EtherCAT Setup window, with this configuration file if given")
     args = ap.parse_args(argv)
+
+    if args.gui is not None:
+        try:
+            from . import gui
+        except ImportError as e:
+            sys.exit("The window needs PyQt5 (apt install python3-pyqt5): %s" % e)
+        sys.exit(gui.main(args.gui or None, args.esi, args.ini, args.mode))
 
     if args.check:
         sys.exit(check_file(args.check))
@@ -329,26 +293,10 @@ def check_file(path):
     except tool.ToolError:
         print("No master running: the bus was not checked")
         return 0
-    bad = 0
-    for s in cfg["slaves"]:
-        pos, ident = s["position"], s["identity"]
-        if pos not in positions:
-            print("Bus: slave %d (%s) is missing" % (pos, s["name"]))
-            bad += 1
-            continue
-        info = tool.slave_info(pos)
-        want = (int(ident["vendor"], 16), int(ident["product"], 16))
-        if (info["vendor_id"], info["product_code"]) != want:
-            print("Bus: slave %d is 0x%08X/0x%08X, the file expects %s/%s (%s)"
-                  % (pos, info["vendor_id"], info["product_code"], ident["vendor"],
-                     ident["product"], s.get("device", "")))
-            bad += 1
-        elif "revision" in ident and info["revision"] != int(ident["revision"], 16):
-            print("Bus: slave %d has revision 0x%08X, the file expects %s"
-                  % (pos, info["revision"], ident["revision"]))
-    extra = positions - {s["position"] for s in cfg["slaves"]}
-    for pos in sorted(extra):
-        print("Bus: slave %d is not in the file" % pos)
+    problems, notes = compare_bus(cfg, positions)
+    for m in problems + notes:
+        print("Bus: %s" % m)
+    bad = len(problems)
     if not bad:
         print("Bus: matches the file")
     return 1 if bad else 0
