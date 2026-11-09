@@ -51,6 +51,7 @@ static const lcec_pindesc_t master_global_pins[] = {
     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, state_op), "%s.state-op"},
     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, link_up), "%s.link-up"},
     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, all_op), "%s.all-op"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, dc_sync_failed), "%s.dc-sync-failed"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -89,6 +90,7 @@ static const lcec_pindesc_t slave_pins[] = {
     {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_preop), "%s.slave-state-preop"},
     {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_safeop), "%s.slave-state-safeop"},
     {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_op), "%s.slave-state-op"},
+    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, dc_sync_failed), "%s.slave-dc-sync-failed"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -1404,11 +1406,16 @@ void lcec_update_slave_state_hal(lcec_slave_state_t *hal_data, ec_slave_config_s
   *(hal_data->state_preop) = (ss->al_state & 0x02) != 0;
   *(hal_data->state_safeop) = (ss->al_state & 0x04) != 0;
   *(hal_data->state_op) = (ss->al_state & 0x08) != 0;
+#ifdef EC_HAVE_DC_SYNC_FAILED
+  *(hal_data->dc_sync_failed) = ss->dc_sync_failed;
+#endif
 }
 
 /// @brief Update all input pins across all masters and slaves.
 void lcec_read_all(void *arg, long period) {
   lcec_master_t *master;
+
+  int dc_sync_failed = 0;
 
   // initialize global state
   global_ms.slaves_responding = 0;
@@ -1418,10 +1425,12 @@ void lcec_read_all(void *arg, long period) {
   // process slaves
   for (master = first_master; master != NULL; master = master->next) {
     lcec_read_master(master, period);
+    dc_sync_failed = dc_sync_failed || master->dc_sync_failed;
   }
 
   // update global state pins
   lcec_update_master_hal(global_hal_data, &global_ms);
+  *(global_hal_data->dc_sync_failed) = dc_sync_failed;
 }
 
 /// @brief Update all output pins across all masters and slaves.
@@ -1530,6 +1539,7 @@ void lcec_read_master(void *arg, long period) {
   lcec_master_t *master = (lcec_master_t *)arg;
   lcec_slave_t *slave;
   int check_states;
+  int dc_sync_failed;
 
   // The servo thread's period is the cycle time (see ecat_config.h)
   if (master->app_time_period == 0) {
@@ -1583,6 +1593,7 @@ void lcec_read_master(void *arg, long period) {
   global_ms.link_up = global_ms.link_up && master->ms.link_up;
 
   // process slaves
+  dc_sync_failed = 0;
   for (slave = master->first_slave; slave != NULL; slave = slave->next) {
     // get slaves state
     rtapi_mutex_get(&master->mutex);
@@ -1592,12 +1603,21 @@ void lcec_read_master(void *arg, long period) {
     rtapi_mutex_give(&master->mutex);
     if (check_states) {
       lcec_update_slave_state_hal(slave->hal_state_data, &slave->state);
+#ifdef EC_HAVE_DC_SYNC_FAILED
+      dc_sync_failed = dc_sync_failed || slave->state.dc_sync_failed;
+#endif
     }
 
     // process read function
     if (slave->proc_read != NULL) {
       slave->proc_read(slave, period);
     }
+  }
+
+  // a slave whose DC sync check timed out, as of the last state check
+  if (check_states) {
+    master->dc_sync_failed = dc_sync_failed;
+    *(master->hal_data->dc_sync_failed) = dc_sync_failed;
   }
 }
 

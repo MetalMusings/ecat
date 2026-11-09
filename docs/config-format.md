@@ -120,6 +120,14 @@ the inputs are ready) are 50000 ns by default. This is the same code as
 lcec's `globalShiftTime="auto"` (see linuxcnc-ethercat's
 `documentation/distributed-clocks.md`).
 
+Before SYNC0 starts in a DC slave, the master waits up to 5 s for the
+slave's clock to be within 10 us of the reference clock, and starts SYNC0
+anyway if it is not. The pins `<slave>.slave-dc-sync-failed`,
+`ecat.0.dc-sync-failed` (any slave) and `ecat.dc-sync-failed` show that
+this happened, for example to keep the machine from being switched on.
+They need the userspace master of linuxcnc-ethercat-uspace 0.5 or later;
+with older master headers they stay false.
+
 ## slaves
 
 | Key | Meaning |
