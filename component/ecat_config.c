@@ -782,7 +782,18 @@ char *ecat_config_load(const char *path, size_t *length) {
   mc->appTimePeriod = 0;  // the servo thread's period, see ecat_config.h
   mc->refClockSyncCycles = get_int(&c, mdc, "ref-clock-sync-cycles", 0);
   mc->syncToRefClock = get_bool(&c, mdc, "sync-to-ref-clock", 0);
-  mc->globalShiftTime = get_int(&c, mdc, "sync0-shift-ns", 0);
+  // sync0-shift-ns: auto lets the component choose it (lcec_autoshift.h),
+  // which moves the servo thread against SYNC0 and so needs
+  // sync-to-ref-clock
+  {
+    const char *shift = get_str(&c, mdc, "sync0-shift-ns");
+    if (shift != NULL && !strcmp(shift, "auto")) {
+      mc->autoShift = 1;
+      if (!mc->syncToRefClock) error(&c, "master.dc.sync0-shift-ns: auto needs master.dc.sync-to-ref-clock: true");
+    } else {
+      mc->globalShiftTime = get_int(&c, mdc, "sync0-shift-ns", 0);
+    }
+  }
 
   slaves = get(&c, root, "slaves");
   if (seq_len(slaves) == 0) error(&c, "no slaves");

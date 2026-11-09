@@ -28,7 +28,7 @@ master:
   dc:
     ref-clock-sync-cycles: 1000
     sync-to-ref-clock: true
-    sync0-shift-ns: 300000
+    sync0-shift-ns: auto
 slaves:
 - position: 0
   name: x-drive
@@ -99,7 +99,26 @@ run in.
 | `transport` | `raw` (default, any network card), `xdp-native` (driver with XDP support, such as `igc`) or `xdp-skb`. |
 | `dc.ref-clock-sync-cycles` | How often the DC clocks are synchronised, in cycles. |
 | `dc.sync-to-ref-clock` | `true`: the servo thread follows the DC reference clock; `false`: the slaves follow the master. |
-| `dc.sync0-shift-ns` | Time from the nominal start of the servo period to SYNC0, for all DC slaves. |
+| `dc.sync0-shift-ns` | Time from the nominal start of the servo period to SYNC0, for all DC slaves, in ns; or `auto` (below). |
+
+`sync0-shift-ns: auto` (needs `sync-to-ref-clock: true`; EtherCAT Setup
+proposes it) lets the component choose the shift so that the turn-around,
+from an output written in one servo cycle to the slave's answer read
+back, is the same in every cycle: two cycles when SYNC0 can fall after
+every frame, otherwise three. A turn-around that varies from cycle to
+cycle is what upsets drives and loops; a fixed shift too close to the
+time the frame is sent causes it. The component measures when the frame
+is sent (`ecat.0.send-offset`) for 2 s once all slaves are in OP, places
+SYNC0 in the middle of the window, and keeps watching: it chooses again
+when a frame comes so late or early that less than half the margins
+are left. A new shift moves the servo thread against SYNC0, `pll-step`
+per cycle. The pins `ecat.0.shift-time` (the shift in use) and
+`ecat.0.turnaround-cycles` (0 while measuring, then 2 or 3) show the
+result; the parameters `ecat.0.auto-shift-margin` (time between a frame
+and SYNC0) and `ecat.0.auto-shift-input-margin` (time from SYNC0 until
+the inputs are ready) are 50000 ns by default. This is the same code as
+lcec's `globalShiftTime="auto"` (see linuxcnc-ethercat's
+`documentation/distributed-clocks.md`).
 
 ## slaves
 

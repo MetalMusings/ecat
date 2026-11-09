@@ -62,6 +62,8 @@ static const lcec_pindesc_t master_pins[] = {
     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, pll_reset_cnt), "%s.pll-reset-count"},
     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, dc_phased), "%s.dc-phased"},
     {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, send_offset), "%s.send-offset"},
+    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, shift_time), "%s.shift-time"},
+    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, turnaround_cycles), "%s.turnaround-cycles"},
 #endif
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
@@ -73,6 +75,8 @@ static const lcec_paramdesc_t master_params[] = {
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_max_err), "%s.pll-max-err"},
     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, dc_phase_max_err), "%s.dc-phase-max-err"},
     {HAL_S32, HAL_RW, offsetof(lcec_master_data_t, send_offset_max), "%s.send-offset-max"},
+    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, auto_shift_margin), "%s.auto-shift-margin"},
+    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, auto_shift_input_margin), "%s.auto-shift-input-margin"},
 #endif
     {HAL_TYPE_UNSPECIFIED},
 };
@@ -447,6 +451,11 @@ static void ecat_config_dc(lcec_master_t *master) {
   lcec_slave_t *slave;
 
   rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "master %s: servo period %u ns\n", master->name, master->app_time_period);
+  // sync0-shift-ns: auto starts in the middle of the period, and chooses
+  // once the frames' timing has been measured
+  if (master->auto_shift) {
+    master->global_shift_time = master->app_time_period / 2;
+  }
   for (slave = master->first_slave; slave != NULL; slave = slave->next) {
     if (slave->dc_conf == NULL) {
       continue;
@@ -490,6 +499,12 @@ static void ecat_config_dc(lcec_master_t *master) {
   master->hal_data->pll_max_err = master->app_time_period;
   // set default DC_PHASE_MAX_ERR: 10% of period
   master->hal_data->dc_phase_max_err = master->app_time_period / 10;
+  master->hal_data->auto_shift_margin = LCEC_AUTOSHIFT_MARGIN_DEFAULT;
+  master->hal_data->auto_shift_input_margin = LCEC_AUTOSHIFT_INPUT_MARGIN_DEFAULT;
+  *(master->hal_data->shift_time) = master->global_shift_time;
+  if (master->auto_shift) {
+    lcec_autoshift_init(&master->autoshift, master->app_time_period, master->global_shift_time);
+  }
 #endif
 }
 
@@ -670,6 +685,13 @@ int rtapi_app_main(void) {
       goto fail2;
     }
 
+#ifndef RTAPI_TASK_PLL_SUPPORT
+    if (master->auto_shift) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s: sync0-shift-ns: auto needs RTAPI_TASK_PLL_SUPPORT\n", master->name);
+      goto fail2;
+    }
+#endif
+
     // export read function
     rtapi_snprintf(name, HAL_NAME_LEN, "%s.%s.read", LCEC_MODULE_NAME, master->name);
     if (hal_export_funct(name, lcec_read_master, master, 0, 0, lcec_comp_id) != 0) {
@@ -811,6 +833,8 @@ int lcec_parse_config(void) {
         // Note: legacy mode - negative refClockSyncCycles enables sync_to_ref_clock
         master->sync_to_ref_clock = master_conf->syncToRefClock;
         master->global_shift_time = master_conf->globalShiftTime;
+        // sync0-shift-ns: auto, see ecat_config_dc
+        master->auto_shift = master_conf->autoShift;
 
         // add master to list
         LCEC_LIST_APPEND(first_master, last_master, master);
@@ -1643,6 +1667,22 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
 
     if (phase_valid && (uint32_t)abs(*(hal_data->pll_err)) < hal_data->dc_phase_max_err) {
       *(hal_data->dc_phased) = 1;
+    }
+
+    // globalShiftTime="auto": a new shift moves the thread against SYNC0
+    // through the PLL below, pll-step per cycle, as at start-up
+    if (master->auto_shift) {
+      master->autoshift.margin = hal_data->auto_shift_margin;
+      master->autoshift.input_margin = hal_data->auto_shift_input_margin;
+      if (lcec_autoshift_update(&master->autoshift, *(hal_data->dc_phased) && *(hal_data->all_op), *(hal_data->send_offset))) {
+        master->global_shift_time = master->autoshift.shift;
+        rtapi_print_msg(master->autoshift.fits ? RTAPI_MSG_INFO : RTAPI_MSG_ERR,
+            LCEC_MSG_PFX "master %s: send-offset %lld..%lld ns, globalShiftTime %u ns, turn-around %d cycles%s\n", master->name,
+            (long long)master->autoshift.send_min, (long long)master->autoshift.send_max, master->global_shift_time,
+            master->autoshift.state, master->autoshift.fits ? "" : ", but the send-offset varies too much for it to be the same in every cycle");
+      }
+      *(hal_data->turnaround_cycles) = master->autoshift.state >= LCEC_AUTOSHIFT_TWO ? master->autoshift.state : 0;
+      *(hal_data->shift_time) = master->global_shift_time;
     }
 
     // syncToRefClock=true: DC is the clock source; steer the servo thread so

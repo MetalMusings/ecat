@@ -98,7 +98,8 @@ def load(path):
     if master.get("syncToRefClock"):
         cfg.sync_to_ref_clock = master.get("syncToRefClock").lower() == "true"
     if master.get("globalShiftTime"):
-        cfg.global_shift_time = int(master.get("globalShiftTime"))
+        shift = master.get("globalShiftTime")
+        cfg.global_shift_time = "auto" if shift.lower() == "auto" else int(shift)
     cfg.interface = master.get("interface")
     cfg.transport = master.get("transport")
     for s in master.findall("slave"):

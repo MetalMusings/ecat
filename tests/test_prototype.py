@@ -332,7 +332,17 @@ class TestConfig(unittest.TestCase):
         cfg = config.from_proposals([p], "enp2s0", "xdp-native", 1000000)
         self.assertEqual(cfg["master"]["dc"], {"ref-clock-sync-cycles": 1000,
                                                "sync-to-ref-clock": True,
-                                               "sync0-shift-ns": 300000})
+                                               "sync0-shift-ns": "auto"})
+        self.assertEqual(config.check(cfg), [])
+
+    def test_check_master_shift(self):
+        cfg = self.easercat_config()
+        cfg["master"]["dc"] = {"sync0-shift-ns": "auto"}
+        self.assertTrue(any("auto needs master.dc.sync-to-ref-clock" in e for e in config.check(cfg)))
+        cfg["master"]["dc"] = {"sync-to-ref-clock": True, "sync0-shift-ns": "often"}
+        self.assertTrue(any("'often' is not a number or auto" in e for e in config.check(cfg)))
+        cfg["master"]["dc"] = {"sync-to-ref-clock": False, "sync0-shift-ns": 300000}
+        self.assertEqual(config.check(cfg), [])
 
     def test_check_finds_errors(self):
         cfg = self.easercat_config()
@@ -351,6 +361,16 @@ class TestConfig(unittest.TestCase):
 
 
 class TestImport(unittest.TestCase):
+    def test_auto_shift(self):
+        xml = LCEC.replace("<master idx", '<master globalShiftTime="auto" idx')
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as f:
+            f.write(xml)
+        try:
+            cfg, notes = importxml.import_lcec(lcecxml.load(f.name), None, 1000000)
+        finally:
+            os.unlink(f.name)
+        self.assertEqual(cfg["master"]["dc"]["sync0-shift-ns"], "auto")
+
     def test_generic_slave(self):
         xml = LCEC.replace("<master idx", '<master interface="enp2s0" globalShiftTime="300000" idx')
         xml = xml.replace("</syncManager>", """</syncManager>

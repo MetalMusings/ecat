@@ -336,6 +336,38 @@ static void test_dc(void) {
   CHECK_EQ(MASTER->syncToRefClock, 0);
 }
 
+static void test_dc_auto_shift(void) {
+  CHECK_EQ(load("ecat: 1\n"
+                "master:\n"
+                "  dc: {ref-clock-sync-cycles: 1000, sync-to-ref-clock: true, sync0-shift-ns: auto}\n"
+                "slaves:\n"
+                "- position: 0\n"
+                "  name: d\n"
+                "  profile: generic\n"),
+      0);
+  CHECK_EQ(MASTER->autoShift, 1);
+  CHECK_EQ(MASTER->globalShiftTime, 0);
+  CHECK_EQ(load(io), 0);
+  CHECK_EQ(MASTER->autoShift, 0);
+  // the servo thread must follow the DC for the shift to move
+  CHECK_FAILS("ecat: 1\n"
+              "master:\n"
+              "  dc: {sync0-shift-ns: auto}\n"
+              "slaves:\n"
+              "- position: 0\n"
+              "  name: d\n"
+              "  profile: generic\n",
+      "sync0-shift-ns: auto needs master.dc.sync-to-ref-clock: true");
+  CHECK_FAILS("ecat: 1\n"
+              "master:\n"
+              "  dc: {sync-to-ref-clock: true, sync0-shift-ns: often}\n"
+              "slaves:\n"
+              "- position: 0\n"
+              "  name: d\n"
+              "  profile: generic\n",
+      "sync0-shift-ns: \"often\" is not a number");
+}
+
 #define SETTINGS(list) HEAD "- position: 0\n  name: s\n  profile: generic\n  settings:\n" list
 
 static void test_settings(void) {
@@ -592,7 +624,7 @@ static void test_too_many_encoders(void) {
   CHECK_FAILS(yaml, "more than 16 encoder channels");
 }
 
-RUN_TESTS("config", test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
+RUN_TESTS("config", test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_types, test_entry_errors, test_split, test_file_errors, test_slave_errors, test_dc, test_settings,
     test_cia402_csp, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders)
