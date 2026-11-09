@@ -1453,18 +1453,22 @@ class MoveCard(Card):
         self.moving = QWidget()
         ml = QVBoxLayout(self.moving)
         ml.setContentsMargins(0, 0, 0, 0)
-        self.hold = QPushButton("Hold to enable")
+        self.hold = QPushButton("Hold to enable (no motion)")
         self.hold.setObjectName("hold")
+        self.hold.setToolTip("Enables the drive while held, without moving it: to see that it "
+                             "reaches \"Operation enabled\". Not needed for jogging.")
         self.hold.pressed.connect(lambda: self.enable(True))
         self.hold.released.connect(lambda: self.enable(False))
         ml.addWidget(self.hold)
-        ml.addWidget(label("The drive is enabled only while a button is held. Release to stop.",
-                           "hint", wrap=True))
+        ml.addWidget(label("Every button here enables the drive only while it is held; release "
+                           "to stop. Use one at a time: the jog buttons enable the drive by "
+                           "themselves.", "hint", wrap=True))
         jog = QHBoxLayout()
         self.jog_minus = QPushButton("– Jog")
         self.jog_plus = QPushButton("Jog +")
         for b, sign in ((self.jog_minus, -1), (self.jog_plus, 1)):
-            b.setToolTip("Hold: enables the drive and moves one step; release to stop")
+            b.setToolTip("Hold alone (not with Hold to enable): enables the drive and moves one "
+                         "step; hold until the step is done, release to stop")
             b.pressed.connect(lambda s=sign: self.jog(s))
             b.released.connect(lambda: self.enable(False))
             jog.addWidget(b)

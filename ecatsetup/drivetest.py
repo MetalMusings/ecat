@@ -36,11 +36,17 @@ DEFAULTS = {"scale": 1.0, "max-velocity": 5.0, "max-acceleration": 50.0, "travel
             "following-error": 2.0, "max-torque": 30.0}
 
 # Where a drive keeps a limit, if not in the CiA 402 object: (vendor,
-# product) -> {limit: (index, subindex, tool type)}.
+# product) -> {limit: (index, subindex, tool type), or why the drive's
+# object is not used}.
 LIMIT_QUIRKS = {
-    # Rtelligent ECT60: "Position trace error Limit", in pulses (drive
-    # error 0x8611 when exceeded)
-    (0x00000A88, 0x0A880002): {"following-error": (0x2022, 0, "uint32")},
+    (0x00000A88, 0x0A880002): {
+        # Rtelligent ECT60: "Position trace error Limit", in pulses (drive
+        # error 0x8611 when exceeded)
+        "following-error": (0x2022, 0, "uint32"),
+        # tried on the plasma cutter, 2026-11-09: in CSP it moved 4.6 mm
+        # past a 0x607D limit of 1 mm, without an error
+        "travel": "the ECT60 ignores its software position limits (0x607D) in CSP",
+    },
 }
 STANDARD_LIMITS = {
     "following-error": (0x6065, 0, "uint32"),
@@ -74,7 +80,10 @@ def plan_limits(slave, has_object, scale, start_counts, settings):
     scale: counts per machine unit; start_counts: the drive's position."""
     limits, notes = [], []
     travel = int(round(abs(settings["travel"] * scale)))
-    if has_object(0x607D, 1) and has_object(0x607D, 2):
+    quirks = LIMIT_QUIRKS.get(identity(slave), {})
+    if isinstance(quirks.get("travel"), str):
+        notes.append("%s: travel is limited in HAL only" % quirks["travel"])
+    elif has_object(0x607D, 1) and has_object(0x607D, 2):
         limits += [Limit("travel-min", 0x607D, 1, "int32", start_counts - travel,
                          "travel %+g mm from start (0x607D:01)" % -settings["travel"]),
                    Limit("travel-max", 0x607D, 2, "int32", start_counts + travel,
@@ -82,7 +91,6 @@ def plan_limits(slave, has_object, scale, start_counts, settings):
     else:
         notes.append("no software position limits (0x607D) in the drive: travel is limited "
                      "in HAL only")
-    quirks = LIMIT_QUIRKS.get(identity(slave), {})
     for name, value, text in (
             ("following-error", int(round(abs(settings["following-error"] * scale))),
              "following error %g mm" % settings["following-error"]),

@@ -28,9 +28,10 @@ A CiA 402 drive in CSP can be moved in small steps. Safety comes in
 layers, so that no single one has to be perfect:
 
 1. **Nothing moves without a deliberate act.** The drive is enabled only
-   while *Hold to enable* or a jog button is held, with the mouse or the
-   space bar. Releasing it disables the drive; so does the window losing
-   focus.
+   while a button is held, with the mouse or the space bar, one at a
+   time: *Hold to enable* enables it without moving it; *Jog −* and
+   *Jog +* enable it by themselves and move one step. Releasing the
+   button disables the drive; so does the window losing focus.
 2. **Heartbeat.** Every drive's `watchdog-ms` is set to 500 ms in the
    test's HAL file, and the window counts the `watchdog` pin up every
    100 ms. If the window hangs or dies, the servo thread shuts the drive
@@ -59,14 +60,38 @@ The scale (counts per mm) is taken from the configuration's HAL files
 (`setp <drive>.pos-scale ...`) when they have it.
 
 What the ECT60 has: `0x607D` and `0x2022`, no `0x6080`, `0x6072` or
-`0x6065`, so its velocity and torque are limited in HAL only. Whether it
-honours `0x607D` in CSP is to be seen in the first test at the machine.
+`0x6065`. It ignores `0x607D` in CSP (tried: it moved 4.6 mm past a
+limit of 1 mm, without an error or a status bit), so the test writes only
+`0x2022` to it, and its travel, velocity and torque are limited in HAL.
 
 ## First test at the machine
 
-Built and tried without motion on the plasma cutter (2026-11-09): the
-limits were written to X, read back and put back; the drive stayed
-disabled. The first motion needs someone at the machine:
+Done on the plasma cutter's X axis (ECT60, CSP, 100 counts/mm) on
+2026-11-09, with the user at the machine, following the steps below:
+
+- limits written (0x607D at ±20 mm, 0x2022 at 2 mm = 200 counts) and put
+  back afterwards (−1/−1, 4000);
+- *Hold to enable*: "Operation enabled", no motion;
+- jog 0.1 mm and 1 mm, both directions, as expected;
+- heartbeat: with the window stopped (`kill -STOP`) while enabled, the
+  servo thread shut the drive down 0.38-0.44 s later (`fault-reason` 5,
+  the last heartbeat up to 0.1 s before), and kept it down while
+  `enable` stayed set;
+- the test stopped cleanly: the slaves in PREOP, `0x603F` 0 on all three
+  drives.
+
+- `0x607D` set to ±1 mm by hand, with the HAL travel at ±20 mm: the
+  ECT60 followed the target to +4.6 mm without an error. It ignores
+  `0x607D` in CSP; the test no longer writes it to an ECT60.
+- Y (66.67 counts/mm) and Z (212.2 counts/mm, travel ±5 mm; Z holds
+  when disabled) the same way: *Jog +* moves Y+ and Z+ (up), steps of
+  0.1, 1 and 5 mm, no errors; all three drives' own values back
+  afterwards, the slaves in PREOP, `0x603F` 0.
+- When a drive is disabled, the stepper lets go of its holding torque
+  and moves back 4-6 counts (0.06 mm on X); the next jog starts from
+  there.
+
+The steps:
 
 1. E-stop within reach; the axis away from its ends.
 2. Start the test, choose the drive (X first), check the scale, and
@@ -75,8 +100,9 @@ disabled. The first motion needs someone at the machine:
 4. Hold *Hold to enable* without jogging: the drive should reach
    "Operation enabled" and not move. Release: it goes back to "Switched
    on" or "Ready to switch on".
-5. Step 0.1 mm, hold *Jog +*: the position should change by 0.1 mm.
-   Then 1 mm, both directions.
+5. Step 0.1 mm, hold *Jog +* alone (it enables the drive by itself)
+   until the step is done: the position should change by 0.1 mm. Then
+   1 mm, both directions.
 6. Check the heartbeat: while holding *Hold to enable*, stop the window
    (for example `kill -STOP` of its process from a terminal). The drive
    should be disabled within half a second (`fault-reason` 5). `kill -CONT`

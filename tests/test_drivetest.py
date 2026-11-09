@@ -44,12 +44,20 @@ class TestPlan(unittest.TestCase):
         limits, notes = drivetest.plan_limits(ECT60, lambda i, sub: (i, sub) in {
             (0x607D, 1), (0x607D, 2), (0x2022, 0)}, 100.0, 5000, s)
         got = {lim.name: (lim.index, lim.subindex, lim.value) for lim in limits}
-        self.assertEqual(got, {"travel-min": (0x607D, 1, 5000 - 2000),
-                               "travel-max": (0x607D, 2, 5000 + 2000),
-                               # the ECT60 keeps its following error in 0x2022
-                               "following-error": (0x2022, 0, 200)})
+        # the ECT60 keeps its following error in 0x2022, and ignores 0x607D
+        # in CSP, so its travel is limited in HAL only
+        self.assertEqual(got, {"following-error": (0x2022, 0, 200)})
+        self.assertTrue(any("ignores its software position limits" in n for n in notes))
         self.assertTrue(any("max torque" in n for n in notes))
         self.assertTrue(any("limit3" in n for n in notes))
+
+    def test_travel_in_the_drive(self):
+        other = dict(ECT60, identity={"vendor": "0x00000002", "product": "0x00001234"})
+        s = dict(drivetest.DEFAULTS, scale=100.0)
+        limits, _ = drivetest.plan_limits(other, lambda i, sub: (i, sub) in {
+            (0x607D, 1), (0x607D, 2)}, 100.0, 5000, s)
+        got = {lim.name: lim.value for lim in limits}
+        self.assertEqual(got, {"travel-min": 5000 - 2000, "travel-max": 5000 + 2000})
 
     def test_standard_drive(self):
         other = dict(ECT60, identity={"vendor": "0x00000002", "product": "0x00001234"})
@@ -107,8 +115,8 @@ class TestDriveTest(TestTestMode):
         # the drive's own values are kept in a file until they are back
         self.assertEqual({(e["index"], e["subindex"], e["original"])
                           for e in drivetest.pending_restores()},
-                         {(0x607D, 1, -1), (0x607D, 2, -1), (0x2022, 0, 4000)})
-        self.assertEqual(self.drive.sdos[(0x607D, 1)], 3000)
+                         {(0x2022, 0, 4000)})
+        self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)     # not written to an ECT60
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 200)
         log = self.setp_log()
         self.assertIn("x.enable FALSE", log)
@@ -128,7 +136,6 @@ class TestDriveTest(TestTestMode):
         self.assertEqual(self.setp_log()[-1], "x.enable FALSE")
 
         self.assertEqual(dt.restore(), [])
-        self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
         self.assertEqual(drivetest.pending_restores(), [])
         self.assertIn("ecatjog0.maxv 0", self.setp_log())
@@ -143,10 +150,15 @@ class TestDriveTest(TestTestMode):
 
     def test_refused_limit_puts_the_others_back(self):
         run = self.started()
-        self.drive.refuse.add((0x2022, 0))
-        dt = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
+        other = dict(ECT60, identity={"vendor": "0x00000002", "product": "0x00001234"})
+        self.drive.sdos[(0x6065, 0)] = 1000
+        self.drive.refuse.add((0x6065, 0))
+        c = self.coe()
+        c.entries = dict(c.entries); c.entries[(0x6065, 0)] = 1
+        dt = drivetest.DriveTest(run, other, c, {"scale": 100.0})
         with self.assertRaises(testmode.TestError):
             dt.prepare()
+        # 0x607D was written before the refusal, and is back
         self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)
         self.assertEqual(self.drive.sdos[(0x607D, 2)], -1)
         self.assertFalse(dt.prepared)
@@ -157,7 +169,7 @@ class TestDriveTest(TestTestMode):
         dt.prepare()
         # the program dies here; the next one finds the file
         done, failed = drivetest.restore_pending()
-        self.assertEqual((len(done), failed), (3, []))
+        self.assertEqual((len(done), failed), (1, []))
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
         self.assertFalse(os.path.exists(drivetest.RESTORE_FILE))
 
