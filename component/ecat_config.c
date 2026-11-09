@@ -409,8 +409,15 @@ static void process_data(ctx_t *c, buf_t *b, yaml_node_t *pd, LCEC_CONF_SLAVE_T 
         error(c, "%s PDO %d: sm must be 0 to 255", dirs[d], i);
         continue;
       }
-      if (seen[sm]) continue;
-      seen[sm] = 1;
+      if (seen[sm]) {
+        // the other direction's PDOs on it would be left out
+        if (seen[sm] != d + 1 && seen[sm] != 3) {
+          error(c, "sm %lld is used for outputs and inputs", sm);
+          seen[sm] = 3;
+        }
+        continue;
+      }
+      seen[sm] = d + 1;
       sm_off = b->len;
       if ((smc = append(b, sizeof(*smc))) == NULL) {
         error(c, "out of memory");
