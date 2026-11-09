@@ -26,13 +26,14 @@ import sys
 from PyQt5.QtCore import QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout,
+    QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+    QFormLayout,
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, esi, propose, testmode, tool
+from . import config, diagnose, drivetest, esi, propose, testmode, tool
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -85,6 +86,10 @@ QPushButton#primary:disabled { background: #8fb2ee; border-color: #8fb2ee; }
 QPushButton#danger { background: #b42318; color: white; border: 2px solid white; font-weight: 700;
               padding: 6px 18px; }
 QPushButton#big { padding: 14px; font-size: 15px; font-weight: 600; }
+QPushButton#hold { padding: 16px; font-size: 15px; font-weight: 600; color: #14532d;
+              background: #e6f6ea; border: 2px solid #1a7f37; border-radius: 8px; }
+QPushButton#hold:pressed { background: #b7e4c3; }
+QPushButton#hold:disabled { color: #9aa4b2; background: #f3f5f8; border-color: #d0d6de; }
 QToolButton#menu { color: #e6edf3; background: #161b22; border: 1px solid #3a434e;
               border-radius: 6px; padding: 6px 12px; }
 QToolButton#menu::menu-indicator { image: none; width: 0px; }
@@ -1408,6 +1413,177 @@ class PinTable(QTableWidget):
                     it.setText(pins[name].value)
 
 
+class MoveCard(Card):
+    """Moving one CSP drive: limits written to it, hold-to-enable, jog."""
+
+    SETTINGS = [("scale", "Scale (counts per mm)", 0.000001, 1e9, 6),
+                ("max-velocity", "Max velocity (mm/s)", 0.01, 100, 2),
+                ("max-acceleration", "Max acceleration (mm/s²)", 0.1, 5000, 1),
+                ("travel", "Travel from start (± mm)", 0.1, 500, 1),
+                ("following-error", "Following error (mm)", 0.01, 100, 2),
+                ("max-torque", "Max torque (%)", 1, 300, 0)]
+
+    def __init__(self, win):
+        super().__init__("Move")
+        self.win = win
+        self.slave = None
+        # before: the limits
+        self.setup = QWidget()
+        form = QFormLayout(self.setup)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.fields = {}
+        for key, text, lo, hi, dec in self.SETTINGS:
+            box = QDoubleSpinBox()
+            box.setRange(lo, hi)
+            box.setDecimals(dec)
+            box.setValue(drivetest.DEFAULTS[key])
+            form.addRow(text, box)
+            self.fields[key] = box
+        self.prepare = QPushButton("Write limits to the drive")
+        self.prepare.setObjectName("primary")
+        self.prepare.setToolTip("Reads the drive's own values, writes the test's limits to it, and "
+                                "sets velocity, acceleration and travel in HAL. The drive stays "
+                                "disabled; its values are written back when you are done.")
+        self.prepare.clicked.connect(self.do_prepare)
+        form.addRow(self.prepare)
+        self.add(self.setup)
+        self.unsupported = self.add(label("", "hint", wrap=True))
+
+        # then: moving
+        self.moving = QWidget()
+        ml = QVBoxLayout(self.moving)
+        ml.setContentsMargins(0, 0, 0, 0)
+        self.hold = QPushButton("Hold to enable")
+        self.hold.setObjectName("hold")
+        self.hold.pressed.connect(lambda: self.enable(True))
+        self.hold.released.connect(lambda: self.enable(False))
+        ml.addWidget(self.hold)
+        ml.addWidget(label("The drive is enabled only while a button is held. Release to stop.",
+                           "hint", wrap=True))
+        jog = QHBoxLayout()
+        self.jog_minus = QPushButton("– Jog")
+        self.jog_plus = QPushButton("Jog +")
+        for b, sign in ((self.jog_minus, -1), (self.jog_plus, 1)):
+            b.setToolTip("Hold: enables the drive and moves one step; release to stop")
+            b.pressed.connect(lambda s=sign: self.jog(s))
+            b.released.connect(lambda: self.enable(False))
+            jog.addWidget(b)
+        jog.addWidget(label("Step", "hint"))
+        self.step = QComboBox()
+        for st in ("0.1", "1", "5"):
+            self.step.addItem("%s mm" % st, float(st))
+        self.step.setCurrentIndex(1)
+        jog.addWidget(self.step)
+        ml.addLayout(jog)
+        row = QHBoxLayout()
+        self.reset = QPushButton("Reset fault")
+        self.reset.pressed.connect(lambda: self.fault_reset(True))
+        self.reset.released.connect(lambda: self.fault_reset(False))
+        row.addWidget(self.reset)
+        self.done = QPushButton("Done: put the drive's limits back")
+        self.done.clicked.connect(self.do_restore)
+        row.addWidget(self.done)
+        ml.addLayout(row)
+        self.where = label("", "mono")
+        self.where.setFont(mono())
+        ml.addWidget(self.where)
+        self.add(self.moving)
+        self.lay.addStretch(1)
+
+    def test(self):
+        return self.win.drive_tests.get(self.slave["name"]) if self.slave else None
+
+    def show_drive(self, slave):
+        self.slave = slave
+        run = self.win.test
+        csp = run is not None and slave["name"] in run.drives
+        dt = self.test()
+        self.setup.setVisible(csp and (dt is None or not dt.prepared))
+        self.moving.setVisible(dt is not None and dt.prepared)
+        if not csp:
+            self.unsupported.setText("Only drives in CSP can be moved in the test for now.")
+        else:
+            self.unsupported.setText("")
+            if dt is None:
+                scale = drivetest.hal_scale(os.path.dirname(os.path.abspath(
+                    self.win.session.ini_path)) if self.win.session.ini_path else "",
+                    slave["name"])
+                if scale:
+                    self.fields["scale"].setValue(scale)
+                    self.fields["scale"].setToolTip("From the configuration's HAL files")
+        self.unsupported.setVisible(bool(self.unsupported.text()))
+        self.win.test_page.show_limits(dt)
+
+    def settings(self):
+        return {k: box.value() for k, box in self.fields.items()}
+
+    def do_prepare(self):
+        run, s = self.win.test, self.slave
+        if run is None or s is None:
+            return
+        b = self.win.session.bus.get(s["position"])
+        dt = drivetest.DriveTest(run, s, b.coe if b else None, self.settings())
+        try:
+            dt.prepare()
+        except (testmode.TestError, tool.ToolError) as e:
+            QMessageBox.warning(self, TITLE, "The drive was not prepared:\n%s" % e)
+            return
+        self.win.drive_tests[s["name"]] = dt
+        self.show_drive(s)
+
+    def do_restore(self):
+        dt = self.test()
+        if dt is None:
+            return
+        failed = dt.restore()
+        del self.win.drive_tests[self.slave["name"]]
+        if failed:
+            QMessageBox.warning(self, TITLE, "Not all of the drive's values could be written back; "
+                                "they are kept in %s:\n%s" % (drivetest.RESTORE_FILE,
+                                                             "\n".join(failed)))
+        else:
+            self.win.status("The drive's own limits are back")
+        self.show_drive(self.slave)
+
+    def enable(self, on):
+        dt = self.test()
+        if dt is None:
+            return
+        try:
+            dt.enable(on)
+        except testmode.TestError as e:
+            self.win.status(str(e))
+
+    def jog(self, sign):
+        dt = self.test()
+        if dt is None:
+            return
+        try:
+            dt.enable(True)
+            dt.jog(sign * self.step.currentData())
+        except testmode.TestError as e:
+            self.win.status(str(e))
+
+    def fault_reset(self, on):
+        dt = self.test()
+        if dt is not None:
+            try:
+                dt.fault_reset(on)
+            except testmode.TestError as e:
+                self.win.status(str(e))
+
+    def update_values(self, v):
+        dt = self.test()
+        if dt is None or not dt.prepared:
+            return
+        try:
+            fb = float(v("pos-fb"))
+        except (TypeError, ValueError):
+            return
+        self.where.setText("position %+.3f mm from start, target %+.3f mm"
+                           % (fb - dt.start, dt.target - dt.start))
+
+
 class TestPage(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -1428,7 +1604,8 @@ class TestPage(QWidget):
             "The ecat component runs this configuration (as edited, saved or not) in halrun with a "
             "servo thread, without LinuxCNC, and takes the slaves to OP. Inputs show here live, "
             "and outputs of I/O slaves can be set. Pins set during the test go back to 0 when it "
-            "stops. CiA 402 drives stay disabled: moving them comes with the CiA 402 test.\n\n"
+            "stops. A CSP drive can be moved in small steps, after limits are written to it, "
+            "only while a button is held.\n\n"
             "Before starting: stop LinuxCNC and the kernel master (sudo systemctl stop ethercat), "
             "and make sure nothing wired to the outputs can do harm.", wrap=True))
         self.start = QPushButton("Start the I/O test")
@@ -1473,20 +1650,14 @@ class TestPage(QWidget):
         self.fault_box.setProperty("box", "fault")
         crow.addWidget(self.fault_box)
         chain.add(crow)
+        self.limits_banner = Card(tone="amber")
+        self.limits_text = self.limits_banner.add(label(wrap=True))
+        dl.addWidget(self.limits_banner)
         dl.addWidget(chain)
         three = QHBoxLayout()
         three.setSpacing(16)
-        move = Card("Move")
-        hold = QPushButton("Hold to enable")
-        hold.setObjectName("big")
-        hold.setEnabled(False)
-        move.add(hold)
-        move.add(label("Moving a drive comes with the CiA 402 test mode (step 3 of the GUI): "
-                       "hold-to-enable, small jog steps, limits written to the drive, and a "
-                       "heartbeat that disables it if this program stops answering.", "hint",
-                       wrap=True))
-        move.lay.addStretch(1)
-        three.addWidget(move, 2)
+        self.move = MoveCard(win)
+        three.addWidget(self.move, 2)
         live = Card("Live values")
         grid = QGridLayout()
         grid.setSpacing(10)
@@ -1576,6 +1747,17 @@ class TestPage(QWidget):
     def position(self):
         return self.win.current
 
+    def show_limits(self, dt):
+        if dt is None or not dt.prepared:
+            self.limits_banner.hide()
+            return
+        self.limits_banner.show()
+        self.limits_text.setText(
+            "<b>Safety limits written to the drive</b> &nbsp; " +
+            " &nbsp; ".join(lim.text for lim in dt.limits) +
+            "<br>heartbeat %d ms: the drive is disabled if this program stops answering. %s"
+            % (testmode.WATCHDOG_MS, " ".join(n[:1].upper() + n[1:] + "." for n in dt.notes)))
+
     def _prefix(self):
         pos = self.position
         s = self.win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
@@ -1600,8 +1782,9 @@ class TestPage(QWidget):
         self.start_card.setVisible(not running)
         if running:
             self.banner_text.setText(
-                "<b>I/O test running</b> &nbsp; ecat in halrun, servo %s. Outputs set here go back "
-                "to 0 when the test stops (STOP, top right). Drives stay disabled.<br>Log: %s"
+                "<b>Test running</b> &nbsp; ecat in halrun, servo %s. Outputs set here go back "
+                "to 0 when the test stops (STOP, top right). A drive moves only while a button is "
+                "held, and stops if this program stops answering.<br>Log: %s"
                 % (period_text(run.period), run.log_path))
         pos = self.position
         s = win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
@@ -1633,6 +1816,7 @@ class TestPage(QWidget):
             return
         if is402:
             self.all_pins.fill(pins, prefix, run)
+            self.move.show_drive(s)
         else:
             self.outputs.fill({n: p for n, p in pins.items() if p.dir == "IN"}, prefix, run)
             self.inputs.fill({n: p for n, p in pins.items() if p.dir != "IN"}, prefix, run)
@@ -1693,6 +1877,7 @@ class TestPage(QWidget):
                 set_pill(chip, "1" if on else "0",
                          ("red" if bit in (3, 7) else "green") if on else "grey")
             self.all_pins.update_values(pins)
+            self.move.update_values(v)
         else:
             self.outputs.update_values(pins)
             self.inputs.update_values(pins)
@@ -1883,6 +2068,12 @@ class MainWindow(QMainWindow):
         self.test_timer = QTimer(self)
         self.test_timer.setInterval(200)
         self.test_timer.timeout.connect(self.poll_test)
+        self.drive_tests = {}   # slave name -> drivetest.DriveTest
+        # the heartbeat: a drive is shut down in the servo thread if it stops
+        self.heartbeat = QTimer(self)
+        self.heartbeat.setInterval(100)
+        self.heartbeat.timeout.connect(self.tick)
+        QApplication.instance().applicationStateChanged.connect(self.app_state)
         self.resize(1440, 940)
         self.setStyleSheet(STYLE)
 
@@ -2244,7 +2435,8 @@ class MainWindow(QMainWindow):
                 "(as edited, saved or not) in halrun with a servo thread of %s, and takes the "
                 "slaves to OP. LinuxCNC must not run.\n\nOutputs of I/O slaves can then be set "
                 "on the Test page: make sure nothing wired to them can do harm. "
-                "CiA 402 drives stay disabled." % period_text(self.session.period or 1000000),
+                "CiA 402 drives stay disabled until you write limits to one and hold a button."
+                % period_text(self.session.period or 1000000),
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
         try:
@@ -2256,6 +2448,7 @@ class MainWindow(QMainWindow):
         def started(_):
             self.test = run
             self.test_timer.start()
+            self.heartbeat.start()
             self.set_messages([(GREEN, "", ["Test running; log: %s" % run.log_path])])
             if self.tabs.currentWidget() is not self.test_page:
                 self.tabs.setCurrentWidget(self.test_page)
@@ -2266,13 +2459,29 @@ class MainWindow(QMainWindow):
             return
         self.test_timer.stop()
         run = self.test
+        tests = list(self.drive_tests.values())
 
-        def stopped(_):
+        def work(progress):
+            failed = []
+            run.disable_drives()
+            for dt in tests:
+                progress("Writing the drive's own limits back to %s" % dt.name)
+                failed += ["%s %s" % (dt.name, f) for f in dt.restore()]
+            run.stop()
+            return failed
+
+        def stopped(failed):
+            self.heartbeat.stop()
+            self.drive_tests = {}
+            if failed:
+                QMessageBox.warning(self, TITLE, "Not all of the drives' values could be written "
+                                    "back; they are kept in %s:\n%s"
+                                    % (drivetest.RESTORE_FILE, "\n".join(failed)))
             self.test = None
             self.set_messages([(GREY, "", [
                 "Test stopped. The free-running master does not come back by itself: to read "
                 "the bus again, sudo ethercat-uspace start"])])
-        self.run("Stopping the test...", lambda progress: run.stop(), stopped)
+        self.run("Stopping the test...", work, stopped)
 
     def set_pin(self, pin, value):
         if self.test is None:
@@ -2281,6 +2490,40 @@ class MainWindow(QMainWindow):
             self.test.set_pin(pin, value)
         except (testmode.TestError, ValueError) as e:
             self.status(str(e))
+
+    def tick(self):
+        """The drives' heartbeat, every 100 ms while the test runs."""
+        if self.test is not None:
+            try:
+                self.test.tick_watchdogs()
+            except (testmode.TestError, OSError):
+                pass
+
+    def app_state(self, state):
+        """A held button can lose its release when the window loses focus:
+        then no drive stays enabled."""
+        if state != Qt.ApplicationActive and self.test is not None:
+            self.test.disable_drives()
+
+    def offer_restore(self):
+        """Limits a crashed drive test left in drives: offer to put them back."""
+        pending = drivetest.pending_restores()
+        if not pending:
+            return
+        text = "\n".join("slave %s (%s): 0x%04X:%02X back to %s" % (
+            e.get("position"), e.get("slave"), e["index"], e["subindex"], e["original"])
+            for e in pending)
+        if QMessageBox.question(
+                self, TITLE, "A drive test ended without writing these drive values back:\n\n%s"
+                "\n\nWrite them back now? (A master must run.)" % text,
+                QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+            return
+        done, failed = drivetest.restore_pending()
+        if failed:
+            QMessageBox.warning(self, TITLE, "Not written back (kept in %s):\n%s"
+                                % (drivetest.RESTORE_FILE, "\n".join(failed)))
+        else:
+            self.status("Written back: %s" % "; ".join(done))
 
     def poll_test(self):
         run = self.test
@@ -2307,7 +2550,8 @@ class MainWindow(QMainWindow):
         except ValueError:
             responding = "?"
         all_op = get("all-op") == "TRUE"
-        set_pill(self.header.status, "● TEST MODE · I/O · %s, %s slaves%s" % (
+        set_pill(self.header.status, "● TEST MODE · %s · %s, %s slaves%s" % (
+            "drive can move" if any(dt.prepared for dt in self.drive_tests.values()) else "I/O",
             "all OP" if all_op else "NOT all OP", responding,
             "" if get("link-up") == "TRUE" else ", link DOWN"), "amber" if all_op else "red")
         if self.tabs.currentWidget() is self.test_page:
@@ -2404,7 +2648,12 @@ class MainWindow(QMainWindow):
             return
         if self.test is not None:
             self.test_timer.stop()
+            self.test.disable_drives()
+            for dt in self.drive_tests.values():
+                dt.restore()
+            self.drive_tests = {}
             self.test.stop()
+            self.heartbeat.stop()
             self.test = None
         event.accept()
 
@@ -2421,4 +2670,5 @@ def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
     win.show()
     if read_bus:
         win.read_bus()
+    QTimer.singleShot(500, win.offer_restore)
     return app.exec_()
