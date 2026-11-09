@@ -22,7 +22,7 @@ Read the design draft:
 
 Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer:
 
-1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 0.6 or newer,
+1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 0.7 or newer,
    from the `uspace-v*` releases of
    [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases);
 2. `linuxcnc-ecat` from this repository's `ecat-v*`

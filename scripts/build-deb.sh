@@ -16,16 +16,16 @@
 # release and LinuxCNC that this machine has.
 #
 # Build dependencies: build-essential git dpkg-dev libyaml-dev
-#   linuxcnc-uspace-dev, and linuxcnc-ethercat-uspace 0.6 or newer (its
+#   linuxcnc-uspace-dev, and linuxcnc-ethercat-uspace 0.7 or newer (its
 #   headers in /opt/linuxcnc-ethercat-uspace/include).
 
 set -euo pipefail
 
 PKG=linuxcnc-ecat
-BASE_VERSION=0.4
+BASE_VERSION=0.5
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
-MASTER_MIN=0.6
+MASTER_MIN=0.7
 OUTDIR=$PWD
 WORKTREE=
 
