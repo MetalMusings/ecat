@@ -217,7 +217,10 @@ types from the slaves' CoE dictionaries, and mappings are checked against
 them. The import prints a note for everything it changes or leaves out.
 
 lcec's `initCmds`, `modParam`, `idnConfig` and `watchdog` are not imported
-yet.
+yet. ecat has no product drivers, so a `modParam` will become settings
+rows or process data choices (see the design draft, [Decision: profiles
+with quirks, no product
+drivers](design/ethercat-setup.md#decision-profiles-with-quirks-no-product-drivers)).
 
 ## In the component
 
@@ -227,8 +230,10 @@ supports the profiles `cia402` ([cia402.md](cia402.md)), `mdp` and
 
 ## Open
 
-- Scaling for `cia402` (counts per unit): a HAL parameter, set from
-  `linuxcnc.joints` by the `ethercat.hal` EtherCAT Setup writes; drives
-  that are not joints set it in HAL.
 - Options for profiles beyond `cia402.mode` and `cia402.modes`.
-- Several masters (only one bus is supported).
+
+One master and one bus per configuration, by decision (see the design
+draft, *Decided questions*). Scaling for `cia402` (counts per unit) is
+the HAL parameter `pos-scale`, set from `linuxcnc.joints` by the
+`ethercat.hal` EtherCAT Setup writes; drives that are not joints set it
+in HAL.

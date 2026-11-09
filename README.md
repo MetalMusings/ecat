@@ -194,7 +194,10 @@ against a userspace build of the IgH EtherCAT master
 can be tried today from
 [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat)
 (see its `INSTALL-USPACE.md`). Unlike linuxcnc-ethercat, `ecat` will not
-read lcec's XML files; they can be imported instead.
+read lcec's XML files; they can be imported instead. ecat is a project
+of its own: it keeps no backward compatibility with linuxcnc-ethercat
+and does not take in its future changes. The userspace master is
+developed actively as part of the project.
 
 ## License
 

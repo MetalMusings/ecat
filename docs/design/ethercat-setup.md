@@ -163,8 +163,10 @@ differently:
   I/O, analog I/O and encoder profiles build on this layout.
 - **Quirks as data**: a small table per vendor and product for devices that
   need something special (an SDO in PREOP, a known SII error).
-- **Existing C drivers as a fallback** for what does not fit (for example
-  SoE drives or FSoE) until it can be replaced.
+
+lcec's product drivers are not carried over, not even as a fallback; see
+[Decision: profiles with quirks, no product
+drivers](#decision-profiles-with-quirks-no-product-drivers).
 
 **Data sources**, in order: the slave itself (SII, CoE dictionary), which
 says what it is; the ESI file, which says what is possible and what it
@@ -377,7 +379,7 @@ name should make clear that forum answers, examples and documentation
 about lcec and its XML do not apply to it as they are. Its HAL pins are
 named by the aliases chosen in the program anyway.
 
-**Proposed**: the new component reads only its own file at run time.
+**Decided** (built as `--import`): the new component reads only its own file at run time.
 Existing XML files are converted once, by an import in EtherCAT Setup,
 which shows what could not be carried over. Generic slaves convert
 directly (PDOs, SDOs, DC); slaves with product drivers and `modParam`
@@ -390,8 +392,11 @@ files are left as they are, for those who do not move.
 | **Only the new file at run time; XML import in the program** | The import, and a translation per driver for `modParam` | Converts once and sees what was not carried over |
 | Only the new file, no import | Least | Redoes everything by hand, against the goal of making it easier |
 
-**Open: devices without a profile.** The break with XML matters less than
-what happens to today's product drivers. Two ways:
+**Devices without a profile** (decided 2026-11-10, see [Decision:
+profiles with quirks, no product
+drivers](#decision-profiles-with-quirks-no-product-drivers)). The break
+with XML mattered less than what happens to today's product drivers. The
+two ways that were weighed:
 
 - **Keep the C drivers as a fallback** in the new component. Every device
   that works with lcec today keeps working (EL7041 stepper, encoder
@@ -404,9 +409,93 @@ what happens to today's product drivers. Two ways:
   product-specific logic are not supported until a profile covers them,
   and the import must say so for those slaves.
 
-A middle way is possible: start with profiles only, and bring over
+A middle way was also possible: start with profiles only, and bring over
 individual drivers, as profiles or fallback drivers, when users need
-them. Which devices users actually run would decide the order.
+them. The choice was profiles only, with quirks as data.
+
+## Decision: profiles with quirks, no product drivers
+
+Decided 2026-11-10. The question was asked for all kinds of devices and
+many users, not for the test machines (both of which the existing
+profiles already cover).
+
+**Decision.** Devices are supported through profiles that follow
+standards, plus quirks kept as data. lcec's per-product C drivers are not
+brought over, not even as a fallback. A device that needs logic in every
+cycle that no profile covers is not supported until a profile does. The
+XML import says so for each such slave. Users who need such a device keep
+lcec.
+
+**Why:**
+
+- **Most drivers repeat a standard.** About ten of lcec's 57 drivers
+  implement CiA 402 for one vendor each (`rtec`, `rtdrv`,
+  `leadshine_stepper`, `deasda`, `dems300`, `omrg5`, `omr1s`, `ommx2`,
+  `basic_cia402`, `class_cia402`). Most Beckhoff I/O drivers do what the
+  Modular Device Profile layout and the slave's own data already say. One
+  profile per standard covers devices whose product nobody has written
+  code for.
+- **A new device should not need C code and a release.** With product
+  drivers, every new product waits for someone to write, test and
+  release a driver. With profiles, a device that follows the standard
+  works directly, and a quirk is a table entry that a user can propose.
+- **Predictable.** The configuration file holds everything that is
+  written to a slave: process data, settings and DC. Nothing is added by
+  hidden code at start. What the program shows is what happens, and the
+  file can be posted when asking for help.
+- **`modParam` was the drivers' interface, and its content fits better
+  elsewhere.** Going through the `modParam`s of the 17 drivers that have
+  them gives three groups:
+
+  | Group | Examples | Replacement |
+  |---|---|---|
+  | A setting under a readable name, sometimes with a unit or named values | `peakCurrent_amps`, `homeMode`, `input3Func`, `encoderResolution`, `maxCurrent`, `coilResistance`, `ch0Baudrate` | `settings` rows. Name, type and limits come from the dictionary. Description, unit and named values come from the ESI file. Where the ESI file lacks them, a quirk table supplies labels, units and value names. |
+  | Which PDOs and pins exist | `enableCSV`, `ciaChannels`, `digitalInChannels`, `enableFB2`, `encoder`, `probe1Positive`, `opmode` | The process data chosen in the program, and the profile's options (`cia402.mode`, `modes`, `encoders`) |
+  | Logic in every cycle | FSoE (`fsoeSlaveIdx`), SoE drives (AX5000) | None. Not supported. |
+
+  Keeping the C drivers as a fallback would have meant bringing group 2
+  and 3 options into the new file format and keeping the old driver
+  interface, for little gain over group 1 settings.
+
+**Cost, accepted:** SoE drives (`ax5100`, `ax5200`, `class_ax5`), safety
+devices (`el6900`, `el1918_logic`, `el1904`, `el2904`, `ax5805`) and
+special cases (`el6090` display, `el3403` power measurement, `stmds5k`,
+`ph3lm2rm`) are not supported. Until a profile covers them, the stepper
+and analog terminals work only as `generic` slaves, without the
+convenience lcec's drivers give.
+
+**Profiles:**
+
+| Profile | Covers (lcec drivers) | State |
+|---|---|---|
+| `cia402` | the CiA 402 drivers above; EL72xx/EL7411 in CiA 402 mode | Done, one axis per slave |
+| `mdp`, `generic` | digital I/O (`el1xxx`, `el2xxx`, `el2202`, `digitalcombo`, `easyio`, `epocat`, `ex260`, `ep9214`), status bits (`el95xx`, `el9410`), `passive` | Done |
+| Encoder (MDP 511) | `el5101`, `el5151`, `el5152`, the encoder channels of `el7342`/`em7004` | Done |
+| `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Next. An extension of `cia402`. |
+| Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Next. The value is scaled to a float pin from the range, status becomes a fault pin, and the 0x80n0 channel settings become named settings. |
+| Stepper and DC motor terminals, velocity mode | `el7041`, `el70x1`, `el7342`, `el2521` | Later. Velocity command, enable, ready and warnings, and position from the encoder channel. |
+| Absolute encoders (SSI, EnDat) | `el5002`, `el5032` | Check first whether `generic` plus settings is enough. |
+
+The order is set by what users run; analog I/O and the EL7041 are
+probably the most common among LinuxCNC users with Beckhoff terminals.
+
+**Quirks** are a table per vendor, product and, where needed, revision.
+EtherCAT Setup uses them when it proposes a configuration. An entry can
+hold:
+
+- settings a device needs at start;
+- labels, units and value names for vendor objects;
+- corrections of known SII or ESI errors;
+- limits a device ignores. For example, the ECT60 ignores 0x607D in CSP,
+  `LIMIT_QUIRKS` in `drivetest.py`.
+
+Quirks act through what they put into `ethercat.yaml`, so the component
+needs no quirk table. The configuration stays complete and predictable.
+
+**Importing lcec XML** translates group 1 `modParam`s into settings rows,
+and group 2 into process data and profile options, driver by driver. It
+starts with the common drivers (`rtec`, `rtdrv`, `leadshine_stepper`,
+`el7041`, `class_cia402`). Group 3 gets a note.
 
 ## Technology
 
@@ -418,30 +507,50 @@ them. Which devices users actually run would decide the order.
   with its git history) and gains reading of `ethercat.yaml`, pin aliases
   and profile-based device support.
 
+## Decided questions
+
+Questions that were open in this draft, with the answer and where it is
+described.
+
+- **Upstream** (2026-11-10): ecat breaks with linuxcnc-ethercat (lcec).
+  It keeps no backward compatibility with lcec, and future upstream
+  changes to lcec are not pulled in: the code taken from lcec is ecat's
+  own and changes as ecat needs. lcec configurations reach ecat through
+  the one-time XML import. The userspace IgH master
+  ([MetalMusings/ethercat](https://github.com/MetalMusings/ethercat)) is
+  not part of this break: it is developed actively as part of the
+  project, and ecat is built on it.
+- **Several masters** (2026-11-10): one master and one bus. A
+  configuration has one `master`; the component's pins are `ecat.0.*`.
+- **Identifying slaves** (2026-11-10): by position and type, and checked
+  in test mode (jog X and see which motor moves). Some slaves report
+  serial number 0 (the ECT60 drives on the test machine), so nothing
+  better is known; swapped drives of the same type are not noticed
+  automatically.
+- **File format**: YAML, `ethercat.yaml`
+  ([config-format.md](../config-format.md)).
+- **Scaling**: in HAL, as today. `ethercat.hal` sets each joint's
+  `pos-scale` from `linuxcnc.joints` ([linuxcnc.md](../linuxcnc.md)).
+- **INI keys**: `[ETHERCAT]CONFIG`, and `HALFILE = ethercat-load.hal`
+  first and `HALFILE = ethercat.hal` last ([linuxcnc.md](../linuxcnc.md)).
+- **Joints and gantries**, for now: EtherCAT Setup connects joints to
+  CiA 402 drives in CSP. Gantries, CSV drives, home and limit switches,
+  and I/O such as an E-stop are connected in the user's HAL files
+  ([linuxcnc.md](../linuxcnc.md)).
+- **CiA 402 homing**: `index-enable` with the drive's own homing
+  (`modes: [hm]`); no homing module. Tried on the plasma cutter's X axis
+  ([cia402.md](../cia402.md)). How drives differ in PP mode (the
+  set-point handshake, profile velocity as process data or a setting) is
+  handled as quirks ([Decision: profiles with quirks, no product
+  drivers](#decision-profiles-with-quirks-no-product-drivers)).
+- **Devices without a profile**: profiles with quirks, no product
+  drivers ([Decision: profiles with quirks, no product
+  drivers](#decision-profiles-with-quirks-no-product-drivers)).
+
 ## Open questions
 
-- **Identifying slaves**: some slaves report serial number 0 (the ECT60
-  drives on the test machine do), so slaves can only be told apart by
-  position and type. Swapped drives are not noticed automatically; test
-  mode can help (jog X and see which motor moves).
-- **Scaling**: in the configuration file (lcec scales, test mode shows
-  mm), or in HAL as today?
-- **File format**: YAML, or something else?
-- **INI keys**: names and placement of `[ETHERCAT]` settings.
-- **Joints and gantries**: what the program reads from the INI file, and
-  where the line to machine configuration tools goes.
 - **Modular devices**: how slots and modules are detected and chosen.
 - **ESI files**: licensing, finding the right file and revision.
-- **Devices without a profile**: C drivers as a fallback, or profiles
-  only (see [Relation to lcec and its XML
-  files](#relation-to-lcec-and-its-xml-files)).
-- **CiA 402 homing**: index-enable or a homing module (see [CiA 402
-  drives and their modes](#cia-402-drives-and-their-modes)). Drives also
-  differ in the PP set-point handshake (single set-points, buffered,
-  change immediately), and in whether the profile velocity is process
-  data or a setting.
-- **Upstream**: the new system is in practice a project of its own next to
-  linuxcnc-ethercat, which keeps its XML-based setup.
 
 ## Plan
 
