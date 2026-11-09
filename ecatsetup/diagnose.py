@@ -8,6 +8,7 @@ LinuxCNC.
 """
 
 import time
+from dataclasses import dataclass, field
 
 from . import tool
 
@@ -142,34 +143,135 @@ def error_text(code):
     return "0x%04X %s" % (code, name or ("(%s)" % cls if cls else ""))
 
 
-def diagnose(positions, seconds=2.0, out=print):
-    """Report on the slaves; return the number of problems found."""
-    problems = 0
+@dataclass
+class Port:
+    number: int
+    link: bool
+    now: dict           # counters since power-on: rx, phy, fwd, lost
+    delta: dict         # how much they grew while watched
+
+    @property
+    def grew(self):
+        """Counters that grew, other than forwarded errors (which only say
+        that the fault is further back)."""
+        return [k for k in ("rx", "phy", "lost") if self.delta[k]]
+
+    @property
+    def shown(self):
+        return self.link or any(self.now.values())
+
+
+@dataclass
+class Cia402:
+    statusword: int = None
+    state: str = ""
+    hint: str = ""
+    mode: object = None             # 0x6061
+    requested: object = None        # 0x6060
+    error_code: int = None          # 0x603F
+
+
+@dataclass
+class Report:
+    """What was found on one slave."""
+    position: int
+    name: str
+    flagged: bool                   # the master's error flag in the slave list
+    state: int                      # AL state: 1, 2, 4, 8
+    error: bool                     # AL error indication
+    code: int                       # AL status code
+    last_code: int = None           # kept by the master when the slave's was cleared
+    ports: list = field(default_factory=list)
+    seconds: float = 0
+    history: list = field(default_factory=list)   # the slave's diagnosis history (0x10F3)
+    error_register: int = None      # 0x1001
+    cia402: Cia402 = None
+
+    @property
+    def state_name(self):
+        return AL_STATES.get(self.state, "0x%X" % self.state)
+
+
+def examine(positions, seconds=2.0):
+    """Read the slaves and return a Report for each."""
     slaves = tool.slave_list()
     first = {pos: counters(pos) for pos in positions}
     if seconds > 0:
         time.sleep(seconds)
-
+    reports = []
     for pos in positions:
         name, flagged = slaves.get(pos, ("", False))
-        out("Slave %d: %s" % (pos, name))
+        state, err, code = al_status(pos)
+        r = Report(pos, name, flagged, state, err, code, seconds=seconds)
+        if flagged and not err and state != 8:
+            r.last_code = tool.slave_info(pos).get("al_status_code")
+        dl, now, then = dl_status(pos), counters(pos), first[pos]
+        for p in range(4):
+            r.ports.append(Port(p, dl[p]["link"], now[p],
+                                {k: (now[p][k] - then[p][k]) % 256 for k in now[p]}))
+        diag = _try(lambda: tool.run("diag", "-p", pos))
+        if diag and "does not provide" not in diag:
+            r.history = diag.strip().splitlines()
+        r.error_register = tool.upload(pos, 0x1001, 0, "uint8")
+        dt = tool.upload(pos, 0x1000, 0, "uint32")
+        if dt is not None and dt & 0xFFFF == 402:
+            c = r.cia402 = Cia402()
+            c.statusword = tool.upload(pos, 0x6041, 0, "uint16")
+            if c.statusword is not None:
+                c.state, c.hint = cia402_state(c.statusword)
+                c.mode = tool.upload(pos, 0x6061, 0, "int8")
+                c.requested = tool.upload(pos, 0x6060, 0, "int8")
+                c.error_code = tool.upload(pos, 0x603F, 0, "uint16")
+        reports.append(r)
+    return reports
+
+
+def cia402_findings(c):
+    """(problems, lines) about a drive."""
+    if c.statusword is None:
+        return 1, ["CiA 402: the status word 0x6041 cannot be read"]
+    sw, lines, problems = c.statusword, [], 0
+    lines.append("CiA 402: %s (status word 0x%04X), mode %s%s" % (
+        c.state, sw, MODES.get(c.mode, c.mode),
+        "" if c.requested in (None, c.mode) else ", requested %s" % MODES.get(c.requested, c.requested)))
+    if c.hint:
+        lines.append("  -> %s" % c.hint)
+    if c.error_code:
+        problems += 1
+        lines.append("Error code 0x603F: %s" % error_text(c.error_code))
+    if not sw & (1 << 4) and c.state in ("Switched on", "Operation enabled"):
+        problems += 1
+        lines.append("  -> no voltage on the power stage (status word bit 4): check the main power")
+    if not sw & (1 << 9):
+        problems += 1
+        lines.append("  -> not remote (bit 9): the drive is set to local control, the bus cannot run it")
+    if sw & (1 << 7):
+        lines.append("  -> warning bit set (bit 7)")
+    if c.state == "Fault":
+        problems += 1
+    return problems, lines
+
+
+def diagnose(positions, seconds=2.0, out=print):
+    """Report on the slaves; return the number of problems found."""
+    problems = 0
+    for r in examine(positions, seconds):
+        out("Slave %d: %s" % (r.position, r.name))
 
         # application layer state
-        state, err, code = al_status(pos)
-        text, hint = AL_CODES.get(code, ("unknown code", ""))
-        line = "  State: %s" % AL_STATES.get(state, "0x%X" % state)
-        if err or state != 8:
+        text, hint = AL_CODES.get(r.code, ("unknown code", ""))
+        line = "  State: %s" % r.state_name
+        if r.error or r.state != 8:
             problems += 1
-            line += ", error 0x%04X: %s" % (code, text) if err else " (not OP)"
+            line += ", error 0x%04X: %s" % (r.code, text) if r.error else " (not OP)"
         out(line)
-        if err and hint:
+        if r.error and hint:
             out("    -> %s" % hint)
-        elif flagged and not err and state != 8:
-            last = tool.slave_info(pos).get("al_status_code")
-            if last:
-                text, hint = AL_CODES.get(last, ("unknown code", ""))
+        elif r.flagged and not r.error and r.state != 8:
+            if r.last_code:
+                text, hint = AL_CODES.get(r.last_code, ("unknown code", ""))
                 out("    -> refused with 0x%04X: %s (kept by the master; the slave's own code was "
-                    "cleared when the master acknowledged the error)" % (last, text))
+                    "cleared when the master acknowledged the error)" % (r.last_code, text))
                 if hint:
                     out("    -> %s" % hint)
             else:
@@ -178,72 +280,37 @@ def diagnose(positions, seconds=2.0, out=print):
                     " (\"AL status message 0x....\")")
 
         # links and error counters
-        dl, now, then = dl_status(pos), counters(pos), first[pos]
-        for p in range(4):
-            if not dl[p]["link"] and not any(now[p].values()):
+        for port in r.ports:
+            if not port.shown:
                 continue
-            delta = {k: (now[p][k] - then[p][k]) % 256 for k in now[p]}
-            # forwarded errors only say that the fault is further back
-            total = ", ".join("%s %s" % (k, _count(now[p][k])) for k in ("rx", "phy", "lost")
-                              if now[p][k])
-            line = "  Port %d: %s%s" % (p, "link" if dl[p]["link"] else "no link",
-                                         "; since power-on: " + total if total else "")
-            out(line)
-            grew = [k for k in ("rx", "phy", "lost") if delta[k]]
-            if grew:
+            total = ", ".join("%s %s" % (k, _count(port.now[k])) for k in ("rx", "phy", "lost")
+                              if port.now[k])
+            out("  Port %d: %s%s" % (port.number, "link" if port.link else "no link",
+                                     "; since power-on: " + total if total else ""))
+            if port.grew:
                 problems += 1
                 out("    -> %s increased by %s in %g s: the cable or connector at this port, "
                     "or the device on its other end"
-                    % (" and ".join(grew), "/".join(str(delta[k]) for k in grew), seconds))
-            elif delta["fwd"]:
+                    % (" and ".join(port.grew), "/".join(str(port.delta[k]) for k in port.grew),
+                       seconds))
+            elif port.delta["fwd"]:
                 out("    -> forwarded errors increased: the fault is before this slave")
 
         # the slave's own messages
-        diag = _try(lambda: tool.run("diag", "-p", pos))
-        if diag and "does not provide" not in diag:
+        if r.history:
             out("  Diagnosis history (0x10F3):")
-            for line in diag.strip().splitlines()[-10:]:
+            for line in r.history[-10:]:
                 out("    " + line)
-        er = tool.upload(pos, 0x1001, 0, "uint8")
-        if er:
+        if r.error_register:
             problems += 1
-            out("  Error register 0x1001: 0x%02X" % er)
+            out("  Error register 0x1001: 0x%02X" % r.error_register)
 
-        # CiA 402
-        dt = tool.upload(pos, 0x1000, 0, "uint32")
-        if dt is not None and dt & 0xFFFF == 402:
-            problems += _cia402(pos, out)
+        if r.cia402 is not None:
+            n, lines = cia402_findings(r.cia402)
+            problems += n
+            for line in lines:
+                out("  " + line)
         out("")
-    return problems
-
-
-def _cia402(pos, out):
-    sw = tool.upload(pos, 0x6041, 0, "uint16")
-    if sw is None:
-        out("  CiA 402: the status word 0x6041 cannot be read")
-        return 1
-    name, hint = cia402_state(sw)
-    md = tool.upload(pos, 0x6061, 0, "int8")
-    want = tool.upload(pos, 0x6060, 0, "int8")
-    ec = tool.upload(pos, 0x603F, 0, "uint16")
-    out("  CiA 402: %s (status word 0x%04X), mode %s%s" % (
-        name, sw, MODES.get(md, md), "" if want in (None, md) else ", requested %s" % MODES.get(want, want)))
-    problems = 0
-    if hint:
-        out("    -> %s" % hint)
-    if ec:
-        problems += 1
-        out("  Error code 0x603F: %s" % error_text(ec))
-    if not sw & (1 << 4) and name in ("Switched on", "Operation enabled"):
-        problems += 1
-        out("    -> no voltage on the power stage (status word bit 4): check the main power")
-    if not sw & (1 << 9):
-        problems += 1
-        out("    -> not remote (bit 9): the drive is set to local control, the bus cannot run it")
-    if sw & (1 << 7):
-        out("    -> warning bit set (bit 7)")
-    if name == "Fault":
-        problems += 1
     return problems
 
 

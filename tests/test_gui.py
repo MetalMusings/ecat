@@ -30,7 +30,8 @@ class FakeTool:
 
     def patches(self):
         return [mock.patch.object(tool, name, getattr(self, name))
-                for name in ("slave_positions", "slave_info", "sii", "sdos", "upload")]
+                for name in ("slave_positions", "slave_info", "sii", "sdos", "upload")] + [
+            mock.patch.object(tool, "sdos_settled", lambda pos, **kw: self.sdos(pos))]
 
     def slave_positions(self):
         return list(self.positions)
@@ -59,6 +60,18 @@ class BusTest(unittest.TestCase):
             self.addCleanup(p.stop)
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
+
+
+class TestTool(unittest.TestCase):
+    def test_dictionary_read_once_settled(self):
+        # after a start the master lists the dictionary bit by bit
+        answers = iter(["", "", "SDO 0x1000\n", "SDO 0x1000\nSDO 0x1008\n",
+                        "SDO 0x1000\nSDO 0x1008\n"])
+        told = []
+        with mock.patch.object(tool, "sdos", lambda pos: next(answers)):
+            text = tool.sdos_settled(0, interval=0, progress=told.append)
+        self.assertEqual(text, "SDO 0x1000\nSDO 0x1008\n")
+        self.assertEqual(len(told), 1)
 
 
 class TestSession(BusTest):
@@ -151,18 +164,29 @@ class TestWindow(BusTest):
         self.addCleanup(lambda: (s.__setattr__("saved", s.cfg), w.close()))
         return w
 
-    def items(self, w):
-        return [[w.slaves.topLevelItem(i).text(c) for c in range(5)]
-                for i in range(w.slaves.topLevelItemCount())]
+    def rows(self, w):
+        """(key, texts) of the bus list's entries."""
+        lst = w.bus_page.list.list
+        out = []
+        for i in range(lst.count()):
+            it = lst.item(i)
+            texts = [lab.text() for lab in lst.itemWidget(it).findChildren(gui.QLabel)]
+            out.append((it.data(gui.Qt.UserRole), texts))
+        return out
 
     def test_list_and_pages(self):
         w = self.window()
-        self.assertEqual(self.items(w)[0][1], "Master")
-        self.assertEqual(self.items(w)[1], ["0", "io-0", "PREOP", "ok", "MetalMusings EaserCAT 7000"])
+        rows = self.rows(w)
+        self.assertEqual(rows[0][0], gui.MASTER_ITEM)
+        self.assertEqual(rows[1], (0, ["0", "MetalMusings EaserCAT 7000", "io-0 · Modular device",
+                                       "PREOP"]))
+        self.assertIn("matches", w.bus_page.list.summary.text())
         w.select_slave(1)
-        self.assertIs(w.pages.currentWidget(), w.slave_page)
+        self.assertIs(w.bus_page.stack.currentWidget(), w.slave_page)
         self.assertGreater(w.slave_page.pd.rowCount(), 0)
-        self.assertIn("io-1", w.yaml.toPlainText())
+        self.assertEqual(w.slave_page.title.text(), "Slave 1 · MetalMusings EaserCAT 7000")
+        self.assertIn("io-1", w.hal_page.yaml.toPlainText())
+        self.assertIn("Bus read · 2 slaves", w.header.status.text())
 
     def test_edit_a_pin_and_see_an_error(self):
         w = self.window()
@@ -173,12 +197,14 @@ class TestWindow(BusTest):
                    and page.pd.item(r, page.PIN).text())
         page.pd.item(row, page.PIN).setText("bad pin")
         self.assertEqual(page._entry(row)["pin"], "bad pin")
-        self.assertIn("bad pin", w.yaml.toPlainText())
-        self.assertEqual(self.items(w)[1][3], "1 problem")
+        self.assertIn("bad pin", w.hal_page.yaml.toPlainText())
+        self.assertIn("1 problem", self.rows(w)[1][1])
+        self.assertIn("except slave 0", w.bus_page.list.summary.text())
         self.assertTrue(w.session.dirty)
+        self.assertIn(" *", w.header.info.text())
         page.pd.item(row, page.PIN).setText("")
         self.assertNotIn("pin", page._entry(row))
-        self.assertEqual(self.items(w)[1][3], "ok")
+        self.assertNotIn("1 problem", self.rows(w)[1][1])
 
     def test_rename_slave(self):
         w = self.window()
@@ -186,8 +212,9 @@ class TestWindow(BusTest):
         w.slave_page.name.setText("thc")
         w.slave_page.general_edited()
         self.assertEqual(w.session.slave(1)["name"], "thc")
-        self.assertEqual(self.items(w)[2][1], "thc")
-        self.assertIs(w.pages.currentWidget(), w.slave_page)
+        self.assertIn("thc · Modular device", self.rows(w)[2][1])
+        self.assertIs(w.bus_page.stack.currentWidget(), w.slave_page)
+        self.assertTrue(any(r[2] == "thc.output4" for r in gui.config_pins(w.session.cfg)))
 
     def test_settings(self):
         w = self.window()
@@ -209,33 +236,70 @@ class TestWindow(BusTest):
     def test_master_page(self):
         w = self.window()
         w.select_slave(gui.MASTER_ITEM)
+        self.assertIs(w.bus_page.stack.currentWidget(), w.master_page)
         m = w.master_page
         m.interface.setEditText("enp9s0")
         m.transport.setCurrentText("xdp-native")
         self.assertEqual(w.session.cfg["master"]["interface"], "enp9s0")
         self.assertEqual(w.session.cfg["master"]["transport"], "xdp-native")
+        self.assertEqual(w.bus_page.list.title.text(), "BUS · ENP9S0")
+        self.assertIn("enp9s0", w.header.info.text())
 
     def test_message_selects_slave(self):
         w = self.window()
         w.session.cfg["slaves"][1]["name"] = "io-0"
         w.check()
-        item = next(w.messages.item(i) for i in range(w.messages.count())
-                    if "used twice" in w.messages.item(i).text())
-        w.message_activated(item)
+        it = next(w.messages.item(i) for i in range(w.messages.count())
+                  if "used twice" in w.messages.item(i).text())
+        w.message_activated(it)
         self.assertEqual(w.slave_page.position, 1)
+        self.assertFalse(w.slave_page.problems.isHidden())
+
+    def test_troubleshoot_page(self):
+        from ecatsetup import diagnose
+        w = self.window()
+        w.select_slave(0)
+        w.tabs.setCurrentWidget(w.trouble_page)
+        page = w.trouble_page
+        self.assertFalse(page.waiting.isHidden())
+        port = diagnose.Port(0, True, {"rx": 1, "phy": 9, "fwd": 0, "lost": 0},
+                             {"rx": 0, "phy": 6, "fwd": 0, "lost": 0})
+        w.reports[0] = diagnose.Report(0, "io", True, 4, True, 0x1D, ports=[port], seconds=2)
+        w.show_current()
+        self.assertTrue(page.waiting.isHidden())
+        self.assertEqual(page.title.text(), "Slave 0 · MetalMusings EaserCAT 7000 does not reach OP")
+        self.assertEqual([c.tag.text() for c in page.steps],
+                         ["✓ reached", "✓ reached", "✓ reached", "✕ refused"])
+        self.assertIn("0x001D Invalid output configuration", page.steps[3].text.text())
+        self.assertIn("Invalid output configuration", page.headline.text())
+        self.assertIn("phy", page.ports.horizontalHeaderItem(3).text().lower())
+        self.assertEqual(page.ports.item(0, 3).text(), "9  (+6)")
+        self.assertIn("grew on port 0", page.cable_verdict.text())
+        self.assertIn("no diagnosis history", page.history_none.text())
+
+    def test_test_page_without_a_test(self):
+        w = self.window()
+        w.select_slave(0)
+        w.tabs.setCurrentWidget(w.test_page)
+        self.assertFalse(w.test_page.start_card.isHidden())
+        self.assertTrue(w.test_page.io.isHidden())
+        self.assertTrue(w.header.stop.isHidden())
 
 
-    def test_diagnosis_findings(self):
-        block = ["Slave 0: ECT60V202(COE)", "  State: PREOP (not OP)",
-                 "  Port 0: link; since power-on: rx 1", "  Port 1: link",
-                 "  CiA 402: Fault (status word 0x0A08), mode CSP",
-                 "    -> see the error code; reset with fault-reset",
-                 "  Error code 0x603F: 0x7500 communication"]
-        self.assertEqual(gui.diagnosis_findings(block), [
-            "State: PREOP (not OP)",
-            "CiA 402: Fault (status word 0x0A08), mode CSP -> see the error code; reset with "
-            "fault-reset",
-            "Error code 0x603F: 0x7500 communication"])
+class TestSteps(unittest.TestCase):
+    def report(self, state, error=False, code=0, last=None):
+        from ecatsetup import diagnose
+        return diagnose.Report(0, "x", bool(error or last), state, error, code, last_code=last)
+
+    @unittest.skipIf(gui is None, "PyQt5 is not installed")
+    def test_steps(self):
+        tags = lambda r: [gui.step_status(r, v)[0] for v, _, _ in gui.STEPS]
+        self.assertEqual(tags(self.report(8)), ["✓ reached"] * 4)
+        self.assertEqual(tags(self.report(2)), ["✓ reached", "✓ reached", "not reached",
+                                                "not reached"])
+        self.assertEqual(tags(self.report(2, last=0x1D)),
+                         ["✓ reached", "✓ reached", "✕ refused", "not reached"])
+        self.assertIn("0x001D", gui.step_status(self.report(2, last=0x1D), 4)[2])
 
 
 if __name__ == "__main__":

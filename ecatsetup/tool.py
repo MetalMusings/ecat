@@ -9,6 +9,7 @@ inside a running LinuxCNC.
 import os
 import re
 import subprocess
+import time
 
 TOOL = os.environ.get("ECAT_TOOL", "ethercat-uspace")
 
@@ -65,6 +66,25 @@ def sii(pos):
 
 def sdos(pos):
     return run("sdos", "-p", pos)
+
+
+def sdos_settled(pos, timeout=20.0, interval=0.3, progress=None):
+    """The CoE dictionary of a slave that has one, once the master has read
+    all of it. After a start the master reads the dictionaries in the
+    background for several seconds; until then "sdos" lists nothing or
+    only part. Returns the last listing if it does not settle in time."""
+    end = time.monotonic() + timeout
+    text, told = sdos(pos), False
+    while time.monotonic() < end:
+        time.sleep(interval)
+        again = sdos(pos)
+        if again and again == text:
+            return again
+        if progress and not told:
+            progress("Slave %d: waiting for the master to read its object dictionary" % pos)
+            told = True
+        text = again
+    return text
 
 
 def upload(pos, index, subindex, dtype):

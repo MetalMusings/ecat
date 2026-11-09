@@ -75,14 +75,18 @@ in plain words, with what usually lies behind it), its links and the
 error counters that grow while it watches (`--seconds`, pointing at a
 cable or connector), the slave's own diagnosis history and error
 register, and for a CiA 402 drive its state, error code and what is
-missing to reach "Operation enabled". `--gui` opens EtherCAT Setup's window (needs `python3-pyqt5`), part 1 of
-the GUI: it reads the bus, lists the slaves with their state and how they
-compare with the file, shows each slave's process data, pins, settings
-and DC, lets you edit them (name, CiA 402 mode, pins, bit pins, scaling,
+missing to reach "Operation enabled". `--gui` opens EtherCAT Setup's window (needs `python3-pyqt5`), laid out
+as the mockups in the design draft, with the pages Bus, Troubleshoot,
+Test and HAL & LinuxCNC. Part 1 of the GUI: it reads the bus, lists the
+slaves with their state and how they compare with the file, shows each
+slave's process data, pins, settings and DC, lets you edit them (name, CiA 402 mode, pins, bit pins, scaling,
 settings, DC, the master's interface and transport), checks as you edit,
 proposes a slave again in another mode or PDO assignment, updates the
-file from the bus, imports lcec XML, saves with a `.bak` copy, and
-diagnoses the slaves. Like the rest of `ecatsetup`, it only reads from
+file from the bus, imports lcec XML, and saves with a `.bak` copy. The
+Troubleshoot page shows a slave's way from INIT to OP, its AL status code
+in plain words, its CiA 402 state, the error counters per port, and its
+own messages (0x10F3). HAL & LinuxCNC lists the pins and the lines for a
+HAL file; writing them into the configuration is step 5 of the plan. Like the rest of `ecatsetup`, it only reads from
 the bus; nothing moves.
 
 Part 2 adds the I/O test (Test > Start test): the `ecat` component runs

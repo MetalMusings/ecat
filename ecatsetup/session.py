@@ -38,11 +38,12 @@ def servo_period(ini_path):
         return None
 
 
-def read_slave(pos, esi_devices, mode, pdo_set=None):
+def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
     """Read one slave and propose its configuration: (info, coe, proposal)."""
     info = tool.slave_info(pos)
     sii = sii_mod.parse(tool.sii(pos))
-    coe = coe_mod.Dictionary(tool.sdos(pos)) if sii.has_coe else coe_mod.Dictionary()
+    coe = coe_mod.Dictionary(tool.sdos_settled(pos, progress=progress)) if sii.has_coe \
+        else coe_mod.Dictionary()
     device_type = tool.upload(pos, 0x1000, 0, "uint32") if coe else None
     modes = None
     if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in coe.objects:
@@ -196,7 +197,7 @@ class Session:
         for pos in positions:
             progress("Reading slave %d" % pos)
             mode = self._slave_mode(pos)
-            bus[pos] = BusSlave(*read_slave(pos, self.esi_devices, mode))
+            bus[pos] = BusSlave(*read_slave(pos, self.esi_devices, mode, progress=progress))
         self.bus, self.bus_error = bus, None
         return bus
 

@@ -1,12 +1,21 @@
-"""EtherCAT Setup's window (PyQt5): read the bus, show the slaves, their
-process data and pins, edit, check and save ethercat.yaml, and diagnose
-the slaves. Nothing is written to the slaves and nothing moves.
+"""EtherCAT Setup's window (PyQt5), laid out as the mockups in
+docs/design/ethercat-setup.md: a header with the configuration and the
+bus's state, and the pages Bus, Troubleshoot, Test and HAL & LinuxCNC.
 
     ecatsetup --gui [ethercat.yaml] [--ini machine.ini] [--esi DIR]
 
-The work is done by session.Session and the modules the command line
-uses; this file only shows it. Reading the bus runs in a thread, so the
-window stays responsive.
+- Bus: the slaves, and per slave where its configuration comes from, its
+  mode and sync, process data and pins, and settings; all editable,
+  checked while editing, saved to ethercat.yaml.
+- Troubleshoot: a slave's way from INIT to OP, what it says (AL status
+  code, CiA 402 state), its cables, and its own messages (0x10F3).
+- Test: the I/O test (testmode.py): ecat in halrun, pins live, outputs of
+  I/O slaves set, SDOs read and written. Drives stay disabled.
+- HAL & LinuxCNC: the pins and the lines for a HAL file; writing them
+  into the configuration is step 5 of the plan.
+
+The work is done by session.Session, diagnose and testmode; this file only
+shows it. Reading the bus runs in a thread, so the window stays responsive.
 """
 
 import copy
@@ -15,21 +24,79 @@ import re
 import sys
 
 from PyQt5.QtCore import QThread, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QFont, QFontDatabase, QKeySequence
+from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDockWidget, QFileDialog,
-    QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QSplitter,
-    QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget)
+    QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout,
+    QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
+    QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
+    QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, propose, testmode, tool
-from .session import Session
+from . import config, diagnose, esi, propose, testmode, tool
+from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
-RED, AMBER, GREEN, GREY = QColor("#c62828"), QColor("#b26a00"), QColor("#2e7d32"), QColor("#777777")
+RED, AMBER, GREEN, GREY = QColor("#b42318"), QColor("#9a5b00"), QColor("#1a7f37"), QColor("#6b7280")
 _SLAVE_REF = re.compile(r"^slave (\d+)\b")
 MASTER_ITEM = -1
+
+STYLE = """
+QWidget { font-size: 13px; }
+QMainWindow, QWidget#page { background: #eef1f4; }
+QScrollArea { background: #eef1f4; border: none; }
+QFrame#header { background: #161b22; }
+QLabel#appTitle { font-size: 16px; font-weight: 600; color: #e6edf3; }
+QLabel#appSub { color: #9aa4b2; }
+QLabel#headerInfo { color: #c9d1d9; }
+QLabel#logo { border: 2px solid #79a8ff; border-radius: 6px; font-weight: 700; padding: 0px 4px;
+              color: #79a8ff; }
+QFrame#nav { background: white; border-bottom: 1px solid #d8dee4; }
+QFrame#nav QTabBar::tab { background: white; padding: 10px 16px; border: none;
+              border-bottom: 2px solid transparent; color: #4b5563; }
+QFrame#nav QTabBar::tab:selected { border-bottom: 2px solid #1f6feb; color: #111827; }
+QFrame#card { background: white; border: 1px solid #dde2e8; border-radius: 10px; }
+QFrame#card[tone="red"] { border: 1px solid #f1a7a0; background: #fff7f6; }
+QFrame#card[tone="amber"] { border: 1px solid #f2c46d; background: #fff8e8; }
+QFrame#card[tone="grey"] { background: #f6f7f9; }
+QLabel#cardTitle { color: #4b5563; font-weight: 600; font-size: 11px; letter-spacing: 1px; }
+QLabel#hint { color: #6b7280; }
+QLabel#bigTitle { font-size: 19px; font-weight: 600; color: #111827; }
+QLabel#fieldName { color: #6b7280; font-size: 11px; letter-spacing: 1px; }
+QLabel#value { font-family: monospace; font-size: 18px; }
+QLabel[pill="green"] { background: #dcf5e3; color: #1a7f37; }
+QLabel[pill="blue"] { background: #dbe8ff; color: #1f4fbf; }
+QLabel[pill="red"] { background: #fde2df; color: #b42318; }
+QLabel[pill="amber"] { background: #fdecc8; color: #8a5300; }
+QLabel[pill="grey"] { background: #eceff3; color: #4b5563; }
+QLabel[pill="green"], QLabel[pill="blue"], QLabel[pill="red"], QLabel[pill="amber"],
+QLabel[pill="grey"] { border-radius: 9px; padding: 2px 9px; font-weight: 600; font-size: 11px; }
+QLabel[box] { border: 1px solid #d0d6de; border-radius: 6px; padding: 6px 10px; color: #374151;
+              background: white; }
+QLabel[box="on"] { border: 1px solid #1a7f37; background: #e6f6ea; color: #14532d; font-weight: 600; }
+QLabel[box="fault"] { border: 1px solid #f1a7a0; color: #b42318; }
+QLabel[box="fault-on"] { border: 1px solid #b42318; background: #fde2df; color: #b42318;
+              font-weight: 600; }
+QPushButton { background: white; border: 1px solid #cdd3db; border-radius: 6px; padding: 5px 12px; }
+QPushButton:hover { background: #f3f5f8; }
+QPushButton:disabled { color: #a0a7b2; }
+QPushButton#primary { background: #1f6feb; color: white; border: 1px solid #1f6feb; font-weight: 600;
+              padding: 7px 16px; }
+QPushButton#primary:disabled { background: #8fb2ee; border-color: #8fb2ee; }
+QPushButton#danger { background: #b42318; color: white; border: 2px solid white; font-weight: 700;
+              padding: 6px 18px; }
+QPushButton#big { padding: 14px; font-size: 15px; font-weight: 600; }
+QToolButton#menu { color: #e6edf3; background: #161b22; border: 1px solid #3a434e;
+              border-radius: 6px; padding: 6px 12px; }
+QToolButton#menu::menu-indicator { image: none; width: 0px; }
+QListWidget#slaves { border: none; background: transparent; outline: none; }
+QListWidget#slaves::item { border-radius: 8px; margin: 2px 0px; border: 1px solid transparent; }
+QListWidget#slaves::item:selected { background: #e7efff; border: 1px solid #9dbcf5; }
+QListWidget#messages { border: none; background: transparent; }
+QTableWidget { border: none; gridline-color: #eceff3; background: white; }
+QHeaderView::section { background: white; border: none; border-bottom: 1px solid #dde2e8;
+              padding: 4px; color: #4b5563; font-weight: 600; }
+QPlainTextEdit#code { background: #161b22; color: #e6edf3; border-radius: 8px; padding: 6px; }
+"""
 
 
 def mono():
@@ -47,24 +114,145 @@ def parse_int(text):
     return int(text.strip(), 0)
 
 
-def diagnosis_findings(block):
-    """The lines of one slave's diagnosis that say something is wrong."""
-    out = []
-    for line in block[1:]:
-        t = line.strip()
-        if t.startswith("->") and out:
-            out[-1] += " " + t
-        elif ("not OP" in t or ", error 0x" in t or t.startswith(("Error code", "Error register"))
-              or (t.startswith("CiA 402:") and "Operation enabled" not in t)):
-            out.append(t)
-    return out
-
-
 def interfaces():
     try:
         return sorted(n for n in os.listdir("/sys/class/net") if n != "lo")
     except OSError:
         return []
+
+
+def period_text(ns):
+    if not ns:
+        return "?"
+    return "%g ms" % (ns / 1e6) if ns >= 100000 else "%d us" % (ns // 1000)
+
+
+def state_kind(state):
+    return {"OP": "green", "SAFEOP": "amber", "PREOP": "amber", "INIT": "red"}.get(
+        (state or "").split("+")[0].strip(), "grey")
+
+
+PROFILE_TEXT = {"cia402": "CiA 402 drive", "mdp": "Modular device", "generic": "Generic"}
+
+
+# -- small building blocks
+
+def restyle(w):
+    w.style().unpolish(w)
+    w.style().polish(w)
+
+
+def pill(text="", kind="grey"):
+    lab = QLabel(text)
+    lab.setProperty("pill", kind)
+    lab.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+    lab.setVisible(bool(text))
+    return lab
+
+
+def set_pill(lab, text, kind):
+    lab.setText(text)
+    lab.setVisible(bool(text))
+    if lab.property("pill") != kind:
+        lab.setProperty("pill", kind)
+        restyle(lab)
+
+
+def label(text="", name=None, wrap=False):
+    lab = QLabel(text)
+    if name:
+        lab.setObjectName(name)
+    lab.setWordWrap(wrap)
+    return lab
+
+
+class Card(QFrame):
+    """A white card with an uppercase title and an optional hint."""
+
+    def __init__(self, title=None, hint=None, tone=None):
+        super().__init__()
+        self.setObjectName("card")
+        if tone:
+            self.setProperty("tone", tone)
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(16, 14, 16, 14)
+        self.lay.setSpacing(8)
+        self.head = QHBoxLayout()
+        self.title = label(title.upper() if title else "", "cardTitle")
+        self.head.addWidget(self.title)
+        self.hint = label(hint or "", "hint", wrap=True)
+        self.head.addWidget(self.hint, 1)
+        if title or hint:
+            self.lay.addLayout(self.head)
+
+    def set_tone(self, tone):
+        if (self.property("tone") or "") != (tone or ""):
+            self.setProperty("tone", tone or "")
+            restyle(self)
+
+    def add(self, w, stretch=0):
+        if isinstance(w, QWidget):
+            self.lay.addWidget(w, stretch)
+        else:
+            self.lay.addLayout(w, stretch)
+        return w
+
+
+def fit_table(t, minimum=1):
+    """Make a table as tall as its rows, so the page scrolls instead."""
+    t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    h = t.horizontalHeader().sizeHint().height() + 4
+    for r in range(t.rowCount()):
+        h += t.rowHeight(r)
+    if t.rowCount() < minimum:
+        h += 30 * (minimum - t.rowCount())
+    h += t.horizontalScrollBar().sizeHint().height()
+    t.setFixedHeight(h)
+
+
+def table(columns, stretch=None):
+    t = QTableWidget(0, len(columns))
+    t.setHorizontalHeaderLabels(columns)
+    t.verticalHeader().hide()
+    t.setSelectionBehavior(QAbstractItemView.SelectRows)
+    t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    t.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    if stretch is not None:
+        t.horizontalHeader().setSectionResizeMode(stretch, QHeaderView.Stretch)
+    else:
+        t.horizontalHeader().setStretchLastSection(True)
+    t.setShowGrid(False)
+    return t
+
+
+def item(text, editable=False, tip=None, colour=None, font=None):
+    it = QTableWidgetItem("" if text is None else str(text))
+    if not editable:
+        it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+    if tip:
+        it.setToolTip(tip)
+    if colour is not None:
+        it.setForeground(QBrush(colour))
+    if font is not None:
+        it.setFont(font)
+    return it
+
+
+def scroll(widget):
+    sa = QScrollArea()
+    sa.setWidgetResizable(True)
+    sa.setFrameShape(QFrame.NoFrame)
+    sa.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    widget.setObjectName("page")
+    sa.setWidget(widget)
+    return sa
+
+
+def page_layout(w):
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(24, 20, 24, 20)
+    lay.setSpacing(16)
+    return lay
 
 
 class Worker(QThread):
@@ -88,7 +276,163 @@ class Worker(QThread):
             self.failed.emit("%s: %s" % (type(e).__name__, e))
 
 
-class MasterPage(QWidget):
+# -- the header
+
+class Header(QFrame):
+    def __init__(self, win):
+        super().__init__()
+        self.setObjectName("header")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(20, 10, 20, 10)
+        lay.setSpacing(12)
+        lay.addWidget(label("•-•", "logo"))
+        lay.addWidget(label(TITLE, "appTitle"))
+        lay.addWidget(label("for LinuxCNC", "appSub"))
+        lay.addSpacing(16)
+        self.info = label("", "headerInfo")
+        self.info.setFont(mono())
+        lay.addWidget(self.info)
+        lay.addStretch(1)
+        self.status = pill("", "grey")
+        lay.addWidget(self.status)
+        self.menu_button = QToolButton()
+        self.menu_button.setObjectName("menu")
+        self.menu_button.setText("File ▾")
+        self.menu_button.setPopupMode(QToolButton.InstantPopup)
+        lay.addWidget(self.menu_button)
+        self.save = QPushButton("Save")
+        self.save.setObjectName("primary")
+        self.save.setToolTip("Write ethercat.yaml; the old file is kept as .bak")
+        self.save.clicked.connect(win.save)
+        lay.addWidget(self.save)
+        self.stop = QPushButton("STOP")
+        self.stop.setObjectName("danger")
+        self.stop.setToolTip("Stop the test: outputs back to 0, halrun ends")
+        self.stop.clicked.connect(win.stop_test)
+        lay.addWidget(self.stop)
+
+
+# -- the Bus page
+
+class SlaveRow(QWidget):
+    """One slave in the bus list: position, device, name and kind, state."""
+
+    def __init__(self, pos_text, title, subtitle, state, kind, problem=None):
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 6, 10, 6)
+        pos = label(pos_text)
+        pos.setFont(mono())
+        pos.setFixedWidth(22)
+        lay.addWidget(pos)
+        text = QVBoxLayout()
+        text.setSpacing(0)
+        t = label(title, wrap=True)
+        t.setStyleSheet("font-weight: 600; font-size: 14px;")
+        text.addWidget(t)
+        sub = label(subtitle, "hint")
+        sub.setWordWrap(True)
+        text.addWidget(sub)
+        lay.addLayout(text, 1)
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        if state:
+            col.addWidget(pill(state, kind), 0, Qt.AlignRight)
+        if problem:
+            col.addWidget(pill(problem[0], problem[1]), 0, Qt.AlignRight)
+        lay.addLayout(col)
+
+
+class BusList(Card):
+    def __init__(self, win):
+        super().__init__("Bus")
+        self.win = win
+        self.setFixedWidth(340)
+        self.rescan = QPushButton("Rescan")
+        self.rescan.setToolTip("Read the slaves on the bus: SII, CoE dictionary, ESI files. "
+                               "Nothing is written to them.")
+        self.rescan.clicked.connect(win.read_bus)
+        self.head.addWidget(self.rescan)
+        self.list = QListWidget()
+        self.list.setObjectName("slaves")
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.setResizeMode(QListWidget.Adjust)
+        self.list.currentItemChanged.connect(self.changed)
+        self.add(self.list, 1)
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("color: #e5e7eb;")
+        self.add(line)
+        self.summary = self.add(label("", wrap=True))
+        self.messages = QListWidget()
+        self.messages.setObjectName("messages")
+        self.messages.setWordWrap(True)
+        self.messages.setMaximumHeight(170)
+        self.messages.itemClicked.connect(win.message_activated)
+        self.messages.itemActivated.connect(win.message_activated)
+        self.add(self.messages)
+        buttons = QVBoxLayout()
+        self.update_button = QPushButton("Update the file from the bus")
+        self.update_button.setToolTip("Bring the file up to date with the bus: slaves keep their "
+                                      "entries, new ones get proposals, missing ones are left out")
+        self.update_button.clicked.connect(win.update_from_bus)
+        buttons.addWidget(self.update_button)
+        self.esi = QPushButton("+ Add ESI files...")
+        self.esi.clicked.connect(win.add_esi)
+        buttons.addWidget(self.esi)
+        self.add(buttons)
+
+    def changed(self, it, _prev=None):
+        if it is not None:
+            self.win.select(it.data(Qt.UserRole), source=self)
+
+    def fill(self):
+        win, s = self.win, self.win.session
+        m = (s.cfg or {}).get("master") or {}
+        self.title.setText(("BUS · %s" % m["interface"].upper()) if m.get("interface") else "BUS")
+        self.list.blockSignals(True)
+        self.list.clear()
+        rows = []
+        if s.cfg is not None or s.bus:
+            n = len(win.messages_by_slave.get(None, []))
+            rows.append((MASTER_ITEM, SlaveRow(
+                "", "Master", " · ".join(x for x in (m.get("interface"), m.get("transport"),
+                                                     "cycle " + period_text(s.period)) if x),
+                "", "grey", ("%d error%s" % (n, "" if n == 1 else "s"), "red") if n else None)))
+        file_slaves = {x.get("position"): x for x in (s.cfg or {}).get("slaves") or []}
+        for pos in sorted(set(file_slaves) | set(s.bus)):
+            f, b = file_slaves.get(pos), s.bus.get(pos)
+            device = (f or {}).get("device") or (b.proposal.name if b else "")
+            sub = " · ".join(x for x in ((f or {}).get("name"),
+                                         PROFILE_TEXT.get((f or {}).get("profile"))) if x)
+            state = b.info.get("state", "?") if b else ""
+            rows.append((pos, SlaveRow(str(pos), device, sub or "not in the file", state,
+                                       state_kind(state), win.file_problem(pos))))
+        width = self.width() - 40      # the card's margins and the item's border
+        for key, w in rows:
+            it = QListWidgetItem()
+            it.setData(Qt.UserRole, key)
+            w.setFixedWidth(width)
+            w.adjustSize()
+            it.setSizeHint(w.sizeHint())
+            self.list.addItem(it)
+            self.list.setItemWidget(it, w)
+        self.list.blockSignals(False)
+        self.select(win.current)
+        self.summary.setText(win.bus_summary())
+        self.update_button.setEnabled(bool(s.bus) and not win.busy)
+        self.rescan.setEnabled(not win.busy)
+
+    def select(self, key):
+        self.list.blockSignals(True)
+        for i in range(self.list.count()):
+            if self.list.item(i).data(Qt.UserRole) == key:
+                self.list.setCurrentRow(i)
+                break
+        self.list.blockSignals(False)
+
+
+class MasterView(QWidget):
     """The master's settings: interface, transport, distributed clocks."""
 
     def __init__(self, win):
@@ -96,10 +440,10 @@ class MasterPage(QWidget):
         self.win = win
         self.loading = False
         lay = QVBoxLayout(self)
-        title = QLabel("Master")
-        title.setFont(QFont(title.font().family(), 14, QFont.Bold))
-        lay.addWidget(title)
-
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(16)
+        lay.addWidget(label("Master", "bigTitle"))
+        card = Card("Master", "The network card and how frames are sent.")
         form = QFormLayout()
         self.interface = QComboBox()
         self.interface.setEditable(True)
@@ -111,18 +455,20 @@ class MasterPage(QWidget):
         self.transport.currentTextChanged.connect(self.edited)
         form.addRow("Transport", self.transport)
         ini = QHBoxLayout()
-        self.ini_label = QLabel()
+        self.ini_label = label(wrap=True)
         ini.addWidget(self.ini_label, 1)
         choose = QPushButton("INI file...")
         choose.clicked.connect(win.choose_ini)
         ini.addWidget(choose)
         form.addRow("Servo period", ini)
-        lay.addLayout(form)
+        card.add(form)
+        lay.addWidget(card)
 
-        self.dc = QGroupBox("Distributed clocks")
-        self.dc.setCheckable(True)
-        self.dc.toggled.connect(self.edited)
-        dform = QFormLayout(self.dc)
+        self.dc = Card("Distributed clocks", "Keep the slaves' clocks in step with the servo thread.")
+        self.dc_on = QCheckBox("Use distributed clocks")
+        self.dc_on.toggled.connect(self.edited)
+        self.dc.add(self.dc_on)
+        dform = QFormLayout()
         self.ref_cycles = QSpinBox()
         self.ref_cycles.setRange(0, 1000000)
         self.ref_cycles.valueChanged.connect(self.edited)
@@ -142,8 +488,15 @@ class MasterPage(QWidget):
         self.shift.valueChanged.connect(self.edited)
         shift.addWidget(self.shift, 1)
         dform.addRow("SYNC0 shift", shift)
+        self.dc.add(dform)
         lay.addWidget(self.dc)
         lay.addStretch(1)
+
+    def _enable_dc(self):
+        on = self.dc_on.isChecked()
+        for w in (self.ref_cycles, self.follows, self.shift_auto):
+            w.setEnabled(on)
+        self.shift.setEnabled(on and not self.shift_auto.isChecked())
 
     def show_config(self):
         self.loading = True
@@ -156,14 +509,14 @@ class MasterPage(QWidget):
             "unknown: choose the machine's INI file" if not s.ini_path else
             "not found in %s" % s.ini_path)
         dc = m.get("dc")
-        self.dc.setChecked(dc is not None)
+        self.dc_on.setChecked(dc is not None)
         dc = dc or {}
         self.ref_cycles.setValue(int(dc.get("ref-clock-sync-cycles") or 0))
         self.follows.setChecked(bool(dc.get("servo-thread-follows-ref-clock")))
         shift = dc.get("sync0-shift-ns")
         self.shift_auto.setChecked(shift == "auto")
-        self.shift.setEnabled(shift != "auto")
         self.shift.setValue(shift if isinstance(shift, int) else 0)
+        self._enable_dc()
         self.setEnabled(s.cfg is not None)
         self.loading = False
 
@@ -177,82 +530,117 @@ class MasterPage(QWidget):
         else:
             m.pop("interface", None)
         m["transport"] = self.transport.currentText()
-        if self.dc.isChecked():
+        if self.dc_on.isChecked():
             dc = m.setdefault("dc", {})
             if self.ref_cycles.value():
                 dc["ref-clock-sync-cycles"] = self.ref_cycles.value()
             else:
                 dc.pop("ref-clock-sync-cycles", None)
             dc["servo-thread-follows-ref-clock"] = self.follows.isChecked()
-            self.shift.setEnabled(not self.shift_auto.isChecked())
             dc["sync0-shift-ns"] = "auto" if self.shift_auto.isChecked() else self.shift.value()
         else:
             m.pop("dc", None)
+        self._enable_dc()
         self.win.changed()
 
 
-class SlavePage(QWidget):
-    """One slave: general, process data, settings, diagnosis."""
+class SlaveView(QWidget):
+    """One slave on the Bus page."""
 
-    PD_COLUMNS = ["Dir", "PDO", "Object", "Name", "Bits", "Type", "Use", "Pin", "HAL type",
+    PD_COLUMNS = ["Dir", "PDO", "Object", "Name", "Type", "Use", "HAL pin", "HAL type",
                   "Scale", "Offset", "Bit pins"]
-    PIN, HALTYPE, SCALE, OFFSET, SPLIT = 7, 8, 9, 10, 11
+    PIN, HALTYPE, SCALE, OFFSET, SPLIT = 6, 7, 8, 9, 10
     SET_COLUMNS = ["Object", "Name", "Type", "Value"]
-    TEST_COLUMNS = ["Pin", "Type", "Direction", "Value", "Set"]
-    TEST_TAB = 4
 
     def __init__(self, win):
         super().__init__()
         self.win = win
         self.position = None
         self.loading = False
+        self.pd_rows = []
         lay = QVBoxLayout(self)
-        self.title = QLabel()
-        self.title.setFont(QFont(self.title.font().family(), 14, QFont.Bold))
-        lay.addWidget(self.title)
-        self.subtitle = QLabel()
-        self.subtitle.setWordWrap(True)
-        lay.addWidget(self.subtitle)
-        self.tabs = QTabWidget()
-        lay.addWidget(self.tabs, 1)
-        self.tabs.addTab(self._general(), "General")
-        self.tabs.addTab(self._process_data(), "Process data")
-        self.tabs.addTab(self._settings(), "Settings")
-        self.tabs.addTab(self._diagnosis(), "Diagnosis")
-        self.tabs.addTab(self._test(), "Test")
-        self.tabs.currentChanged.connect(lambda i: self.show_test() if i == self.TEST_TAB else None)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(16)
 
-    # -- building
-
-    def _general(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        form = QFormLayout()
+        # the slave
+        head = Card()
+        row = QHBoxLayout()
+        self.title = label("", "bigTitle")
+        row.addWidget(self.title)
+        self.state = pill()
+        row.addWidget(self.state)
+        self.profile = pill("", "blue")
+        row.addWidget(self.profile)
+        self.where = label("", "hint")
+        row.addWidget(self.where)
+        row.addStretch(1)
+        trouble = QPushButton("Troubleshoot")
+        trouble.clicked.connect(lambda: win.show_tab(win.trouble_page))
+        row.addWidget(trouble)
+        test = QPushButton("Test this slave")
+        test.clicked.connect(lambda: win.show_tab(win.test_page))
+        row.addWidget(test)
+        head.add(row)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        self.fields = {}
+        for c, name in enumerate(("Vendor", "Product", "Revision", "Clock")):
+            grid.addWidget(label(name.upper(), "fieldName"), 0, c)
+            v = label()
+            v.setFont(mono())
+            v.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            grid.addWidget(v, 1, c)
+            self.fields[name] = v
+        grid.addWidget(label("NAME (PIN PREFIX)", "fieldName"), 0, 4)
         self.name = QLineEdit()
-        self.name.setToolTip("The start of the slave's HAL pin names: ecat.<name>.<pin>")
+        self.name.setToolTip("The start of the slave's HAL pin names: <name>.<pin>")
         self.name.textEdited.connect(self.general_edited)
-        form.addRow("Name", self.name)
-        self.identity = QLabel()
-        self.identity.setFont(mono())
-        self.identity.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        form.addRow("Identity", self.identity)
-        self.profile = QLabel()
-        form.addRow("Profile", self.profile)
-        self.esi = QLabel()
-        self.esi.setWordWrap(True)
-        form.addRow("ESI file", self.esi)
-        lay.addLayout(form)
+        grid.addWidget(self.name, 1, 4)
+        grid.setColumnStretch(4, 1)
+        head.add(grid)
+        self.bus_ident = head.add(label("", "hint", wrap=True))
+        lay.addWidget(head)
 
-        self.cia402 = QGroupBox("CiA 402 drive")
+        self.problems = Card("Problems", tone="red")
+        self.problem_text = self.problems.add(label(wrap=True))
+        lay.addWidget(self.problems)
+
+        # where the configuration comes from, and operation and sync
+        two = QHBoxLayout()
+        two.setSpacing(16)
+        self.source = Card("Where the configuration comes from")
+        self.source_rows = []
+        for _ in range(3):
+            r = QHBoxLayout()
+            mark = pill()
+            mark.setFixedWidth(26)
+            mark.setAlignment(Qt.AlignCenter)
+            text = label(wrap=True)
+            r.addWidget(mark)
+            r.addWidget(text, 1)
+            self.source.add(r)
+            self.source_rows.append((mark, text))
+        esi_row = QHBoxLayout()
+        self.esi_button = QPushButton("Choose ESI files...")
+        self.esi_button.clicked.connect(win.add_esi)
+        esi_row.addWidget(self.esi_button)
+        esi_row.addStretch(1)
+        self.source.add(esi_row)
+        self.source.lay.addStretch(1)
+        two.addWidget(self.source, 1)
+
+        op = Card("Operation and sync")
+        self.cia402 = QWidget()
         cform = QFormLayout(self.cia402)
+        cform.setContentsMargins(0, 0, 0, 0)
         self.mode = QComboBox()
-        for m, text in (("csp", "CSP: cyclic synchronous position (a joint)"),
-                        ("csv", "CSV: cyclic synchronous velocity (a joint with a pid)"),
-                        ("pv", "PV: profile velocity (a spindle or conveyor)"),
-                        ("pp", "PP: profile position (positioning that is not a joint)")):
+        for m, text in (("csp", "Cyclic synchronous position (CSP)"),
+                        ("csv", "Cyclic synchronous velocity (CSV)"),
+                        ("pv", "Profile velocity (PV), a spindle or conveyor"),
+                        ("pp", "Profile position (PP), positioning that is not a joint")):
             self.mode.addItem(text, m)
         self.mode.activated.connect(self.general_edited)
-        cform.addRow("Mode", self.mode)
+        cform.addRow("Mode of operation", self.mode)
         modes = QHBoxLayout()
         self.other_modes = {}
         for m in ("hm", "csp", "csv", "pv", "pp"):
@@ -262,88 +650,68 @@ class SlavePage(QWidget):
             modes.addWidget(cb)
         modes.addStretch(1)
         cform.addRow("Other modes", modes)
-        self.drive_modes = QLabel()
-        cform.addRow("The drive supports", self.drive_modes)
-        lay.addWidget(self.cia402)
-
-        self.pdo_box = QGroupBox("Process data")
-        pform = QFormLayout(self.pdo_box)
-        self.configure_pdos = QCheckBox("Write the PDO mapping to the slave (configure-pdos)")
-        self.configure_pdos.toggled.connect(self.general_edited)
-        pform.addRow(self.configure_pdos)
+        self.supported = QHBoxLayout()
+        self.supported.addStretch(1)
+        cform.addRow("Supported (0x6502)", self.supported)
+        cform.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        op.add(self.cia402)
         again = QHBoxLayout()
         self.pdo_set = QComboBox()
         self.pdo_set.setToolTip("The ESI file's predefined PDO assignments")
         again.addWidget(self.pdo_set, 1)
-        self.again = QPushButton("Propose again from the bus")
+        self.again = QPushButton("Propose again")
         self.again.setToolTip("Read the slave and replace its process data, DC and settings with "
                               "a new proposal for the chosen mode and PDO assignment. The name is "
                               "kept.")
         self.again.clicked.connect(self.propose_again)
         again.addWidget(self.again)
-        pform.addRow("PDO assignment", again)
-        lay.addWidget(self.pdo_box)
-
-        self.dc = QGroupBox("Distributed clocks")
-        self.dc.setCheckable(True)
+        op.add(again)
+        self.configure_pdos = QCheckBox("Write the PDO mapping to the slave (configure-pdos)")
+        self.configure_pdos.toggled.connect(self.general_edited)
+        op.add(self.configure_pdos)
+        sync = QHBoxLayout()
+        sync.addWidget(label("Sync:"))
+        self.dc = QCheckBox("DC SYNC0")
         self.dc.toggled.connect(self.general_edited)
-        dform = QFormLayout(self.dc)
+        sync.addWidget(self.dc)
         self.assign = QLineEdit()
+        self.assign.setMaximumWidth(90)
+        self.assign.setMinimumWidth(70)
         self.assign.setToolTip("AssignActivate, as in the ESI file, such as 0x0300")
         self.assign.textEdited.connect(self.general_edited)
-        dform.addRow("Assign activate", self.assign)
+        sync.addWidget(self.assign)
         self.sync0_cycles = QSpinBox()
         self.sync0_cycles.setRange(1, 1000)
-        self.sync0_cycles.setSuffix(" x servo period")
+        self.sync0_cycles.setPrefix("cycle ")
+        self.sync0_cycles.setSuffix(" x")
         self.sync0_cycles.valueChanged.connect(self.general_edited)
-        dform.addRow("SYNC0 cycle", self.sync0_cycles)
+        sync.addWidget(self.sync0_cycles)
         self.sync0_shift = QSpinBox()
         self.sync0_shift.setRange(-10000000, 10000000)
+        self.sync0_shift.setPrefix("shift ")
         self.sync0_shift.setSuffix(" ns")
         self.sync0_shift.valueChanged.connect(self.general_edited)
-        dform.addRow("SYNC0 shift", self.sync0_shift)
-        lay.addWidget(self.dc)
+        sync.addWidget(self.sync0_shift)
+        sync.addStretch(1)
+        op.add(sync)
+        op.lay.addStretch(1)
+        two.addWidget(op, 1)
+        lay.addLayout(two)
 
-        self.notes = QLabel()
-        self.notes.setWordWrap(True)
-        self.notes.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.notes)
-        lay.addStretch(1)
-        return w
-
-    def _process_data(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        hint = QLabel("Pins are ecat.<name>.<pin>. Entries the profile handles have no pins of "
-                      "their own. Clear a pin to map the entry without a pin.")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-        self.pd = QTableWidget(0, len(self.PD_COLUMNS))
-        self.pd.setHorizontalHeaderLabels(self.PD_COLUMNS)
-        self.pd.verticalHeader().hide()
-        self.pd.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.pd.horizontalHeader().setSectionResizeMode(self.PIN, QHeaderView.Stretch)
-        self.pd.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # process data
+        pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
+                                  "without one; entries the profile handles have no pins.")
+        self.pd = table(self.PD_COLUMNS, self.PIN)
         self.pd.itemChanged.connect(self.pd_edited)
-        lay.addWidget(self.pd)
-        return w
+        pd.add(self.pd)
+        lay.addWidget(pd)
 
-    def _settings(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        hint = QLabel("SDOs written to the slave at every start, in PREOP. Type an object such as "
-                      "0x2000:01; its name and type come from the slave's dictionary when the bus "
-                      "has been read.")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-        self.st = QTableWidget(0, len(self.SET_COLUMNS))
-        self.st.setHorizontalHeaderLabels(self.SET_COLUMNS)
-        self.st.verticalHeader().hide()
-        self.st.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.st.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.st.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # settings
+        st = Card("Settings", "SDOs written at every start, in PREOP. Type an object such as "
+                              "0x2000:01; name and type come from the slave's dictionary.")
+        self.st = table(self.SET_COLUMNS, 1)
         self.st.itemChanged.connect(self.st_edited)
-        lay.addWidget(self.st)
+        st.add(self.st)
         buttons = QHBoxLayout()
         add = QPushButton("Add setting")
         add.clicked.connect(self.add_setting)
@@ -352,68 +720,13 @@ class SlavePage(QWidget):
         buttons.addWidget(add)
         buttons.addWidget(remove)
         buttons.addStretch(1)
-        lay.addLayout(buttons)
-        return w
+        st.add(buttons)
+        lay.addWidget(st)
 
-    def _diagnosis(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        top = QHBoxLayout()
-        self.diag_state = QLabel()
-        top.addWidget(self.diag_state, 1)
-        run = QPushButton("Diagnose this slave")
-        run.clicked.connect(lambda: self.win.diagnose([self.position]))
-        top.addWidget(run)
-        lay.addLayout(top)
-        self.diag = QPlainTextEdit()
-        self.diag.setReadOnly(True)
-        self.diag.setFont(mono())
-        self.diag.setPlaceholderText("Not diagnosed yet. The diagnosis only reads: the slave's "
-                                     "state, error counters per port (watched for 2 s), its "
-                                     "diagnosis history and, for a drive, the CiA 402 state.")
-        lay.addWidget(self.diag)
-        return w
-
-    def _test(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        self.test_state = QLabel()
-        self.test_state.setWordWrap(True)
-        lay.addWidget(self.test_state)
-        self.tp = QTableWidget(0, len(self.TEST_COLUMNS))
-        self.tp.setHorizontalHeaderLabels(self.TEST_COLUMNS)
-        self.tp.verticalHeader().hide()
-        self.tp.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tp.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.tp.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        lay.addWidget(self.tp, 1)
-        self.tp_rows = {}
-
-        box = QGroupBox("SDO (CoE object)")
-        form = QHBoxLayout(box)
-        self.sdo_obj = QLineEdit()
-        self.sdo_obj.setPlaceholderText("0x2000:01")
-        self.sdo_obj.setMaximumWidth(110)
-        self.sdo_obj.editingFinished.connect(self.sdo_object_typed)
-        form.addWidget(self.sdo_obj)
-        self.sdo_type = QComboBox()
-        self.sdo_type.addItem("type from the slave", None)
-        for t in sorted(testmode.TOOL_TYPES.values()) + ["string"]:
-            self.sdo_type.addItem(t, t)
-        form.addWidget(self.sdo_type)
-        read = QPushButton("Read")
-        read.clicked.connect(self.sdo_read)
-        form.addWidget(read)
-        self.sdo_value = QLineEdit()
-        self.sdo_value.setPlaceholderText("value")
-        form.addWidget(self.sdo_value, 1)
-        write = QPushButton("Write...")
-        write.clicked.connect(self.sdo_write)
-        form.addWidget(write)
-        self.sdo_name = QLabel()
-        lay.addWidget(box)
-        lay.addWidget(self.sdo_name)
-        return w
+        self.notes = Card("Notes from the proposal")
+        self.notes_text = self.notes.add(label(wrap=True))
+        lay.addWidget(self.notes)
+        lay.addStretch(1)
 
     # -- showing
 
@@ -431,36 +744,73 @@ class SlavePage(QWidget):
         b = win.session.bus.get(pos)
         p = b.proposal if b else None
         self.title.setText("Slave %d · %s" % (pos, (s or {}).get("device") or (p.name if p else "")))
-        where = []
-        if b:
-            where.append("on the bus, %s" % b.info.get("state", "?"))
-        else:
-            where.append("not read from the bus")
-        where.append("in the file" if s else "not in the file: add it with Update from bus")
-        self.subtitle.setText("; ".join(where))
-        for i in (0, 1, 2, self.TEST_TAB):
-            self.tabs.setTabEnabled(i, s is not None)
-        if s is None:
-            self.tabs.setCurrentIndex(3)
-            self.name.setText("")
-            self.show_diagnosis()
-            return
+        state = b.info.get("state", "?") if b else ""
+        set_pill(self.state, state, state_kind(state))
+        set_pill(self.profile, ("Profile: %s" % PROFILE_TEXT.get(s.get("profile"), s.get("profile")))
+                 if s else "", "blue")
+        self.where.setText("" if s and b else "not read from the bus" if s else
+                           "not in the file: add it with Update from bus")
+        self.name.setEnabled(s is not None)
+        problems = win.messages_by_slave.get(pos, [])
+        self.problems.setVisible(bool(problems))
+        self.problem_text.setText("\n".join(problems))
 
-        self.name.setText(s.get("name", ""))
-        ident = s.get("identity") or {}
-        text = "vendor %s  product %s  revision %s" % (ident.get("vendor"), ident.get("product"),
-                                                       ident.get("revision", "-"))
-        if b:
-            i = b.info
-            bus_ident = "vendor 0x%08X  product 0x%08X  revision 0x%08X" % (
-                i["vendor_id"] or 0, i["product_code"] or 0, i["revision"] or 0)
-            if bus_ident != text:
-                text += "\non the bus: " + bus_ident
-        self.identity.setText(text)
-        self.profile.setText({"cia402": "CiA 402 drive", "mdp": "Modular device (ETG.5001)",
-                              "generic": "none: configured from its process data"}.get(
-                                  s.get("profile"), str(s.get("profile"))))
-        self.esi.setText(p.esi_path or "no matching file" if p else "-")
+        ident = (s or {}).get("identity") or {}
+        info = b.info if b else {}
+
+        def hx(v):
+            return "0x%08X" % v if isinstance(v, int) else (v or "-")
+        self.fields["Vendor"].setText(hx(ident.get("vendor") or info.get("vendor_id")))
+        self.fields["Product"].setText(hx(ident.get("product") or info.get("product_code")))
+        self.fields["Revision"].setText(hx(ident.get("revision") or info.get("revision")))
+        self.fields["Clock"].setText("DC" if info.get("dc") else "no DC" if b else "-")
+        bus_ident = ""
+        try:
+            want = (int(str(ident.get("vendor")), 16), int(str(ident.get("product")), 16),
+                    int(str(ident.get("revision", "0")), 16))
+        except ValueError:
+            want = None
+        if s and b and want != (info["vendor_id"], info["product_code"], info["revision"]):
+            bus_ident = "On the bus: vendor 0x%08X, product 0x%08X, revision 0x%08X" % (
+                info["vendor_id"] or 0, info["product_code"] or 0, info["revision"] or 0)
+        self.bus_ident.setText(bus_ident)
+        self.bus_ident.setVisible(bool(bus_ident))
+        self.name.setText((s or {}).get("name", ""))
+
+        # sources
+        rows = []
+        if p:
+            rows.append((True, "Slave's own EEPROM (SII): PDOs, sync managers"))
+            has_coe = b.coe is not None and bool(b.coe)
+            rows.append((has_coe, "CoE dictionary read from the slave" if has_coe else
+                         "No CoE dictionary: names come from the SII"))
+            rows.append((bool(p.esi_path), "ESI file: %s" % os.path.basename(p.esi_path)
+                         if p.esi_path else "No ESI file for this product"))
+        else:
+            rows.append((None, "Not read from the bus: Rescan to see the slave's own data"))
+        for (mark, text), row in zip(self.source_rows, rows + [None] * 3):
+            if row is None:
+                mark.hide()
+                text.hide()
+                continue
+            ok, t = row
+            set_pill(mark, "✓" if ok else "!" if ok is False else "–",
+                     "green" if ok else "amber" if ok is False else "grey")
+            text.show()
+            text.setText(t)
+        self.esi_button.setVisible(bool(p) and not p.esi_path)
+
+        editable = (self.cia402, self.pdo_set, self.configure_pdos, self.dc, self.pd, self.st)
+        for w in editable:
+            w.setEnabled(s is not None)
+        if s is None:
+            self.again.setEnabled(False)
+            for w in (self.assign, self.sync0_cycles, self.sync0_shift):
+                w.setEnabled(False)
+            self.pd.setRowCount(0)
+            self.st.setRowCount(0)
+            self.notes.hide()
+            return
 
         is402 = s.get("profile") == "cia402"
         self.cia402.setVisible(is402)
@@ -471,13 +821,18 @@ class SlavePage(QWidget):
             for m, cb in self.other_modes.items():
                 cb.setChecked(m in (c.get("modes") or []))
                 cb.setEnabled(m != c.get("mode"))
-            self.drive_modes.setText(" ".join(p.drive_modes) if p and p.drive_modes
-                                     else "unknown (0x6502 not read)")
+            while self.supported.count() > 1:
+                w = self.supported.takeAt(0).widget()
+                if w:
+                    w.deleteLater()
+            chips = p.drive_modes if p and p.drive_modes else ["not read"]
+            for m in chips:
+                self.supported.insertWidget(self.supported.count() - 1, pill(m.upper(), "grey"))
 
         self.configure_pdos.setChecked(bool(s.get("configure-pdos", True)))
         self.pdo_set.clear()
-        self.pdo_set.addItem("The ESI file's default, or the slave's own" if p and p.pdo_sets
-                             else "The slave's own mapping, or the ESI file's", None)
+        self.pdo_set.addItem("PDO assignment: the ESI file's default" if p and p.pdo_sets
+                             else "PDO assignment: the slave's own", None)
         for name in (p.pdo_sets if p else []):
             self.pdo_set.addItem(name, name)
         self.again.setEnabled(b is not None and not win.busy)
@@ -488,59 +843,68 @@ class SlavePage(QWidget):
         self.assign.setText(str(dc.get("assign-activate", "")))
         self.sync0_cycles.setValue(int(dc.get("sync0-cycles") or 1))
         self.sync0_shift.setValue(int(dc.get("sync0-shift-ns") or 0))
+        for w in (self.assign, self.sync0_cycles, self.sync0_shift):
+            w.setEnabled(self.dc.isChecked())
         notes = list(p.notes) if p else []
-        self.notes.setText("\n".join("Note: %s" % n for n in notes))
+        self.notes.setVisible(bool(notes))
+        self.notes_text.setText("\n".join(notes))
 
         self.show_process_data(s)
         self.show_settings(s)
-        self.show_diagnosis()
-        self.show_test()
-
-    def _item(self, text, editable=False, tip=None):
-        it = QTableWidgetItem("" if text is None else str(text))
-        if not editable:
-            it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-            if text in ("profile", "gap"):
-                it.setForeground(QBrush(GREY))
-        if tip:
-            it.setToolTip(tip)
-        return it
 
     def show_process_data(self, s):
+        self.loading = True
         self.pd.setRowCount(0)
         self.pd_rows = []
+        b = self.win.session.bus.get(self.position)
+        self.pd_names = {(e.index, e.subindex): e.name for c in (b.proposal.pdos if b else [])
+                         for e in c.entries}
         pd = s.get("process-data") or {}
         for direction in ("outputs", "inputs"):
             for pi, pdo in enumerate(pd.get(direction) or []):
                 for ei, e in enumerate(pdo.get("entries") or []):
-                    self._pd_row(direction, pdo, pi, e, ei)
+                    self._pd_row(s, direction, pdo, pi, e, ei)
         self.pd.resizeColumnsToContents()
         self.pd.horizontalHeader().setSectionResizeMode(self.PIN, QHeaderView.Stretch)
+        fit_table(self.pd)
+        self.loading = False
 
-    def _pd_row(self, direction, pdo, pi, e, ei):
+    @staticmethod
+    def _use(e):
+        return e.get("use") or ("split" if "split" in e else "pin" if "pin" in e else "-")
+
+    def _pd_row(self, s, direction, pdo, pi, e, ei):
         r = self.pd.rowCount()
         self.pd.insertRow(r)
         self.pd_rows.append((direction, pi, ei))
         try:
             index, sub = config.parse_obj(e.get("object"))
-            name = self.win.session.object_name(self.position, index, sub)
+            name = self.win.session.object_name(self.position, index, sub) or \
+                self.pd_names.get((index, sub), "")
         except ValueError:
             name = ""
-        use = e.get("use") or ("split" if "split" in e else "pin" if "pin" in e else "-")
+        use = self._use(e)
         fixed = use in ("profile", "gap")
         cells = ["out" if direction == "outputs" else "in", pdo.get("pdo"), e.get("object"), name,
-                 e.get("bits"), e.get("type"), use]
+                 "%s %s" % (e.get("type", ""), e.get("bits")), use]
         for c, v in enumerate(cells):
-            self.pd.setItem(r, c, self._item(v))
-        self.pd.setItem(r, self.PIN, self._item(e.get("pin", ""), editable=not fixed and "split" not in e))
-        self.pd.setItem(r, self.SCALE, self._item(e.get("scale", ""), editable=not fixed))
-        self.pd.setItem(r, self.OFFSET, self._item(e.get("offset", ""), editable=not fixed))
-        self.pd.setItem(r, self.SPLIT, self._item(", ".join(p or "" for p in e.get("split", [])),
-                                                  editable=not fixed and "pin" not in e,
-                                                  tip="One pin per bit, from bit 0, comma separated; "
-                                                      "leave a bit empty to give it no pin"))
+            self.pd.setItem(r, c, item(v, colour=GREY if v in ("profile", "gap") else None,
+                                       font=mono() if c in (1, 2) else None))
+        pin_text = e.get("pin", "")
+        if use == "profile":
+            pin_text = "handled by the %s" % ("CiA 402 profile" if s.get("profile") == "cia402"
+                                              else "encoder function")
+        self.pd.setItem(r, self.PIN, item(pin_text, editable=not fixed and "split" not in e,
+                                          colour=GREY if fixed else None,
+                                          font=None if fixed else mono()))
+        self.pd.setItem(r, self.SCALE, item(e.get("scale", ""), editable=not fixed))
+        self.pd.setItem(r, self.OFFSET, item(e.get("offset", ""), editable=not fixed))
+        self.pd.setItem(r, self.SPLIT, item(", ".join(p or "" for p in e.get("split", [])),
+                                            editable=not fixed and "pin" not in e,
+                                            tip="One pin per bit, from bit 0, comma separated; "
+                                                "leave a bit empty to give it no pin"))
         if fixed:
-            self.pd.setItem(r, self.HALTYPE, self._item(""))
+            self.pd.setItem(r, self.HALTYPE, item(""))
             return
         box = QComboBox()
         box.addItems([""] + sorted(config.HAL_TYPES))
@@ -564,138 +928,11 @@ class SlavePage(QWidget):
             if "value" not in st and "data" in st:
                 value = "data %s" % st["data"]
             for c, v in enumerate((st.get("object"), st.get("name", ""), st.get("type", ""), value)):
-                self.st.setItem(r, c, self._item(v, editable=True))
+                self.st.setItem(r, c, item(v, editable=True, font=mono() if c == 0 else None))
         self.st.resizeColumnsToContents()
+        self.st.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        fit_table(self.st, minimum=1)
         self.loading = False
-
-    def _prefix(self):
-        s = self.win.session.slave(self.position)
-        return "%s." % s["name"] if s and s.get("name") else None
-
-    def show_test(self):
-        """Build the pin table of the running test for this slave."""
-        self.tp.setRowCount(0)
-        self.tp_rows = {}
-        run = self.win.test
-        prefix = self._prefix()
-        if run is None or not run.running:
-            self.test_state.setText(
-                "The I/O test is off. Start it with Test > Start test: the ecat component runs "
-                "this configuration in halrun, so inputs show here live and outputs can be set. "
-                "Drives stay disabled. SDOs can be read and written whenever a master runs.")
-            return
-        if prefix is None:
-            return
-        try:
-            pins = run.pins(prefix)
-        except testmode.TestError as e:
-            self.test_state.setText(str(e))
-            return
-        drive = prefix.startswith(run.read_only)
-        self.test_state.setText(
-            "Test running. " + ("This is a CiA 402 drive: its pins are shown, not set; drives are "
-                                "tested with motion in the CiA 402 test mode." if drive else
-                                "Pins set here go back to 0 when the test stops. Mind what is "
-                                "wired to the outputs."))
-        for name in sorted(pins):
-            pin = pins[name]
-            r = self.tp.rowCount()
-            self.tp.insertRow(r)
-            self.tp_rows[name] = r
-            # HAL's direction is the component's: its IN pins are the slave's outputs
-            direction = {"IN": "to the slave", "OUT": "from the slave"}.get(pin.dir, pin.dir)
-            for c, v in enumerate((name[len(prefix):], pin.type, direction, pin.value)):
-                self.tp.setItem(r, c, self._item(v))
-            if run.writable(pin):
-                self.tp.setCellWidget(r, 4, self._setter(pin))
-
-    def _setter(self, pin):
-        if pin.type == "bit":
-            w = QCheckBox()
-            w.setChecked(pin.value == "TRUE")
-            w.toggled.connect(lambda on, p=pin: self.win.set_pin(p, on))
-            return w
-        w = QLineEdit(pin.value)
-        w.setToolTip("Type a value and press Enter")
-        w.returnPressed.connect(lambda p=pin, e=w: self.win.set_pin(p, e.text()))
-        return w
-
-    def update_test(self):
-        """Refresh the values of the pin table (timer)."""
-        run, prefix = self.win.test, self._prefix()
-        if run is None or prefix is None:
-            return
-        try:
-            pins = run.pins(prefix)
-        except testmode.TestError:
-            return
-        if set(pins) != set(self.tp_rows):
-            self.show_test()
-            return
-        for name, r in self.tp_rows.items():
-            it = self.tp.item(r, 3)
-            if it.text() != pins[name].value:
-                it.setText(pins[name].value)
-
-    def _sdo_target(self):
-        try:
-            index, sub = config.parse_obj(self.sdo_obj.text().strip())
-        except ValueError:
-            self.win.status("Type an object as 0xIIII:SS, such as 0x2000:01")
-            return None
-        return index, sub
-
-    def sdo_object_typed(self):
-        t = self._sdo_target()
-        if t:
-            b = self.win.session.bus.get(self.position)
-            entry = b.coe.entries.get(t) if b and b.coe else None
-            self.sdo_name.setText("%s (%s, %s)" % (
-                self.win.session.object_name(self.position, *t), entry.data_type, entry.access)
-                if entry else "Not in the dictionary read from the slave: choose a type")
-
-    def sdo_read(self):
-        t = self._sdo_target()
-        if not t:
-            return
-        try:
-            text = tool.upload_text(self.position, t[0], t[1], self.sdo_type.currentData())
-        except tool.ToolError as e:
-            self.win.status(str(e).splitlines()[-1])
-            return
-        if self.sdo_type.currentData() != "string" and len(text.split()) == 2:
-            text = text.split()[-1]     # "0x0010 16": hex and decimal
-        self.sdo_value.setText(text)
-        self.win.status("0x%04X:%02X = %s" % (t[0], t[1], text))
-
-    def sdo_write(self):
-        t = self._sdo_target()
-        value = self.sdo_value.text().strip()
-        s = self.win.session.slave(self.position) or {}
-        if not t or not value:
-            return
-        why = testmode.sdo_write_refused(s, *t)
-        if why:
-            QMessageBox.warning(self, TITLE, "Not written: %s" % why)
-            return
-        if QMessageBox.question(
-                self, TITLE, "Write %s to 0x%04X:%02X of slave %d?\n\nThe slave keeps it until "
-                "it restarts (or for good, if it stores it). To have it written at every start, "
-                "add it under Settings." % (value, t[0], t[1], self.position),
-                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
-            return
-        try:
-            tool.download(self.position, t[0], t[1], value, self.sdo_type.currentData())
-        except tool.ToolError as e:
-            QMessageBox.warning(self, TITLE, "The slave refused:\n%s" % e)
-            return
-        self.win.status("Wrote 0x%04X:%02X = %s to slave %d" % (t[0], t[1], value, self.position))
-
-    def show_diagnosis(self):
-        b = self.win.session.bus.get(self.position)
-        self.diag_state.setText("State when last read: %s" % b.info.get("state") if b else
-                                "Not read from the bus")
-        self.diag.setPlainText(self.win.diagnoses.get(self.position, ""))
 
     # -- editing
 
@@ -724,14 +961,16 @@ class SlavePage(QWidget):
             dc["sync0-shift-ns"] = self.sync0_shift.value()
         else:
             s.pop("dc", None)
+        for w in (self.assign, self.sync0_cycles, self.sync0_shift):
+            w.setEnabled(self.dc.isChecked())
         self.win.changed()
 
-    def pd_edited(self, item):
+    def pd_edited(self, it):
         if self.loading:
             return
-        row, col = item.row(), item.column()
+        row, col = it.row(), it.column()
         e = self._entry(row)
-        text = item.text().strip()
+        text = it.text().strip()
         if col == self.PIN:
             if text:
                 e["pin"] = text
@@ -764,8 +1003,7 @@ class SlavePage(QWidget):
 
     def _refresh_row(self, row, e):
         self.loading = True
-        use = e.get("use") or ("split" if "split" in e else "pin" if "pin" in e else "-")
-        self.pd.item(row, 6).setText(use)
+        self.pd.item(row, 5).setText(self._use(e))
         pin_item = self.pd.item(row, self.PIN)
         split_item = self.pd.item(row, self.SPLIT)
         for it, on in ((pin_item, "split" not in e), (split_item, "pin" not in e)):
@@ -787,13 +1025,13 @@ class SlavePage(QWidget):
         e["hal-type"] = text
         self.win.changed()
 
-    def st_edited(self, item):
+    def st_edited(self, it):
         if self.loading:
             return
         s = self.win.session.slave(self.position)
-        st = s["settings"][item.row()]
-        text = item.text().strip()
-        col = item.column()
+        st = s["settings"][it.row()]
+        text = it.text().strip()
+        col = it.column()
         if col == 0:
             st["object"] = text
             try:
@@ -851,105 +1089,865 @@ class SlavePage(QWidget):
                                if self.cia402.isVisible() else None, self.pdo_set.currentData())
 
 
+class BusPage(QWidget):
+    def __init__(self, win):
+        super().__init__()
+        self.setObjectName("page")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(20)
+        self.list = BusList(win)
+        lay.addWidget(self.list)
+        self.stack = QStackedWidget()
+        self.empty = label("Read the bus (Rescan) or open a configuration file (File > Open).")
+        self.empty.setAlignment(Qt.AlignCenter)
+        self.master = MasterView(win)
+        self.slave = SlaveView(win)
+        for w in (self.empty, self.master, self.slave):
+            self.stack.addWidget(w)
+        content = QWidget()
+        cl = QVBoxLayout(content)
+        cl.setContentsMargins(0, 0, 8, 0)
+        cl.addWidget(self.stack)
+        self.scroll = scroll(content)
+        lay.addWidget(self.scroll, 1)
+
+
+# -- the Troubleshoot page
+
+STEPS = [(1, "INIT", "Slave answers; identity read."),
+         (2, "PREOP", "Mailbox works; SDOs can be read and written."),
+         (4, "SAFEOP", "Inputs run; outputs are held safe."),
+         (8, "OP", "Cyclic data in both directions.")]
+
+
+def step_status(report, value):
+    """(tag, pill kind, text or None) of one state, for a diagnose.Report."""
+    order = [v for v, _, _ in STEPS]
+    if report.state in order and value <= report.state:
+        return "✓ reached", "green", None
+    nxt = next((v for v in order if v > report.state), None)
+    if value == nxt and (report.error or report.last_code):
+        c = report.code if report.error else report.last_code
+        return "✕ refused", "red", "0x%04X %s" % (c, diagnose.AL_CODES.get(c, ("unknown code",))[0])
+    return "not reached", "grey", None
+
+
+class StepCard(Card):
+    def __init__(self):
+        super().__init__()
+        self.tag = pill()
+        self.lay.addWidget(self.tag)
+        self.name = label()
+        self.name.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.lay.addWidget(self.name)
+        self.text = label("", "hint", wrap=True)
+        self.lay.addWidget(self.text)
+        self.lay.addStretch(1)
+
+    def show_step(self, name, desc, status):
+        tag, kind, extra = status
+        set_pill(self.tag, tag, kind)
+        self.name.setText(name)
+        self.text.setText(extra or desc)
+        self.set_tone({"red": "red", "grey": "grey"}.get(kind))
+
+
+class TroubleshootPage(QWidget):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        content = QWidget()
+        lay = page_layout(content)
+        outer.addWidget(scroll(content))
+
+        row = QHBoxLayout()
+        self.title = label("", "bigTitle")
+        row.addWidget(self.title)
+        self.state = pill()
+        row.addWidget(self.state)
+        row.addStretch(1)
+        self.slave = QComboBox()
+        self.slave.activated.connect(lambda i: win.select(self.slave.itemData(i), source=self))
+        row.addWidget(self.slave)
+        self.again = QPushButton("Examine again")
+        self.again.setToolTip("Read the slave's state, its error counters (watched for 2 s), its "
+                              "messages and, for a drive, the CiA 402 state. Only reads.")
+        self.again.clicked.connect(lambda: win.examine([win.current]))
+        row.addWidget(self.again)
+        self.all = QPushButton("Examine all")
+        self.all.clicked.connect(lambda: win.examine(None))
+        row.addWidget(self.all)
+        lay.addLayout(row)
+
+        self.waiting = Card("Not examined yet")
+        self.waiting.add(label("Examining only reads: the slave's state (INIT, PREOP, SAFEOP, OP) "
+                               "and AL status code, the error counters per port while they are "
+                               "watched for 2 s, the slave's own diagnosis history, and for a "
+                               "CiA 402 drive its state and error code. Press Examine again or "
+                               "Examine all.", "hint", wrap=True))
+        lay.addWidget(self.waiting)
+
+        self.body = QWidget()
+        body = QVBoxLayout(self.body)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(16)
+        steps = QHBoxLayout()
+        steps.setSpacing(12)
+        self.steps = [StepCard() for _ in STEPS]
+        for c in self.steps:
+            steps.addWidget(c, 1)
+        body.addLayout(steps)
+        self.step_note = label("", "hint", wrap=True)
+        body.addWidget(self.step_note)
+
+        two = QHBoxLayout()
+        two.setSpacing(16)
+        self.says = Card("What the slave says")
+        self.headline = self.says.add(label(wrap=True))
+        self.headline.setStyleSheet("font-size: 15px; font-weight: 600;")
+        self.explain = self.says.add(label(wrap=True))
+        self.drive_title = self.says.add(label("CIA 402 DRIVE", "cardTitle"))
+        self.drive = self.says.add(label(wrap=True))
+        self.says.lay.addStretch(1)
+        two.addWidget(self.says, 3)
+        self.cable = Card("Cable and link")
+        self.ports = table(["Port", "Link", "RX errors", "PHY errors", "Lost link"])
+        self.cable.add(self.ports)
+        self.cable_verdict = self.cable.add(label("", "hint", wrap=True))
+        self.cable.lay.addStretch(1)
+        two.addWidget(self.cable, 2)
+        body.addLayout(two)
+
+        self.history = Card("Messages from the slave (0x10F3)", "Newest first, from the slave's "
+                                                                "diagnosis history.")
+        self.history_table = table(["Message"], 0)
+        self.history.add(self.history_table)
+        self.history_none = self.history.add(label("", "hint", wrap=True))
+        body.addWidget(self.history)
+        lay.addWidget(self.body)
+        lay.addStretch(1)
+
+    def fill_slaves(self):
+        win = self.win
+        self.slave.blockSignals(True)
+        self.slave.clear()
+        for pos in win.positions():
+            self.slave.addItem("Slave %d · %s" % (pos, win.device(pos)), pos)
+        self.slave.setCurrentIndex(self.slave.findData(win.current))
+        self.slave.blockSignals(False)
+        self.again.setEnabled(not win.busy and isinstance(win.current, int) and win.current >= 0)
+        self.all.setEnabled(not win.busy)
+
+    def show_slave(self):
+        win = self.win
+        self.fill_slaves()
+        pos = win.current
+        r = win.reports.get(pos) if isinstance(pos, int) and pos >= 0 else None
+        if r is None:
+            self.title.setText("Slave %d · %s" % (pos, win.device(pos))
+                               if isinstance(pos, int) and pos >= 0 else "Choose a slave")
+            set_pill(self.state, "", "grey")
+            self.waiting.show()
+            self.body.hide()
+            return
+        self.waiting.hide()
+        self.body.show()
+        if r.state == 8 and not r.error:
+            self.title.setText("Slave %d · %s is in OP" % (pos, win.device(pos)))
+            set_pill(self.state, "OP", "green")
+        else:
+            self.title.setText("Slave %d · %s does not reach OP" % (pos, win.device(pos)))
+            set_pill(self.state, "Stopped in %s%s" % (r.state_name, " + ERROR" if r.error else ""),
+                     "red" if r.error or r.last_code else "amber")
+        for card, (value, step, desc) in zip(self.steps, STEPS):
+            card.show_step(step, desc, step_status(r, value))
+        self.step_note.setText(
+            "The slave waits in PREOP: normal while only the free-running master runs "
+            "(ethercat-uspace start). LinuxCNC, or the test, takes it to OP."
+            if r.state == 2 and not r.error and not r.last_code else "")
+        self.step_note.setVisible(bool(self.step_note.text()))
+
+        # what it says
+        code = r.code if r.error else r.last_code
+        if code:
+            text, hint = diagnose.AL_CODES.get(code, ("unknown code", ""))
+            self.headline.setText("AL status 0x%04X  %s" % (code, text))
+            self.explain.setText((hint[:1].upper() + hint[1:] + "." if hint else "") + (
+                "" if r.error else "\nKept by the master: the slave's own code was cleared when "
+                "the master acknowledged the error."))
+            self.says.set_tone("red")
+        elif r.flagged and r.state != 8:
+            self.headline.setText("The slave refused a state change")
+            self.explain.setText("The master acknowledged the error, which cleared the slave's "
+                                 "code; it is only in the master's log (\"AL status message\").")
+            self.says.set_tone("red")
+        else:
+            self.headline.setText("No error reported (AL status 0x%04X)" % r.code)
+            self.explain.setText("")
+            self.says.set_tone(None)
+        self.explain.setVisible(bool(self.explain.text()))
+        lines = []
+        if r.cia402 is not None:
+            _, lines = diagnose.cia402_findings(r.cia402)
+        if r.error_register:
+            lines.append("Error register 0x1001: 0x%02X" % r.error_register)
+        self.drive_title.setVisible(r.cia402 is not None)
+        self.drive.setText("\n".join(line.strip() for line in lines))
+        self.drive.setVisible(bool(lines))
+
+        # cables
+        self.ports.setRowCount(0)
+        grew = []
+        for p in r.ports:
+            if not p.shown and p.number > 1:
+                continue
+            row = self.ports.rowCount()
+            self.ports.insertRow(row)
+            role = {0: " (in)", 1: " (out)"}.get(p.number, "")
+            self.ports.setItem(row, 0, item("%d%s" % (p.number, role), font=mono()))
+            self.ports.setItem(row, 1, item("up" if p.link else "open",
+                                            colour=GREEN if p.link else GREY))
+            for c, k in ((2, "rx"), (3, "phy"), (4, "lost")):
+                v = p.now[k]
+                text = ("255+" if v == 255 else str(v)) if p.link or v else "–"
+                bad = k in p.grew
+                if bad:
+                    text += "  (+%d)" % p.delta[k]
+                self.ports.setItem(row, c, item(text, colour=RED if bad else None, font=mono()))
+            if p.grew:
+                grew.append(p.number)
+        fit_table(self.ports)
+        last = not any(p.link for p in r.ports[1:])
+        if grew:
+            self.cable_verdict.setText(
+                "Errors grew on port %s while watched for %g s: the cable or connector at that "
+                "port, or the device on its other end." % (", ".join(map(str, grew)), r.seconds))
+            self.cable.set_tone("red")
+        else:
+            self.cable_verdict.setText(
+                "No errors grew in %g s; counts since power-on can be old." % r.seconds +
+                (" Port 1 is open: this is the last slave." if last else ""))
+            self.cable.set_tone(None)
+
+        # history
+        self.history_table.setRowCount(0)
+        for line in reversed(r.history):
+            row = self.history_table.rowCount()
+            self.history_table.insertRow(row)
+            self.history_table.setItem(row, 0, item(line, font=mono()))
+        fit_table(self.history_table)
+        self.history_table.setVisible(bool(r.history))
+        self.history_none.setText("" if r.history else
+                                  "The slave keeps no diagnosis history (0x10F3).")
+        self.history_none.setVisible(not r.history)
+
+
+# -- the Test page
+
+DRIVE_STATES = ["Not ready", "Switch on disabled", "Ready to switch on", "Switched on",
+                "Operation enabled"]
+STATUS_BITS = [(0, "Ready to switch on"), (1, "Switched on"), (2, "Operation enabled"),
+               (3, "Fault"), (4, "Voltage enabled"), (5, "Quick stop not active"),
+               (6, "Switch on disabled"), (7, "Warning"), (9, "Remote"), (10, "Target reached")]
+LIVE_VALUES = [("pos-fb", "Position feedback"), ("drv-actual-position", "Position actual (0x6064)"),
+               ("drv-actual-velocity", "Velocity actual (0x606C)"),
+               ("actual-torque", "Torque actual (0x6077)"), ("error-code", "Error code (0x603F)"),
+               ("fault-reason", "Fault reason (ecat)")]
+
+
+class PinTable(QTableWidget):
+    """Pins of a running test, with a setter for those that may be set."""
+
+    COLUMNS = ["Pin", "Type", "Value", "Set"]
+
+    def __init__(self, win):
+        super().__init__(0, len(self.COLUMNS))
+        self.win = win
+        self.setHorizontalHeaderLabels(self.COLUMNS)
+        self.verticalHeader().hide()
+        self.setShowGrid(False)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.rows = {}
+
+    def fill(self, pins, prefix, run):
+        self.setRowCount(0)
+        self.rows = {}
+        for name in sorted(pins):
+            pin = pins[name]
+            r = self.rowCount()
+            self.insertRow(r)
+            self.rows[name] = r
+            for c, v in enumerate((name[len(prefix):], pin.type, pin.value)):
+                self.setItem(r, c, item(v, font=mono() if c == 2 else None))
+            if run.writable(pin):
+                self.setCellWidget(r, 3, self._setter(pin))
+        fit_table(self)
+
+    def _setter(self, pin):
+        if pin.type == "bit":
+            w = QCheckBox()
+            w.setChecked(pin.value == "TRUE")
+            w.toggled.connect(lambda on, p=pin: self.win.set_pin(p, on))
+            return w
+        w = QLineEdit(pin.value)
+        w.setToolTip("Type a value and press Enter")
+        w.returnPressed.connect(lambda p=pin, e=w: self.win.set_pin(p, e.text()))
+        return w
+
+    def update_values(self, pins):
+        for name, r in self.rows.items():
+            if name in pins:
+                it = self.item(r, 2)
+                if it.text() != pins[name].value:
+                    it.setText(pins[name].value)
+
+
+class TestPage(QWidget):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.shown_for = None
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        content = QWidget()
+        lay = page_layout(content)
+        outer.addWidget(scroll(content))
+
+        self.banner = Card(tone="amber")
+        self.banner_text = self.banner.add(label(wrap=True))
+        lay.addWidget(self.banner)
+
+        self.start_card = Card("I/O test")
+        self.start_card.add(label(
+            "The ecat component runs this configuration (as edited, saved or not) in halrun with a "
+            "servo thread, without LinuxCNC, and takes the slaves to OP. Inputs show here live, "
+            "and outputs of I/O slaves can be set. Pins set during the test go back to 0 when it "
+            "stops. CiA 402 drives stay disabled: moving them comes with the CiA 402 test.\n\n"
+            "Before starting: stop LinuxCNC and the kernel master (sudo systemctl stop ethercat), "
+            "and make sure nothing wired to the outputs can do harm.", wrap=True))
+        self.start = QPushButton("Start the I/O test")
+        self.start.setObjectName("primary")
+        self.start.clicked.connect(win.start_test)
+        row = QHBoxLayout()
+        row.addWidget(self.start)
+        row.addStretch(1)
+        self.start_card.add(row)
+        lay.addWidget(self.start_card)
+
+        row = QHBoxLayout()
+        self.title = label("", "bigTitle")
+        row.addWidget(self.title)
+        self.mode_pill = pill("", "blue")
+        row.addWidget(self.mode_pill)
+        self.state = pill()
+        row.addWidget(self.state)
+        row.addStretch(1)
+        self.slave = QComboBox()
+        self.slave.activated.connect(lambda i: win.select(self.slave.itemData(i), source=self))
+        row.addWidget(self.slave)
+        lay.addLayout(row)
+
+        # a drive
+        self.drive = QWidget()
+        dl = QVBoxLayout(self.drive)
+        dl.setContentsMargins(0, 0, 0, 0)
+        dl.setSpacing(16)
+        chain = Card("Drive state (CiA 402)")
+        crow = QHBoxLayout()
+        self.chain = []
+        for i, name in enumerate(DRIVE_STATES):
+            if i:
+                crow.addWidget(label("→", "hint"))
+            box = QLabel(name)
+            box.setProperty("box", "off")
+            crow.addWidget(box)
+            self.chain.append(box)
+        crow.addStretch(1)
+        self.fault_box = QLabel("Fault")
+        self.fault_box.setProperty("box", "fault")
+        crow.addWidget(self.fault_box)
+        chain.add(crow)
+        dl.addWidget(chain)
+        three = QHBoxLayout()
+        three.setSpacing(16)
+        move = Card("Move")
+        hold = QPushButton("Hold to enable")
+        hold.setObjectName("big")
+        hold.setEnabled(False)
+        move.add(hold)
+        move.add(label("Moving a drive comes with the CiA 402 test mode (step 3 of the GUI): "
+                       "hold-to-enable, small jog steps, limits written to the drive, and a "
+                       "heartbeat that disables it if this program stops answering.", "hint",
+                       wrap=True))
+        move.lay.addStretch(1)
+        three.addWidget(move, 2)
+        live = Card("Live values")
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        self.live = {}
+        for i, (pin, text) in enumerate(LIVE_VALUES):
+            tile = Card()
+            tile.lay.setContentsMargins(12, 10, 12, 10)
+            tile.add(label(text, "hint"))
+            v = tile.add(label("–", "value"))
+            grid.addWidget(tile, i // 2, i % 2)
+            self.live[pin] = (tile, v)
+        live.add(grid)
+        live.lay.addStretch(1)
+        three.addWidget(live, 3)
+        sw = Card("Status word")
+        self.sw_value = label()
+        self.sw_value.setFont(mono())
+        sw.head.addWidget(self.sw_value)
+        self.bits = {}
+        for bit, text in STATUS_BITS:
+            r = QHBoxLayout()
+            chip = pill("0", "grey")
+            chip.setFixedWidth(26)
+            chip.setAlignment(Qt.AlignCenter)
+            r.addWidget(chip)
+            r.addWidget(label(text), 1)
+            sw.add(r)
+            self.bits[bit] = chip
+        sw.lay.addStretch(1)
+        three.addWidget(sw, 2)
+        dl.addLayout(three)
+        lay.addWidget(self.drive)
+
+        # an I/O slave
+        self.io = QWidget()
+        il = QHBoxLayout(self.io)
+        il.setContentsMargins(0, 0, 0, 0)
+        il.setSpacing(16)
+        self.outputs_card = Card("Outputs (to the slave)", "Set here; back to 0 when the test "
+                                                           "stops.")
+        self.outputs = PinTable(win)
+        self.outputs_card.add(self.outputs)
+        self.outputs_card.lay.addStretch(1)
+        il.addWidget(self.outputs_card, 1)
+        self.inputs_card = Card("Inputs (from the slave)", "Live.")
+        self.inputs = PinTable(win)
+        self.inputs_card.add(self.inputs)
+        self.inputs_card.lay.addStretch(1)
+        il.addWidget(self.inputs_card, 1)
+        lay.addWidget(self.io)
+
+        self.all_card = Card("All pins", "As the component shows them; a drive's pins are not "
+                                         "set in the I/O test.")
+        self.all_pins = PinTable(win)
+        self.all_card.add(self.all_pins)
+        lay.addWidget(self.all_card)
+
+        # SDOs
+        sdo = Card("SDO (CoE object)", "Read and write whenever a master runs: the test, or the "
+                                       "free-running master.")
+        form = QHBoxLayout()
+        self.sdo_obj = QLineEdit()
+        self.sdo_obj.setPlaceholderText("0x2000:01")
+        self.sdo_obj.setMaximumWidth(110)
+        self.sdo_obj.editingFinished.connect(self.sdo_object_typed)
+        form.addWidget(self.sdo_obj)
+        self.sdo_type = QComboBox()
+        self.sdo_type.addItem("type from the slave", None)
+        for t in sorted(testmode.TOOL_TYPES.values()) + ["string"]:
+            self.sdo_type.addItem(t, t)
+        form.addWidget(self.sdo_type)
+        read = QPushButton("Read")
+        read.clicked.connect(self.sdo_read)
+        form.addWidget(read)
+        self.sdo_value = QLineEdit()
+        self.sdo_value.setPlaceholderText("value")
+        form.addWidget(self.sdo_value, 1)
+        write = QPushButton("Write...")
+        write.clicked.connect(self.sdo_write)
+        form.addWidget(write)
+        sdo.add(form)
+        self.sdo_name = sdo.add(label("", "hint"))
+        lay.addWidget(sdo)
+        lay.addStretch(1)
+
+    @property
+    def position(self):
+        return self.win.current
+
+    def _prefix(self):
+        pos = self.position
+        s = self.win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
+        return "%s." % s["name"] if s and s.get("name") else None
+
+    def fill_slaves(self):
+        win = self.win
+        self.slave.blockSignals(True)
+        self.slave.clear()
+        for pos in win.positions():
+            self.slave.addItem("Slave %d · %s" % (pos, win.device(pos)), pos)
+        self.slave.setCurrentIndex(self.slave.findData(win.current))
+        self.slave.blockSignals(False)
+        self.start.setEnabled(win.session.cfg is not None and not win.busy)
+
+    def show_slave(self):
+        """Lay the page out for the chosen slave and the test's state."""
+        win, run = self.win, self.win.test
+        self.fill_slaves()
+        running = run is not None and run.running
+        self.banner.setVisible(running)
+        self.start_card.setVisible(not running)
+        if running:
+            self.banner_text.setText(
+                "<b>I/O test running</b> &nbsp; ecat in halrun, servo %s. Outputs set here go back "
+                "to 0 when the test stops (STOP, top right). Drives stay disabled.<br>Log: %s"
+                % (period_text(run.period), run.log_path))
+        pos = self.position
+        s = win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
+        if s is None:
+            self.title.setText("Slave %d is not in the file" % pos
+                               if isinstance(pos, int) and pos >= 0 else "Choose a slave")
+            for w in (self.drive, self.io, self.all_card):
+                w.hide()
+            set_pill(self.mode_pill, "", "blue")
+            set_pill(self.state, "", "grey")
+            self.shown_for = None
+            return
+        self.title.setText("Slave %d · %s · %s" % (pos, win.device(pos), s.get("name")))
+        is402 = s.get("profile") == "cia402"
+        set_pill(self.mode_pill, ((s.get("cia402") or {}).get("mode") or "").upper()
+                 if is402 else "", "blue")
+        self.drive.setVisible(running and is402)
+        self.io.setVisible(running and not is402)
+        self.all_card.setVisible(running and is402)
+        if not running:
+            set_pill(self.state, "", "grey")
+            self.shown_for = None
+            return
+        prefix = self._prefix()
+        try:
+            pins = run.pins(prefix)
+        except testmode.TestError as e:
+            win.status(str(e))
+            return
+        if is402:
+            self.all_pins.fill(pins, prefix, run)
+        else:
+            self.outputs.fill({n: p for n, p in pins.items() if p.dir == "IN"}, prefix, run)
+            self.inputs.fill({n: p for n, p in pins.items() if p.dir != "IN"}, prefix, run)
+        self.shown_for = (pos, prefix, frozenset(pins))
+        self.update_values(pins)
+
+    def update_values(self, pins=None):
+        """Refresh live values (timer)."""
+        run, prefix = self.win.test, self._prefix()
+        if run is None or prefix is None or self.shown_for is None:
+            return
+        if pins is None:
+            try:
+                pins = run.pins(prefix)
+            except testmode.TestError:
+                return
+            if (self.position, prefix, frozenset(pins)) != self.shown_for:
+                self.show_slave()
+                return
+
+        def v(name):
+            p = pins.get(prefix + name)
+            return p.value if p else None
+        op = v("slave-state-op") == "TRUE"
+        set_pill(self.state, "OP" if op else "not OP" if v("slave-online") == "TRUE" else
+                 "offline", "green" if op else "red")
+        if not self.drive.isHidden():
+            try:
+                st = int(v("cia-state") or "-1")
+            except ValueError:
+                st = -1
+            for i, box in enumerate(self.chain):
+                want = "on" if i == st else "off"
+                if box.property("box") != want:
+                    box.setProperty("box", want)
+                    restyle(box)
+            want = "fault-on" if st in (6, 7) else "fault"
+            if self.fault_box.property("box") != want:
+                self.fault_box.setProperty("box", want)
+                restyle(self.fault_box)
+            for pin, (tile, lab) in self.live.items():
+                val = v(pin)
+                tile.setVisible(val is not None)
+                if val is not None:
+                    if pin == "error-code":
+                        try:
+                            val = diagnose.error_text(int(val, 0))
+                        except ValueError:
+                            pass
+                    lab.setText(val)
+            try:
+                sw = int(v("statusword") or "0", 0)
+            except ValueError:
+                sw = 0
+            self.sw_value.setText("0x%04X" % sw)
+            for bit, chip in self.bits.items():
+                on = bool(sw >> bit & 1)
+                set_pill(chip, "1" if on else "0",
+                         ("red" if bit in (3, 7) else "green") if on else "grey")
+            self.all_pins.update_values(pins)
+        else:
+            self.outputs.update_values(pins)
+            self.inputs.update_values(pins)
+
+    # SDOs
+
+    def _sdo_target(self):
+        try:
+            index, sub = config.parse_obj(self.sdo_obj.text().strip())
+        except ValueError:
+            self.win.status("Type an object as 0xIIII:SS, such as 0x2000:01")
+            return None
+        return index, sub
+
+    def sdo_object_typed(self):
+        t = self._sdo_target()
+        pos = self.position
+        if t and isinstance(pos, int) and pos >= 0:
+            b = self.win.session.bus.get(pos)
+            entry = b.coe.entries.get(t) if b and b.coe else None
+            self.sdo_name.setText("%s (%s, %s)" % (
+                self.win.session.object_name(pos, *t), entry.data_type, entry.access)
+                if entry else "Not in the dictionary read from the slave: choose a type")
+
+    def sdo_read(self):
+        t = self._sdo_target()
+        pos = self.position
+        if not t or not isinstance(pos, int) or pos < 0:
+            return
+        try:
+            text = tool.upload_text(pos, t[0], t[1], self.sdo_type.currentData())
+        except tool.ToolError as e:
+            self.win.status(str(e).splitlines()[-1])
+            return
+        if self.sdo_type.currentData() != "string" and len(text.split()) == 2:
+            text = text.split()[-1]     # "0x0010 16": hex and decimal
+        self.sdo_value.setText(text)
+        self.win.status("0x%04X:%02X = %s" % (t[0], t[1], text))
+
+    def sdo_write(self):
+        t = self._sdo_target()
+        value = self.sdo_value.text().strip()
+        pos = self.position
+        s = self.win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
+        if not t or not value or s is None:
+            return
+        why = testmode.sdo_write_refused(s, *t)
+        if why:
+            QMessageBox.warning(self, TITLE, "Not written: %s" % why)
+            return
+        if QMessageBox.question(
+                self, TITLE, "Write %s to 0x%04X:%02X of slave %d?\n\nThe slave keeps it until "
+                "it restarts (or for good, if it stores it). To have it written at every start, "
+                "add it under Settings on the Bus page." % (value, t[0], t[1], pos),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        try:
+            tool.download(pos, t[0], t[1], value, self.sdo_type.currentData())
+        except tool.ToolError as e:
+            QMessageBox.warning(self, TITLE, "The slave refused:\n%s" % e)
+            return
+        self.win.status("Wrote 0x%04X:%02X = %s to slave %d" % (t[0], t[1], value, pos))
+
+
+# -- the HAL & LinuxCNC page
+
+def config_pins(cfg):
+    """(slave position, signal, pin, HAL type, direction) of the pins a
+    configuration gives."""
+    rows = []
+    for s in (cfg or {}).get("slaves") or []:
+        name = s.get("name")
+        for direction in ("outputs", "inputs"):
+            way = "to the slave" if direction == "outputs" else "from the slave"
+            for pdo in (s.get("process-data") or {}).get(direction) or []:
+                for e in pdo.get("entries") or []:
+                    if "pin" in e:
+                        rows.append((s["position"], e.get("object"), "%s.%s" % (name, e["pin"]),
+                                     e.get("hal-type"), way))
+                    for i, p in enumerate(e.get("split") or []):
+                        if p:
+                            rows.append((s["position"], "%s bit %d" % (e.get("object"), i),
+                                         "%s.%s" % (name, p), "bit", way))
+        if s.get("profile") == "cia402":
+            rows.append((s["position"], "CiA 402 profile", "%s.*" % name, "",
+                         "see docs/cia402.md"))
+        for ch in s.get("encoders") or []:
+            rows.append((s["position"], "encoder %s" % ch.get("index"),
+                         "%s.%s.*" % (name, ch.get("name")), "", "see docs/encoder.md"))
+    return rows
+
+
+class HalPage(QWidget):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        content = QWidget()
+        lay = QHBoxLayout(content)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(20)
+        outer.addWidget(scroll(content))
+
+        left = QVBoxLayout()
+        left.setSpacing(16)
+        pins = Card("Inputs and outputs", "The pins this configuration gives, to connect in HAL.")
+        self.pins = table(["Slave", "Signal", "HAL pin", "Type", "Direction"], 2)
+        pins.add(self.pins)
+        left.addWidget(pins)
+        yaml_card = Card("File contents", "ethercat.yaml as it will be written.")
+        self.yaml = QPlainTextEdit()
+        self.yaml.setReadOnly(True)
+        self.yaml.setFont(mono())
+        self.yaml.setMinimumHeight(360)
+        yaml_card.add(self.yaml)
+        left.addWidget(yaml_card)
+        left.addStretch(1)
+        lay.addLayout(left, 3)
+
+        right = QVBoxLayout()
+        apply = Card("Apply to LinuxCNC")
+        apply.add(label("Writing ethercat.hal and the INI changes into the configuration comes "
+                        "in step 5 of the plan. Until then, put these lines in the machine's HAL "
+                        "file, in place of lcec's:", wrap=True))
+        self.code = QPlainTextEdit()
+        self.code.setObjectName("code")
+        self.code.setReadOnly(True)
+        self.code.setFont(mono())
+        self.code.setFixedHeight(110)
+        apply.add(self.code)
+        apply.add(label("ecat.read-all goes first in the servo thread, ecat.write-all last.",
+                        "hint", wrap=True))
+        right.addWidget(apply)
+        right.addStretch(1)
+        lay.addLayout(right, 2)
+
+    def refresh(self):
+        s = self.win.session
+        self.yaml.setPlainText(s.dumps())
+        name = os.path.basename(s.path) if s.path else "ethercat.yaml"
+        self.code.setPlainText("loadrt ecat config=%s\naddf ecat.read-all  servo-thread\n"
+                               "# ... the other functions ...\naddf ecat.write-all servo-thread"
+                               % name)
+        self.pins.setRowCount(0)
+        for row in config_pins(s.cfg):
+            r = self.pins.rowCount()
+            self.pins.insertRow(r)
+            for c, v in enumerate(row):
+                self.pins.setItem(r, c, item(v, font=mono() if c in (1, 2) else None))
+        fit_table(self.pins, minimum=1)
+
+
+# -- the window
+
+class NavTabs(QStackedWidget):
+    """Pages under a white strip of tabs, as in the mockups."""
+
+    def __init__(self):
+        super().__init__()
+        self.strip = QFrame()
+        self.strip.setObjectName("nav")
+        lay = QHBoxLayout(self.strip)
+        lay.setContentsMargins(12, 0, 12, 0)
+        self.bar = QTabBar()
+        self.bar.setDrawBase(False)
+        self.bar.setExpanding(False)
+        lay.addWidget(self.bar)
+        lay.addStretch(1)
+        self.bar.currentChanged.connect(self.setCurrentIndex)
+
+    def addTab(self, page, text):
+        self.addWidget(page)
+        self.bar.addTab(text)
+
+    def setCurrentWidget(self, page):
+        self.bar.setCurrentIndex(self.indexOf(page))
+
 class MainWindow(QMainWindow):
     def __init__(self, session):
         super().__init__()
         self.session = session
-        self.diagnoses = {}     # position -> diagnosis text
+        self.reports = {}       # position -> diagnose.Report
         self.worker = None
         self.test = None        # testmode.TestRun while the I/O test runs
+        self.current = None     # the chosen slave's position, MASTER_ITEM, or None
+        self.messages_by_slave = {}
         self.test_timer = QTimer(self)
         self.test_timer.setInterval(200)
         self.test_timer.timeout.connect(self.poll_test)
-        self.messages_by_slave = {}
-        self.resize(1300, 850)
+        self.resize(1440, 940)
+        self.setStyleSheet(STYLE)
 
+        central = QWidget()
+        lay = QVBoxLayout(central)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.header = Header(self)
+        lay.addWidget(self.header)
+        self.tabs = NavTabs()
+        self.bus_page = BusPage(self)
+        self.trouble_page = TroubleshootPage(self)
+        self.test_page = TestPage(self)
+        self.hal_page = HalPage(self)
+        self.tabs.addTab(self.bus_page, "Bus")
+        self.tabs.addTab(self.trouble_page, "Troubleshoot")
+        self.tabs.addTab(self.test_page, "Test")
+        self.tabs.addTab(self.hal_page, "HAL && LinuxCNC")
+        self.tabs.currentChanged.connect(lambda _: self.show_current())
+        lay.addWidget(self.tabs.strip)
+        lay.addWidget(self.tabs, 1)
+        self.setCentralWidget(central)
         self._actions()
-        split = QSplitter()
-        self.slaves = QTreeWidget()
-        self.slaves.setHeaderLabels(["#", "Name", "Bus", "File", "Device"])
-        self.slaves.setRootIsDecorated(False)
-        self.slaves.header().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.slaves.currentItemChanged.connect(self.selected)
-        split.addWidget(self.slaves)
-        self.pages = QStackedWidget()
-        self.empty = QLabel("Read the bus or open a configuration file.")
-        self.empty.setAlignment(Qt.AlignCenter)
-        self.master_page = MasterPage(self)
-        self.slave_page = SlavePage(self)
-        for w in (self.empty, self.master_page, self.slave_page):
-            self.pages.addWidget(w)
-        split.addWidget(self.pages)
-        split.setStretchFactor(1, 1)
-        split.setSizes([480, 820])
-        self.setCentralWidget(split)
-
-        bottom = QTabWidget()
-        self.messages = QListWidget()
-        self.messages.itemActivated.connect(self.message_activated)
-        self.messages.itemClicked.connect(self.message_activated)
-        bottom.addTab(self.messages, "Messages")
-        self.yaml = QPlainTextEdit()
-        self.yaml.setReadOnly(True)
-        self.yaml.setFont(mono())
-        bottom.addTab(self.yaml, "File contents")
-        dock = QDockWidget("Messages and file", self)
-        dock.setObjectName("bottom")
-        dock.setWidget(bottom)
-        dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
-        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [170], Qt.Vertical)
-
-        self.bus_label = QLabel()
-        self.statusBar().addPermanentWidget(self.bus_label)
         self.refresh()
 
-    def _actions(self):
-        tb = self.addToolBar("Main")
-        tb.setObjectName("main")
-        tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        menu = self.menuBar().addMenu("&File")
-        busm = self.menuBar().addMenu("&Bus")
+    @property
+    def slave_page(self):
+        return self.bus_page.slave
 
-        def act(text, slot, where, key=None, tip=None):
+    @property
+    def master_page(self):
+        return self.bus_page.master
+
+    @property
+    def messages(self):
+        return self.bus_page.list.messages
+
+    def _actions(self):
+        menu = QMenu(self)
+
+        def act(text, slot, key=None):
             a = QAction(text, self)
             a.triggered.connect(slot)
             if key:
                 a.setShortcut(key)
-            if tip:
-                a.setToolTip(tip)
-                a.setStatusTip(tip)
-            for w in where:
-                w.addAction(a)
+                self.addAction(a)
+            menu.addAction(a)
             return a
 
-        self.a_open = act("Open...", self.open_file, (menu, tb), QKeySequence.Open,
-                          "Open an ethercat.yaml")
-        self.a_import = act("Import lcec XML...", self.import_xml, (menu,), None,
-                            "Convert an lcec ethercat-conf.xml, with what was read from the bus")
-        self.a_save = act("Save", self.save, (menu, tb), QKeySequence.Save,
-                          "Write ethercat.yaml; the old file is kept as .bak")
-        self.a_save_as = act("Save as...", self.save_as, (menu,), QKeySequence.SaveAs)
+        self.a_open = act("Open...", self.open_file, QKeySequence.Open)
+        self.a_import = act("Import lcec XML...", self.import_xml)
         menu.addSeparator()
-        act("Quit", self.close, (menu,), QKeySequence.Quit)
-        tb.addSeparator()
-        self.a_read = act("Read bus", self.read_bus, (busm, tb), QKeySequence.Refresh,
-                          "Read the slaves on the bus: SII, CoE dictionary, ESI files. "
-                          "Nothing is written to them.")
-        self.a_update = act("Update from bus", self.update_from_bus, (busm, tb), None,
-                            "Bring the file up to date with the bus: slaves keep their entries, "
-                            "new ones get proposals, missing ones are left out")
-        self.a_check = act("Check", self.check, (busm, tb), None,
-                           "Check the file, and the bus against it")
-        self.a_diag = act("Diagnose", lambda: self.diagnose(None), (busm, tb), None,
-                          "State, cable errors, the slaves' own messages and CiA 402 state")
-        testm = self.menuBar().addMenu("&Test")
-        tb.addSeparator()
-        self.a_test = act("Start test", self.start_test, (testm, tb), None,
-                          "Run this configuration in halrun: read inputs, set outputs. "
-                          "Drives stay disabled.")
-        self.a_test_stop = act("Stop test", self.stop_test, (testm, tb), None,
-                               "Put set outputs back to 0 and stop halrun")
+        self.a_save = act("Save", self.save, QKeySequence.Save)
+        self.a_save_as = act("Save as...", self.save_as, QKeySequence.SaveAs)
+        menu.addSeparator()
+        self.a_read = act("Rescan the bus", self.read_bus, QKeySequence.Refresh)
+        self.a_update = act("Update from bus", self.update_from_bus)
+        self.a_check = act("Check", self.check)
+        self.a_esi = act("Add ESI files...", self.add_esi)
+        menu.addSeparator()
+        self.a_test = act("Start the I/O test", self.start_test)
+        self.a_test_stop = act("Stop the test", self.stop_test)
+        menu.addSeparator()
+        act("Quit", self.close, QKeySequence.Quit)
+        self.header.menu_button.setMenu(menu)
 
     # -- state shown
 
@@ -960,8 +1958,45 @@ class MainWindow(QMainWindow):
     def status(self, text):
         self.statusBar().showMessage(text, 8000)
 
+    def positions(self):
+        s = self.session
+        return sorted({x.get("position") for x in (s.cfg or {}).get("slaves") or []} | set(s.bus))
+
+    def device(self, pos):
+        f, b = self.session.slave(pos), self.session.bus.get(pos)
+        return (f or {}).get("device") or (b.proposal.name if b else "?")
+
+    def file_problem(self, pos):
+        """(text, pill kind) for a slave's entry in the list, or None."""
+        s = self.session
+        if s.cfg is None:
+            return None
+        if s.slave(pos) is None:
+            return "not in file", "amber"
+        if s.bus and pos not in s.bus:
+            return "not on bus", "red"
+        n = len(self.messages_by_slave.get(pos, []))
+        if n:
+            return "%d problem%s" % (n, "" if n == 1 else "s"), "red"
+        return None
+
+    def bus_summary(self):
+        s = self.session
+        if s.bus_error and not s.bus:
+            return "No master running: start one with sudo ethercat-uspace start, then Rescan."
+        if not s.bus:
+            return "The bus has not been read."
+        if s.cfg is None:
+            return "%d slaves on the bus." % len(s.bus)
+        odd = [pos for pos in self.positions() if self.file_problem(pos)]
+        where = "the saved configuration" if not s.dirty else "the configuration"
+        if not odd:
+            return "The bus matches %s." % where
+        return "The bus matches %s, except slave%s %s." % (
+            where, "" if len(odd) == 1 else "s", ", ".join(map(str, odd)))
+
     def changed(self):
-        """The configuration was edited: show the file, check it, mark the list."""
+        """The configuration was edited: check it, show it, mark the list."""
         self.check(quiet=True)
         self.refresh(keep_page=True)
 
@@ -969,128 +2004,103 @@ class MainWindow(QMainWindow):
         s = self.session
         name = os.path.basename(s.path) if s.path else ("new configuration" if s.cfg else "")
         self.setWindowTitle("%s%s - %s" % (name, " *" if s.dirty else "", TITLE) if name else TITLE)
-        self.yaml.setPlainText(s.dumps())
-        if s.bus_error:
-            self.bus_label.setText("No master running: start one with sudo ethercat-uspace start")
-        elif s.bus:
-            self.bus_label.setText("Bus: %d slaves read" % len(s.bus))
-        else:
-            self.bus_label.setText("Bus not read")
-        has_cfg = s.cfg is not None
-        self.a_save.setEnabled(has_cfg and not self.busy)
-        self.a_save_as.setEnabled(has_cfg and not self.busy)
-        self.a_check.setEnabled(has_cfg and not self.busy)
-        self.a_update.setEnabled(bool(s.bus) and not self.busy)
-        for a in (self.a_read, self.a_diag, self.a_import, self.a_open):
-            a.setEnabled(not self.busy)
+        m = (s.cfg or {}).get("master") or {}
+        cfg_name = os.path.basename(os.path.dirname(os.path.abspath(s.path))) if s.path else (
+            "new" if s.cfg else "none")
+        self.header.info.setText("   ".join(x for x in (
+            "config: %s%s" % (cfg_name, " *" if s.dirty else ""), m.get("interface"),
+            m.get("transport"), "cycle %s%s" % (period_text(s.period),
+                                                " (from INI)" if s.period else "")) if x))
         testing = self.test is not None
+        if testing:
+            if not self.header.status.text().startswith("● TEST"):
+                set_pill(self.header.status, "● TEST MODE · I/O", "amber")
+        elif s.bus_error and not s.bus:
+            set_pill(self.header.status, "● No master", "grey")
+        elif s.bus:
+            bad = {p for p in self.positions() if self.file_problem(p)}
+            bad |= {p for p, b in s.bus.items() if b.info.get("state") not in ("OP", "PREOP")}
+            n = len(bad)
+            set_pill(self.header.status, "● %d slave%s need%s attention" % (
+                n, "" if n == 1 else "s", "s" if n == 1 else "") if n else
+                "● Bus read · %d slaves" % len(s.bus), "amber" if n else "green")
+        else:
+            set_pill(self.header.status, "● Bus not read", "grey")
+        has_cfg = s.cfg is not None
+        self.header.save.setEnabled(has_cfg and not self.busy)
+        self.header.save.setVisible(not testing)
+        self.header.stop.setVisible(testing)
+        self.header.stop.setEnabled(not self.busy)
+        for a in (self.a_save, self.a_save_as, self.a_check):
+            a.setEnabled(has_cfg and not self.busy)
+        self.a_update.setEnabled(bool(s.bus) and not self.busy)
+        for a in (self.a_read, self.a_import, self.a_open, self.a_esi):
+            a.setEnabled(not self.busy)
         self.a_test.setEnabled(has_cfg and not self.busy and not testing)
         self.a_test_stop.setEnabled(testing and not self.busy)
-        if testing:
-            self.bus_label.setText("Test running")
-        self.fill_list(keep_page)
-
-    def fill_list(self, keep_page):
-        s = self.session
-        current = self.slaves.currentItem()
-        selected = current.data(0, Qt.UserRole) if current else None
-        self.slaves.blockSignals(True)
-        self.slaves.clear()
-        if s.cfg is not None or s.bus:
-            m = (s.cfg or {}).get("master") or {}
-            it = QTreeWidgetItem(["", "Master", "", self._file_text(None)[0],
-                                  " ".join(x for x in (m.get("interface"), m.get("transport")) if x)])
-            it.setData(0, Qt.UserRole, MASTER_ITEM)
-            self._colour(it, 3, self._file_text(None)[1])
-            self.slaves.addTopLevelItem(it)
-        file_slaves = {x.get("position"): x for x in (s.cfg or {}).get("slaves") or []}
-        for pos in sorted(set(file_slaves) | set(s.bus)):
-            f, b = file_slaves.get(pos), s.bus.get(pos)
-            title = (f or {}).get("name") or ""
-            device = (f or {}).get("device") or (b.proposal.name if b else "")
-            state = b.info.get("state", "?") if b else ""
-            file_text, file_colour = self._file_text(pos)
-            it = QTreeWidgetItem([str(pos), title, state, file_text, device])
-            it.setData(0, Qt.UserRole, pos)
-            it.setToolTip(4, device)
-            self._colour(it, 2, GREEN if state == "OP" else AMBER if state else GREY)
-            self._colour(it, 3, file_colour)
-            msgs = self.messages_by_slave.get(pos)
-            if msgs:
-                it.setToolTip(3, "\n".join(msgs))
-            self.slaves.addTopLevelItem(it)
-        self.slaves.blockSignals(False)
-        for i in range(self.slaves.topLevelItemCount()):
-            it = self.slaves.topLevelItem(i)
-            if it.data(0, Qt.UserRole) == selected:
-                self.slaves.blockSignals(keep_page)
-                self.slaves.setCurrentItem(it)
-                self.slaves.blockSignals(False)
-                break
+        if self.current is None or (self.current != MASTER_ITEM and
+                                    self.current not in self.positions()):
+            self.current = MASTER_ITEM if (s.cfg is not None or s.bus) else None
+        self.bus_page.list.fill()
+        self.hal_page.refresh()
+        if not keep_page:
+            self.show_current()
         else:
-            if self.slaves.topLevelItemCount():
-                self.slaves.setCurrentItem(self.slaves.topLevelItem(0))
-            else:
-                self.pages.setCurrentWidget(self.empty)
+            self.trouble_page.fill_slaves()
+            self.test_page.fill_slaves()
 
-    def _file_text(self, pos):
-        s = self.session
-        if s.cfg is None:
-            return "", GREY
-        if pos is None:
-            n = len(self.messages_by_slave.get(None, []))
-            return ("%d error%s" % (n, "" if n == 1 else "s"), RED) if n else ("ok", GREEN)
-        if s.slave(pos) is None:
-            return "not in file", AMBER
-        if s.bus and pos not in s.bus:
-            return "not on bus", RED
-        n = len(self.messages_by_slave.get(pos, []))
-        if n:
-            return "%d problem%s" % (n, "" if n == 1 else "s"), RED
-        return "ok", GREEN
-
-    @staticmethod
-    def _colour(item, col, colour):
-        item.setForeground(col, QBrush(colour))
-
-    def selected(self, item, _previous=None):
-        if item is None:
-            self.pages.setCurrentWidget(self.empty)
-            return
-        pos = item.data(0, Qt.UserRole)
-        if pos == MASTER_ITEM:
-            self.master_page.show_config()
-            self.pages.setCurrentWidget(self.master_page)
-        else:
-            self.slave_page.show_slave(pos)
-            self.pages.setCurrentWidget(self.slave_page)
+    def select(self, key, source=None):
+        self.current = key
+        if source is not self.bus_page.list:
+            self.bus_page.list.select(key)
+        self.show_current()
 
     def select_slave(self, pos):
-        for i in range(self.slaves.topLevelItemCount()):
-            it = self.slaves.topLevelItem(i)
-            if it.data(0, Qt.UserRole) == pos:
-                self.slaves.setCurrentItem(it)
-                return
+        self.select(pos)
 
-    def show_page_again(self):
-        it = self.slaves.currentItem()
-        if it:
-            self.selected(it)
+    def show_tab(self, page):
+        if self.tabs.currentWidget() is page:
+            self.show_current()
+        else:
+            self.tabs.setCurrentWidget(page)
+
+    def show_current(self):
+        page = self.tabs.currentWidget()
+        key = self.current
+        if page is self.bus_page:
+            stack = self.bus_page.stack
+            if key is None:
+                stack.setCurrentWidget(self.bus_page.empty)
+            elif key == MASTER_ITEM:
+                self.bus_page.master.show_config()
+                stack.setCurrentWidget(self.bus_page.master)
+            else:
+                self.bus_page.slave.show_slave(key)
+                stack.setCurrentWidget(self.bus_page.slave)
+        elif page is self.trouble_page:
+            self.trouble_page.show_slave()
+        elif page is self.test_page:
+            self.test_page.show_slave()
+        elif page is self.hal_page:
+            self.hal_page.refresh()
 
     def set_messages(self, groups):
         """groups: [(colour, prefix, [message])]."""
-        self.messages.clear()
+        lst = self.messages
+        lst.clear()
         for colour, prefix, msgs in groups:
             for m in msgs:
                 it = QListWidgetItem("%s%s" % (prefix, m))
                 it.setForeground(QBrush(colour))
                 it.setData(Qt.UserRole, slave_of(m))
-                self.messages.addItem(it)
+                lst.addItem(it)
+        lst.setVisible(lst.count() > 0)
 
-    def message_activated(self, item):
-        pos = item.data(Qt.UserRole)
+    def message_activated(self, it):
+        pos = it.data(Qt.UserRole)
         if pos is not None:
-            self.select_slave(pos)
+            self.show_tab(self.bus_page)
+            self.select(pos)
 
     # -- work in a thread
 
@@ -1115,7 +2125,6 @@ class MainWindow(QMainWindow):
         self._finish_worker()
         done(result)
         self.refresh()
-        self.show_page_again()
 
     def _failed(self, text):
         self._finish_worker()
@@ -1124,7 +2133,6 @@ class MainWindow(QMainWindow):
         self.set_messages([(RED, "", text.splitlines())])
         self.status(text.splitlines()[0])
         self.refresh()
-        self.show_page_again()
 
     # -- actions
 
@@ -1145,7 +2153,6 @@ class MainWindow(QMainWindow):
                     "The file matches the bus")
         self.check(extra=notes or ["Update: the file matches the bus"])
         self.refresh()
-        self.show_page_again()
 
     def propose_again(self, pos, mode, pdo_set):
         if self.session.slave(pos) is not None and QMessageBox.question(
@@ -1159,6 +2166,16 @@ class MainWindow(QMainWindow):
                  lambda notes: self.check(extra=["slave %d: proposed again: %s" % (pos, n)
                                                  for n in notes] or
                                           ["slave %d: proposed again" % pos]))
+
+    def add_esi(self):
+        path = QFileDialog.getExistingDirectory(self, "A folder of ESI files", self.start_dir())
+        if not path:
+            return
+        self.session.esi_paths.append(path)
+        self.session.esi_devices = esi.load_dirs(self.session.esi_paths)
+        self.status("%d device descriptions read" % len(self.session.esi_devices))
+        if self.session.bus:
+            self.read_bus()
 
     def check(self, quiet=False, extra=()):
         errors, problems, notes = self.session.check()
@@ -1178,50 +2195,45 @@ class MainWindow(QMainWindow):
         if not quiet:
             self.refresh(keep_page=True)
 
-    def diagnose(self, positions):
+    def examine(self, positions):
+        """Diagnose slaves (only reads) and show them on the Troubleshoot page."""
         def work(progress):
-            pos_list = positions or sorted(self.session.bus) or tool.slave_positions()
-            lines = []
-            progress("Diagnosing %d slave%s (watching the error counters for 2 s)..."
+            on_bus = set(tool.slave_positions())
+            pos_list = [p for p in (positions or self.positions() or sorted(on_bus))
+                        if p in on_bus]
+            progress("Examining %d slave%s (watching the error counters for 2 s)..."
                      % (len(pos_list), "" if len(pos_list) == 1 else "s"))
-            found = diagnose.diagnose(pos_list, 2.0, out=lines.append)
+            reports = diagnose.examine(pos_list, 2.0)
             states = {pos: tool.slave_info(pos) for pos in pos_list}
-            return found, lines, states
+            return reports, states
 
         def done(result):
-            found, lines, states = result
-            current, blocks = None, {}
-            for line in lines:
-                m = re.match(r"^Slave (\d+):", line)
-                if m:
-                    current = int(m.group(1))
-                if current is not None:
-                    blocks.setdefault(current, []).append(line)
-            for pos, block in blocks.items():
-                self.diagnoses[pos] = "\n".join(block).rstrip()
+            reports, states = result
+            for r in reports:
+                self.reports[r.position] = r
             for pos, info in states.items():
                 if pos in self.session.bus:
                     self.session.bus[pos].info.update(state=info["state"],
                                                       al_status_code=info.get("al_status_code"))
-            summary = "Diagnosis: %s" % ("no problems found" if not found else
-                                         "%d problem%s found" % (found, "" if found == 1 else "s"))
-            findings = ["slave %d: %s" % (pos, f) for pos, block in sorted(blocks.items())
-                        for f in diagnosis_findings(block)]
-            extra = []
-            if all(i.get("state") == "PREOP" for i in states.values()) and states:
-                extra.append("All slaves are in PREOP: normal while only a free-running master "
-                             "runs (ethercat-uspace start); LinuxCNC takes them to OP")
-            self.set_messages([(RED if found else GREEN, "", [summary]), (RED, "", findings),
-                               (GREY, "", extra)])
-            self.status(summary)
+            bad = [r for r in reports if r.error or r.state != 8 or any(p.grew for p in r.ports)
+                   or (r.cia402 and diagnose.cia402_findings(r.cia402)[0])]
+            self.status("Examined %d slave%s; %d need attention" % (
+                len(reports), "" if len(reports) == 1 else "s", len(bad)))
             if positions and len(positions) == 1:
-                self.select_slave(positions[0])
-                self.slave_page.tabs.setCurrentIndex(3)
-        self.run("Diagnosing...", work, done)
+                self.current = positions[0]
+                self.bus_page.list.select(self.current)
+            if self.tabs.currentWidget() is not self.trouble_page:
+                self.tabs.setCurrentWidget(self.trouble_page)
+        self.run("Examining...", work, done)
+
+    def diagnose(self, positions):
+        self.examine(positions)
 
     # -- the I/O test
 
     def start_test(self):
+        if self.session.cfg is None or self.test is not None:
+            return
         errors = config.check(self.session.cfg)
         if errors:
             self.check()
@@ -1229,10 +2241,10 @@ class MainWindow(QMainWindow):
             return
         if QMessageBox.question(
                 self, TITLE, "Start the I/O test?\n\nThe ecat component runs this configuration "
-                "(as edited, saved or not) in halrun with a servo thread of %d ns, and takes the "
+                "(as edited, saved or not) in halrun with a servo thread of %s, and takes the "
                 "slaves to OP. LinuxCNC must not run.\n\nOutputs of I/O slaves can then be set "
-                "from each slave's Test tab: make sure nothing wired to them can do harm. "
-                "CiA 402 drives stay disabled." % (self.session.period or 1000000),
+                "on the Test page: make sure nothing wired to them can do harm. "
+                "CiA 402 drives stay disabled." % period_text(self.session.period or 1000000),
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
         try:
@@ -1245,6 +2257,8 @@ class MainWindow(QMainWindow):
             self.test = run
             self.test_timer.start()
             self.set_messages([(GREEN, "", ["Test running; log: %s" % run.log_path])])
+            if self.tabs.currentWidget() is not self.test_page:
+                self.tabs.setCurrentWidget(self.test_page)
         self.run("Starting the test...", lambda progress: run.start(progress), started)
 
     def stop_test(self):
@@ -1279,24 +2293,27 @@ class MainWindow(QMainWindow):
             self.test = None
             self.set_messages([(RED, "", ["The test stopped by itself (halrun ended):"] +
                                 tail.splitlines())])
-            self.refresh(keep_page=True)
+            self.refresh()
             return
         try:
             m = run.pins("ecat.0.")
         except testmode.TestError:
             return
-        get = lambda n: m["ecat.0." + n].value if "ecat.0." + n in m else "?"
-        responding = get("slaves-responding")
+
+        def get(n):
+            return m["ecat.0." + n].value if "ecat.0." + n in m else "?"
         try:
-            responding = int(responding, 0)
+            responding = int(get("slaves-responding"), 0)
         except ValueError:
-            pass
-        self.bus_label.setText("Test running: %s, %s slaves responding, link %s" % (
-            "all OP" if get("all-op") == "TRUE" else "NOT all OP", responding,
-            "up" if get("link-up") == "TRUE" else "DOWN"))
-        if self.pages.currentWidget() is self.slave_page and \
-                self.slave_page.tabs.currentIndex() == SlavePage.TEST_TAB:
-            self.slave_page.update_test()
+            responding = "?"
+        all_op = get("all-op") == "TRUE"
+        set_pill(self.header.status, "● TEST MODE · I/O · %s, %s slaves%s" % (
+            "all OP" if all_op else "NOT all OP", responding,
+            "" if get("link-up") == "TRUE" else ", link DOWN"), "amber" if all_op else "red")
+        if self.tabs.currentWidget() is self.test_page:
+            self.test_page.update_values()
+
+    # -- files
 
     def ask_save(self):
         """True if it is fine to drop the configuration being edited."""
@@ -1331,7 +2348,6 @@ class MainWindow(QMainWindow):
             return False
         self.check()
         self.refresh()
-        self.show_page_again()
         return True
 
     def import_xml(self):
@@ -1350,7 +2366,6 @@ class MainWindow(QMainWindow):
             notes.insert(0, "the bus was not read: imported from the XML file alone")
         self.check(extra=["Import: %s" % n for n in notes])
         self.refresh()
-        self.show_page_again()
 
     def save(self):
         if not self.session.path:
@@ -1379,9 +2394,9 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "The machine's INI file", self.start_dir(),
                                               "LinuxCNC INI (*.ini);;All files (*)")
         if path:
-            from .session import servo_period
             self.session.ini_path, self.session.period = path, servo_period(path)
-            self.master_page.show_config()
+            self.refresh(keep_page=True)
+            self.bus_page.master.show_config()
 
     def closeEvent(self, event):
         if self.busy or not self.ask_save():
