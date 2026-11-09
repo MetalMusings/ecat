@@ -18,7 +18,7 @@ on:
     inputs:
       master_release:
         description: Release of MetalMusings/linuxcnc-ethercat with the master package
-        default: uspace-v0.5
+        default: uspace-v0.6
   push:
     tags: ['ecat-v*']
 
@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 env:
-  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v0.5' }}
+  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v0.6' }}
 
 jobs:
   deb:
