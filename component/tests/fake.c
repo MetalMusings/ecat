@@ -33,7 +33,7 @@ static named_t names[MAX_PINS];
 static int n_names;
 
 int fake_generic_reads, fake_generic_writes;
-char fake_last_msg[512];
+char fake_msgs[8192];
 int fake_failures;
 
 static void *zalloc(size_t size) {
@@ -96,7 +96,7 @@ lcec_slave_t *fake_slave(const char *name, const fake_entry_t *entries, const lc
 
   n_names = 0;
   fake_generic_reads = fake_generic_writes = 0;
-  fake_last_msg[0] = 0;
+  fake_msgs[0] = 0;
   fake_bus(s, 1);
   return s;
 }
@@ -168,10 +168,11 @@ static int add_name(void *addr, const char *fmt, va_list ap) {
 // ---- what the devices call -------------------------------------------
 
 void rtapi_print_msg(msg_level_t level, const char *fmt, ...) {
+  size_t n = strlen(fake_msgs);
   va_list ap;
   (void)level;
   va_start(ap, fmt);
-  vsnprintf(fake_last_msg, sizeof(fake_last_msg), fmt, ap);
+  vsnprintf(fake_msgs + n, sizeof(fake_msgs) - n, fmt, ap);
   va_end(ap);
 }
 

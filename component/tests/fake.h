@@ -51,8 +51,8 @@ void *fake_pin(const char *name);
 /// Calls of lcec_generic_read and lcec_generic_write.
 extern int fake_generic_reads, fake_generic_writes;
 
-/// The last error message, "" if none since fake_slave().
-extern char fake_last_msg[];
+/// The messages printed since fake_slave(), or since it was set to "".
+extern char fake_msgs[];
 
 // A minimal test runner.
 extern int fake_failures;

@@ -56,14 +56,15 @@ ecat.so: $(objs)
 
 # Unit tests: a device's code with a fake of HAL, the master and lcec
 # (tests/fake.c), so that its read and write functions run without a bus.
-tests := tests/test_cia402 tests/test_encoder
+tests := tests/test_cia402 tests/test_encoder tests/test_config
 tests/test_cia402: tests/test_cia402.o tests/fake.o devices/ecat_cia402.o
 tests/test_encoder: tests/test_encoder.o tests/fake.o devices/ecat_encoder.o
+tests/test_config: tests/test_config.o tests/fake.o ecat_config.o
 -include tests/*.d
 
 $(tests):
 	@echo Linking $@
-	@$(CC) -o $@ $^ -lm
+	@$(CC) -o $@ $^ -lm -lyaml
 
 check: $(tests)
 	@for t in $(tests); do $$t || exit 1; done

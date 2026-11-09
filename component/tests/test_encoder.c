@@ -94,7 +94,7 @@ static void test_latch_must_match_the_counter(void) {
   strcpy(mp[0].value.str, "enc");
   S = fake_slave("e", e, mp);
   CHECK_EQ(ecat_encoder_init(0, S), -EINVAL);
-  CHECK(strstr(fake_last_msg, "0x6000:12") != NULL);
+  CHECK(strstr(fake_msgs, "0x6000:12") != NULL);
 }
 
 static void test_starts_at_zero(void) {

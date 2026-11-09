@@ -94,7 +94,7 @@ static void test_needs_the_control_and_status_words(void) {
   static const fake_entry_t e[] = {{0x6041, 0, 16}, {0x6064, 0, 32}, FAKE_END};
   S = fake_slave("x", e, NULL);
   CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
-  CHECK(strstr(fake_last_msg, "0x6040") != NULL);
+  CHECK(strstr(fake_msgs, "0x6040") != NULL);
 }
 
 static void test_held_ready_without_enable(void) {
