@@ -1,13 +1,13 @@
 """EtherCAT Setup's window (PyQt5), laid out as the mockups in
 docs/design/ethercat-setup.md: a header with the configuration and the
-bus's state, and the pages Bus, Troubleshoot, Test and HAL & LinuxCNC.
+bus's state, and the pages Bus, Slave status, Test and HAL & LinuxCNC.
 
     ecatsetup --gui [ethercat.yaml] [--ini machine.ini] [--esi DIR]
 
 - Bus: the slaves, and per slave where its configuration comes from, its
   mode and sync, process data and pins, and settings; all editable,
   checked while editing, saved to ethercat.yaml.
-- Troubleshoot: a slave's way from INIT to OP, what it says (AL status
+- Slave status: a slave's way from INIT to OP, what it says (AL status
   code, CiA 402 state), its cables, and its own messages (0x10F3).
 - Test: the I/O test (testmode.py): ecat in halrun, pins live, outputs of
   I/O slaves set, SDOs read and written. Drives stay disabled.
@@ -33,7 +33,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, drivetest, esi, integrate, propose, testmode, tool
+from . import config, diagnose, drivetest, esi, integrate, netif, propose, testmode, tool
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -121,13 +121,6 @@ def slave_of(message):
 def parse_int(text):
     """A number as typed: decimal or 0x hex. Raises ValueError."""
     return int(text.strip(), 0)
-
-
-def interfaces():
-    try:
-        return sorted(n for n in os.listdir("/sys/class/net") if n != "lo")
-    except OSError:
-        return []
 
 
 def period_text(ns):
@@ -456,13 +449,15 @@ class MasterView(QWidget):
         form = QFormLayout()
         self.interface = QComboBox()
         self.interface.setEditable(True)
-        self.interface.addItems(interfaces())
+        self.interface.addItems(netif.interfaces())
         self.interface.editTextChanged.connect(self.edited)
         form.addRow("Network interface", self.interface)
         self.transport = QComboBox()
         self.transport.addItems(sorted(config.TRANSPORTS))
         self.transport.currentTextChanged.connect(self.edited)
         form.addRow("Transport", self.transport)
+        self.xdp_hint = label("", "hint", wrap=True)
+        form.addRow("", self.xdp_hint)
         ini = QHBoxLayout()
         self.ini_label = label(wrap=True)
         ini.addWidget(self.ini_label, 1)
@@ -489,6 +484,8 @@ class MasterView(QWidget):
         self.shift_auto = QCheckBox("auto")
         self.shift_auto.setToolTip("SYNC0 where the turn-around from output to status is the same "
                                    "in every cycle (two cycles)")
+        tip = ("Time from the start of the servo period to SYNC0, for all DC slaves "
+               "(lcec's globalShiftTime)")
         self.shift_auto.toggled.connect(self.edited)
         shift.addWidget(self.shift_auto)
         self.shift = QSpinBox()
@@ -496,10 +493,27 @@ class MasterView(QWidget):
         self.shift.setSuffix(" ns")
         self.shift.valueChanged.connect(self.edited)
         shift.addWidget(self.shift, 1)
-        dform.addRow("SYNC0 shift", shift)
+        shift_label = QLabel("Global shift time")
+        shift_label.setToolTip(tip)
+        self.shift.setToolTip(tip)
+        dform.addRow(shift_label, shift)
         self.dc.add(dform)
         lay.addWidget(self.dc)
         lay.addStretch(1)
+
+    def _show_xdp(self):
+        iface = self.interface.currentText().strip()
+        if not iface:
+            text = ""
+        else:
+            native = netif.xdp_native(iface) if iface in netif.interfaces() else None
+            drv = netif.driver(iface) if native is not None else None
+            name = "%s (%s)" % (iface, drv) if drv else iface
+            text = ("%s can do xdp-native" % name if native else
+                    "%s cannot do xdp-native: use raw or xdp-skb" % name if native is False else
+                    "Not known whether %s can do xdp-native" % iface)
+        self.xdp_hint.setText(text)
+        self.xdp_hint.setVisible(bool(text))
 
     def _enable_dc(self):
         on = self.dc_on.isChecked()
@@ -526,6 +540,7 @@ class MasterView(QWidget):
         self.shift_auto.setChecked(shift == "auto")
         self.shift.setValue(shift if isinstance(shift, int) else 0)
         self._enable_dc()
+        self._show_xdp()
         self.setEnabled(s.cfg is not None)
         self.loading = False
 
@@ -550,6 +565,7 @@ class MasterView(QWidget):
         else:
             m.pop("dc", None)
         self._enable_dc()
+        self._show_xdp()
         self.win.changed()
 
 
@@ -583,7 +599,7 @@ class SlaveView(QWidget):
         self.where = label("", "hint")
         row.addWidget(self.where)
         row.addStretch(1)
-        trouble = QPushButton("Troubleshoot")
+        trouble = QPushButton("Status")
         trouble.clicked.connect(lambda: win.show_tab(win.trouble_page))
         row.addWidget(trouble)
         test = QPushButton("Test this slave")
@@ -686,7 +702,12 @@ class SlaveView(QWidget):
         self.assign = QLineEdit()
         self.assign.setMaximumWidth(90)
         self.assign.setMinimumWidth(70)
-        self.assign.setToolTip("AssignActivate, as in the ESI file, such as 0x0300")
+        self.assign.setPlaceholderText("0x0300")
+        self.assign.setToolTip(
+            "AssignActivate: which sync signals the slave uses, in hex. 0x0300 (SYNC0) is common for "
+            "DC sync; 0x0000 means free run, the same as leaving DC SYNC0 off. The value is "
+            "device-specific: take it from the ESI file's OpMode (AssignActivate) or the "
+            "slave's manual.")
         self.assign.textEdited.connect(self.general_edited)
         sync.addWidget(self.assign)
         self.sync0_cycles = QSpinBox()
@@ -1125,7 +1146,7 @@ class BusPage(QWidget):
         lay.addWidget(self.scroll, 1)
 
 
-# -- the Troubleshoot page
+# -- the Slave status page
 
 STEPS = [(1, "INIT", "Slave answers; identity read."),
          (2, "PREOP", "Mailbox works; SDOs can be read and written."),
@@ -2380,7 +2401,7 @@ class MainWindow(QMainWindow):
         self.test_page = TestPage(self)
         self.hal_page = HalPage(self)
         self.tabs.addTab(self.bus_page, "Bus")
-        self.tabs.addTab(self.trouble_page, "Troubleshoot")
+        self.tabs.addTab(self.trouble_page, "Slave status")
         self.tabs.addTab(self.test_page, "Test")
         self.tabs.addTab(self.hal_page, "HAL && LinuxCNC")
         self.tabs.currentChanged.connect(lambda _: self.show_current())
@@ -2622,7 +2643,7 @@ class MainWindow(QMainWindow):
         def done(bus):
             notes = []
             if self.session.cfg is None:
-                self.session.new()
+                notes += self.session.new()
                 notes.append("A new configuration proposed from the bus; save it to keep it")
             self.status("Read %d slaves" % len(bus))
             self.check(extra=notes)
@@ -2678,7 +2699,7 @@ class MainWindow(QMainWindow):
             self.refresh(keep_page=True)
 
     def examine(self, positions):
-        """Diagnose slaves (only reads) and show them on the Troubleshoot page."""
+        """Diagnose slaves (only reads) and show them on the Slave status page."""
         def work(progress):
             on_bus = set(tool.slave_positions())
             pos_list = [p for p in (positions or self.positions() or sorted(on_bus))

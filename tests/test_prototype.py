@@ -335,6 +335,19 @@ class TestConfig(unittest.TestCase):
                                                "sync0-shift-ns": "auto"})
         self.assertEqual(config.check(cfg), [])
 
+    def test_check_assign_activate(self):
+        cfg = self.easercat_config()
+        slave = cfg["slaves"][0]
+        for value in ("", None):
+            slave["dc"] = {"assign-activate": value, "sync0-cycles": 1}
+            self.assertEqual(config.check(cfg), ["slave 3: DC sync needs an assign-activate value, such as "
+                                                 "0x0300 (from the ESI file)"])
+        slave["dc"]["assign-activate"] = "SYNC0"
+        self.assertEqual(config.check(cfg), ["slave 3: dc assign-activate 'SYNC0' is not a hex number, "
+                                             "such as 0x0300"])
+        slave["dc"]["assign-activate"] = "0x0300"
+        self.assertEqual(config.check(cfg), [])
+
     def test_check_master_shift(self):
         cfg = self.easercat_config()
         cfg["master"]["dc"] = {"sync0-shift-ns": "auto"}

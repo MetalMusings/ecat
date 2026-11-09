@@ -325,10 +325,15 @@ def check(cfg):
                     err("%s: changing modes needs 0x%04X:00 in the process data" % (where, i))
         dc = s.get("dc")
         if dc is not None:
-            try:
-                int(str(dc.get("assign-activate")), 16)
-            except ValueError:
-                err("%s: dc assign-activate %r is not a number" % (where, dc.get("assign-activate")))
+            aa = dc.get("assign-activate")
+            if aa is None or str(aa).strip() == "":
+                err("%s: DC sync needs an assign-activate value, such as 0x0300 (from the ESI file)"
+                    % where)
+            else:
+                try:
+                    int(str(aa), 16)
+                except ValueError:
+                    err("%s: dc assign-activate %r is not a hex number, such as 0x0300" % (where, aa))
         set_objects = set()
         for st in s.get("settings") or []:
             try:

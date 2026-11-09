@@ -9,6 +9,12 @@ Before starting it, stop LinuxCNC and the kernel master
 (`ethercat-uspace start`) hands the bus over to the test by itself and
 does not come back when the test stops.
 
+The test does not start when the master's network interface is missing,
+does not exist on this computer, or is set to `xdp-native` on a driver
+that cannot do it (such as `r8169`): the Master page says why. If the
+component does not load, the test stops at once with the end of the
+`halrun` log.
+
 ## I/O
 
 Each slave's inputs show live; the outputs of I/O slaves can be set.

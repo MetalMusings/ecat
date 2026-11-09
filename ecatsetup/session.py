@@ -11,7 +11,7 @@ import shutil
 
 import yaml
 
-from . import coe as coe_mod, config, esi, importxml, lcecxml, propose, sii as sii_mod, tool, update
+from . import coe as coe_mod, config, esi, importxml, lcecxml, netif, propose, sii as sii_mod, tool, update
 
 
 def ini_value(ini_path, section, key):
@@ -114,6 +114,7 @@ class Session:
         self.saved = None       # a copy of cfg as last loaded or saved
         self.bus = {}           # position -> BusSlave
         self.bus_error = None   # why the bus could not be read, or None
+        self.bus_interface = None  # the interface the master read the bus through, if known
 
     # the configuration
 
@@ -122,11 +123,11 @@ class Session:
         return self.cfg is not None and self.cfg != self.saved
 
     def new(self, interface=None, transport="raw"):
-        """A configuration proposed from the bus as read."""
+        """A configuration proposed from the bus as read. Returns the notes."""
         self.cfg = config.from_proposals([b.proposal for _, b in sorted(self.bus.items())],
                                          interface, transport, self.period)
         self.saved = None   # the file name, if one was given, is kept
-        return []
+        return netif.fill_master(self.cfg, self.bus_interface)
 
     def load(self, path):
         cfg = config.load(path)
@@ -140,8 +141,13 @@ class Session:
         xml_cfg = lcecxml.load(path)
         bus = {pos: (b.info, b.coe, b.proposal) for pos, b in self.bus.items()}
         self.cfg, notes = importxml.import_lcec(xml_cfg, bus, self.period)
+        filled = netif.fill_master(self.cfg, self.bus_interface, keep_transport=bool(xml_cfg.transport))
+        if filled:
+            notes = [n for n in notes if not n.startswith("master: no interface")]
+            if self.cfg["master"]["transport"] != "raw":
+                notes = [n for n in notes if not n.startswith("master: no transport")]
         self.path, self.saved = None, None
-        return notes
+        return notes + filled
 
     def update_from_bus(self, interface=None, transport="raw"):
         """Bring the configuration up to date with the bus, keeping its
@@ -150,9 +156,9 @@ class Session:
                                       interface, transport, self.period)
         if self.cfg is None:
             self.cfg = fresh
-            return ["proposed from the bus"]
+            return ["proposed from the bus"] + netif.fill_master(self.cfg, self.bus_interface)
         self.cfg, notes = update.merge(self.cfg, fresh)
-        return notes
+        return notes + netif.fill_master(self.cfg, self.bus_interface)
 
     def check(self):
         """Errors in the configuration, and the bus compared with it:
@@ -199,6 +205,7 @@ class Session:
             mode = self._slave_mode(pos)
             bus[pos] = BusSlave(*read_slave(pos, self.esi_devices, mode, progress=progress))
         self.bus, self.bus_error = bus, None
+        self.bus_interface = netif.master_interface()
         return bus
 
     def _slave_mode(self, pos):
@@ -223,6 +230,7 @@ class Session:
         else:
             if self.cfg is None:
                 self.cfg = config.from_proposals([], None, "raw", self.period)
+                netif.fill_master(self.cfg, self.bus_interface)
             self.cfg["slaves"].append(new)
             self.cfg["slaves"].sort(key=lambda s: s["position"])
         return list(p.notes)

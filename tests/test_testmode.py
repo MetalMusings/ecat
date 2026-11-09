@@ -8,6 +8,7 @@ import os
 import stat
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -20,6 +21,13 @@ FAKE_HALRUN = """\
 #!/usr/bin/python3
 import json, os, sys
 state = os.environ["FAKE_HAL_STATE"]
+if os.environ.get("FAKE_HAL_FAIL"):
+    # as halrun -I: the error in the file is reported, and it goes on reading commands
+    print("ecat: userspace master: cannot start master on enp2s0", flush=True)
+    print("%s:2: insmod for ecat failed, returned -1" % sys.argv[-1], flush=True)
+    for line in sys.stdin:
+        pass
+    sys.exit(0)
 json.dump(json.loads(os.environ["FAKE_HAL_PINS"]), open(state, "w"))
 for line in sys.stdin:
     with open(state + ".cmds", "a") as f:
@@ -96,7 +104,7 @@ def cfg():
                     {"object": "0x6041:00", "bits": 16, "type": "UINT", "use": "profile"},
                     {"object": "0x6064:00", "bits": 32, "type": "DINT", "use": "profile"}]}]}
         return s
-    return {"ecat": 1, "master": {"transport": "raw"},
+    return {"ecat": 1, "master": {"interface": "enp1s0", "transport": "raw"},
             "slaves": [slave(0, "x", "cia402"), slave(1, "io", "generic")]}
 
 
@@ -114,6 +122,9 @@ class TestTestMode(unittest.TestCase):
         for p in (mock.patch.object(testmode, "HALRUN", os.path.join(d, "halrun")),
                   mock.patch.object(testmode, "HALCMD", os.path.join(d, "halcmd")),
                   mock.patch.object(testmode, "KERNEL_MASTER", os.path.join(d, "none")),
+                  mock.patch.object(testmode.netif, "interfaces", lambda: ["enp1s0", "enp2s0"]),
+                  mock.patch.object(testmode.netif, "xdp_native", lambda name: name == "enp1s0"),
+                  mock.patch.object(testmode.netif, "driver", {"enp1s0": "igb", "enp2s0": "r8169"}.get),
                   mock.patch.dict(os.environ, {"FAKE_HAL_STATE": self.state,
                                                "FAKE_HAL_PINS": json.dumps(PINS)})):
             p.start()
@@ -168,6 +179,31 @@ class TestTestMode(unittest.TestCase):
         with mock.patch.object(testmode, "KERNEL_MASTER", self.dir.name):
             with self.assertRaisesRegex(testmode.TestError, "systemctl stop ethercat"):
                 testmode.TestRun(cfg()).start(timeout=1)
+
+    def test_refuses_an_interface_that_cannot_work(self):
+        for master, text in (({"transport": "raw"}, "no network interface"),
+                             ({"interface": "eth9", "transport": "raw"}, "eth9 does not exist"),
+                             ({"interface": "enp2s0", "transport": "xdp-native"},
+                              r"enp2s0 \(r8169\) cannot do xdp-native")):
+            c = cfg()
+            c["master"] = master
+            with self.assertRaisesRegex(testmode.TestError, text):
+                testmode.TestRun(c).start(timeout=1)
+        for master in ({"interface": "enp2s0", "transport": "raw"},
+                       {"interface": "enp1s0", "transport": "xdp-native"}):
+            c = cfg()
+            c["master"] = master
+            self.assertIsNone(testmode.interface_problem(c))
+
+    def test_says_so_when_ecat_does_not_load(self):
+        # halrun -I goes on after the file failed: the test must not wait and run "anyway"
+        with mock.patch.dict(os.environ, {"FAKE_HAL_FAIL": "1"}):
+            run = testmode.TestRun(cfg())
+            t0 = time.monotonic()
+            with self.assertRaisesRegex(testmode.TestError, "(?s)ecat could not be started.*insmod for ecat failed"):
+                run.start(timeout=10)
+            self.assertLess(time.monotonic() - t0, 5)
+            self.assertFalse(run.running)
 
     def test_refuses_a_configuration_with_errors(self):
         c = cfg()

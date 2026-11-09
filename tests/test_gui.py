@@ -30,8 +30,13 @@ class FakeTool:
 
     def patches(self):
         return [mock.patch.object(tool, name, getattr(self, name))
-                for name in ("slave_positions", "slave_info", "sii", "sdos", "upload")] + [
+                for name in ("slave_positions", "slave_info", "sii", "sdos", "upload", "master_mac")] + [
             mock.patch.object(tool, "sdos_settled", lambda pos, **kw: self.sdos(pos))]
+
+    mac = None  # the master's MAC address: no interface found for it unless a test says so
+
+    def master_mac(self):
+        return self.mac
 
     def slave_positions(self):
         return list(self.positions)
@@ -69,6 +74,14 @@ class TestTool(unittest.TestCase):
         with mock.patch.object(tool, "run", lambda *a, **k: "0x00000fa0 4000\n"):
             self.assertEqual(tool.upload(0, 0x2022, 0, "uint32"), 4000)
 
+    def test_master_mac(self):
+        out = ("Master0\n  Phase: Idle\n  Active: no\n  Slaves: 6\n  Ethernet devices:\n"
+               "    Main: E8:EA:6A:09:88:2B (attached)\n      Link: UP\n")
+        with mock.patch.object(tool, "run", lambda *a, **k: out):
+            self.assertEqual(tool.master_mac(), "e8:ea:6a:09:88:2b")
+        with mock.patch.object(tool, "run", lambda *a, **k: "Master0\n"):
+            self.assertIsNone(tool.master_mac())
+
     def test_negative_download(self):
         calls = []
         with mock.patch.object(tool, "run", lambda *a, **k: calls.append(a) or ""):
@@ -104,6 +117,48 @@ class TestSession(BusTest):
         s.save()
         self.assertTrue(os.path.exists(path + ".bak"))
         self.assertEqual(config.load(path)["slaves"][0]["name"], "thc")
+
+    def test_a_new_configuration_uses_the_interface_the_bus_was_read_through(self):
+        from ecatsetup import netif
+        self.tool.mac = "e8:ea:6a:09:88:2b"
+        for native, transport in ((True, "xdp-native"), (False, "raw"), (None, "raw")):
+            with mock.patch.object(netif, "by_mac", {"e8:ea:6a:09:88:2b": "enp1s0"}.get), \
+                    mock.patch.object(netif, "xdp_native", lambda name: native), \
+                    mock.patch.object(netif, "driver", lambda name: "igb"):
+                s = session.Session()
+                s.read_bus()
+                self.assertEqual(s.bus_interface, "enp1s0")
+                notes = s.new()
+                self.assertEqual((s.cfg["master"]["interface"], s.cfg["master"]["transport"]),
+                                 ("enp1s0", transport))
+                self.assertIn("interface enp1s0", notes[0])
+                self.assertEqual("xdp-native, as igb can do it" in notes[0], native is True)
+                # given in the file: kept
+                s.cfg["master"].update(interface="eth7", transport="raw")
+                self.assertEqual(s.update_from_bus(), [])
+                self.assertEqual(s.cfg["master"]["interface"], "eth7")
+                # a file without one gets it, as a new one
+                del s.cfg["master"]["interface"]
+                s.update_from_bus()
+                self.assertEqual((s.cfg["master"]["interface"], s.cfg["master"]["transport"]),
+                                 ("enp1s0", transport))
+
+    def test_import_without_an_interface_uses_the_bus_one(self):
+        from ecatsetup import netif
+        self.tool.mac = "e8:ea:6a:09:88:2b"
+        path = os.path.join(self.dir.name, "ethercat-conf.xml")
+        for transport_attr, transport in (("", "xdp-native"), (' transport="raw"', "raw")):
+            with open(path, "w") as f:
+                f.write('<masters><master idx="0" appTimePeriod="1000000"%s/></masters>' % transport_attr)
+            with mock.patch.object(netif, "by_mac", lambda mac: "enp1s0"), \
+                    mock.patch.object(netif, "xdp_native", lambda name: True):
+                s = session.Session()
+                s.read_bus()
+                notes = s.import_xml(path)
+            self.assertEqual((s.cfg["master"]["interface"], s.cfg["master"]["transport"]),
+                             ("enp1s0", transport))
+            self.assertFalse([n for n in notes if "no interface" in n])
+            self.assertEqual(bool([n for n in notes if "no transport" in n]), False)
 
     def test_errors_are_not_saved(self):
         s = session.Session()
@@ -257,6 +312,18 @@ class TestWindow(BusTest):
         self.assertEqual(w.session.cfg["master"]["transport"], "xdp-native")
         self.assertEqual(w.bus_page.list.title.text(), "BUS · ENP9S0")
         self.assertIn("enp9s0", w.header.info.text())
+        self.assertIn("Not known whether enp9s0", m.xdp_hint.text())  # no such interface
+        from ecatsetup import netif
+        with mock.patch.object(netif, "interfaces", lambda: ["enp1s0", "enp2s0"]), \
+                mock.patch.object(netif, "xdp_native", lambda name: name == "enp1s0"), \
+                mock.patch.object(netif, "driver", {"enp1s0": "igb", "enp2s0": "r8169"}.get):
+            m.interface.setEditText("enp1s0")
+            self.assertEqual(m.xdp_hint.text(), "enp1s0 (igb) can do xdp-native")
+            m.interface.setEditText("enp2s0")
+            self.assertEqual(m.xdp_hint.text(), "enp2s0 (r8169) cannot do xdp-native: use raw or xdp-skb")
+        labels = [lab.text() for lab in m.findChildren(gui.QLabel)]
+        self.assertIn("Global shift time", labels)
+        self.assertNotIn("SYNC0 shift", labels)
 
     def test_message_selects_slave(self):
         w = self.window()

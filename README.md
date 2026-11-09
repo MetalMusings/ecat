@@ -52,7 +52,7 @@ is the command `ecatsetup`; from this repository, `python3 -m ecatsetup`:
 
 ```
 python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
-python3 -m ecatsetup --ini <machine>.ini --write ethercat.yaml --interface enp2s0
+python3 -m ecatsetup --ini <machine>.ini --write ethercat.yaml [--interface enp2s0]
 python3 -m ecatsetup --esi <ESI folder> --pdo-set "3=Standard 32 Bit (MDP 511)" --write ethercat.yaml
 python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethercat.yaml
 python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
@@ -81,14 +81,14 @@ error counters that grow while it watches (`--seconds`, pointing at a
 cable or connector), the slave's own diagnosis history and error
 register, and for a CiA 402 drive its state, error code and what is
 missing to reach "Operation enabled". `--gui` opens EtherCAT Setup's window (needs `python3-pyqt5`), laid out
-as the mockups in the design draft, with the pages Bus, Troubleshoot,
+as the mockups in the design draft, with the pages Bus, Slave status,
 Test and HAL & LinuxCNC. Part 1 of the GUI: it reads the bus, lists the
 slaves with their state and how they compare with the file, shows each
 slave's process data, pins, settings and DC, lets you edit them (name, CiA 402 mode, pins, bit pins, scaling,
 settings, DC, the master's interface and transport), checks as you edit,
 proposes a slave again in another mode or PDO assignment, updates the
 file from the bus, imports lcec XML, and saves with a `.bak` copy. The
-Troubleshoot page shows a slave's way from INIT to OP, its AL status code
+Slave status page shows a slave's way from INIT to OP, its AL status code
 in plain words, its CiA 402 state, the error counters per port, and its
 own messages (0x10F3). HAL & LinuxCNC connects the INI file's joints to
 CSP drives and writes the configuration into the LinuxCNC configuration:

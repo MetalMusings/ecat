@@ -41,6 +41,12 @@ def slave_list():
     return slaves
 
 
+def master_mac():
+    """The MAC address of the master's main Ethernet device, or None."""
+    m = re.search(r"^\s*Main:\s+([0-9a-f]{2}(?::[0-9a-f]{2}){5})", run("master"), re.M | re.I)
+    return m.group(1).lower() if m else None
+
+
 def slave_info(pos):
     """Identity and state from "slaves -v" for one slave."""
     text = run("slaves", "-v", "-p", pos)

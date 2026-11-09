@@ -278,7 +278,7 @@ static ec_master_t *lcec_request_master(lcec_master_t *master) {
   }
   if (interface == NULL || interface[0] == 0) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX
-        "userspace master: give the EtherCAT network interface as <master interface=\"...\"> or in LCEC_ETHERCAT_INTERFACE\n");
+        "userspace master: no network interface: give it as master: interface in the configuration, or in LCEC_ETHERCAT_INTERFACE\n");
     return NULL;
   }
   if (transport_name == NULL || transport_name[0] == 0) {

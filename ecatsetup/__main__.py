@@ -19,7 +19,7 @@ from dataclasses import asdict
 
 import yaml
 
-from . import config, diagnose, esi, importxml, integrate, lcecxml, propose, tool, update
+from . import config, diagnose, esi, importxml, integrate, lcecxml, netif, propose, tool, update
 from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F401
 
 
@@ -135,9 +135,11 @@ def main(argv=None):
     ap.add_argument("-p", "--position", type=int, action="append", help="only these slaves")
     ap.add_argument("--json", action="store_true", help="the proposals as JSON")
     ap.add_argument("--write", metavar="FILE", help="write the proposals as an ecat configuration")
-    ap.add_argument("--interface", help="network interface, for --write")
-    ap.add_argument("--transport", default="raw", choices=sorted(config.TRANSPORTS),
-                    help="master transport, for --write")
+    ap.add_argument("--interface", help="network interface, for --write (default: the one the "
+                    "master reads the bus through)")
+    ap.add_argument("--transport", choices=sorted(config.TRANSPORTS),
+                    help="master transport, for --write (default: xdp-native if the interface "
+                    "can do it, else raw)")
     ap.add_argument("--update", metavar="FILE",
                     help="update an ecat configuration from the bus, keeping its choices; "
                          "written back with a .bak copy, or to --write")
@@ -207,7 +209,9 @@ def main(argv=None):
         sys.exit(update_file(args, proposals, period))
     if args.write:
         try:
-            config.write(config.from_proposals(proposals, args.interface, args.transport, period), args.write)
+            iface = args.interface or netif.master_interface()
+            transport = args.transport or netif.default_transport(iface)
+            config.write(config.from_proposals(proposals, iface, transport, period), args.write)
         except ValueError as e:
             sys.exit(str(e))
         print("Wrote %s" % args.write)
@@ -275,8 +279,10 @@ def update_file(args, proposals, period):
     except (OSError, yaml.YAMLError) as e:
         print("Cannot read %s: %s" % (args.update, e))
         return 1
-    fresh = config.from_proposals(proposals, args.interface, args.transport, period)
+    fresh = config.from_proposals(proposals, args.interface, args.transport or "raw", period)
     cfg, notes = update.merge(old, fresh)
+    notes += netif.fill_master(cfg, args.interface or netif.master_interface(),
+                               keep_transport=bool(args.transport))
     print("Update of %s:" % args.update)
     for n in notes:
         print("  %s" % n)

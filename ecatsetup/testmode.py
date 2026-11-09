@@ -31,7 +31,7 @@ import subprocess
 import tempfile
 import time
 
-from . import config
+from . import config, netif
 
 HALRUN = os.environ.get("ECAT_HALRUN", "halrun")
 HALCMD = os.environ.get("ECAT_HALCMD", "halcmd")
@@ -165,6 +165,23 @@ def read_only_prefixes(cfg):
                               if s.get("profile") == "cia402"])
 
 
+def interface_problem(cfg):
+    """Why the master's network interface cannot work on this computer, or
+    None: not given, not there, or xdp-native on a driver without XDP."""
+    master = cfg.get("master") or {}
+    iface = master.get("interface")
+    if not iface:
+        return ("The master has no network interface. Give the one the bus is on, on the "
+                "Master page (Network interface).")
+    if iface not in netif.interfaces():
+        return "The network interface %s does not exist on this computer." % iface
+    if master.get("transport", "raw") == "xdp-native" and netif.xdp_native(iface) is False:
+        drv = netif.driver(iface)
+        return ("%s%s cannot do xdp-native: choose the transport raw or xdp-skb on the Master "
+                "page." % (iface, " (%s)" % drv if drv else ""))
+    return None
+
+
 class TestRun:
     def __init__(self, cfg, period=None):
         errors = config.check(cfg)
@@ -189,6 +206,9 @@ class TestRun:
                             "Stop it first: sudo systemctl stop ethercat")
         if hal_running():
             raise TestError("HAL runs already (LinuxCNC or halrun): stop it first")
+        problem = interface_problem(self.cfg)
+        if problem:
+            raise TestError(problem)
         self.dir = tempfile.mkdtemp(prefix="ecatsetup-test-")
         cfg_path = os.path.join(self.dir, "ethercat.yaml")
         config.write(self.cfg, cfg_path)
@@ -206,12 +226,32 @@ class TestRun:
             if self.proc.poll() is not None:
                 self._closed()
                 raise TestError("halrun stopped:\n" + self.log_tail())
+            if self._hal_file_failed(hal_path):
+                # halrun -I goes on after an error in the file: end it
+                tail = self.log_tail()
+                self.proc.stdin.close()
+                try:
+                    self.proc.wait(5)
+                except subprocess.TimeoutExpired:
+                    self.proc.terminate()
+                    self.proc.wait(5)
+                self._closed()
+                raise TestError("ecat could not be started:\n" + tail)
             pins = self._try_pins("ecat.0.")
             if pins.get("ecat.0.all-op") and pins["ecat.0.all-op"].value == "TRUE":
                 progress("All slaves in OP")
                 return
             time.sleep(0.25)
         progress("Not all slaves reached OP in %g s; the test runs anyway" % timeout)
+
+    def _hal_file_failed(self, hal_path):
+        """True when halrun has reported an error in the test's HAL file,
+        such as the component failing to load."""
+        try:
+            with open(self.log_path, errors="replace") as f:
+                return any(line.startswith(hal_path + ":") for line in f)
+        except OSError:
+            return False
 
     def _try_pins(self, prefix=""):
         try:
