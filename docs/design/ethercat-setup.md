@@ -1,7 +1,8 @@
 # EtherCAT Setup for LinuxCNC: design draft
 
-Status: **draft for discussion**, 2026-11-08. Nothing here is built yet.
-Directions will change as parts are tried on real machines.
+Status: **draft for discussion**, 2026-11-08; status of the plan
+updated 2026-11-09 (see [Plan](#plan)). Directions will change as parts
+are tried on real machines.
 
 ## Summary
 
@@ -222,6 +223,14 @@ Moving a CiA 402 drive from a test program needs care:
   positioning.
 - **Emergency stop**: if the machine's E-stop is wired through EtherCAT
   I/O, test mode can use it.
+
+Built so far (CSP only, see [test-mode.md](../test-mode.md)): hold-to-enable
+and jog buttons, the heartbeat through the drive's `watchdog` pin, limits
+written to the drive where it has the objects, and velocity,
+acceleration and travel limited in HAL by a `limit3`. The ECT60 has no
+0x6080, 0x6072 or 0x6065 and ignores 0x607D in CSP, so on it only the
+following error (its 0x2022) is set in the drive. The E-stop is not used
+yet.
 
 ![Testing a CiA 402 drive](images/setup-test.png)
 
@@ -445,6 +454,13 @@ Each step is useful on its own; the order may change as parts are tried.
 5. **HAL and LinuxCNC integration**: `ethercat.hal`, INI changes, the start
    check.
 6. **Later**: ESI download links, user comments per device.
+
+Where it stands (2026-11-09): steps 1-3 are done (`ecatsetup` on the
+command line, `ethercat.yaml`, the `ecat` component, which runs the
+plasma cutter). Of step 4, the window has the Bus, Troubleshoot, Test
+and HAL & LinuxCNC pages; test mode covers I/O, SDOs and moving a CSP
+drive, tried on three axes. Moving a drive in PP, PV or HM from the
+window is not built; the profile has those modes. Step 5 is next.
 
 ## Mockups
 

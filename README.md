@@ -2,9 +2,12 @@
 
 EtherCAT for LinuxCNC, configured without hand-written XML.
 
-**Status: early development.** The design draft, a prototype of the
-setup program's core, the first part of its window and the HAL component exist; they are
-built in steps.
+**Status: early development.** The HAL component runs a plasma cutter
+(three CiA 402 drives in CSP, one I/O slave). EtherCAT Setup reads,
+proposes, checks, updates and diagnoses a configuration from the command
+line and in its window, and tests it: I/O, SDOs, and moving a CSP drive
+in small steps. Writing the result into a LinuxCNC configuration comes
+next. Everything is built in steps, following the design draft.
 
 `ecat` is planned as:
 
@@ -37,13 +40,13 @@ sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb ./linuxcnc-ecat_*_amd64.
 the master package, `linuxcnc-uspace-dev` and `libyaml-dev` installed
 (`-w` builds uncommitted changes, to try them out).
 
-## Prototype
+## EtherCAT Setup
 
-`ecatsetup` is the first step: it reads the slaves on the bus (SII, CoE
-dictionary, ESI files) and proposes their process data, distributed clocks
-and HAL pins, optionally compared with an lcec XML file. It only reads from
-the bus. It needs a running userspace master (`sudo ethercat-uspace start`,
-or LinuxCNC with `lcec_uspace` or `ecat`). Installed from the package it
+`ecatsetup` reads the slaves on the bus (SII, CoE dictionary, ESI
+files) and proposes their process data, distributed clocks and HAL pins,
+optionally compared with an lcec XML file. Apart from the test mode
+below, it only reads from the bus. It needs a running userspace master
+(`sudo ethercat-uspace start`, or LinuxCNC with `lcec_uspace` or `ecat`). Installed from the package it
 is the command `ecatsetup`; from this repository, `python3 -m ecatsetup`:
 
 ```
@@ -86,12 +89,12 @@ file from the bus, imports lcec XML, and saves with a `.bak` copy. The
 Troubleshoot page shows a slave's way from INIT to OP, its AL status code
 in plain words, its CiA 402 state, the error counters per port, and its
 own messages (0x10F3). HAL & LinuxCNC lists the pins and the lines for a
-HAL file; writing them into the configuration is step 5 of the plan. Like the rest of `ecatsetup`, it only reads from
-the bus; nothing moves.
+HAL file; writing them into the configuration is step 5 of the plan.
 
 Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in CSP in
 small steps, hold-to-enable, with a heartbeat and limits written to the
-drive: [docs/test-mode.md](docs/test-mode.md). The `ecat` component runs
+drive, tried on the plasma cutter's three axes:
+[docs/test-mode.md](docs/test-mode.md). The `ecat` component runs
 the configuration being edited (saved or not) in `halrun` with a servo
 thread, without LinuxCNC. Each slave's Test tab shows its pins live and
 sets the outputs of I/O slaves; pins set during the test go back to 0

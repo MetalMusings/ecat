@@ -66,8 +66,9 @@ limit of 1 mm, without an error or a status bit), so the test writes only
 
 ## First test at the machine
 
-Done on the plasma cutter's X axis (ECT60, CSP, 100 counts/mm) on
-2026-11-09, with the user at the machine, following the steps below:
+Done on the plasma cutter's three axes (ECT60 drives in CSP) on
+2026-11-09, with the user at the machine, following the steps below; X
+(100 counts/mm) first:
 
 - limits written (0x607D at ±20 mm, 0x2022 at 2 mm = 200 counts) and put
   back afterwards (−1/−1, 4000);
@@ -78,8 +79,7 @@ Done on the plasma cutter's X axis (ECT60, CSP, 100 counts/mm) on
   the last heartbeat up to 0.1 s before), and kept it down while
   `enable` stayed set;
 - the test stopped cleanly: the slaves in PREOP, `0x603F` 0 on all three
-  drives.
-
+  drives;
 - `0x607D` set to ±1 mm by hand, with the HAL travel at ±20 mm: the
   ECT60 followed the target to +4.6 mm without an error. It ignores
   `0x607D` in CSP; the test no longer writes it to an ECT60.
@@ -108,4 +108,6 @@ The steps:
    should be disabled within half a second (`fault-reason` 5). `kill -CONT`
    it again.
 7. *Done* writes the drive's own limits back; check them with an SDO
-   read (`0x607D:01`, `0x607D:02`, `0x2022`).
+   read of what the banner listed (`0x2022` on the ECT60).
+8. The other axes the same way. Stopping the test takes the slaves to
+   PREOP; `0x603F` should be 0 on every drive afterwards.
