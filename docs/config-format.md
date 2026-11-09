@@ -27,7 +27,7 @@ master:
   transport: xdp-native
   dc:
     ref-clock-sync-cycles: 1000
-    sync-to-ref-clock: true
+    servo-thread-follows-ref-clock: true
     sync0-shift-ns: auto
 slaves:
 - position: 0
@@ -98,10 +98,10 @@ run in.
 | `interface` | Network interface of the bus, such as `enp2s0`. |
 | `transport` | `raw` (default, any network card), `xdp-native` (driver with XDP support, such as `igc`) or `xdp-skb`. |
 | `dc.ref-clock-sync-cycles` | How often the DC clocks are synchronised, in cycles. |
-| `dc.sync-to-ref-clock` | `true`: the servo thread follows the DC reference clock; `false`: the slaves follow the master. |
+| `dc.servo-thread-follows-ref-clock` | `true`: LinuxCNC's servo thread is steered to follow the DC reference clock (the first DC slave); `false`: the slaves' clocks follow the PC's clock. Called `sync-to-ref-clock` before; that name is an error now. |
 | `dc.sync0-shift-ns` | Time from the nominal start of the servo period to SYNC0, for all DC slaves, in ns; or `auto` (below). |
 
-`sync0-shift-ns: auto` (needs `sync-to-ref-clock: true`; EtherCAT Setup
+`sync0-shift-ns: auto` (needs `servo-thread-follows-ref-clock: true`; EtherCAT Setup
 proposes it) lets the component choose the shift so that the turn-around,
 from an output written in one servo cycle to the slave's answer read
 back, is the same in every cycle: two cycles when SYNC0 can fall after

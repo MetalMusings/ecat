@@ -312,7 +312,7 @@ static void test_slave_errors(void) {
 static void test_dc(void) {
   CHECK_EQ(load("ecat: 1\n"
                 "master:\n"
-                "  dc: {ref-clock-sync-cycles: -1, sync-to-ref-clock: true, sync0-shift-ns: 100000}\n"
+                "  dc: {ref-clock-sync-cycles: -1, servo-thread-follows-ref-clock: true, sync0-shift-ns: 100000}\n"
                 "slaves:\n"
                 "- position: 0\n"
                 "  name: d\n"
@@ -339,7 +339,7 @@ static void test_dc(void) {
 static void test_dc_auto_shift(void) {
   CHECK_EQ(load("ecat: 1\n"
                 "master:\n"
-                "  dc: {ref-clock-sync-cycles: 1000, sync-to-ref-clock: true, sync0-shift-ns: auto}\n"
+                "  dc: {ref-clock-sync-cycles: 1000, servo-thread-follows-ref-clock: true, sync0-shift-ns: auto}\n"
                 "slaves:\n"
                 "- position: 0\n"
                 "  name: d\n"
@@ -357,15 +357,24 @@ static void test_dc_auto_shift(void) {
               "- position: 0\n"
               "  name: d\n"
               "  profile: generic\n",
-      "sync0-shift-ns: auto needs master.dc.sync-to-ref-clock: true");
+      "sync0-shift-ns: auto needs master.dc.servo-thread-follows-ref-clock: true");
   CHECK_FAILS("ecat: 1\n"
               "master:\n"
-              "  dc: {sync-to-ref-clock: true, sync0-shift-ns: often}\n"
+              "  dc: {servo-thread-follows-ref-clock: true, sync0-shift-ns: often}\n"
               "slaves:\n"
               "- position: 0\n"
               "  name: d\n"
               "  profile: generic\n",
       "sync0-shift-ns: \"often\" is not a number");
+  // the old name is an error, not ignored
+  CHECK_FAILS("ecat: 1\n"
+              "master:\n"
+              "  dc: {sync-to-ref-clock: true}\n"
+              "slaves:\n"
+              "- position: 0\n"
+              "  name: d\n"
+              "  profile: generic\n",
+      "sync-to-ref-clock is now called servo-thread-follows-ref-clock");
 }
 
 #define SETTINGS(list) HEAD "- position: 0\n  name: s\n  profile: generic\n  settings:\n" list

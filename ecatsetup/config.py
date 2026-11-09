@@ -116,7 +116,7 @@ def from_proposals(proposals, interface=None, transport="raw", servo_period=None
         # servo thread. The thread follows the reference clock, and the
         # component places SYNC0 where the turn-around is the same in every
         # cycle (sync0-shift-ns: auto).
-        master["dc"] = {"ref-clock-sync-cycles": 1000, "sync-to-ref-clock": True,
+        master["dc"] = {"ref-clock-sync-cycles": 1000, "servo-thread-follows-ref-clock": True,
                         "sync0-shift-ns": "auto"}
     return {"ecat": FORMAT_VERSION, "master": master, "slaves": slaves}
 
@@ -166,11 +166,13 @@ def check(cfg):
     if master.get("transport", "raw") not in TRANSPORTS:
         err("master: unknown transport %r" % master.get("transport"))
     mdc = master.get("dc") or {}
+    if "sync-to-ref-clock" in mdc:
+        err("master.dc.sync-to-ref-clock is now called servo-thread-follows-ref-clock")
     shift = mdc.get("sync0-shift-ns")
     if shift == "auto":
         # the component moves the servo thread against SYNC0
-        if mdc.get("sync-to-ref-clock") is not True:
-            err("master.dc.sync0-shift-ns: auto needs master.dc.sync-to-ref-clock: true")
+        if mdc.get("servo-thread-follows-ref-clock") is not True:
+            err("master.dc.sync0-shift-ns: auto needs master.dc.servo-thread-follows-ref-clock: true")
     elif shift is not None and (not isinstance(shift, int) or isinstance(shift, bool)):
         err("master.dc.sync0-shift-ns: %r is not a number or auto" % shift)
     slaves = cfg.get("slaves")

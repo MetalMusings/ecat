@@ -120,11 +120,11 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
         dc["ref-clock-sync-cycles"] = abs(xml_cfg.ref_clock_sync_cycles)
         legacy = xml_cfg.ref_clock_sync_cycles < 0
         if xml_cfg.sync_to_ref_clock is not None or legacy:
-            dc["sync-to-ref-clock"] = bool(xml_cfg.sync_to_ref_clock) or (
+            dc["servo-thread-follows-ref-clock"] = bool(xml_cfg.sync_to_ref_clock) or (
                 xml_cfg.sync_to_ref_clock is None and legacy)
         if legacy and xml_cfg.sync_to_ref_clock is None:
             notes.append("master: negative refClockSyncCycles means syncToRefClock in lcec; "
-                         "imported as sync-to-ref-clock: true")
+                         "imported as servo-thread-follows-ref-clock: true")
     if xml_cfg.global_shift_time:
         dc["sync0-shift-ns"] = xml_cfg.global_shift_time
     if dc:

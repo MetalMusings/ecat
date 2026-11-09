@@ -781,15 +781,20 @@ char *ecat_config_load(const char *path, size_t *length) {
   copy_str(mc->transport, get_str(&c, master, "transport"));
   mc->appTimePeriod = 0;  // the servo thread's period, see ecat_config.h
   mc->refClockSyncCycles = get_int(&c, mdc, "ref-clock-sync-cycles", 0);
-  mc->syncToRefClock = get_bool(&c, mdc, "sync-to-ref-clock", 0);
+  // true: the servo thread follows the DC reference clock (lcec's
+  // syncToRefClock); false: the slaves' clocks follow the PC's
+  mc->syncToRefClock = get_bool(&c, mdc, "servo-thread-follows-ref-clock", 0);
+  if (get(&c, mdc, "sync-to-ref-clock") != NULL) {
+    error(&c, "master.dc.sync-to-ref-clock is now called servo-thread-follows-ref-clock");
+  }
   // sync0-shift-ns: auto lets the component choose it (lcec_autoshift.h),
   // which moves the servo thread against SYNC0 and so needs
-  // sync-to-ref-clock
+  // servo-thread-follows-ref-clock
   {
     const char *shift = get_str(&c, mdc, "sync0-shift-ns");
     if (shift != NULL && !strcmp(shift, "auto")) {
       mc->autoShift = 1;
-      if (!mc->syncToRefClock) error(&c, "master.dc.sync0-shift-ns: auto needs master.dc.sync-to-ref-clock: true");
+      if (!mc->syncToRefClock) error(&c, "master.dc.sync0-shift-ns: auto needs master.dc.servo-thread-follows-ref-clock: true");
     } else {
       mc->globalShiftTime = get_int(&c, mdc, "sync0-shift-ns", 0);
     }

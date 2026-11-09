@@ -331,18 +331,20 @@ class TestConfig(unittest.TestCase):
         p.dc_assign, p.dc_sync0_factor, p.dc_shift = 0x300, 1, 0
         cfg = config.from_proposals([p], "enp2s0", "xdp-native", 1000000)
         self.assertEqual(cfg["master"]["dc"], {"ref-clock-sync-cycles": 1000,
-                                               "sync-to-ref-clock": True,
+                                               "servo-thread-follows-ref-clock": True,
                                                "sync0-shift-ns": "auto"})
         self.assertEqual(config.check(cfg), [])
 
     def test_check_master_shift(self):
         cfg = self.easercat_config()
         cfg["master"]["dc"] = {"sync0-shift-ns": "auto"}
-        self.assertTrue(any("auto needs master.dc.sync-to-ref-clock" in e for e in config.check(cfg)))
-        cfg["master"]["dc"] = {"sync-to-ref-clock": True, "sync0-shift-ns": "often"}
+        self.assertTrue(any("auto needs master.dc.servo-thread-follows-ref-clock" in e for e in config.check(cfg)))
+        cfg["master"]["dc"] = {"servo-thread-follows-ref-clock": True, "sync0-shift-ns": "often"}
         self.assertTrue(any("'often' is not a number or auto" in e for e in config.check(cfg)))
-        cfg["master"]["dc"] = {"sync-to-ref-clock": False, "sync0-shift-ns": 300000}
+        cfg["master"]["dc"] = {"servo-thread-follows-ref-clock": False, "sync0-shift-ns": 300000}
         self.assertEqual(config.check(cfg), [])
+        cfg["master"]["dc"] = {"sync-to-ref-clock": True}
+        self.assertTrue(any("now called servo-thread-follows-ref-clock" in e for e in config.check(cfg)))
 
     def test_check_finds_errors(self):
         cfg = self.easercat_config()
@@ -395,7 +397,7 @@ class TestImport(unittest.TestCase):
         self.assertEqual(config.check(cfg), [])
         m = cfg["master"]
         self.assertEqual((m["interface"], m["dc"]["sync0-shift-ns"]), ("enp2s0", 300000))
-        self.assertTrue(m["dc"]["sync-to-ref-clock"])          # negative refClockSyncCycles
+        self.assertTrue(m["dc"]["servo-thread-follows-ref-clock"])          # negative refClockSyncCycles
         s = cfg["slaves"][0]
         self.assertTrue(s["configure-pdos"])
         self.assertEqual(s["dc"], {"assign-activate": "0x0300", "sync0-cycles": 1, "sync0-shift-ns": 0})
@@ -480,7 +482,7 @@ class TestUpdate(unittest.TestCase):
     def test_revision_and_master_dc(self):
         fresh = self.fresh(slave(0, "drive-0", "0x1", "0xA", "0x00000002"),
                            slave(1, "drive-1", "0x1", "0xA"), slave(2, "io-2", "0x2", "0xB"))
-        fresh["master"]["dc"] = {"ref-clock-sync-cycles": 1000, "sync-to-ref-clock": True}
+        fresh["master"]["dc"] = {"ref-clock-sync-cycles": 1000, "servo-thread-follows-ref-clock": True}
         cfg, notes = update.merge(self.old, fresh)
         self.assertEqual(cfg["slaves"][0]["identity"]["revision"], "0x00000002")
         self.assertEqual(cfg["master"]["interface"], "enp2s0")
