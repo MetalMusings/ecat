@@ -119,7 +119,8 @@ run in.
 
 ### PDOs and entries
 
-A PDO has `pdo` (its index), `sm` (its sync manager) and `entries`. An
+A PDO has `pdo` (its index), `sm` (its sync manager, 0 to 255) and
+`entries`. A sync manager holds either outputs or inputs, not both. An
 entry has:
 
 | Key | Meaning |

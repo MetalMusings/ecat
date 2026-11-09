@@ -191,6 +191,24 @@ class TestEsi(unittest.TestCase):
             slave([counter], [{"name": "enc", "index": "0x6001"}]))))
         self.assertTrue(any("only for objects" in e for e in config.check(slave([counter], []))))
 
+    def test_sync_manager_rules(self):
+        def slave(out_sm, in_sm):
+            def pdo(index, sm, obj, pin):
+                return {"pdo": index, "sm": sm, "entries": [
+                    {"object": obj, "bits": 16, "type": "UINT", "pin": pin, "hal-type": "u32"}]}
+            return {"ecat": 1, "master": {}, "slaves": [{
+                "position": 0, "name": "s", "identity": {"vendor": "0x2", "product": "0x1"},
+                "profile": "generic", "process-data": {
+                    "outputs": [pdo("0x1600", out_sm, "0x7000:01", "a"), pdo("0x1601", out_sm, "0x7010:01", "b")],
+                    "inputs": [pdo("0x1A00", in_sm, "0x6000:01", "c")]}}]}
+        self.assertEqual(config.check(slave(2, 3)), [])
+        # as the component: the inputs on sm 2 would be left out
+        errors = config.check(slave(2, 2))
+        self.assertEqual([e for e in errors if "sm 2 is used for outputs and inputs" in e], [errors[0]])
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(any("sm must be 0 to 255" in e for e in config.check(slave(2, 256))))
+        self.assertTrue(any("sm must be 0 to 255" in e for e in config.check(slave(None, 3))))
+
     def test_a_pulse_counter_is_not_an_encoder(self):
         # EL2521: a "Counter value" without "Latch C valid"
         e = [propose.Entry(0x6020, 0x11, 32, "Counter value", "UDINT", "pin"),

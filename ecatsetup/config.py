@@ -226,8 +226,16 @@ def check(cfg):
 
         seen = set()
         owned = set()
+        sm_dir = {}
         for direction in ("outputs", "inputs"):
             for pdo in (s.get("process-data") or {}).get(direction, []):
+                sm = pdo.get("sm")
+                if not isinstance(sm, int) or not 0 <= sm <= 255:
+                    err("%s: PDO %s: sm must be 0 to 255" % (where, pdo.get("pdo")))
+                elif sm_dir.setdefault(sm, direction) != direction:
+                    # the component would leave the second direction's PDOs out
+                    err("%s: sm %d is used for outputs and inputs" % (where, sm))
+                    sm_dir[sm] = "both"
                 for e in pdo.get("entries", []):
                     try:
                         o = parse_obj(e.get("object"))
