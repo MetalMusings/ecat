@@ -26,17 +26,13 @@ The packages do **not**:
 - conflict with the kernel master or with `lcec`: the component is called
   `ecat`, and the two masters are separate installs.
 
-Two things to know:
+One thing to know:
 
 - **Only one master can use a network interface at a time.** The kernel
   master (`sudo systemctl stop ethercat`) must be stopped while ecat's
   master runs on the same interface, and `ecat` refuses to start while
   the kernel master has it. With two network cards, give ecat the one
   your kernel master does not use.
-- **Installing `linuxcnc-ethercat-uspace` 1.1 over 1.0 removes
-  `lcec_uspace`, `lcec_conf` and `lcec-take-down`**, which 1.0 held (they
-  are frozen; ecat imports lcec XML files). If you run `lcec_uspace`,
-  stay on 1.0 until you move over.
 
 The program keeps a little of its own, all in your home directory:
 `~/.config/ecatsetup/` (the ESI folders you gave, your quirk files),
@@ -69,9 +65,9 @@ ecatsetup --check path/to/ethercat.yaml
 ecatsetup --import path/to/ethercat-conf.xml --ini machine.ini --write /tmp/ethercat.yaml
 ```
 
-The window opens on a *Start* page (a tour of it: [ecatsetup-gui.md](ecatsetup.md#the-window)). `--import` turns an lcec XML file
+The window opens on a *Start* page (a tour of it: [the window](ecatsetup.md#the-window)). `--import` turns an lcec XML file
 into an ecat file; `--check` checks a file (see
-[config-format.md](component.md#the-configuration-file)). Open the result and look at what
+[file format](component.md#the-configuration-file)). Open the result and look at what
 it proposes.
 
 **2. Reading the bus.** Reading needs a master. Stop the kernel master
@@ -103,7 +99,7 @@ ecatsetup --gui ~/linuxcnc/configs/mymachine-ecat/ethercat.yaml \
 *HAL & LinuxCNC* then shows what would be written (`ethercat.yaml`,
 `ethercat-load.hal`, `ethercat.hal`, the INI changes and the HAL lines
 that would be commented out) before it writes, and keeps each changed
-file as `.bak`. [linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc) says what is written and how
+file as `.bak`. [writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc) says what is written and how
 the check of your HAL files works.
 
 **4. The test mode.** It runs the `ecat` component in `halrun` without
@@ -118,7 +114,7 @@ back). Before moving a drive:
 - set the scale (counts per mm) first;
 - check what the drive's homing method (`0x6098`) does before using
   *Home*: only method 35 leaves the axis where it is;
-- read [test-mode.md](ecatsetup.md#test-mode).
+- read [test mode](ecatsetup.md#test-mode).
 
 **5. In LinuxCNC.** Only now run the copy of your configuration. Start
 with the machine unable to do harm (no power to the axes, the
@@ -126,7 +122,7 @@ spindle or the torch off). *Watch LinuxCNC that runs (read only)* on the
 *Test* page shows the pins live without changing anything, and if
 something is wrong the *Slave status* page, the event log and *Save
 report...* give what to send when you ask for help
-([events.md](ecatsetup.md#event-log-and-report)).
+([event log](ecatsetup.md#event-log-and-report)).
 
 ## Going back
 

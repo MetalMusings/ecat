@@ -34,12 +34,9 @@ ecat has two parts:
 
 Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer:
 
-1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 1.1 or newer,
-   from the `uspace-v*` releases of
-   [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases).
-   The package is named as before but holds the master only; installing
-   1.1 over a 1.0 built in the old linuxcnc-ethercat repository removes
-   that package's frozen `lcec_uspace`;
+1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace`, from the
+   `uspace-v*` releases of
+   [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases);
 2. `linuxcnc-ecat` from this repository's `ecat-v*`
    [releases](https://github.com/MetalMusings/ecat/releases): the `ecat`
    HAL component and the `ecatsetup` command.

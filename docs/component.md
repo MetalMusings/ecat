@@ -40,8 +40,7 @@ addf ecat.write-all servo-thread
   sets every output to zero and takes the slaves to PREOP, and unloading
   waits for it. `ecat.0.guard-state` shows it (0 the servo thread runs, 1
   taking the slaves down, 2 done) and `ecat.0.guard-cycles` counts the
-  cycles it sent; while the machine runs that stays 0. It needs
-  linuxcnc-ethercat-uspace 1.1 or newer. After `halcmd stop` and `start`
+  cycles it sent; while the machine runs that stays 0. After `halcmd stop` and `start`
   the slaves are asked back to OP; DC slaves (such as the ECT60) then stop
   in SAFEOP with a synchronization error, as they did before the guard:
   restart instead.
@@ -241,10 +240,7 @@ Tried on the plasma cutter (2026-11-10, halrun, no motion): with the
 kernel master running, ecat refused before it took the card; with it
 stopped, the matching file loaded after waiting 3.5 s for the link and
 the scan, a wrong product code on slave 3 and an extra slave 4 in the
-file each stopped the load with their own line. The comparison needs
-linuxcnc-ethercat-uspace 1.1 (`ecrt_master()` and
-`ecrt_master_get_slave()` exported); with 1.0 only the kernel master is
-checked.
+file each stopped the load with their own line.
 
 ### slaves
 
@@ -256,12 +252,12 @@ checked.
 | `identity` | `vendor`, `product`, and optionally `revision`. At start the component compares them with the bus. |
 | `profile` | `cia402` (CiA 402 drive), `mdp` (modular device, ETG.5001) or `generic`. |
 | `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01`, `0x607D:02` and `0x607F:00`). |
-| `modules` | For a modular device: the module idents it detected (`0xF050`) when it was read, to notice a change ([modules.md](#modular-devices)). The component does not read it. |
-| `cia402.axes` | For `cia402`: a drive with several axes in one slave (such as a two-axis ECT60x2): a list of 1 to 4 names, the axes' pin prefixes. Axis n uses the CiA 402 objects at index + n × 0x800 (`0x6040`, `0x6840`, `0x7040`, `0x7840`); see [cia402.md](#several-axes). Without it, the drive has one axis named after the slave. |
-| `cia402.zero-at-start` | For `cia402`: `true` makes positions count from where the drive stands when the bus first reaches OP, for drives that keep their position from an earlier run (see [cia402.md](#zero-at-start)). Default `false`. |
+| `modules` | For a modular device: the module idents it detected (`0xF050`) when it was read, to notice a change ([modular devices](#modular-devices)). The component does not read it. |
+| `cia402.axes` | For `cia402`: a drive with several axes in one slave (such as a two-axis ECT60x2): a list of 1 to 4 names, the axes' pin prefixes. Axis n uses the CiA 402 objects at index + n × 0x800 (`0x6040`, `0x6840`, `0x7040`, `0x7840`); see [cia402](#several-axes). Without it, the drive has one axis named after the slave. |
+| `cia402.zero-at-start` | For `cia402`: `true` makes positions count from where the drive stands when the bus first reaches OP, for drives that keep their position from an earlier run (see [cia402](#zero-at-start)). Default `false`. |
 | `cia402.modes` | For `cia402`: other modes the drive may change to: `hm` for homing by the drive's own method, and `csp`, `csv`, `pv`, `pp` to choose with the `opmode-cmd` pin. It needs `0x6060` and `0x6061`, and each mode's objects, in the process data. |
-| `homing` | For `cia402` with `hm`: the homing method chosen in the window, `{method: 17, fast: 3000, slow: 1000, accel: 5000, offset: 0}` (a list of them, `null` for an axis without, for a drive with several axes). The master ignores it. The window writes the same choice to `settings` (0x6098, 0x6099, 0x609A, 0x607C and what the drive needs besides, from its quirk file), which is what the drive gets at start; the drive test writes it too, so a test homes as LinuxCNC will ([quirks.md](ecatsetup.md#homing)). |
-| `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder.md](#encoder-channels). |
+| `homing` | For `cia402` with `hm`: the homing method chosen in the window, `{method: 17, fast: 3000, slow: 1000, accel: 5000, offset: 0}` (a list of them, `null` for an axis without, for a drive with several axes). The master ignores it. The window writes the same choice to `settings` (0x6098, 0x6099, 0x609A, 0x607C and what the drive needs besides, from its quirk file), which is what the drive gets at start; the drive test writes it too, so a test homes as LinuxCNC will ([quirk files](ecatsetup.md#homing)). |
+| `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder channels](#encoder-channels). |
 | `configure-pdos` | `true`: the master writes the PDO assignment and mapping below to the slave; `false`: the slave's own mapping is used and the entries below are only located in it. |
 | `process-data` | `outputs` (master to slave) and `inputs` (slave to master): lists of PDOs. |
 | `dc` | Distributed clocks; leave out for none. |
@@ -278,7 +274,7 @@ entry has:
 | `object` | `"0xINDEX:SUB"`, or `"0x0000:00"` for a gap. |
 | `bits` | Bit length. |
 | `type` | Data type: `BOOL`, `SINT`, `INT`, `DINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `REAL`, `LREAL`. |
-| `use` | `profile`: handled by the profile or an encoder channel, no pin (see [cia402.md](#the-cia402-profile), [encoder.md](#encoder-channels)). `gap`: padding. Left out: an ordinary entry. |
+| `use` | `profile`: handled by the profile or an encoder channel, no pin (see [cia402](#the-cia402-profile), [encoder channels](#encoder-channels)). `gap`: padding. Left out: an ordinary entry. |
 | `pin`, `hal-type` | One pin for the whole entry; `hal-type` is `bit`, `s32`, `u32` or `float`. A `float` pin of a `REAL`/`LREAL` entry carries the value as it is; of an integer entry it is scaled. A `LINT`/`ULINT` entry must be `float` (LinuxCNC 2.9 has no 64-bit pins): the whole 64 bits are read and written, exact up to 2^53, and written values are held within the type's range. |
 | `scale`, `offset` | For a `float` pin of an integer entry: pin = value × scale + offset. |
 | `split` | One `bit` pin per bit, from bit 0; `null` for a bit without a pin. Instead of `pin`. |
@@ -302,7 +298,7 @@ as `"a0 0f"`). `name` is for people.
 ### linuxcnc
 
 Written by EtherCAT Setup when joints are connected to drives, or
-slaves' pins to LinuxCNC's ([linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)); the component
+slaves' pins to LinuxCNC's ([writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc)); the component
 does not read it.
 
 ```yaml
@@ -318,7 +314,7 @@ linuxcnc:
 | Key | Meaning |
 |---|---|
 | `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0). Each joint and each slave once. |
-| `check-hal-at-start` | `true`: `ethercat-load.hal` runs the HAL check (`ecatsetup --check-hal`) when LinuxCNC starts ([linuxcnc.md](ecatsetup.md#checking-the-hal-files)). |
+| `check-hal-at-start` | `true`: `ethercat-load.hal` runs the HAL check (`ecatsetup --check-hal`) when LinuxCNC starts ([writing into LinuxCNC](ecatsetup.md#checking-the-hal-files)). |
 | `nets` | A list of `signal` (a HAL signal name: no blanks or `#`, at most 47 characters, each once) and `pins` (at least two; at least one of them a slave's pin; each pin in one net only, and not a pin a joint's connection takes). |
 
 ### Importing lcec XML files
@@ -342,7 +338,7 @@ setting is kept, with a note.
 
 lcec's `initCmds`, `idnConfig` and `watchdog` are not imported yet.
 `modParam`s become settings where a [quirk file](ecatsetup.md#quirk-files) translates
-them (lcec's stepper drivers, [stepper.md](#from-lcec-stepper)); others
+them (lcec's stepper drivers, [stepper terminals](#from-lcec-stepper)); others
 get a note. ecat has no product drivers, so a `modParam` will become settings
 rows or process data choices (see the design draft, [Decision: profiles
 with quirks, no product
@@ -351,8 +347,8 @@ drivers](development.md#decision-profiles-with-quirks-no-product-drivers)).
 ### In the component
 
 The `ecat` component reads the file with `loadrt ecat config=<file>`. It
-supports the profiles `cia402` ([cia402.md](#the-cia402-profile)), `mdp` and
-`generic`, and encoder channels on any of them ([encoder.md](#encoder-channels)). 64-bit integer entries are `float` pins (above).
+supports the profiles `cia402` ([cia402](#the-cia402-profile)), `mdp` and
+`generic`, and encoder channels on any of them ([encoder channels](#encoder-channels)). 64-bit integer entries are `float` pins (above).
 
 ### Open
 
@@ -979,7 +975,7 @@ homing does not end. Method 36 is not usable on the ECT60 as it is.
 
 PP and PV were tried on the same machine on 2026-11-10: PV runs as
 expected on X, Y and Z; PP works with the set-point given again as above
-([test-mode.md](ecatsetup.md#pp-pv-and-homing-at-the-machine)). The ECT60s
+([test mode](ecatsetup.md#pp-pv-and-homing-at-the-machine)). The ECT60s
 were delivered with `0x6098` = 17 (negative limit switch): a drive that
 is homed without a switch drives into its end stop. Use method 35, or set
 the method in `settings`.

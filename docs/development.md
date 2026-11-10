@@ -255,7 +255,7 @@ Moving a CiA 402 drive from a test program needs care:
 - **Emergency stop**: if the machine's E-stop is wired through EtherCAT
   I/O, test mode can use it.
 
-Built so far (CSP only, see [test-mode.md](ecatsetup.md#test-mode)): hold-to-enable
+Built so far (CSP only, see [test mode](ecatsetup.md#test-mode)): hold-to-enable
 and jog buttons, the heartbeat through the drive's `watchdog` pin, limits
 written to the drive where it has the objects, and velocity,
 acceleration and travel limited in HAL by a `limit3`. The ECT60 has no
@@ -387,7 +387,7 @@ changed. When an existing `lcec` configuration is moved over, the old
 `lcec_conf` and `lcec` lines in the user's HAL file are shown, and removed
 only if the user agrees.
 
-As built (step 5, [linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)): two files, since the
+As built (step 5, [writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc)): two files, since the
 servo thread exists only once `motmod` is loaded in the user's first HAL
 file. `ethercat-load.hal`, the first HALFILE, loads the component;
 `ethercat.hal`, the last, adds its functions and connects the joints.
@@ -501,15 +501,15 @@ convenience lcec's drivers give.
 | `mdp`, `generic` | digital I/O (`el1xxx`, `el2xxx`, `el2202`, `digitalcombo`, `easyio`, `epocat`, `ex260`, `ep9214`), status bits (`el95xx`, `el9410`), `passive` | Done |
 | Encoder (MDP 511) | `el5101`, `el5151`, `el5152`, the encoder channels of `el7342`/`em7004` | Done |
 | `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Built (`cia402.axes`, objects 0x800 apart, pins per axis); not tried on such a drive. |
-| Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog.md](component.md#analog-inputs-and-outputs)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
-| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale, error reset (HAL lines) and lcec modParams are a quirk file ([stepper.md](component.md#stepper-and-dc-motor-terminals), [quirks.md](ecatsetup.md#quirk-files)). Not tried on a terminal. `el2521` (pulse train) not yet. |
+| Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog terminals](component.md#analog-inputs-and-outputs)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
+| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale, error reset (HAL lines) and lcec modParams are a quirk file ([stepper terminals](component.md#stepper-and-dc-motor-terminals), [quirk files](ecatsetup.md#quirk-files)). Not tried on a terminal. `el2521` (pulse train) not yet. |
 | Absolute encoders (SSI, EnDat) | `el5002`, `el5032` | Check first whether `generic` plus settings is enough. |
 
 The order is set by what users run; analog I/O and the EL7041 are
 probably the most common among LinuxCNC users with Beckhoff terminals.
 
 **Quirks** are YAML files per vendor and product, which users can write
-and share ([quirks.md](ecatsetup.md#quirk-files), decided 2026-11-10: a small product
+and share ([quirk files](ecatsetup.md#quirk-files), decided 2026-11-10: a small product
 such as the EL7041 gets a quirk file, not code). EtherCAT Setup uses them
 when it proposes, imports and writes a configuration. An entry can
 hold:
@@ -559,19 +559,19 @@ described.
   better is known; swapped drives of the same type are not noticed
   automatically.
 - **File format**: YAML, `ethercat.yaml`
-  ([config-format.md](component.md#the-configuration-file)).
+  ([file format](component.md#the-configuration-file)).
 - **Scaling**: in HAL, as today. `ethercat.hal` sets each joint's
-  `pos-scale` from `linuxcnc.joints` ([linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
+  `pos-scale` from `linuxcnc.joints` ([writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **INI keys**: `[ETHERCAT]CONFIG`, and `HALFILE = ethercat-load.hal`
-  first and `HALFILE = ethercat.hal` last ([linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
+  first and `HALFILE = ethercat.hal` last ([writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **Joints and gantries**, for now: EtherCAT Setup connects joints to
   CiA 402 drives in CSP. Gantries, CSV drives, home and limit switches,
   and I/O such as an E-stop are connected in the user's HAL files
-  ([linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
+  ([writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **CiA 402 homing**: `index-enable` with the drive's own homing
   (`modes: [hm]`); no homing module. Tried on the plasma cutter's X axis
-  ([cia402.md](component.md#the-cia402-profile)). PP and PV were tried on the plasma
-  cutter's three ECT60 drives on 2026-11-10 ([test-mode.md](ecatsetup.md#pp-pv-and-homing-at-the-machine)):
+  ([cia402](component.md#the-cia402-profile)). PP and PV were tried on the plasma
+  cutter's three ECT60 drives on 2026-11-10 ([test mode](ecatsetup.md#pp-pv-and-homing-at-the-machine)):
   the ECT60 sometimes acknowledges a set-point without starting (the
   profile gives it again), and torque homing (method 36) ends only with an integral gain in
   the drive's speed loop (`0x2030:06`).
@@ -757,22 +757,22 @@ in this order:
 
 1. **Flight recorder and Save report** (e): helps users who ask for help
    the most, and is useful in a-d too. Built 2026-11-10
-   ([events.md](ecatsetup.md#event-log-and-report)).
+   ([event log](ecatsetup.md#event-log-and-report)).
 2. **HAL check and drift** (b): the check, hand edits of `ethercat.hal`
    noticed, renames into the user's files, where each pin is connected.
-   Built 2026-11-10 ([linuxcnc.md](ecatsetup.md#checking-the-hal-files)).
+   Built 2026-11-10 ([writing into LinuxCNC](ecatsetup.md#checking-the-hal-files)).
 3. **The bus changed**, matched by type and order (b); modular devices
    best effort. Built 2026-11-10: *Update from bus* shows the changes and
    what depends on missing slaves first; connections of missing slaves
-   are removed; modules recorded and compared ([modules.md](component.md#modular-devices)).
+   are removed; modules recorded and compared ([modular devices](component.md#modular-devices)).
 4. **From a simulated configuration** (a): recognising and replacing the
    simulation, copying library files, the scale, the INI check. Built
-   2026-11-10 ([linuxcnc.md](ecatsetup.md#from-a-simulated-configuration)).
+   2026-11-10 ([writing into LinuxCNC](ecatsetup.md#from-a-simulated-configuration)).
 5. **Bringing up a slave** (c): the sync card, where proposals come
    from, ESI file handling, Save as quirk file. Built 2026-11-10
-   ([bring-up.md](ecatsetup.md#bringing-up-a-new-slave)).
+   ([bringing up a slave](ecatsetup.md#bringing-up-a-new-slave)).
 6. **Watching while LinuxCNC runs and the plot** (d, e). Built
-   2026-11-10 ([test-mode.md](ecatsetup.md#watching-linuxcnc)); the
+   2026-11-10 ([test mode](ecatsetup.md#watching-linuxcnc)); the
    watching is tried against a fake HAL, not a running LinuxCNC.
 7. **The start page**, once the parts exist. Built 2026-11-10: the *Start* tab
    (`ecatsetup/tasks.py`) lists the five tasks with their steps and a button

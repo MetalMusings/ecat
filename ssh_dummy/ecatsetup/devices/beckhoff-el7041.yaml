@@ -1,0 +1,51 @@
+# Beckhoff EL7041 stepper motor terminal (and EP7041), velocity interface.
+# A quirk file: what EtherCAT Setup knows about a device beyond its ESI
+# file, SII and dictionary. See docs/ecatsetup.md. Not tried on a terminal:
+# corrections are welcome.
+name: Beckhoff EL7041
+match: {vendor: '0x00000002', product: '0x1B813052'}
+
+# Pins for objects, used when EtherCAT Setup proposes the slave.
+pins:
+  '0x7010:01': {pin: enable}
+  '0x7010:02': {pin: reset}
+  '0x7010:03': {pin: reduce-torque}
+  # -1..1 of the speed range (0x8012:05: 0 = 1000 ... 5 = 32000 full steps/s)
+  '0x7010:21': {pin: velocity, hal-type: float, scale: 32767}
+  '0x6010:04': {pin: error}
+
+# HAL lines written into ethercat.hal for each slave this file matches,
+# as lcec's el7041 driver did in C: an error is reset when enable comes on
+# again. {name} is the slave's name, {pin:OBJ} the pin of an object,
+# {signal:OBJ} the signal that pin is on (made for an output of the slave;
+# for an input, the lines are left out if nothing drives it).
+hal:
+  load: {edge: ['{name}-enable-edge'], and2: ['{name}-auto-reset']}
+  addf: ['{name}-enable-edge', '{name}-auto-reset']
+  lines:
+  - setp {name}-enable-edge.in-edge FALSE        # rising (TRUE is falling)
+  - setp {name}-enable-edge.out-width-ns 10000000
+  - net {signal:0x7010:01} => {name}-enable-edge.in
+  - net {name}-enable-rise {name}-enable-edge.out => {name}-auto-reset.in0
+  - net {signal:0x6010:04} => {name}-auto-reset.in1
+  - net {name}-reset {name}-auto-reset.out => {pin:0x7010:02}
+
+# Importing lcec XML files: lcec's modParams as settings. lcec_el7041.c had
+# no break after motorEMF and the cases after it, so it also wrote that
+# value into the objects after it; here each value goes to its own object.
+lcec:
+  types: [EL7041, EL7041_1000, EL7041-1000, EP7041]
+  modparams:
+    maxCurrent: {object: '0x8010:01', type: UINT, convert: milli}   # A -> mA
+    reducedCurrent: {object: '0x8010:02', type: UINT, convert: milli}
+    nominalVoltage: {object: '0x8010:03', type: UINT, convert: milli}   # x1000, as lcec wrote it
+    coilResistance: {object: '0x8010:04', type: UINT, convert: milli}   # x1000, as lcec wrote it
+    motorEMF: {object: '0x8010:05', type: UINT, convert: milli}         # x1000, as lcec wrote it
+    motorFullsteps: {object: '0x8010:06', type: UINT}
+    encoderIncrements: {object: '0x8010:07', type: UINT}
+    startVelocity: {object: '0x8010:09', type: UINT}
+    driveOnDelay: {object: '0x8010:10', type: UINT}
+    driveOffDelay: {object: '0x8010:11', type: UINT}
+    maxSpeed: {object: '0x8012:05', type: UINT, values: {1000: 0, 2000: 1, 4000: 2, 8000: 3, 16000: 4, 32000: 5}}
+    encoder: {object: '0x8012:08', type: USINT, convert: flag}
+    microsteps: {object: '0x8012:45', type: USINT, values: {1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6}}

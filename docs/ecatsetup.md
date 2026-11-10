@@ -92,7 +92,7 @@ transport, the servo period (taken from the INI file once you have chosen
 one) and **Distributed clocks**: whether to use them, how often the
 reference clock is synchronised, whether the servo thread follows it, and
 the global shift time (`auto` lets the component find it; see
-[config-format.md](component.md#the-configuration-file)).
+[file format](component.md#the-configuration-file)).
 
 ![Bus: a slave](images/gui-slave.png)
 
@@ -104,10 +104,23 @@ Choosing a slave shows:
   A green tick means the source was found, an amber mark that something
   would improve the proposal (usually an ESI file). *Choose ESI files...*
   and *Save as quirk file...* (what you chose, kept for the device, see
-  [quirks.md](#quirk-files)) are here;
+  [quirk files](#quirk-files)) are here;
 - **Operation and sync**: the PDO assignment, `configure-pdos`, DC SYNC0
-  and its shift, and for a drive the CiA 402 modes, *Propose again* and
-  the homing card ([cia402.md](component.md#the-cia402-profile));
+  and its shift, and for a drive the CiA 402 modes (below), *Propose again*
+  and the homing card ([cia402](component.md#the-cia402-profile));
+- **CiA 402 modes**, for a drive: *Mode of operation* is the mode the
+  drive starts in and runs in. Under *Can also switch to* you tick the
+  modes it may switch to while it runs, with the pin `opmode-cmd`: for
+  instance CSP and PP, or CSV and PV, for a drive that is sometimes a
+  joint and sometimes positions on its own. A line under the boxes shows
+  the pin's numbers (0 is the mode above). The mode above cannot be
+  ticked twice. *Homing by the drive's own method* is separate, since
+  homing is not an `opmode-cmd` value; it shows the card **Homing by the
+  drive**: the method (from the drive's `0x60E3`, or all of the standard's),
+  speeds, acceleration, offset, and the INI lines LinuxCNC needs, with
+  *Copy the INI lines*. The choice goes to Settings. Switching modes is
+  built and unit-tested but not yet tried on a drive
+  ([Changing modes](component.md#changing-modes));
 - **Process data**: every PDO entry with its pin name and HAL type. Clear
   a pin name to map an entry without a pin; entries the profile handles
   are marked as such and get no pin;
@@ -127,7 +140,7 @@ the chosen slave the page shows a series of steps (each ok, warning or
 failed), what the slave says (AL state and status code), the cable and
 link (port error counters), the slave's own message history (0x10F3), and
 the **Event log**: what the `ecat` component recorded while LinuxCNC ran
-([events.md](#event-log-and-report)), optionally only for this slave and the master.
+([event log](#event-log-and-report)), optionally only for this slave and the master.
 
 For a running machine the page opens with a short flow: *Save report...*
 (a file to attach when you ask for help), then *Watch LinuxCNC (read only)*.
@@ -140,7 +153,7 @@ comes from and what to do.
 
 Works with no LinuxCNC. *Start the I/O test* runs `ecat` in `halrun` on
 the bus; stop the kernel master first, or the two share the NIC
-([try-it.md](getting-started.md#getting-started)). For the chosen slave:
+([Getting started](getting-started.md#getting-started)). For the chosen slave:
 
 - **Synchronisation**: DC state and where SYNC0 falls;
 - **Outputs** and **Inputs**, live, and **All pins**. Outputs are set
@@ -150,7 +163,7 @@ the bus; stop the kernel master first, or the two share the NIC
   and **Move**, which can move the axis. It writes limits to the drive,
   needs *Hold to enable* held down (a heartbeat shuts the drive down if
   the window hangs), has jogs, runs, homing and *Reset fault*, and puts
-  the drive's limits back with *Done*. Read [test-mode.md](#test-mode)
+  the drive's limits back with *Done*. Read [test mode](#test-mode)
   before using it, and have the user at the machine.
 
 *Watch LinuxCNC that runs (read only)* shows the pins of a LinuxCNC that is
@@ -160,7 +173,7 @@ already running and changes nothing.
 
 ![HAL and LinuxCNC](images/gui-hal.png)
 
-Writing the configuration into a LinuxCNC machine ([linuxcnc.md](#writing-the-configuration-into-linuxcnc)):
+Writing the configuration into a LinuxCNC machine ([writing into LinuxCNC](#writing-the-configuration-into-linuxcnc)):
 
 - **Joints**: choose the INI file, then the drive for each joint.
   *Take over from the HAL files* reads what your HAL files already use;
@@ -193,7 +206,7 @@ matching) or – (not used):
 | The CoE dictionary | The names and types of settings, the drive's supported modes. Without it names come from the SII. |
 | An ESI file | Predefined PDO sets (*Propose again* offers them), DC modes, units and value names of settings. The line says which file matched and whether it is for the slave's revision; a file for another revision is used, with a warning to check what it gave. |
 | Process data, DC, profile | Which of the above each came from. |
-| A quirk file | When one matches the device ([quirks.md](#quirk-files)). |
+| A quirk file | When one matches the device ([quirk files](#quirk-files)). |
 
 ### ESI files
 
@@ -230,7 +243,7 @@ whether the slaves are in OP.
 *Save as quirk file...* on the slave's page saves its pin names, scales
 and settings as a quirk file of your own, for the device's vendor and
 product. The next slave of the same device is proposed with them, on
-this machine or, with the file shared, on another ([quirks.md](#quirk-files)).
+this machine or, with the file shared, on another ([quirk files](#quirk-files)).
 
 ## Test mode
 
@@ -400,7 +413,7 @@ user at the machine (100 counts/mm on X and Y; the test configuration
 had the drives' `0x607D`, `0x607F` as settings):
 
 - **PP** works on X, Y and Z, steps of 1 and 5 mm in both directions,
-  after two findings, both in the profile ([cia402.md](component.md#the-cia402-profile)): the
+  after two findings, both in the profile ([cia402](component.md#the-cia402-profile)): the
   ECT60 acknowledges a set-point sometimes without starting (target
   reached stays set), so the profile gives it again; and with control
   word bit 5 ("change set immediately") set it acknowledged and did not
@@ -417,7 +430,7 @@ had the drives' `0x607D`, `0x607F` as settings):
   had no integral gain (`0x2030:06` = 0). With `0x2030:06` = 100 and a
   larger `0x2022` it ends: the drive sets "homing attained" and zeroes
   the position at the stop, twice in a row
-  ([cia402.md](component.md#homing-by-the-drive)).
+  ([cia402](component.md#homing-by-the-drive)).
 - Z hangs in a spring suspension and moves when its drive is disabled:
   with the drive off, the axis can drift.
 - Everything the test wrote to the drives was read back and restored.
@@ -521,7 +534,7 @@ net x-amp-fault x.drv-fault => joint.0.amp-fault-in
 
 and `index-enable` both ways if the drive homes by itself (`modes:
 [hm]`). The scale is counts per machine unit. The choice is kept in
-`ethercat.yaml` (see [config-format.md](component.md#linuxcnc)).
+`ethercat.yaml` (see [file format](component.md#linuxcnc)).
 
 When your HAL files already connect a joint to a drive, the program
 proposes the same connection with the same `pos-scale` (*Take over from
@@ -599,7 +612,7 @@ net io-dout-1 motion.digital-out-00 => io.dout-1
 ```
 
 The choice is kept in `ethercat.yaml` as `linuxcnc.nets`
-([config-format.md](component.md#linuxcnc)). The arrow is written when
+([file format](component.md#linuxcnc)). The arrow is written when
 one pin of the net is known to write it. The check refuses a net with two
 pins known to write it, with pins of different HAL types, with a pin a
 joint already takes, or without any slave pin.
@@ -711,7 +724,7 @@ The window shows the changes first, with what depends on slaves that are
 missing: joints and connected pins (removed from the file), and lines in
 your HAL files that use their pins (`--update --ini` prints those too);
 then the HAL check lists what to fix. A modular device whose modules
-changed is reported ([modules.md](component.md#modular-devices)).
+changed is reported ([modular devices](component.md#modular-devices)).
 
 **Renames.** Renaming a slave in the program offers to rename its pins in
 your HAL files in the configuration folder too (each kept as `.bak`;
@@ -762,7 +775,7 @@ The component records, with the time to the millisecond:
 | slave N online / offline / operational | |
 | DC sync check | The master's check that a slave's clock is within 10 us before SYNC0 starts. |
 | drive fault | A CiA 402 drive's fault, with its error code (`0x603F`) as text. |
-| the profile shut the drive down | The cia402 profile's `fault-reason` (watchdog, enable timeout, no valid process data, ...), see [cia402.md](component.md#the-cia402-profile). |
+| the profile shut the drive down | The cia402 profile's `fault-reason` (watchdog, enable timeout, no valid process data, ...), see [cia402](component.md#the-cia402-profile). |
 | stop guard | The servo thread stopped: the guard takes the slaves to PREOP, and says whether they got there (or it gave up, with the states they were left in); or the servo thread runs again. |
 | servo thread late | The guard sent a cycle for a servo thread more than a quarter period late (at most one line a second, with the number left out). |
 | SYNC0 shift | `sync0-shift-ns: auto` chose a shift, with the turn-around in cycles. |
@@ -901,8 +914,8 @@ serves the import alone.
 | Key | |
 |---|---|
 | `match` | `vendor` and `product` of the device. |
-| `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [config-format.md](component.md#the-configuration-file). Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. |
-| `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [config-format.md](component.md#the-configuration-file). |
+| `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [file format](component.md#the-configuration-file). Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. |
+| `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [file format](component.md#the-configuration-file). |
 | `commands` | Per object index: why it is a command. The test mode does not write it. |
 | `limits` | For the drive test: `following-error`, `max-torque`, `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), or `travel` and the others as a text saying why the drive's own object is not used. |
 | `hal` | `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
@@ -952,7 +965,7 @@ first axis; for later axes their indexes move by 0x800 as the other objects do.
   CSP; lcec's `0x2010` sdoConfig becomes `cia402.zero-at-start`.
 - `beckhoff-el7041.yaml`: pin names and the velocity scale; HAL lines
   that reset an error when `enable` comes on again (as lcec's driver did);
-  lcec's modParams. See [stepper.md](component.md#stepper-and-dc-motor-terminals).
+  lcec's modParams. See [stepper terminals](component.md#stepper-and-dc-motor-terminals).
 - `beckhoff-el70x1-position.yaml`: lcec's el70x1 modParams and the
   position interface it always set.
 
