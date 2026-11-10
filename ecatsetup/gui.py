@@ -796,7 +796,6 @@ class SlaveView(QWidget):
         self.home_method.activated.connect(self.homing_edited)
         hform.addRow("Method", self.home_method)
         self.home_text = label("", "hint", wrap=True)
-        hform.addRow("", self.home_text)
         self.home_fields = {}
         for key, _i, _s, _t, text in homing.PARAMS:
             box = QSpinBox()
@@ -806,7 +805,19 @@ class SlaveView(QWidget):
             self.home_fields[key] = box
             hform.addRow(text[0].upper() + text[1:], box)
         self.home_hform = hform
+        self.homing_card.add(self.home_text)
         self.homing_card.add(hform)
+        self.home_ini_title = label("In LinuxCNC's INI file:", "hint")
+        self.homing_card.add(self.home_ini_title)
+        self.home_ini = QPlainTextEdit()
+        self.home_ini.setReadOnly(True)
+        self.home_ini.setFont(mono())
+        self.home_ini.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.homing_card.add(self.home_ini)
+        self.home_copy = QPushButton("Copy the INI lines")
+        self.home_copy.clicked.connect(lambda: QApplication.clipboard().setText(
+            self.home_ini.toPlainText()))
+        self.homing_card.add(self.home_copy)
         lay.addWidget(self.homing_card)
 
         # process data
@@ -1040,6 +1051,12 @@ class SlaveView(QWidget):
             "%s (from the %s)" % (", ".join(map(str, nums)), where) if nums
             else "not known for this drive, every method of the standard is offered"))
         self.home_text.setText(" ".join(parts))
+        lines = homing.ini_help(self.win.session.cfg, s, self.home_axis_number())
+        self.home_ini.setPlainText("\n".join(t for t, _ in lines) if lines else "")
+        self.home_ini.setFixedHeight(self.home_ini.fontMetrics().lineSpacing()
+                                     * (len(lines or ()) + 2) + 16)
+        for w in (self.home_ini_title, self.home_ini, self.home_copy):
+            w.setVisible(bool(lines))
         for key, box in self.home_fields.items():
             self.home_hform.labelForField(box).setVisible(key in used)
             box.setVisible(key in used)

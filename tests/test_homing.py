@@ -111,3 +111,22 @@ class TestChoice(unittest.TestCase):
         self.assertIsNone(homing.choice({"homing": {"method": 17}}, 1))
         self.assertEqual(homing.choice({"homing": [None, {"method": 18}]}, 1), {"method": 18})
         self.assertIsNone(homing.choice({}))
+
+
+class TestIniHelp(unittest.TestCase):
+    def test_none_without_a_choice(self):
+        self.assertIsNone(homing.ini_help({}, {"name": "x"}))
+
+    def test_lines_for_the_joint_of_the_drive(self):
+        cfg = {"linuxcnc": {"joints": [{"joint": 2, "slave": "z", "scale": 1.0}]}}
+        s = {"name": "z", "homing": {"method": 17}}
+        lines = homing.ini_help(cfg, s)
+        text = "\n".join(t for t, _ in lines)
+        self.assertIn("[JOINT_2]", text)
+        self.assertIn("HOME_SEARCH_VEL = 0", text)
+        self.assertIn("HOME_USE_INDEX = YES", text)
+        self.assertIn("joint.2.index-enable <=> z.index-enable", text)
+        self.assertIn("MOVES", text)
+        self.assertIn("does not move", "\n".join(
+            t for t, _ in homing.ini_help(cfg, {"name": "z", "homing": {"method": 35}})))
+        self.assertIn("[JOINT_N]", homing.ini_help({}, s)[0][0])

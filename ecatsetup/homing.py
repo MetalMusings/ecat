@@ -213,3 +213,39 @@ def apply(slave, axis, chosen):
             slave["homing"] = h
         else:
             slave.pop("homing", None)
+
+
+def ini_help(cfg, slave, axis=0):
+    """The LinuxCNC INI lines for a joint that homes through the drive, with
+    what each is for: [(text, is_setting)]. None when no method is chosen.
+    The joint is the one of the configuration's `linuxcnc: joints` that uses the
+    axis; JOINT_N when there is none."""
+    chosen = choice(slave, axis)
+    if not chosen:
+        return None
+    names = config.axes(slave)
+    drive = names[axis] if axis < len(names) else slave.get("name")
+    joint = next((j["joint"] for j in ((cfg or {}).get("linuxcnc") or {}).get("joints") or []
+                  if j.get("slave") == drive), None)
+    m = method(chosen["method"], slave)
+    out = [("[JOINT_%s]" % ("N" if joint is None else joint), True),
+           ("# The drive homes by method %d (%s)." % (m.number, m.text), False),
+           ("# Motion does not search itself: it only waits for the drive, as for an index pulse.",
+            False),
+           ("HOME_SEARCH_VEL = 0", True),
+           ("HOME_LATCH_VEL = 1", True),
+           ("HOME_USE_INDEX = YES", True),
+           ("# HOME_OFFSET is the machine coordinate of the place where the drive homes;", False),
+           ("# with HOME equal to it there is no final move.", False),
+           ("HOME_OFFSET = 0", True),
+           ("HOME = 0", True),
+           ("# Joints with the same number home together, lower numbers first.", False),
+           ("HOME_SEQUENCE = 0", True)]
+    if m.moves:
+        out.insert(3, ("# The axis MOVES at the drive's speeds (0x6099) and must reach its "
+                       "end within home-timeout-ms (60 s).", False))
+    else:
+        out.insert(3, ("# This method does not move the axis.", False))
+    out.append(("# And in HAL: net %s-index  joint.%s.index-enable <=> %s.index-enable"
+                % (drive, "N" if joint is None else joint, drive), False))
+    return out
