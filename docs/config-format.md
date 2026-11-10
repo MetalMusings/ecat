@@ -190,19 +190,24 @@ as `"a0 0f"`). `name` is for people.
 
 ## linuxcnc
 
-Written by EtherCAT Setup when joints are connected to drives
-([linuxcnc.md](linuxcnc.md)); the component does not read it.
+Written by EtherCAT Setup when joints are connected to drives, or
+slaves' pins to LinuxCNC's ([linuxcnc.md](linuxcnc.md)); the component
+does not read it.
 
 ```yaml
 linuxcnc:
   joints:
   - {joint: 0, slave: lcec.0.X, scale: 100.0}
   - {joint: 1, slave: lcec.0.Y, scale: 66.6666666666666}
+  nets:
+  - signal: home-x
+    pins: [lcec.0.E7000.in-1, joint.0.home-sw-in]
 ```
 
 | Key | Meaning |
 |---|---|
 | `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0). Each joint and each slave once. |
+| `nets` | A list of `signal` (a HAL signal name: no blanks or `#`, at most 47 characters, each once) and `pins` (at least two; at least one of them a slave's pin; each pin in one net only, and not a pin a joint's connection takes). |
 
 ## Importing lcec XML files
 

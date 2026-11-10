@@ -56,8 +56,60 @@ proposes the same connection with the same `pos-scale` (*Take over from
 the HAL files*; `--apply` takes them over by itself).
 
 Joints the program does not connect stay as your HAL files have them.
-CSV drives, gantries with their own components, home and limit switches,
-and I/O such as an E-stop are connected in your HAL files for now.
+CSV drives and gantries with their own components are connected in your
+HAL files for now.
+
+## Inputs and outputs
+
+A slave's pin can be connected to LinuxCNC pins in the program: the
+*Inputs and outputs* card on the *HAL & LinuxCNC* page has a column
+*Connected to*. Type one or more pins, separated by spaces, or choose one
+of the offered LinuxCNC pins (only those of the pin's HAL type and the
+other direction are offered: an input of the slave is offered
+`motion.digital-in-00`, `joint.0.home-sw-in`, `iocontrol.0.emc-enable-in`
+and so on). Pins of other components, such as `not.0.in` or
+`plasmac.arc-voltage-in`, can be typed too; the component must be loaded
+by a HALFILE, since `ethercat.hal` comes after them. `ethercat.hal` then
+holds, for example:
+
+```
+# inputs and outputs
+net home-x io.din-0 => joint.0.home-sw-in
+net io-dout-1 motion.digital-out-00 => io.dout-1
+```
+
+The choice is kept in `ethercat.yaml` as `linuxcnc.nets`
+([config-format.md](config-format.md#linuxcnc)). The arrow is written when
+one pin of the net is known to write it. The check refuses a net with two
+pins known to write it, with pins of different HAL types, with a pin a
+joint already takes, or without any slave pin.
+
+On the command line:
+
+```
+ecatsetup --apply ethercat.yaml --ini <machine>.ini --net io.din-0=joint.0.home-sw-in
+ecatsetup --apply ethercat.yaml --ini <machine>.ini --net io.din-0=      # removes it
+```
+
+**Taking over from the HAL files.** *Take over from the HAL files* (or
+`--take-over-io`) moves the signals that carry a slave's pin into
+`ethercat.hal`, with their names and with the pins your HAL files in the
+configuration folder put on them. Lines in LinuxCNC's `hallib` and in
+POSTGUI files that use the same signal keep working, since the signal
+keeps its name. A signal with only the slave's pin in the folder (the
+rest in `hallib`) is left where it is.
+
+Unlike the joints, the I/O is not taken over by `--apply` by itself:
+moving every connection is a larger change than most need.
+
+**POSTGUI files.** They are read after `ethercat.hal`, when a GUI's pins
+(PyVCP, QtVCP) exist. A pin connected here must not be connected in a
+POSTGUI file; the program refuses to write then. Connect the signal there
+instead (`net home-x => pyvcp.home-x-led`).
+
+**Names.** Signals keep the name your HAL files gave them. A new
+connection gets the slave's pin name with `-` for `.` (`io-din-0`); a name
+already used in your HAL files for something else is refused.
 
 ## Names
 
@@ -67,7 +119,8 @@ lcec keeps lcec's names, such as `lcec.0.X`, so that its HAL files work
 unchanged; any other name works too, such as `x-drive` (`x-drive.pos-cmd`).
 
 Rename a slave on the Bus page (*Name (pin prefix)*). A joint connected
-to it follows, and `ethercat.hal` gets the new name at the next write.
+to it, and its pins connected in the program, follow, and `ethercat.hal`
+gets the new name at the next write.
 Your own HAL files are not changed: lines there that use the old name,
 such as an I/O slave's pins, must be changed by hand.
 
@@ -78,7 +131,8 @@ commented out with `#ecatsetup: ` in front:
 
 - loading `lcec_conf`, `lcec`, `lcec_uspace` or `ecat`, and adding their
   functions;
-- `net` lines with a pin that `ethercat.hal` connects;
+- `net` lines with a pin that `ethercat.hal` connects (joints and
+  inputs and outputs);
 - `setp` of a connected drive's `pos-scale`.
 
 The signal names of those lines are kept in `ethercat.hal`. Other lines

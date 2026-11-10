@@ -155,6 +155,12 @@ def main(argv=None):
                          "the file, ethercat-load.hal, ethercat.hal and the INI changes, after "
                          "showing them; joints connected to drives in your HAL files are taken over")
     ap.add_argument("--yes", action="store_true", help="for --apply, write without asking")
+    ap.add_argument("--net", action="append", default=[], metavar="PIN=PIN[,PIN...]",
+                    help="for --apply, connect a slave's pin to LinuxCNC pins (repeatable); "
+                         "PIN= with nothing after it removes the connection")
+    ap.add_argument("--take-over-io", action="store_true",
+                    help="for --apply, also take over the slaves' I/O pins as your HAL files "
+                         "(not the POSTGUI ones) connect them")
     ap.add_argument("--gui", nargs="?", const="", metavar="FILE",
                     help="open the EtherCAT Setup window, with this configuration file if given")
     args = ap.parse_args(argv)
@@ -230,6 +236,15 @@ def apply_file(args):
     for j, (name, scale) in sorted(integrate.propose_joints(args.ini, cfg).items()):
         integrate.set_joint(cfg, j, name, scale)
         print("joint %d -> %s, scale %g (as connected in your HAL files)" % (j, name, scale))
+    if args.take_over_io:
+        for sig, pins in sorted(integrate.propose_nets(args.ini, cfg).items()):
+            own = [x for x in pins if integrate.is_own(cfg, x)]
+            integrate.set_net(cfg, own[0], [x for x in pins if x != own[0]], sig)
+            print("net %s: %s (as connected in your HAL files)" % (sig, " ".join(pins)))
+    for spec in args.net:
+        pin, _, rest = spec.partition("=")
+        others = [x.strip() for x in rest.split(",") if x.strip()]
+        integrate.set_net(cfg, pin.strip(), others)
     errors = config.check(cfg)
     if errors:
         print("The configuration has errors:\n  " + "\n  ".join(errors))

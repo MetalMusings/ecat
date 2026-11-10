@@ -2129,9 +2129,24 @@ class HalPage(QWidget):
         self.axes.lay.addLayout(row)
         left.addWidget(self.axes)
 
-        pins = Card("Inputs and outputs", "The pins this configuration gives, to connect in HAL.")
-        self.pins = table(["Slave", "Signal", "HAL pin", "Type", "Direction"], 2)
+        pins = Card("Inputs and outputs",
+                    "The pins this configuration gives. Connect a slave's pin to LinuxCNC pins "
+                    "here (several separated by spaces), or in your own HAL files.")
+        self.pins = table(["Slave", "Signal", "HAL pin", "Type", "Direction", "Connected to"], 5)
         pins.add(self.pins)
+        row = QHBoxLayout()
+        self.take_over_io = QPushButton("Take over from the HAL files")
+        self.take_over_io.setToolTip("Connect the slaves' pins here as your HAL files (not the "
+                                     "POSTGUI ones) connect them now; those lines are then "
+                                     "commented out there")
+        self.take_over_io.clicked.connect(self.do_take_over_io)
+        row.addWidget(self.take_over_io)
+        self.take_over_io_text = label("", "hint", wrap=True)
+        row.addWidget(self.take_over_io_text, 1)
+        pins.lay.addLayout(row)
+        self.other_nets = pins.add(label("", "hint", wrap=True))
+        self.io_proposal = {}
+        self.hal_signals = {}
         left.addWidget(pins)
         yaml_card = Card("File contents", "ethercat.yaml as it will be written.")
         self.yaml = QPlainTextEdit()
@@ -2177,16 +2192,90 @@ class HalPage(QWidget):
     def refresh(self):
         s = self.win.session
         self.yaml.setPlainText(s.dumps())
+        self.show_pins()
+        if self.win.tabs.currentWidget() is self:
+            self.show_joints()
+            self.show_plan()
+
+    def show_pins(self):
+        s, ini = self.win.session, self.ini()
+        self.hal_signals, self.io_proposal = {}, {}
+        if ini and s.cfg is not None:
+            try:
+                self.hal_signals = integrate.signals(integrate.user_hal_files(ini))
+                self.io_proposal = integrate.propose_nets(ini, s.cfg)
+            except OSError:
+                pass
+        own = integrate.slave_pins(s.cfg)
+        offered = integrate.suggestions(ini)
+        shown = set()
         self.pins.setRowCount(0)
         for row in config_pins(s.cfg):
             r = self.pins.rowCount()
             self.pins.insertRow(r)
             for c, v in enumerate(row):
                 self.pins.setItem(r, c, item(v, font=mono() if c in (1, 2) else None))
+            pin = row[2]
+            if pin not in own or s.cfg is None:
+                self.pins.setItem(r, 5, item(""))
+                continue
+            shown.add(pin)
+            htype, way = own[pin]
+            net = integrate.net_of(s.cfg, pin)
+            others = [x for x in (net or {}).get("pins", []) if x != pin]
+            box = QComboBox()
+            box.setEditable(True)
+            box.setInsertPolicy(QComboBox.NoInsert)
+            box.addItem("")
+            for x in offered:
+                k = integrate.known_pin(x)
+                if k and k[0] == htype and k[1] != way:
+                    box.addItem(x)
+            box.setEditText(" ".join(others))
+            box.lineEdit().setCursorPosition(0)
+            box.setFont(mono())
+            box.setMinimumWidth(260)
+            tip = ["Signal %s" % net["signal"]] if net else []
+            theirs = [(sig, sorted(p for p in pins if p != pin))
+                      for sig, pins in self.hal_signals.items() if pin in pins]
+            for sig, pins in theirs:
+                tip.append("In your HAL files: %s %s" % (sig, " ".join(pins)))
+            if not tip:
+                tip.append("Not connected; type LinuxCNC pins, or choose one")
+            box.setToolTip("\n".join(tip))
+            box.lineEdit().editingFinished.connect(lambda p=pin, b=box: self.pin_edited(p, b))
+            box.activated.connect(lambda _i, p=pin, b=box: self.pin_edited(p, b))
+            self.pins.setCellWidget(r, 5, box)
         fit_table(self.pins, minimum=1)
-        if self.win.tabs.currentWidget() is self:
-            self.show_joints()
-            self.show_plan()
+        rest = [n for n in integrate.nets(s.cfg)
+                if not any(x in shown for x in n.get("pins") or [])]
+        self.other_nets.setText("Also connected: " + "; ".join(
+            "%s (%s)" % (n.get("signal"), " ".join(n.get("pins") or [])) for n in rest))
+        self.other_nets.setVisible(bool(rest))
+        self.take_over_io.setVisible(bool(self.io_proposal))
+        self.take_over_io_text.setVisible(bool(self.io_proposal))
+        self.take_over_io_text.setText("Your HAL files connect " + ", ".join(
+            "%s (%s)" % (sig, " ".join(p for p in pins if integrate.is_own(s.cfg, p)))
+            for sig, pins in sorted(self.io_proposal.items())) + ".")
+
+    def pin_edited(self, pin, box):
+        cfg = self.win.session.cfg
+        if cfg is None:
+            return
+        others = box.currentText().replace(",", " ").split()
+        net = integrate.net_of(cfg, pin)
+        if others == [x for x in (net or {}).get("pins", []) if x != pin]:
+            return
+        integrate.set_net(cfg, pin, others)
+        # the box sends this from its own signal: rebuild the table after it
+        QTimer.singleShot(0, self.win.changed)
+
+    def do_take_over_io(self):
+        cfg = self.win.session.cfg
+        for sig, pins in sorted(self.io_proposal.items()):
+            own = [x for x in pins if integrate.is_own(cfg, x)]
+            integrate.set_net(cfg, own[0], [x for x in pins if x != own[0]], sig)
+        self.win.changed()
 
     def ini(self):
         p = self.win.session.ini_path

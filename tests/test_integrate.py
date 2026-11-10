@@ -288,3 +288,130 @@ class TestHalPage(Folder):
         self.assertFalse(s.dirty)
         # written: nothing more to change
         self.assertEqual(page.plan.changes, [])
+
+    def test_connect_pins(self):
+        s = session.Session(ini_path=self.ini)
+        s.cfg, s.path = cfg(), os.path.join(self.dir.name, "ethercat.yaml")
+        w = gui.MainWindow(s)
+        self.addCleanup(lambda: (s.__setattr__("saved", s.cfg), w.close()))
+        w.tabs.setCurrentWidget(w.hal_page)
+        page = w.hal_page
+        page.refresh()
+        self.assertFalse(page.take_over_io.isHidden())
+        self.assertIn("io-out (io.out-1)", page.take_over_io_text.text())
+        page.do_take_over_io()
+        self.assertEqual(integrate.nets(s.cfg), [
+            {"signal": "io-out", "pins": ["io.out-1", "motion.digital-out-00"]}])
+        self.assertTrue(page.take_over_io.isHidden())
+        r = next(r for r in range(page.pins.rowCount()) if page.pins.item(r, 2).text() == "io.out-1")
+        box = page.pins.cellWidget(r, 5)
+        self.assertEqual(box.currentText(), "motion.digital-out-00")
+        # only bit pins LinuxCNC writes are offered for a slave's output
+        offered = [box.itemText(i) for i in range(box.count())]
+        self.assertIn("iocontrol.0.user-enable-out", offered)
+        self.assertNotIn("motion.digital-in-00", offered)
+        self.assertNotIn("motion.analog-out-00", offered)
+        box.setEditText("spindle.0.on")
+        page.pin_edited("io.out-1", box)
+        self.app.processEvents()
+        self.assertEqual(integrate.nets(s.cfg), [
+            {"signal": "io-out", "pins": ["io.out-1", "spindle.0.on"]}])
+        self.assertIn("net io-out spindle.0.on => io.out-1", page.code.toPlainText())
+        self.assertTrue(s.dirty)
+
+
+class TestNets(Folder):
+    def test_proposed_from_the_hal_files(self):
+        c = cfg()
+        # io.out-1 in machine.hal; basic.hal's estop has no slave pin
+        self.assertEqual(integrate.propose_nets(self.ini, c),
+                         {"io-out": ["io.out-1", "motion.digital-out-00"]})
+        integrate.set_net(c, "io.out-1", ["motion.digital-out-00"], "io-out")
+        self.assertEqual(integrate.propose_nets(self.ini, c), {})
+
+    def test_not_proposed_when_a_joint_has_it(self):
+        self.write("machine.hal", "net x-enable joint.0.amp-enable-out => x.enable io.out-1\n")
+        c = cfg()
+        integrate.set_joint(c, 0, "x", 1.0)
+        self.assertEqual(integrate.propose_nets(self.ini, c), {})
+
+    def test_set_net(self):
+        c = cfg()
+        integrate.set_net(c, "io.out-1", ["motion.digital-out-00", "motion.digital-out-00"])
+        self.assertEqual(integrate.nets(c), [
+            {"signal": "io-out-1", "pins": ["io.out-1", "motion.digital-out-00"]}])
+        # another pin keeps the signal name
+        integrate.set_net(c, "io.out-1", ["iocontrol.0.user-enable-out"])
+        self.assertEqual(integrate.nets(c), [
+            {"signal": "io-out-1", "pins": ["io.out-1", "iocontrol.0.user-enable-out"]}])
+        integrate.set_net(c, "io.out-1", [])
+        self.assertNotIn("linuxcnc", c)
+
+    def test_rename_follows(self):
+        c = cfg()
+        integrate.set_net(c, "io.out-1", ["motion.digital-out-00"])
+        integrate.rename_slave(c, "io", "board")
+        self.assertEqual(integrate.nets(c)[0]["pins"], ["board.out-1", "motion.digital-out-00"])
+
+    def test_plan_keeps_the_users_signal(self):
+        c = cfg()
+        integrate.set_net(c, "io.out-1", ["motion.digital-out-00"], "my-name")
+        self.assertEqual(config.check(c), [])
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        self.assertIn("signal my-name is called io-out in your HAL files; that name is kept",
+                      p.notes)
+        integrate.apply(p)
+        self.assertIn("net io-out motion.digital-out-00 => io.out-1\n", self.read("ethercat.hal"))
+        self.assertIn(integrate.COMMENT + "net io-out       io.out-1 <= motion.digital-out-00",
+                      self.read("machine.hal"))
+        again = integrate.plan(self.ini, c)
+        self.assertEqual((again.changes, again.errors), ([], []))
+        # taken out again: the user's line comes back
+        integrate.set_net(c, "io.out-1", [])
+        integrate.apply(integrate.plan(self.ini, c))
+        self.assertIn("\nnet io-out       io.out-1 <= motion.digital-out-00\n",
+                      self.read("machine.hal"))
+        self.assertNotIn("io.out-1", self.read("ethercat.hal"))
+
+    def test_new_signal_name_in_use(self):
+        self.write("machine.hal", "net x-enable joint.0.amp-enable-out => x.enable\n")
+        c = cfg()
+        integrate.set_net(c, "io.out-1", ["motion.digital-out-01"], "x-enable")
+        p = integrate.plan(self.ini, c)
+        self.assertIn("signal x-enable is used in your HAL files already: choose another name "
+                      "or connect it there", p.errors)
+
+    def test_postgui_pin_is_refused(self):
+        self.write("postgui.hal", "net led io.out-1 => pyvcp.led\n")
+        c = cfg()
+        integrate.set_net(c, "io.out-1", ["motion.digital-out-01"], "led")
+        p = integrate.plan(self.ini, c)
+        self.assertTrue(any("postgui.hal (a POSTGUI file" in e for e in p.errors), p.errors)
+
+    def test_check(self):
+        c = cfg()
+        lc = c.setdefault("linuxcnc", {})
+        lc["nets"] = [{"signal": "a b", "pins": ["io.out-1"]}]
+        self.assertEqual(config.check(c), [
+            "linuxcnc.nets: a b: signal must be a HAL name (no blanks or #, at most 47 characters)",
+            "linuxcnc.nets: a b: pins must be a list of at least two pin names"])
+        lc["nets"] = [{"signal": "a", "pins": ["io.out-2", "motion.digital-in-00"]}]
+        self.assertEqual(config.check(c), ["linuxcnc.nets: a: io.out-2 is not a pin of slave io"])
+        lc["nets"] = [{"signal": "a", "pins": ["motion.digital-out-00", "halui.machine.on"]}]
+        self.assertEqual(config.check(c), ["linuxcnc.nets: a: none of its pins is a slave's pin"])
+        lc["nets"] = [{"signal": "a", "pins": ["io.out-1", "motion.analog-out-00"]}]
+        self.assertEqual(config.check(c), ["linuxcnc.nets: a: pins of different HAL types "
+                                           "(bit, float)"])
+        lc["nets"] = [{"signal": "a", "pins": ["io.out-1", "motion.digital-out-00",
+                                               "halui.machine.is-on"]}]
+        self.assertEqual(config.check(c), ["linuxcnc.nets: a: more than one pin writes it "
+                                           "(motion.digital-out-00, halui.machine.is-on)"])
+        lc["nets"] = [{"signal": "a", "pins": ["io.out-1", "motion.digital-out-00"]},
+                      {"signal": "b", "pins": ["io.out-1", "motion.digital-out-01"]}]
+        self.assertEqual(config.check(c), ["linuxcnc.nets: b: io.out-1 is in signal a too"])
+        # a profile's pins are not known here; a joint's are taken
+        integrate.set_joint(c, 0, "x", 1.0)
+        lc["nets"] = [{"signal": "a", "pins": ["x.enable", "motion.digital-out-00"]},
+                      {"signal": "b", "pins": ["x.drv-din-0", "motion.digital-in-00"]}]
+        self.assertEqual(config.check(c), ["linuxcnc.nets: a: x.enable is connected by joint 0"])

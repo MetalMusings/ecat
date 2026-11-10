@@ -357,7 +357,7 @@ def check(cfg):
             for i, sub, _ in PP_LIMITS:
                 if (i, sub) not in set_objects:
                     err("%s: cia402 mode pp needs the setting %s" % (where, obj(i, sub)))
-    return errors + check_joints(cfg)
+    return errors + check_joints(cfg) + check_nets(cfg)
 
 
 def check_joints(cfg):
@@ -392,4 +392,67 @@ def check_joints(cfg):
         scale = j.get("scale", 1.0)
         if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale == 0:
             errors.append("%s: scale must be a number other than 0" % where)
+    return errors
+
+
+def check_nets(cfg):
+    """Errors in linuxcnc.nets: the slaves' pins connected to LinuxCNC's."""
+    from . import integrate
+    lc = cfg.get("linuxcnc")
+    if not isinstance(lc, dict) or lc.get("nets") is None:
+        return []
+    ns = lc["nets"]
+    if not isinstance(ns, list):
+        return ["linuxcnc.nets: must be a list"]
+    errors = []
+    own = integrate.slave_pins(cfg)
+    names = {s.get("name"): s for s in cfg.get("slaves") or []}
+    taken = integrate.joint_pins(cfg)
+    signals, seen = set(), {}
+    for n in ns:
+        if not isinstance(n, dict):
+            errors.append("linuxcnc.nets: each net must be a mapping")
+            continue
+        sig = n.get("signal")
+        where = "linuxcnc.nets: %s" % (sig,)
+        if not isinstance(sig, str) or not integrate.SIGNAL_RE.fullmatch(sig):
+            errors.append("%s: signal must be a HAL name (no blanks or #, at most 47 characters)"
+                          % where)
+        elif sig in signals:
+            errors.append("%s: listed twice" % where)
+        signals.add(sig)
+        pins = n.get("pins")
+        if not isinstance(pins, list) or len(pins) < 2 or \
+                not all(isinstance(x, str) for x in pins):
+            errors.append("%s: pins must be a list of at least two pin names" % where)
+            continue
+        mine = False
+        types, writers = set(), []
+        for x in pins:
+            if not integrate.PIN_RE.fullmatch(x):
+                errors.append("%s: %r is not a HAL pin name" % (where, x))
+                continue
+            if x in seen:
+                errors.append("%s: %s is in signal %s too" % (where, x, seen[x]))
+            seen[x] = sig
+            if x in taken:
+                errors.append("%s: %s is connected by joint %d" % (where, x, taken[x]))
+            slave = next((s for name, s in names.items()
+                          if name and x.startswith(name + ".")), None)
+            if slave is not None:
+                mine = True
+                if x not in own and slave.get("profile") in (None, "generic") and \
+                        not slave.get("encoders"):
+                    errors.append("%s: %s is not a pin of slave %s" % (where, x, slave["name"]))
+            info = own.get(x) or integrate.known_pin(x)
+            if info:
+                types.add(info[0])
+                if info[1] == "out":
+                    writers.append(x)
+        if not mine:
+            errors.append("%s: none of its pins is a slave's pin" % where)
+        if len(types) > 1:
+            errors.append("%s: pins of different HAL types (%s)" % (where, ", ".join(sorted(types))))
+        if len(writers) > 1:
+            errors.append("%s: more than one pin writes it (%s)" % (where, ", ".join(writers)))
     return errors
