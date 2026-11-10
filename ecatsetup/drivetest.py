@@ -34,7 +34,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 
-from . import config, testmode, tool
+from . import config, homing, testmode, tool
 from . import quirks as q
 
 RESTORE_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or
@@ -257,6 +257,29 @@ class DriveTest:
             return (index, subindex) in self.coe.entries
         return tool.upload(self.position, index, subindex, "uint8") is not None
 
+    HOMING_TYPES = {"SINT": "int8", "INT": "int16", "DINT": "int32",
+                    "USINT": "uint8", "UINT": "uint16", "UDINT": "uint32"}
+
+    def _homing_limits(self):
+        """The settings of the homing chosen for this axis (homing.py), written for
+        the test and put back with the limits. The test then homes by the same
+        method and settings as LinuxCNC will."""
+        chosen = homing.choice(self.slave, self.axis)
+        if not chosen:
+            return []
+        out = []
+        for st in homing.plan(self.slave, chosen["method"], chosen, self.axis):
+            index, sub = config.parse_obj(st["object"])
+            dtype = self.HOMING_TYPES.get(str(st["type"]).upper())
+            if dtype is None or not self._has(index, sub):
+                self.notes.append("homing: 0x%04X:%02X is not in the drive (or has a type this "
+                                  "program does not write): left as it is" % (index, sub))
+                continue
+            out.append(Limit("homing", index, sub, dtype, int(st["value"]),
+                             "homing %s (0x%04X:%02X)" % (st.get("name", ""), index, sub)))
+        self.notes.append("homing by method %d, as chosen for this axis" % chosen["method"])
+        return out
+
     def pin(self, name):
         p = self.run.pins("%s.%s" % (self.name, name)).get("%s.%s" % (self.name, name))
         if p is None:
@@ -283,6 +306,8 @@ class DriveTest:
         counts = int(self.pin("drv-actual-position"))
         self.limits, self.notes = plan_limits(self.slave, self._has, s["scale"], counts, s,
                                               self.axis)
+        if self.homes:
+            self.limits += self._homing_limits()
         # the drive's own values first, kept in a file until put back
         for lim in self.limits:
             lim.original = tool.upload(self.position, lim.index, lim.subindex, lim.dtype)

@@ -34,7 +34,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import (config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose,
+from . import (config, diagnose, drivetest, esi, events, halcheck, homing, integrate, netif, propose,
                quirks, settings, symptoms, tasks, testmode, tool, update)
 from .session import Session, servo_period
 
@@ -620,6 +620,7 @@ class SlaveView(QWidget):
         self.position = None
         self.loading = False
         self.pd_rows = []
+        self.home_support = (None, None)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(16)
@@ -779,6 +780,34 @@ class SlaveView(QWidget):
         two.addWidget(op, 1)
         lay.addLayout(two)
 
+        # homing (CiA 402 hm)
+        self.homing_card = Card("Homing by the drive",
+                                "The drive's own homing (0x6098), used by the test's Home button "
+                                "and by LinuxCNC when the joint homes through the drive. The "
+                                "choice is written to Settings.")
+        hform = QFormLayout()
+        hform.setContentsMargins(0, 0, 0, 0)
+        self.home_axis = QComboBox()
+        self.home_axis.activated.connect(lambda *_: self.show_homing(
+            self.win.session.slave(self.position)))
+        hform.addRow("Axis", self.home_axis)
+        self.home_method = QComboBox()
+        self.home_method.activated.connect(self.homing_edited)
+        hform.addRow("Method", self.home_method)
+        self.home_text = label("", "hint", wrap=True)
+        hform.addRow("", self.home_text)
+        self.home_fields = {}
+        for key, _i, _s, _t, text in homing.PARAMS:
+            box = QSpinBox()
+            box.setRange(-2000000000, 2000000000)
+            box.setToolTip(text)
+            box.valueChanged.connect(self.homing_edited)
+            self.home_fields[key] = box
+            hform.addRow(text[0].upper() + text[1:], box)
+        self.home_hform = hform
+        self.homing_card.add(hform)
+        lay.addWidget(self.homing_card)
+
         # process data
         pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
                                   "without one; entries the profile handles have no pins.")
@@ -904,6 +933,7 @@ class SlaveView(QWidget):
             self.pd.setRowCount(0)
             self.st.setRowCount(0)
             self.notes.hide()
+            self.homing_card.hide()
             return
 
         is402 = s.get("profile") == "cia402"
@@ -946,6 +976,90 @@ class SlaveView(QWidget):
 
         self.show_process_data(s)
         self.show_settings(s)
+        self.show_homing(s)
+
+    HOME_DEFAULTS = {"fast": 3000, "slow": 1000, "accel": 5000, "offset": 0}
+
+    def home_axis_number(self):
+        return max(self.home_axis.currentIndex(), 0)
+
+    def show_homing(self, s):
+        c = (s or {}).get("cia402") or {}
+        shown = bool(s) and s.get("profile") == "cia402" and ("hm" in (c.get("modes") or [])
+                                                           or bool(s.get("homing")))
+        self.homing_card.setVisible(shown)
+        if not shown:
+            return
+        names = config.axes(s)
+        if self.home_axis.count() != len(names):
+            self.home_axis.clear()
+            self.home_axis.addItems(names)
+        self.home_axis.setVisible(len(names) > 1)
+        self.home_hform.labelForField(self.home_axis).setVisible(len(names) > 1)
+        axis = self.home_axis_number()
+        b = self.win.session.bus.get(self.position)
+        coe = b.coe.entries if b and b.coe else {}
+        base = 0x60E3 + axis * config.AXIS_OFFSET
+        read = (lambda i, sub, t: tool.upload(self.position, i, sub, t)) if (base, 0) in coe \
+            else (lambda i, sub, t: None)
+        try:
+            nums, where = homing.supported(s, axis, read)
+        except tool.ToolError:
+            nums, where = None, None
+        chosen = homing.choice(s, axis)
+        self.loading = True
+        self.home_method.clear()
+        self.home_method.addItem("Not set here (the drive's own 0x6098, or a setting of yours)", None)
+        for m, ok in homing.choices(s, axis, read):
+            text = "%d  %s" % (m.number, m.text)
+            if ok is False:
+                text += "  (the drive does not support it)"
+            self.home_method.addItem(text, m.number)
+            if ok is False:
+                self.home_method.model().item(self.home_method.count() - 1).setEnabled(False)
+        i = self.home_method.findData(chosen["method"]) if chosen else 0
+        self.home_method.setCurrentIndex(max(i, 0))
+        for key, box in self.home_fields.items():
+            box.setValue(int((chosen or {}).get(key, self.HOME_DEFAULTS[key]) or 0))
+        self.loading = False
+        self.home_support = (nums, where)
+        self.show_homing_text(s, chosen, nums, where)
+
+    def show_homing_text(self, s, chosen, nums, where):
+        parts = []
+        if chosen:
+            m = homing.method(chosen["method"], s)
+            parts.append(m.text + ".")
+            parts.append(("The axis does not move." if not m.moves else
+                          "The axis MOVES. " + ("Needs: %s." % ", ".join(m.needs) if m.needs else "")))
+            used = homing.parameters(chosen["method"], s)
+        else:
+            used = []
+        parts.append("Supported methods: %s." % (
+            "%s (from the %s)" % (", ".join(map(str, nums)), where) if nums
+            else "not known for this drive, every method of the standard is offered"))
+        self.home_text.setText(" ".join(parts))
+        for key, box in self.home_fields.items():
+            self.home_hform.labelForField(box).setVisible(key in used)
+            box.setVisible(key in used)
+
+    def homing_edited(self, *_):
+        if self.loading:
+            return
+        s = self.win.session.slave(self.position)
+        if s is None:
+            return
+        axis = self.home_axis_number()
+        number = self.home_method.currentData()
+        chosen = None
+        if number is not None:
+            chosen = {"method": number}
+            for key in homing.parameters(number, s):
+                chosen[key] = self.home_fields[key].value()
+        homing.apply(s, axis, chosen)
+        self.show_settings(s)
+        self.show_homing_text(s, chosen, *self.home_support)
+        self.win.changed()
 
     def show_process_data(self, s):
         self.loading = True
@@ -1066,6 +1180,7 @@ class SlaveView(QWidget):
             s.pop("dc", None)
         for w in (self.assign, self.sync0_cycles, self.sync0_shift):
             w.setEnabled(self.dc.isChecked())
+        self.show_homing(s)
         self.win.changed()
 
     def pd_edited(self, it):

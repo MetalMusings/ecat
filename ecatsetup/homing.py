@@ -150,5 +150,66 @@ def plan(slave, number, params=None, axis=0):
     extras = ((quirks.of(slave).get("homing") or {}).get("extras") or {}).get(number, [])
     for e in extras:
         index, _, sub = e["object"].partition(":")
-        out.append(dict(e, object="0x%04X:%s" % (int(index, 16) + off, sub)))
+        i = int(index, 16)
+        # the CiA 402 objects of a later axis move; a vendor's own do not
+        out.append(dict(e, object="0x%04X:%s" % (i + off if 0x6000 <= i < 0x6800 else i, sub)))
     return out
+
+
+def choice(slave, axis=0):
+    """The homing chosen for an axis of a slave: {"method": n, "fast": ...} or None.
+    `homing` of a slave is that mapping for a drive with one axis, or a list of them
+    (None for an axis without) for a drive with several."""
+    h = (slave or {}).get("homing")
+    if isinstance(h, list):
+        h = h[axis] if axis < len(h) else None
+    elif axis:
+        h = None
+    return dict(h) if h and h.get("method") is not None else None
+
+
+def _owned(slave, number, axis):
+    """The objects (as the strings of `settings`) a chosen method wrote."""
+    return {s["object"].upper().replace("X", "x") for s in plan(slave, number, {k: 0 for k in
+            ("fast", "slow", "accel", "offset")}, axis)}
+
+
+def _norm(text):
+    index, _, sub = str(text).partition(":")
+    return (int(index, 16), int(sub or "0", 16))
+
+
+def apply(slave, axis, chosen):
+    """Make the choice (or None for no choice) the slave's homing: the `homing`
+    block, and its settings in `settings` (those of an earlier choice go). Other
+    settings, also those for the same objects that the user wrote, are kept
+    unless the new choice writes them: then the choice's value wins."""
+    old = choice(slave, axis)
+    gone = set()
+    if old:
+        gone |= {_norm(o) for o in _owned(slave, old["method"], axis)}
+    if chosen:
+        gone |= {_norm(o) for o in _owned(slave, chosen["method"], axis)}
+    settings = [st for st in slave.get("settings") or [] if _norm(st["object"]) not in gone]
+    if chosen:
+        settings += plan(slave, chosen["method"], chosen, axis)
+    if settings:
+        slave["settings"] = settings
+    else:
+        slave.pop("settings", None)
+    n = len(config.axes(slave))
+    block = ({k: v for k, v in chosen.items() if v is not None} if chosen else None)
+    if n <= 1:
+        if block:
+            slave["homing"] = block
+        else:
+            slave.pop("homing", None)
+    else:
+        h = slave.get("homing")
+        h = list(h) if isinstance(h, list) else [None] * n
+        h += [None] * (n - len(h))
+        h[axis] = block
+        if any(h):
+            slave["homing"] = h
+        else:
+            slave.pop("homing", None)

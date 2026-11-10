@@ -294,6 +294,23 @@ class TestDriveTest(TestTestMode):
         self.assertIn("MOVES the axis in the negative", drivetest.homing_text(17))
         self.assertIn("does not move", drivetest.homing_text(35))
 
+    def test_homing_choice_is_written_for_the_test_and_put_back(self):
+        run = self.started()
+        self.drive.sdos[(0x6098, 0)] = 35
+        self.drive.sdos[(0x6099, 1)] = 7
+        slave = dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]},
+                     homing={"method": 17, "fast": 3000})
+        coe = self.coe()
+        coe.entries.update({(0x6098, 0): 1, (0x6099, 1): 1})
+        dt = drivetest.DriveTest(run, slave, coe, {"scale": 100.0})
+        dt.prepare()
+        self.assertEqual(self.drive.sdos[(0x6098, 0)], 17)
+        self.assertEqual(self.drive.sdos[(0x6099, 1)], 3000)
+        self.assertEqual(dt.homing_method, 17)
+        dt.restore()
+        self.assertEqual(self.drive.sdos[(0x6098, 0)], 35)
+        self.assertEqual(self.drive.sdos[(0x6099, 1)], 7)
+
     def test_home_result(self):
         run = self.started()
         self.drive.sdos[(0x6098, 0)] = 35

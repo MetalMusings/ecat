@@ -342,6 +342,34 @@ class TestWindow(BusTest):
         self.assertIs(s["cia402"]["zero-at-start"], True)
         self.assertIn("zero-at-start: true", w.hal_page.yaml.toPlainText())
 
+    def test_homing_card(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp"}
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
+        w.select_slave(0)
+        page = w.slave_page
+        self.assertTrue(page.homing_card.isHidden())        # no hm in the modes
+        page.other_modes["hm"].setChecked(True)
+        self.assertFalse(page.homing_card.isHidden())
+        self.assertEqual(page.home_method.itemData(0), None)
+        i = page.home_method.findData(1)
+        self.assertFalse(page.home_method.model().item(i).isEnabled())   # the ECT60 has no 1
+        page.home_method.setCurrentIndex(page.home_method.findData(17))
+        page.homing_edited()
+        self.assertEqual(s["homing"]["method"], 17)
+        self.assertIn("0x6098:00", [x["object"] for x in s["settings"]])
+        page.home_fields["fast"].setValue(4000)
+        self.assertEqual(s["homing"]["fast"], 4000)
+        page.home_method.setCurrentIndex(page.home_method.findData(36))
+        page.homing_edited()
+        self.assertIn("0x2030:01", [x["object"] for x in s["settings"]])
+        page.home_method.setCurrentIndex(0)
+        page.homing_edited()
+        self.assertNotIn("homing", s)
+        self.assertNotIn("0x6098:00", [x["object"] for x in s.get("settings") or []])
+
     def test_settings(self):
         w = self.window()
         w.select_slave(0)

@@ -65,7 +65,7 @@ class TestHoming(unittest.TestCase):
         p = homing.plan(ECT, 36, {"fast": 3000}, axis=1)
         objs = [s["object"] for s in p]
         self.assertEqual(objs[:2], ["0x6898:00", "0x6899:01"])
-        self.assertIn("0x2830:01", objs)
+        self.assertIn("0x2030:01", objs)
         self.assertEqual(len(p), 2 + 7)
         self.assertEqual(len(homing.plan(ECT, 17, {"fast": 1})), 2)
 
@@ -78,3 +78,36 @@ class TestHoming(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChoice(unittest.TestCase):
+    def slave(self, **kw):
+        s = {"position": 0, "name": "x", "identity": dict(OTHER["identity"]),
+             "settings": [{"object": "0x2000:01", "type": "UINT", "value": 5}]}
+        s.update(kw)
+        return s
+
+    def test_apply_and_change(self):
+        s = self.slave()
+        homing.apply(s, 0, {"method": 17, "fast": 3000, "slow": 1000})
+        self.assertEqual(s["homing"], {"method": 17, "fast": 3000, "slow": 1000})
+        self.assertEqual([x["object"] for x in s["settings"]],
+                         ["0x2000:01", "0x6098:00", "0x6099:01", "0x6099:02"])
+        homing.apply(s, 0, {"method": 35})
+        self.assertEqual([x["object"] for x in s["settings"]], ["0x2000:01", "0x6098:00"])
+        homing.apply(s, 0, None)
+        self.assertNotIn("homing", s)
+        self.assertEqual(s["settings"], [{"object": "0x2000:01", "type": "UINT", "value": 5}])
+
+    def test_extras_go_with_the_method(self):
+        s = self.slave(identity=dict(ECT["identity"]), settings=[])
+        homing.apply(s, 0, {"method": 36, "fast": 3000})
+        self.assertIn("0x2030:01", [x["object"] for x in s["settings"]])
+        homing.apply(s, 0, {"method": 17, "fast": 3000})
+        self.assertNotIn("0x2030:01", [x["object"] for x in s["settings"]])
+
+    def test_choice_reads_both_forms(self):
+        self.assertEqual(homing.choice({"homing": {"method": 17}}), {"method": 17})
+        self.assertIsNone(homing.choice({"homing": {"method": 17}}, 1))
+        self.assertEqual(homing.choice({"homing": [None, {"method": 18}]}, 1), {"method": 18})
+        self.assertIsNone(homing.choice({}))
