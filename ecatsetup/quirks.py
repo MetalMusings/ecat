@@ -1,5 +1,5 @@
 """Quirks: what EtherCAT Setup knows about particular devices beyond their
-ESI file, SII and dictionary, read from quirk files (docs/quirks.md).
+ESI file, SII and dictionary, read from quirk files (docs/ecatsetup.md).
 
 Quirk files are YAML, one per device or family: those that come with
 EtherCAT Setup (ecatsetup/devices/*.yaml) and the user's own
@@ -294,7 +294,7 @@ def save(slave, path=None):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         f.write("# Quirk file for %s, saved by EtherCAT Setup from a configured slave.\n"
-                "# See docs/quirks.md. Edit freely.\n" % data["name"])
+                "# See docs/ecatsetup.md. Edit freely.\n" % data["name"])
         yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
     load(reload=True)
     return path

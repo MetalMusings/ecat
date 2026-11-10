@@ -1,6 +1,6 @@
 # Rtelligent ECT60 (ECT60V202), a CiA 402 stepper drive with encoder.
 # A quirk file: what EtherCAT Setup knows about a device beyond its ESI
-# file, SII and dictionary. See docs/quirks.md.
+# file, SII and dictionary. See docs/ecatsetup.md.
 name: Rtelligent ECT60
 match: {vendor: '0x00000A88', product: '0x0A880002'}
 
@@ -30,7 +30,7 @@ lcec:
 
 # Homing (0x6098). The manual (ECT Series User Manual 2.4.6) lists 17 to 30,
 # 35, 36 and 37; the drive has no 0x60E3. 36 and 37 are torque homing:
-# 36 tried on a plasma cutter 2026-11-10, 37 not tried. See docs/cia402.md.
+# 36 tried on a plasma cutter 2026-11-10, 37 not tried. See docs/component.md.
 homing:
   methods: [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37]
   describe:

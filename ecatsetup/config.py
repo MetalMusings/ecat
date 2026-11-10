@@ -1,7 +1,7 @@
 """The ecat configuration file (ethercat.yaml): make it from proposals, write
 it, read it back and check it.
 
-The format is described in docs/config-format.md. The file is plain YAML
+The format is described in docs/component.md. The file is plain YAML
 that the setup program writes; numbers that are EtherCAT identifiers
 (vendor, product, object indexes) are kept as "0x..." strings so that they
 read as they do in vendor documentation.
@@ -19,7 +19,7 @@ FORMAT_VERSION = 1
 HEADER = """\
 # ecat configuration, written by EtherCAT Setup.
 # Read by the ecat HAL component: loadrt ecat config=<this file>
-# Format: https://github.com/MetalMusings/ecat/blob/main/docs/config-format.md
+# Format: https://github.com/MetalMusings/ecat/blob/main/docs/component.md#the-configuration-file
 # The program rewrites this file; comments added by hand are not kept.
 """
 

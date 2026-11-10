@@ -1,6 +1,6 @@
 # Beckhoff EL7041 stepper motor terminal (and EP7041), velocity interface.
 # A quirk file: what EtherCAT Setup knows about a device beyond its ESI
-# file, SII and dictionary. See docs/quirks.md. Not tried on a terminal:
+# file, SII and dictionary. See docs/ecatsetup.md. Not tried on a terminal:
 # corrections are welcome.
 name: Beckhoff EL7041
 match: {vendor: '0x00000002', product: '0x1B813052'}

@@ -12,7 +12,7 @@
 ///
 /// lcec read its configuration as a stream of LCEC_CONF_* records that
 /// lcec_conf made from the XML file and put in shared memory. ecat makes the
-/// same stream from its YAML file (docs/config-format.md), in memory, so the
+/// same stream from its YAML file (docs/component.md), in memory, so the
 /// rest of the code is unchanged.
 ///
 /// Two differences from lcec's stream: the master's appTimePeriod is 0 (the

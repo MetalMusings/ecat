@@ -6,7 +6,7 @@ drive itself (0x60E3, if it has that object) or from its quirk file
 (`homing: methods`); the quirk file wins, because some drives do not report
 it right. A drive that needs more than the standard objects for a method
 (the ECT60's torque homing) gives `homing: extras` for it. See
-docs/quirks.md.
+docs/ecatsetup.md.
 """
 
 from . import config, quirks, tool

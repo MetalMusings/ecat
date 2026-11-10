@@ -192,7 +192,7 @@ def add_modules(p, detected, configured):
                                                        else "s", ids))
     if configured is not None and configured and configured != detected:
         p.notes.append("modules configured in 0xF030 (%s) differ from those detected: the slave "
-                       "may refuse OP until 0xF030 matches (see docs/modules.md)"
+                       "may refuse OP until 0xF030 matches (see docs/component.md)"
                        % (", ".join("0x%08X" % m for m in configured)))
 
 

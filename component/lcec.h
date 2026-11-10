@@ -34,7 +34,7 @@ extern "C" {
 
 /// HAL component name, the same as the module file (ecat.so) and the prefix of
 /// the component's own pins and functions (ecat.read-all, ecat.0.all-op).
-/// Slave pins are named <slave name>.<pin>, see docs/config-format.md.
+/// Slave pins are named <slave name>.<pin>, see docs/component.md.
 #define LCEC_COMP_NAME LCEC_MODULE_NAME
 #include "lcec_rtapi.h"
 #include "rtapi_ctype.h"

@@ -1,5 +1,5 @@
 """EtherCAT Setup's window (PyQt5), laid out as the mockups in
-docs/design/ethercat-setup.md: a header with the configuration and the
+docs/development.md: a header with the configuration and the
 bus's state, and the pages Bus, Slave status, Test and HAL & LinuxCNC.
 
     ecatsetup --gui [ethercat.yaml] [--ini machine.ini] [--esi DIR]
@@ -2674,10 +2674,10 @@ def config_pins(cfg):
         names = config.axes(s)
         for n, a in enumerate(names):
             rows.append((s["position"], "CiA 402 axis %d" % n if len(names) > 1 else "CiA 402 profile",
-                         "%s.*" % a, "", "see docs/cia402.md"))
+                         "%s.*" % a, "", "see docs/component.md"))
         for ch in s.get("encoders") or []:
             rows.append((s["position"], "encoder %s" % ch.get("index"),
-                         "%s.%s.*" % (name, ch.get("name")), "", "see docs/encoder.md"))
+                         "%s.%s.*" % (name, ch.get("name")), "", "see docs/component.md"))
     return rows
 
 

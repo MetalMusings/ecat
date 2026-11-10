@@ -97,6 +97,8 @@ install -m 755 "$WORK/ecat/scripts/ecat-take-down" "$ROOT/usr/bin/"
 install -m 644 "$WORK/ecat/README.md" "$DOC/"
 install -d "$DOC/docs"
 install -m 644 "$WORK/ecat"/docs/*.md "$DOC/docs/"
+install -d "$DOC/docs/images"
+install -m 644 "$WORK/ecat"/docs/images/*.png "$DOC/docs/images/"
 install -m 644 "$WORK/ecat/LICENSE" "$DOC/copyright"
 echo "ecat: $(git -C "$SRC" rev-parse HEAD)$WORKTREE" >"$DOC/VERSION"
 
