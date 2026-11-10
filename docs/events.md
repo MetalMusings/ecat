@@ -76,3 +76,13 @@ motion): the log showed the load, the activation 4 s later, the four
 slaves from PREOP to OP within a second, the working counter coming up,
 and at the stop the late servo thread, the guard taking over and its
 done 55 ms later.
+
+*Save report* in the window (2026-11-10, the plasma cutter's configuration and
+INI, the dialog answered by a script): with LinuxCNC running it wrote the report in
+6.6 s, with versions, the configuration, the INI lines, the bus diagnosis of all
+four slaves (states, ports, CiA 402 state) and the event logs of this run and the
+one before; with LinuxCNC closed, in 0.5 s, saying that no master could be
+reached and what to start, and with the closing run's stop guard in the log. The
+file name is proposed next to the INI file, and nothing is written there unless
+the dialog is accepted. Its paths show the user's home folder name; look
+the report through before posting it.
