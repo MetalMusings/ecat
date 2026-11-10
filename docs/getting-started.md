@@ -1,8 +1,13 @@
-# Trying ecat without disturbing your setup
+# Getting started
 
-ecat is experimental. This page is for trying it on a machine that
-already works, with LinuxCNC configurations and perhaps another EtherCAT
-master that you want to keep. Everything below can be undone.
+ecat is experimental. This is for trying it on a machine that already
+works, with LinuxCNC configurations and perhaps another EtherCAT master
+that you want to keep. Everything below can be undone.
+
+Where to go next: [EtherCAT Setup](ecatsetup.md) for the program (its
+window, the test mode, writing into LinuxCNC, troubleshooting) and
+[The ecat component](component.md) for the configuration file and what
+each kind of slave gives you in HAL.
 
 ## What gets installed, and what does not change
 
@@ -64,9 +69,9 @@ ecatsetup --check path/to/ethercat.yaml
 ecatsetup --import path/to/ethercat-conf.xml --ini machine.ini --write /tmp/ethercat.yaml
 ```
 
-The window opens on a *Start* page. `--import` turns an lcec XML file
+The window opens on a *Start* page (a tour of it: [ecatsetup-gui.md](ecatsetup.md#the-window)). `--import` turns an lcec XML file
 into an ecat file; `--check` checks a file (see
-[config-format.md](config-format.md)). Open the result and look at what
+[config-format.md](component.md#the-configuration-file)). Open the result and look at what
 it proposes.
 
 **2. Reading the bus.** Reading needs a master. Stop the kernel master
@@ -98,7 +103,7 @@ ecatsetup --gui ~/linuxcnc/configs/mymachine-ecat/ethercat.yaml \
 *HAL & LinuxCNC* then shows what would be written (`ethercat.yaml`,
 `ethercat-load.hal`, `ethercat.hal`, the INI changes and the HAL lines
 that would be commented out) before it writes, and keeps each changed
-file as `.bak`. [linuxcnc.md](linuxcnc.md) says what is written and how
+file as `.bak`. [linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc) says what is written and how
 the check of your HAL files works.
 
 **4. The test mode.** It runs the `ecat` component in `halrun` without
@@ -113,7 +118,7 @@ back). Before moving a drive:
 - set the scale (counts per mm) first;
 - check what the drive's homing method (`0x6098`) does before using
   *Home*: only method 35 leaves the axis where it is;
-- read [test-mode.md](test-mode.md).
+- read [test-mode.md](ecatsetup.md#test-mode).
 
 **5. In LinuxCNC.** Only now run the copy of your configuration. Start
 with the machine unable to do harm (no power to the axes, the
@@ -121,7 +126,7 @@ spindle or the torch off). *Watch LinuxCNC that runs (read only)* on the
 *Test* page shows the pins live without changing anything, and if
 something is wrong the *Slave status* page, the event log and *Save
 report...* give what to send when you ask for help
-([events.md](events.md)).
+([events.md](ecatsetup.md#event-log-and-report)).
 
 ## Going back
 

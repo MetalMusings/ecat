@@ -1,17 +1,46 @@
-# EtherCAT Setup for LinuxCNC: design draft
+# Developing ecat
+
+For whoever works on ecat itself: how to build and test it, the design
+draft, what the prototype found on a real bus, and the plan for tests at
+a machine.
+
+## Build and test
+
+```
+python3 -m unittest discover -s tests      # Python tests
+make -C component                          # ecat.so
+make -C component check                    # C unit tests
+scripts/build-deb.sh -w -o <dir>           # package from the working tree
+```
+
+- The component needs `linuxcnc-uspace-dev`, `libyaml-dev` and the master
+  package's headers in `/opt/linuxcnc-ethercat-uspace/include`. Set
+  `USPACE_ETHERCAT=` to use another master install. To install it from
+  the checkout: `make -C component install`.
+- `make check` runs the cia402 profile's and the encoder function's read
+  and write functions cycle by cycle against a fake of HAL and the master
+  (`component/tests/fake.c`), without a bus, and reads configuration
+  files into the records the component is set up from, checking the
+  records and the errors.
+- The window's tests run offscreen against a fake bus and are skipped
+  without PyQt5.
+- `scripts/build-deb.sh` runs both test suites and builds the package for
+  Debian 12 and 13 (`.github/workflows/deb.yml` does so for releases).
+
+## Design draft
 
 Status: **draft for discussion**, 2026-11-08; status of the plan
 updated 2026-11-09 (see [Plan](#plan)). Directions will change as parts
 are tried on real machines.
 
-## Summary
+### Summary
 
 Today an EtherCAT bus for LinuxCNC is set up by writing an XML file
 (`ethercat-conf.xml`) and HAL lines by hand. Many users find this hard to
 get right, and when a slave does not work, finding out why takes
 knowledge of EtherCAT that most users do not have.
 
-This document proposes:
+This draft proposes:
 
 - **EtherCAT Setup**, an interactive program that shows the slaves on the
   bus, configures them from the slave's own data and its ESI file, helps
@@ -29,7 +58,7 @@ developed in steps, each of which is useful on its own.
 
 ![The bus and one slave](images/setup-bus.png)
 
-## The problem
+### The problem
 
 What a user has to know today:
 
@@ -54,7 +83,7 @@ product-specific drivers, because most slaves only need process data and
 start-up settings, not product-specific code. What makes `generic` hard is
 writing the mapping by hand.
 
-## Goals
+### Goals
 
 - No hand-written bus configuration. The user picks and confirms; the
   program writes the files.
@@ -68,7 +97,7 @@ writing the mapping by hand.
   files.
 - Let existing lcec XML configurations be imported.
 
-## Non-goals
+### Non-goals
 
 - The kernel-mode master. Only the userspace master is supported.
 - Machine configuration (axes, kinematics, limits, GUI). That remains the
@@ -77,7 +106,7 @@ writing the mapping by hand.
 - Replacing HAL. The program writes ordinary HAL lines that the user can
   read.
 
-## Overview
+### Overview
 
 ```
                  +-------------------------------------+
@@ -114,7 +143,7 @@ A master built into the program itself would be a third way to the bus,
 with its own behaviour to maintain. It is only worth adding if something
 turns out to be impossible through the two above.
 
-## The configuration file
+### The configuration file
 
 `ethercat.yaml` in the machine configuration's folder (format to be
 settled; YAML is the working assumption). It is written by EtherCAT Setup
@@ -143,7 +172,7 @@ XML files](#relation-to-lcec-and-its-xml-files)).
 program, such as `x-drive.pos-fb`, instead of `lcec.0.0.actual-position`,
 so that HAL files are readable.
 
-## Device support from data
+### Device support from data
 
 Today's drivers do three different things, which should be handled
 differently:
@@ -183,7 +212,7 @@ slots) need to know which modules are fitted.
 **Later**: user comments per device ("works in CSP, needs 0x2010 set"),
 shown next to the device, and a shared list of download links.
 
-## Bringing up and troubleshooting a slave
+### Bringing up and troubleshooting a slave
 
 Much of what is needed exists in the master but is shown in a way only
 experts understand. The program shows it in plain language:
@@ -203,7 +232,7 @@ experts understand. The program shows it in plain language:
 
 ![Troubleshooting a slave](images/setup-troubleshoot.png)
 
-## Test mode and safety
+### Test mode and safety
 
 Test mode runs `ecat` in `halrun` as described above, so I/O,
 SDOs, CiA 402 drives and sync modes are tested with the same code as in
@@ -226,7 +255,7 @@ Moving a CiA 402 drive from a test program needs care:
 - **Emergency stop**: if the machine's E-stop is wired through EtherCAT
   I/O, test mode can use it.
 
-Built so far (CSP only, see [test-mode.md](../test-mode.md)): hold-to-enable
+Built so far (CSP only, see [test-mode.md](ecatsetup.md#test-mode)): hold-to-enable
 and jog buttons, the heartbeat through the drive's `watchdog` pin, limits
 written to the drive where it has the objects, and velocity,
 acceleration and travel limited in HAL by a `limit3`. The ECT60 has no
@@ -236,7 +265,7 @@ yet.
 
 ![Testing a CiA 402 drive](images/setup-test.png)
 
-## CiA 402 drives and their modes
+### CiA 402 drives and their modes
 
 The `cia402` profile runs CSP and CSV so far. Machines also need profile
 position (PP), profile velocity (PV) and the drive's own homing (HM).
@@ -339,7 +368,7 @@ In the component, each mode is an entry in a table: its number, the
 objects it needs, how it is entered, what it writes every cycle and when
 it is done. The mode change is then the same code for all modes.
 
-## Integration with LinuxCNC
+### Integration with LinuxCNC
 
 The program writes, after showing the change and keeping a backup:
 
@@ -358,7 +387,7 @@ changed. When an existing `lcec` configuration is moved over, the old
 `lcec_conf` and `lcec` lines in the user's HAL file are shown, and removed
 only if the user agrees.
 
-As built (step 5, [linuxcnc.md](../linuxcnc.md)): two files, since the
+As built (step 5, [linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)): two files, since the
 servo thread exists only once `motmod` is loaded in the user's first HAL
 file. `ethercat-load.hal`, the first HALFILE, loads the component;
 `ethercat.hal`, the last, adds its functions and connects the joints.
@@ -371,7 +400,7 @@ configuration expects an EL1008; run EtherCAT Setup".
 
 ![HAL and LinuxCNC](images/setup-hal.png)
 
-## Relation to lcec and its XML files
+### Relation to lcec and its XML files
 
 **Decided**: the new system is called `ecat`, also the name of its HAL
 component, not `lcec_uspace`. It no longer reads lcec's XML files, so the
@@ -413,7 +442,7 @@ A middle way was also possible: start with profiles only, and bring over
 individual drivers, as profiles or fallback drivers, when users need
 them. The choice was profiles only, with quirks as data.
 
-## Decision: profiles with quirks, no product drivers
+### Decision: profiles with quirks, no product drivers
 
 Decided 2026-11-10. The question was asked for all kinds of devices and
 many users, not for the test machines (both of which the existing
@@ -472,15 +501,15 @@ convenience lcec's drivers give.
 | `mdp`, `generic` | digital I/O (`el1xxx`, `el2xxx`, `el2202`, `digitalcombo`, `easyio`, `epocat`, `ex260`, `ep9214`), status bits (`el95xx`, `el9410`), `passive` | Done |
 | Encoder (MDP 511) | `el5101`, `el5151`, `el5152`, the encoder channels of `el7342`/`em7004` | Done |
 | `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Built (`cia402.axes`, objects 0x800 apart, pins per axis); not tried on such a drive. |
-| Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog.md](../analog.md)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
-| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale, error reset (HAL lines) and lcec modParams are a quirk file ([stepper.md](../stepper.md), [quirks.md](../quirks.md)). Not tried on a terminal. `el2521` (pulse train) not yet. |
+| Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog.md](component.md#analog-inputs-and-outputs)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
+| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale, error reset (HAL lines) and lcec modParams are a quirk file ([stepper.md](component.md#stepper-and-dc-motor-terminals), [quirks.md](ecatsetup.md#quirk-files)). Not tried on a terminal. `el2521` (pulse train) not yet. |
 | Absolute encoders (SSI, EnDat) | `el5002`, `el5032` | Check first whether `generic` plus settings is enough. |
 
 The order is set by what users run; analog I/O and the EL7041 are
 probably the most common among LinuxCNC users with Beckhoff terminals.
 
 **Quirks** are YAML files per vendor and product, which users can write
-and share ([quirks.md](../quirks.md), decided 2026-11-10: a small product
+and share ([quirks.md](ecatsetup.md#quirk-files), decided 2026-11-10: a small product
 such as the EL7041 gets a quirk file, not code). EtherCAT Setup uses them
 when it proposes, imports and writes a configuration. An entry can
 hold:
@@ -499,7 +528,7 @@ and group 2 into process data and profile options, driver by driver. It
 starts with the common drivers (`rtec`, `rtdrv`, `leadshine_stepper`,
 `el7041`, `class_cia402`). Group 3 gets a note.
 
-## Technology
+### Technology
 
 - **Python and PyQt5**: present in every LinuxCNC installation, known in
   the community, and LinuxCNC's `hal` module is available.
@@ -509,7 +538,7 @@ starts with the common drivers (`rtec`, `rtdrv`, `leadshine_stepper`,
   with its git history) and gains reading of `ethercat.yaml`, pin aliases
   and profile-based device support.
 
-## Decided questions
+### Decided questions
 
 Questions that were open in this draft, with the answer and where it is
 described.
@@ -530,19 +559,19 @@ described.
   better is known; swapped drives of the same type are not noticed
   automatically.
 - **File format**: YAML, `ethercat.yaml`
-  ([config-format.md](../config-format.md)).
+  ([config-format.md](component.md#the-configuration-file)).
 - **Scaling**: in HAL, as today. `ethercat.hal` sets each joint's
-  `pos-scale` from `linuxcnc.joints` ([linuxcnc.md](../linuxcnc.md)).
+  `pos-scale` from `linuxcnc.joints` ([linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **INI keys**: `[ETHERCAT]CONFIG`, and `HALFILE = ethercat-load.hal`
-  first and `HALFILE = ethercat.hal` last ([linuxcnc.md](../linuxcnc.md)).
+  first and `HALFILE = ethercat.hal` last ([linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **Joints and gantries**, for now: EtherCAT Setup connects joints to
   CiA 402 drives in CSP. Gantries, CSV drives, home and limit switches,
   and I/O such as an E-stop are connected in the user's HAL files
-  ([linuxcnc.md](../linuxcnc.md)).
+  ([linuxcnc.md](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **CiA 402 homing**: `index-enable` with the drive's own homing
   (`modes: [hm]`); no homing module. Tried on the plasma cutter's X axis
-  ([cia402.md](../cia402.md)). PP and PV were tried on the plasma
-  cutter's three ECT60 drives on 2026-11-10 ([test-mode.md](../test-mode.md#pp-pv-and-homing-at-the-machine)):
+  ([cia402.md](component.md#the-cia402-profile)). PP and PV were tried on the plasma
+  cutter's three ECT60 drives on 2026-11-10 ([test-mode.md](ecatsetup.md#pp-pv-and-homing-at-the-machine)):
   the ECT60 sometimes acknowledges a set-point without starting (the
   profile gives it again), and torque homing (method 36) ends only with an integral gain in
   the drive's speed loop (`0x2030:06`).
@@ -553,13 +582,13 @@ described.
   drivers ([Decision: profiles with quirks, no product
   drivers](#decision-profiles-with-quirks-no-product-drivers)).
 
-## Use cases
+### Use cases
 
 Agreed with the user on 2026-11-10. These are the main things people do
 with EtherCAT Setup; the window should lead into each of them, and the
 plan below is ordered by them.
 
-### a. A new machine, from a simulated configuration
+#### a. A new machine, from a simulated configuration
 
 A user tries LinuxCNC's simulator and picks a configuration. The
 starting point is a folder in `~/linuxcnc/configs/` holding that
@@ -584,7 +613,7 @@ point into LinuxCNC's `hallib`, where much of the simulation is.
   `MAX_VELOCITY` against the drive's maximum speed, `FERROR` values.
 - Everything else in the copy stays as it was.
 
-### b. Changing a configuration that runs
+#### b. Changing a configuration that runs
 
 New I/O, another scale, modules added or moved. Users often edit their
 HAL files by hand, and those then drift from `ethercat.yaml`. That is
@@ -625,7 +654,7 @@ depends on the modules:
   slots, and write `0xF030` as a setting;
 - the start check compares the modules as it compares the slaves.
 
-### c. Bringing up a new slave
+#### c. Bringing up a new slave
 
 Getting it to work with the master: process data, DC and
 synchronisation, settings.
@@ -645,7 +674,7 @@ synchronisation, settings.
 - **Save as quirk file**: the pin names, scales and settings chosen for
   a product become a quirk file, to share and to ship.
 
-### d. Using a slave by hand
+#### d. Using a slave by hand
 
 Reading and setting I/O, moving to positions, trying homing: testing a
 slave's functions on their own. Test mode does this (I/O, SDOs, CSP, PP,
@@ -655,7 +684,7 @@ PV, homing, with its safety layers).
   over the last seconds.
 - PP, PV and homing to be tried on the plasma cutter.
 
-### e. Troubleshooting while LinuxCNC runs
+#### e. Troubleshooting while LinuxCNC runs
 
 Something unexpected happens in LinuxCNC that the user thinks may come
 from a slave. The Troubleshoot page reads the master and the slaves over
@@ -676,13 +705,13 @@ but by the time the user looks, the fault has often passed.
   turn-around (`sync0-shift-ns`), working counter drops (cables, port
   error counters).
 
-### For all of them
+#### For all of them
 
 A start page in the window with the five tasks, leading to the pages
 and the order for each. The pages exist; what is missing is the way in
 for someone who does not know where to begin.
 
-## Open questions
+### Open questions
 
 - **Modular devices**: how slots and modules are detected and chosen;
   best effort for now (see [use case b](#b-changing-a-configuration-that-runs)),
@@ -690,7 +719,7 @@ for someone who does not know where to begin.
 - **ESI files**: licensing, finding the right file and revision. For now
   the user provides the file, or works without one.
 
-## Plan
+### Plan
 
 Each step is useful on its own; the order may change as parts are tried.
 
@@ -728,29 +757,242 @@ in this order:
 
 1. **Flight recorder and Save report** (e): helps users who ask for help
    the most, and is useful in a-d too. Built 2026-11-10
-   ([events.md](../events.md)).
+   ([events.md](ecatsetup.md#event-log-and-report)).
 2. **HAL check and drift** (b): the check, hand edits of `ethercat.hal`
    noticed, renames into the user's files, where each pin is connected.
-   Built 2026-11-10 ([linuxcnc.md](../linuxcnc.md#checking-the-hal-files)).
+   Built 2026-11-10 ([linuxcnc.md](ecatsetup.md#checking-the-hal-files)).
 3. **The bus changed**, matched by type and order (b); modular devices
    best effort. Built 2026-11-10: *Update from bus* shows the changes and
    what depends on missing slaves first; connections of missing slaves
-   are removed; modules recorded and compared ([modules.md](../modules.md)).
+   are removed; modules recorded and compared ([modules.md](component.md#modular-devices)).
 4. **From a simulated configuration** (a): recognising and replacing the
    simulation, copying library files, the scale, the INI check. Built
-   2026-11-10 ([linuxcnc.md](../linuxcnc.md#from-a-simulated-configuration)).
+   2026-11-10 ([linuxcnc.md](ecatsetup.md#from-a-simulated-configuration)).
 5. **Bringing up a slave** (c): the sync card, where proposals come
    from, ESI file handling, Save as quirk file. Built 2026-11-10
-   ([bring-up.md](../bring-up.md)).
+   ([bring-up.md](ecatsetup.md#bringing-up-a-new-slave)).
 6. **Watching while LinuxCNC runs and the plot** (d, e). Built
-   2026-11-10 ([test-mode.md](../test-mode.md#watching-linuxcnc)); the
+   2026-11-10 ([test-mode.md](ecatsetup.md#watching-linuxcnc)); the
    watching is tried against a fake HAL, not a running LinuxCNC.
 7. **The start page**, once the parts exist. Built 2026-11-10: the *Start* tab
    (`ecatsetup/tasks.py`) lists the five tasks with their steps and a button
    for each; it opens first when nothing is loaded.
 
-## Mockups
+### Mockups
 
 The screens in this document are mockups without function, made to show
 the idea. Slave identities and PDOs are read from the test machine's bus;
 messages, limits and values are examples.
+
+## Prototype: can slaves be configured from their own data?
+
+Status: done, 2026-11-08. Step 1 of the plan in the
+[design draft](#design-draft).
+
+### The question
+
+Can a slave's process data, distributed clocks and HAL pins be proposed
+from what can be read (the slave's SII, its CoE dictionary, a few CoE
+objects, and an ESI file if one matches), without a hand-written mapping?
+
+### How it was tried
+
+The prototype, `ecatsetup` (Python, no GUI), reads the bus through the
+userspace master's `ethercat` tool. It only reads: the slave list, SII
+contents, the CoE dictionary and single SDO uploads (0x1000 device type,
+0x6502 supported drive modes). It proposes a configuration per slave and
+compares it with an lcec XML file:
+
+```
+python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
+```
+
+It was run against a plasma cutter's bus while LinuxCNC was running on it
+(the tool reached the master inside LinuxCNC), and compared with the
+machine's hand-written `ethercat-conf.xml`, which is known to work:
+
+| Pos | Slave | Profile found |
+|---|---|---|
+| 0–2 | ECT60V202 closed-loop stepper drives | CiA 402 (0x1000 = 0x00040192) |
+| 3 | MetalMusings EaserCAT 7000, THC and I/O | Modular device, ETG.5001 (0x1000 = 5001) |
+
+There was no matching ESI file for any of them: none for the ECT60, and
+the EaserCAT 7000's firmware folder holds the ESI file of the EaserCAT
+6000 (another product code). The proposals below come from the slaves'
+own data alone.
+
+### Results
+
+**Process data: derived.**
+
+- ECT60: the SII's default assignment is 0x1600 (control word, mode,
+  target position) and 0x1A00 (status word, mode display, actual
+  position, digital inputs). That is what CSP needs; the drive reports
+  CSP in 0x6502. The hand-written file maps the same plus velocity and
+  torque, and leaves out the digital inputs.
+- EaserCAT 7000: the proposal has exactly the same entries as the
+  hand-written file.
+
+**Distributed clocks: derived.** The ECT60's SII describes a DC mode
+"DC" with AssignActivate 0x0300 and SYNC0 = 1 × cycle, which is what the
+hand-written file has. The EaserCAT 7000 has no DC mode, and the
+hand-written file uses none.
+
+**Profile: derived.** CoE 0x1000 identified both kinds of slave. For the
+drives, the CiA 402 objects (control word, status word, mode) are left to
+the drive profile, and the rest become pins with fixed names (`pos-cmd`,
+`pos-fb`).
+
+**Pins: derived, but naming needs the user.** Every entry gets a pin with
+a type from the data type (`float` for REAL, `s32`, `u32`) and a name from
+the entry, prefixed by the PDO's name when names repeat
+(`out-unit1.calculated-voltage`). The hand-written names differ
+(`calculatedVoltage-1`), as names will; aliases chosen in the program are
+needed.
+
+### What could not be derived
+
+These are choices, not data. The program must ask for them:
+
+- **Bit fields.** The hand-written file splits `Input12` (32 bit) into 12
+  bit pins, `Output4` (8 bit) into 4, and uses bit 0 of three 8-bit flags.
+  Nothing in the SII or CoE dictionary says that these are bit fields or
+  how many bits are used. An ESI file may say so; otherwise the user
+  chooses "split into bits" in the program.
+- **Settings.** The hand-written file writes 4–5 vendor objects per drive
+  (peak current, idle current, motor direction, closed loop, position
+  loop gain) and 10 on the EaserCAT (ADC type, I2C address, filter, ohmic
+  sensing times). They are machine-specific. The CoE dictionary gives them
+  names, so the program can show "0x2000 Peak Current = 4000" instead of
+  `<sdoDataRaw data="a0 0f"/>`, and offer the writable vendor objects (69
+  on the ECT60) as a settings list.
+- **Cyclic mode** (CSP or CSV) for drives that support several.
+
+### Found on the way
+
+- **The SII can be wrong.** The EaserCAT 7000's SII gives subindex 0 for
+  every entry of its record objects (0x6001, 0x7001, ...); its CoE
+  dictionary has the right ones (1–6). The prototype takes them from the
+  CoE dictionary, matched by order, and says so. Sources must be
+  cross-checked, not trusted one by one.
+- **Data types differ between sources.** The ECT60's SII says USINT for
+  0x6060 (modes of operation), its CoE dictionary SINT, as CiA 402 has
+  it. The master's own `ethercat xml` output gives UINT32 for 0x607A,
+  which is a DINT.
+- **"#" is not a comment in XML.** The hand-written file has lines like
+  `#<pdoEntry idx="60FF" .../>`, meant to be commented out. The XML
+  parser still reads the element, and the running master maps 0x60FF,
+  0x606C and 0x6077. Harmless here, but an example of why hand-written XML
+  is hard to get right.
+- **No serial numbers.** All four slaves report serial number 0, so they
+  can only be told apart by position and identity. Two swapped drives of
+  the same type would not be noticed by the configuration.
+- **ESI files are hard to match** even for one's own device (the 7000
+  folder holds the 6000's file). Matching must be by vendor, product code
+  and revision, never by file name, and the program must work without
+  one.
+
+### Conclusion
+
+For these slaves the core idea holds: process data, distributed clocks,
+profile and pins can be proposed from the slaves' own data, without an
+ESI file. What remains are real choices (settings, bit fields, cyclic
+mode, pin names), which is what the program's screens are for.
+
+The bus had only two kinds of slave, both with a CoE dictionary and a
+correct default mapping. Still to try: slaves without CoE, slaves whose
+default mapping does not fit, modular devices with slots, and ESI files
+from vendors such as Beckhoff.
+
+### Next
+
+Step 2 of the plan: settle the data model and file (`ethercat.yaml`) from
+these proposals, and let the component read it. The proposal objects in
+`ecatsetup/propose.py` are a first draft of what the file holds per
+slave.
+
+## Fault tests at the machine
+
+The event log and the report are tried so far on a bus that behaves. This
+is the plan for provoking real faults and checking that the recorder
+catches them, that the diagnosis and the symptom guide name them, and that
+Watch shows them live. Results are at the end.
+
+### Before
+
+- LinuxCNC runs with `ecat` (the machine can stay switched off, no motion
+  is needed for most rows). The kernel master is stopped.
+- In a terminal: `scripts/ecat-events-follow`. It prints each event as the
+  component records it.
+- In the window: *Troubleshoot* page, *Watch LinuxCNC (read only)*.
+- Note the time of each action; the log is to the millisecond.
+- After each row: *Save report...*, and look at the diagnosis and at which
+  symptom in the guide fits. Restart LinuxCNC between rows when a row says
+  so (each start drops the older of the two logs, so save first).
+
+### Rows
+
+| # | Provoke | Expect in the log | Expect elsewhere |
+|---|---|---|---|
+| 1 | Pull the cable between two slaves, put it back | `slaves respond` fewer, `working counter incomplete`, `slave N OFFLINE`; then back: online, operational | Watch: slave state; diagnosis: lost-link counter on the port; symptom "a slave drops out" |
+| 2 | Pull the cable at the master (the card) | `link DOWN`, working counter zero | Symptom for link down |
+| 3 | Switch off the last slave's power | `slave N OFFLINE`, working counter incomplete | same as row 1 |
+| 4 | Stop the servo thread (`halcmd stop`, or pause it) | `servo thread late`, then `stop guard` taking the slaves to PREOP, `done` | slaves in PREOP, outputs zero |
+| 5 | Start the servo thread again (`halcmd start`) | `stop guard: the servo thread runs the bus again`, slaves back to OP | backlog items 4 and 5 (DC slaves stay in SAFEOP?) are watched here |
+| 6 | Force a drive fault (drive over-travel input, or a wrong parameter that trips it) | `drive fault <text> (status word ...)`, then `the profile shut the drive down` | Watch: CiA 402 state Fault; symptom "a drive switches itself off" |
+| 7 | Clear the fault (fault-reset) | `drive fault cleared` | |
+| 8 | Hold the machine's enable and unplug the bus while the drive is enabled | `drive left Operation enabled` or no valid process data as `fault-reason` | the drive's own state afterwards |
+| 9 | Run with a heavy load on the CPU (a build, `stress`) | `servo thread late` lines (at most one a second) | whether the report's diagnosis points at latency |
+
+Rows 1-3, 6 and 7 are the ones a user can meet in practice; 4 and 5 test
+the guard; 8 and 9 are stress.
+
+### What to check in each row
+
+1. The event appears within the cycle or the second it is recorded for
+   (states are read once a second, the working counter every cycle).
+2. The text says what to look at (cable, power, drive) without the reader
+   knowing EtherCAT.
+3. The diagnosis in the saved report agrees with the log.
+4. The symptom guide has an entry that fits, and Watch shows the same live.
+5. No event is missing or false (for example a working counter error at a
+   normal start).
+
+### Results (fault tests)
+
+2026-11-10, plasma cutter, LinuxCNC (QtPlasmaC, 1 ms servo thread), 3 drives
+and the EaserCAT, machine switched off. Rows 6-8 need a real drive fault or
+a drive that is enabled and were not tried.
+
+| # | Tried | What the log showed |
+|---|---|---|
+| 1 | Cable between slave 0 port 1 and slave 1 pulled and put back | Working counter incomplete, "1 slaves respond (was 4)", working counter zero. Back: 4 respond, all in OP 10 s later. |
+| 2 | Cable at the master | Working counter zero, "0 slaves respond", all OFFLINE, and a second later `link DOWN`. Back: `link up`, all in SAFEOP, in OP 10 s later. |
+| 3 | Slave 2 powered off and on | "2 slaves respond (was 4)", correct. Back: 4 respond, in OP 10 s later. |
+| 4, 5 | `halcmd stop`, 6 s, `halcmd start` | `servo thread late`, `stop guard` to PREOP and done (60 ms), then `runs the bus again`, all in OP 1 s later. The DC slaves did not stay in SAFEOP. |
+| 9 | Busy loops on every CPU for 25 s | No events. The servo thread's maximum time did not grow. |
+
+In every row the drives stayed in "Ready to switch on" and LinuxCNC kept
+running: the bus recovers by itself, without a restart.
+
+#### Found, and what was done
+
+- Fixed: the diagnosis said "No problems found" with `lost 1` at both ends
+  of the pulled cable. It now adds a note that names the cable when two
+  ports at the ends of one cable count the same number of lost links
+  (`lost_link_notes`). It is a note, not a problem: the counters are not
+  cleared and the master's counts since power-on stay.
+- Fixed: `scripts/ecat-events-follow` printed "a new run started" in the
+  middle of a run.
+- Not fixed: when the topology changes, the master reports every slave
+  as not online for a moment: rows 1 and 3 list slaves that were still on
+  the bus (slave 0 and 1 in row 3) as OFFLINE, and again when the
+  slave behind them returns. "N slaves respond" is right. Read the count of
+  responding slaves first; the cause is in how the master reports the
+  slave configurations, so the component needs a closer look.
+- Not fixed: a `working counter zero` of a millisecond, logged as ERROR,
+  comes while the bus climbs back to OP (after rows 1-3 and 5). It is
+  harmless, but the log cannot tell it from a real one.
+- The port counters of the master side and of a slave that lost power
+  start again from zero, so those show nothing: the event log is the
+  record for them.

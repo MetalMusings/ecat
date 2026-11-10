@@ -5,32 +5,34 @@ EtherCAT for LinuxCNC, configured without hand-written XML.
 **Status: early development, tried on one machine.** The HAL component
 runs a plasma cutter (three CiA 402 drives in CSP, one I/O slave); PP and
 PV have been tried on its drives too. EtherCAT Setup reads, proposes,
-checks, updates and diagnoses a configuration from the command line and
-in its window, and tests it: I/O, SDOs, moving a drive in small steps
-(CSP, PP, PV) and homing it. It writes the configuration into a LinuxCNC
-configuration, with the joints connected to their drives and I/O pins to
-LinuxCNC, checks your HAL files against it, and watches a running
-LinuxCNC read only. Everything is built in steps, following the design
-draft. To try it without disturbing your own setup:
-[docs/try-it.md](docs/try-it.md).
+checks, updates and diagnoses a configuration in its window or from the
+command line, tests it (I/O, SDOs, moving a drive in small steps, homing),
+writes it into a LinuxCNC configuration, and watches a running LinuxCNC
+read only. Everything is built in steps, following the design draft.
 
-`ecat` is planned as:
+ecat has two parts:
 
-- **EtherCAT Setup**, an interactive program that shows the slaves on the
+- **EtherCAT Setup** (`ecatsetup`), a program that shows the slaves on the
   bus, configures them from the slave's own data and its ESI file, helps
-  bring up and troubleshoot a slave that does not work, tests it, connects
-  it to HAL, and writes the result into the LinuxCNC configuration;
+  bring up and troubleshoot a slave that does not work, tests it,
+  connects it to HAL, and writes the result into the LinuxCNC
+  configuration;
 - **`ecat`**, a HAL component that runs the userspace IgH EtherCAT master
-  inside LinuxCNC and reads the configuration written by EtherCAT Setup.
+  inside LinuxCNC and reads the `ethercat.yaml` that EtherCAT Setup
+  writes.
 
-Read the design draft:
-[docs/design/ethercat-setup.md](docs/design/ethercat-setup.md).
+## Documentation
+
+| | |
+|---|---|
+| [Getting started](docs/getting-started.md) | What gets installed, and how to try ecat step by step without disturbing your setup, from the safest. Start here. |
+| [EtherCAT Setup](docs/ecatsetup.md) | The window, bringing up a new slave, the test mode, writing into LinuxCNC, the event log and report, quirk files, and the command line. |
+| [The ecat component](docs/component.md) | Using the component in HAL, the `ethercat.yaml` file format, and what drives (cia402), encoder channels, analog and stepper terminals and modular devices give you. |
+| [Developing ecat](docs/development.md) | Building and testing, the design draft, what the prototype found on a real bus, and the plan for fault tests at a machine. |
 
 ## Install
 
-Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer (how to
-try them without disturbing your own setup, and to undo it:
-[docs/try-it.md](docs/try-it.md)):
+Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer:
 
 1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 1.1 or newer,
    from the `uspace-v*` releases of
@@ -46,122 +48,25 @@ try them without disturbing your own setup, and to undo it:
 sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb ./linuxcnc-ecat_*_amd64.deb
 ```
 
-`scripts/build-deb.sh` builds the `linuxcnc-ecat` package on a machine with
-the master package, `linuxcnc-uspace-dev` and `libyaml-dev` installed
-(`-w` builds uncommitted changes, to try them out).
+[Getting started](docs/getting-started.md) says what the packages install
+and how to try them, and to undo it. To build the package yourself:
+`scripts/build-deb.sh` ([Developing ecat](docs/development.md#build-and-test)).
 
-## EtherCAT Setup
-
-`ecatsetup` reads the slaves on the bus (SII, CoE dictionary, ESI
-files) and proposes their process data, distributed clocks and HAL pins,
-optionally compared with an lcec XML file. Apart from the test mode
-below, it only reads from the bus. It needs a running userspace master
-(`sudo ethercat-uspace start`, or LinuxCNC with `ecat`). Installed from the package it
-is the command `ecatsetup`; from this repository, `python3 -m ecatsetup`:
+## Quick start
 
 ```
-python3 -m ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
-python3 -m ecatsetup --ini <machine>.ini --write ethercat.yaml [--interface enp2s0]
-python3 -m ecatsetup --esi <ESI folder> --pdo-set "3=Standard 32 Bit (MDP 511)" --write ethercat.yaml
-python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethercat.yaml
-python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
-python3 -m ecatsetup --check ethercat.yaml
-python3 -m ecatsetup --diagnose
-python3 -m ecatsetup --check-hal <machine>.ini
-python3 -m ecatsetup --events [prev]
-python3 -m ecatsetup --report --ini <machine>.ini
-python3 -m ecatsetup --apply ethercat.yaml --ini <machine>.ini
-python3 -m ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
-python3 -m unittest discover -s tests
+sudo systemctl stop ethercat          # the kernel master, if you have one
+sudo ethercat-uspace start -- -i enp2s0
+ecatsetup --gui ethercat.yaml --ini <machine>.ini
 ```
 
-With ESI files, a slave gets the ESI's predefined PDO assignment that
-the ESI marks as default (TwinCAT's "Predefined PDO Assignment"), or the
-one named with `--pdo-set`; the report lists them.
-Unsigned 32-bit counters, latches and positions get `s32` pins, since they
-count down past 0; a 16-bit counter is noted, as it wraps at 65536.
-`--write` writes the proposals as an ecat configuration file, `--import`
-converts an lcec XML file, and `--check` checks a file and compares the bus
-with it. `--update` brings a file up to date with the bus and keeps what is
-in it: slaves still on the bus keep their entries (names, pins, settings,
-mapping), slaves moved by others put in or taken out before them keep
-theirs at the new position, new slaves get proposals, missing ones are
-left out, and each change is reported. The old file is kept as `.bak`.
-`--diagnose` reports, per slave, why it is not in OP (the AL status code
-in plain words, with what usually lies behind it), its links and the
-error counters that grow while it watches (`--seconds`, pointing at a
-cable or connector), the slave's own diagnosis history and error
-register, and for a CiA 402 drive its state, error code and what is
-missing to reach "Operation enabled". `--events` shows the event log the
-`ecat` component keeps while LinuxCNC runs (link, states, working counter,
-drive faults, the stop guard), and `--report` writes one file to attach
-when asking for help ([docs/events.md](docs/events.md); what the log shows
-for a pulled cable, lost power or a stopped servo thread:
-[docs/fault-tests.md](docs/fault-tests.md)). `--gui` opens EtherCAT Setup's window (its *Start* tab lists the tasks and the steps of each) (needs `python3-pyqt5`), laid out
-as the mockups in the design draft, with the pages Bus, Slave status,
-Test and HAL & LinuxCNC. Part 1 of the GUI: it reads the bus, lists the
-slaves with their state and how they compare with the file, shows each
-slave's process data, pins, settings and DC, lets you edit them (name, CiA 402 mode, pins, bit pins, scaling,
-settings, DC, the master's interface and transport), checks as you edit,
-proposes a slave again in another mode or PDO assignment, updates the
-file from the bus, imports lcec XML, and saves with a `.bak` copy. The
-Slave status page shows a slave's way from INIT to OP, its AL status code
-in plain words, its CiA 402 state, the error counters per port, and its
-own messages (0x10F3). HAL & LinuxCNC connects the INI file's joints to
-CSP drives and writes the configuration into the LinuxCNC configuration:
-`ethercat.yaml`, `ethercat-load.hal`, `ethercat.hal` and the INI changes,
-commenting out only the lines in your HAL files that would clash, each
-changed file kept as `.bak` (`--apply` does the same from the command
-line): [docs/linuxcnc.md](docs/linuxcnc.md). Where each slave's
-proposal comes from, the synchronisation while testing, ESI folders and
-saving a slave as a quirk file: [docs/bring-up.md](docs/bring-up.md).
+The window opens on a *Start* page that lists the tasks and the steps of
+each ([EtherCAT Setup](docs/ecatsetup.md)). It needs `python3-pyqt5`. The
+same functions are available as options for scripts (`ecatsetup --help`,
+[Command line](docs/ecatsetup.md#command-line)).
 
-Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in small
-steps (CSP, PP, PV) and homing it, hold-to-enable, with a heartbeat and
-limits written to the drive, tried on the plasma cutter's three axes
-(CSP, PP and PV; homing by the current position, or by a method
-chosen from the ones the drive supports, with the INI lines it needs:
-[docs/cia402.md](docs/cia402.md)):
-[docs/test-mode.md](docs/test-mode.md). The window can also watch a
-running LinuxCNC read only, and plots a drive's last seconds. The `ecat` component runs
-the configuration being edited (saved or not) in `halrun` with a servo
-thread, without LinuxCNC. Each slave's Test tab shows its pins live and
-sets the outputs of I/O slaves; pins set during the test go back to 0
-before it stops. SDOs can be read and written from the same tab whenever
-a master runs. CiA 402 drives stay disabled unless moved as above: their
-pins are shown, not set, and their CiA 402 objects are not written; objects that are
-commands rather than settings (such as 0x2010 on the ECT60) and objects
-in the process data are refused too. The kernel master must be stopped
-(`sudo systemctl stop ethercat`) and LinuxCNC must not run. The
-free-running master hands the bus over to the test and does not come
-back when it stops.
-The file format: [docs/config-format.md](docs/config-format.md).
-What the prototype found on a real bus:
-[docs/prototype-step1.md](docs/prototype-step1.md).
-
-## The component
-
-`component/` holds the `ecat` HAL component, lcec_uspace's code (moved here
-with its history) configured from `ethercat.yaml` instead of lcec's XML
-file. The package installs it; to build it from here, it needs the
-userspace master package (or a master built from source, with
-`USPACE_ETHERCAT=<its prefix>`), `linuxcnc-uspace-dev` and `libyaml-dev`:
-
-```
-cd component
-make
-sudo make install
-make check     # unit tests
-```
-
-`make check` runs the cia402 profile's and the encoder function's read
-and write functions cycle by cycle against a fake of HAL and the master
-(`component/tests/fake.c`), without a bus, and reads configuration files
-into the records the component is set up from, checking the records and
-the errors.
-
-EtherCAT Setup writes these lines itself ([docs/linuxcnc.md](docs/linuxcnc.md)).
-By hand, in a HAL file, instead of `lcec_conf` and `lcec`:
+In a HAL file, the component replaces `lcec_conf` and `lcec`
+([The ecat component](docs/component.md#using-the-component)):
 
 ```
 loadrt ecat config=ethercat.yaml
@@ -169,43 +74,7 @@ addf ecat.read-all  servo-thread
 addf ecat.write-all servo-thread
 ```
 
-- Slave pins are `<slave name>.<pin>` as named in the file; the master's
-  are `ecat.0.*` (`ecat.0.all-op`, ...) and `ecat.*`.
-- The bus stops in order by itself when LinuxCNC (or `halcmd stop`)
-  stops the threads. Otherwise the slaves would lose their process data
-  in OP and stop with an error (sync manager watchdog 0x001B,
-  synchronization error 0x001A), and CiA 402 drives latch a
-  communication fault (0x7500 on the ECT60, after one or two missed
-  cycles). A stop guard, an RTAPI task with the servo period beside the
-  servo thread, sends the process data unchanged when `ecat.write-all`
-  is more than a quarter period late; after 10 such cycles in a row it
-  sets every output to zero and takes the slaves to PREOP, and unloading
-  waits for it. `ecat.0.guard-state` shows it (0 the servo thread runs, 1
-  taking the slaves down, 2 done) and `ecat.0.guard-cycles` counts the
-  cycles it sent; while the machine runs that stays 0. It needs
-  linuxcnc-ethercat-uspace 1.1 or newer. After `halcmd stop` and `start`
-  the slaves are asked back to OP; DC slaves (such as the ECT60) then stop
-  in SAFEOP with a synchronization error, as they did before the guard:
-  restart instead.
-- `ecat.take-down` does the same on request while the thread runs, and
-  `ecat-take-down` sets it and waits for PREOP; it is no longer needed in
-  `[HAL]SHUTDOWN`.
-- The cycle time is the servo thread's period, taken at the first call
-  of `ecat.read-all`; distributed clocks are configured then, before the
-  master is activated.
-- Profiles `cia402`, `mdp` and `generic` are supported. A `cia402` drive
-  gets the CiA 402 state machine and scaled position and velocity pins in
-  the component, with the pins of the cia402 HAL component:
-  [docs/cia402.md](docs/cia402.md).
-- Incremental encoder channels laid out as in MDP 511 (EL5101, EL5151,
-  EL5152, EL7041, ...) get position, velocity, index and latch pins, like
-  LinuxCNC's encoder component: [docs/encoder.md](docs/encoder.md).
-
-A configuration imported from lcec can keep lcec's pin names by naming
-the slaves `lcec.0.<name>`, so that existing HAL files work with only the
-lines above changed. It has run a plasma cutter's LinuxCNC configuration
-(three CiA 402 drives driven through HAL, one I/O slave) this way, and
-with the drives as `cia402` slaves instead of the cia402 HAL component.
+EtherCAT Setup writes these lines itself.
 
 ## Background
 
