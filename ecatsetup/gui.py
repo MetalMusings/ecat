@@ -1786,6 +1786,14 @@ class MoveCard(Card):
         self.home_button.pressed.connect(self.home)
         self.home_button.released.connect(lambda: self.enable(False))
         ml.addWidget(self.home_button)
+        self.home_info = label("", "hint", wrap=True)
+        ml.addWidget(self.home_info)
+        self.home_ok = QCheckBox("The homing may move the axis")
+        self.home_ok.setToolTip("The drive's homing method drives the axis to a switch or a stop. "
+                                "Tick it only when the axis is free to move that way and the "
+                                "emergency stop is within reach.")
+        self.home_ok.toggled.connect(self.home_allowed)
+        ml.addWidget(self.home_ok)
         row = QHBoxLayout()
         self.reset = QPushButton("Reset fault")
         self.reset.pressed.connect(lambda: self.fault_reset(True))
@@ -1828,6 +1836,15 @@ class MoveCard(Card):
         mode = drivetest.mode_of(slave)
         self.setup.setVisible(ok and (dt is None or not dt.prepared))
         self.moving.setVisible(dt is not None and dt.prepared)
+        homes = dt is not None and dt.prepared and dt.homes
+        self.home_info.setVisible(bool(homes))
+        stays = homes and dt.homing_method in drivetest.HOMING_STAYS
+        self.home_ok.setVisible(bool(homes) and not stays)
+        if homes:
+            self.home_info.setText("Homing: " + drivetest.homing_text(dt.homing_method))
+            self.home_ok.blockSignals(True)
+            self.home_ok.setChecked(dt.home_moves_ok)
+            self.home_ok.blockSignals(False)
         if dt is not None and dt.prepared and self.plot_for != (dt.name, dt.mode):
             self.plot_for = (dt.name, dt.mode)
             self.plot.reset(dt.mode)
@@ -1918,6 +1935,11 @@ class MoveCard(Card):
             dt.run_velocity(sign)
         except testmode.TestError as e:
             self.win.status(str(e))
+
+    def home_allowed(self, on):
+        dt = self.test()
+        if dt is not None:
+            dt.home_moves_ok = on
 
     def home(self):
         dt = self.test()

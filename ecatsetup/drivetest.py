@@ -68,6 +68,31 @@ def testable(slave):
                                                          or can_home(slave))
 
 
+# Homing methods (0x6098) that leave the axis where it is; every other method
+# drives it to a switch, a stop or an index pulse.
+HOMING_STAYS = (35,)
+
+
+def homing_text(method):
+    """What a homing method (0x6098) does, for the window."""
+    if method is None:
+        return "the drive's homing method could not be read"
+    if method in HOMING_STAYS:
+        return "method %d: takes the current position as home; the axis does not move" % method
+    if method in (17, 1, 33):
+        return "method %d: MOVES the axis in the negative direction until a limit switch, " \
+               "index or stop" % method
+    if method in (18, 2, 34):
+        return "method %d: MOVES the axis in the positive direction until a limit switch, " \
+               "index or stop" % method
+    if method == 36:
+        return "method 36: on an ECT60 torque homing, MOVES the axis against a stop until the " \
+               "torque limit (0x2030) is reached"
+    if method < 0:
+        return "method %d (manufacturer specific): may MOVE the axis" % method
+    return "method %d: MOVES the axis to a home switch or an index pulse" % method
+
+
 @dataclass
 class Limit:
     name: str           # travel-min, travel-max, following-error, max-torque
@@ -214,6 +239,8 @@ class DriveTest:
             self.limit3 = self.sel = None
         self.limits, self.notes = [], []
         self.start = None       # machine units, at prepare()
+        self.homing_method = None   # 0x6098 of the drive, read at prepare()
+        self.home_moves_ok = False  # the user accepts a homing that moves the axis
         self.target = None
         self.pending = None     # ("move", target), ("run", velocity) or ("home",)
         self.prepared = False
@@ -274,6 +301,9 @@ class DriveTest:
             self.restore()
             raise testmode.TestError("the drive refused 0x%04X:%02X = %d: %s"
                                      % (lim.index, lim.subindex, lim.value, e))
+        if self.homes:
+            self.homing_method = tool.upload(self.position, 0x6098 + self.axis * config.AXIS_OFFSET,
+                                             0, "int8")
         self.start = float(self.pin("pos-fb"))
         self.target = self.start
         travel = abs(s["travel"])
@@ -350,6 +380,11 @@ class DriveTest:
             raise testmode.TestError("prepare the drive first")
         if not self.homes:
             raise testmode.TestError("%s has no hm in its modes" % self.name)
+        if self.homing_method not in HOMING_STAYS and not self.home_moves_ok:
+            raise testmode.TestError(
+                "homing here would move the axis: %s. Tick \"The homing may move the axis\" "
+                "when it is free to move and the emergency stop is within reach."
+                % homing_text(self.homing_method))
         self.pending = ("home",)
 
     def tick(self, enabled):

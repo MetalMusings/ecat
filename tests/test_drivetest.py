@@ -270,8 +270,33 @@ class TestDriveTest(TestTestMode):
         with self.assertRaises(testmode.TestError):
             dt.jog(1.0)
 
+    def test_home_that_moves_needs_the_users_word(self):
+        run = self.started()
+        for method, ok in ((17, False), (None, False), (35, True), (36, False), (37, False)):
+            if method is None:
+                self.drive.sdos.pop((0x6098, 0), None)
+            else:
+                self.drive.sdos[(0x6098, 0)] = method
+            dt = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]}),
+                                     self.coe(), {"scale": 100.0})
+            dt.prepare()
+            self.assertEqual(dt.homing_method, method)
+            if ok:
+                dt.home()
+                continue
+            with self.assertRaisesRegex(testmode.TestError, "would move the axis"):
+                dt.home()
+            self.assertIsNone(dt.pending)
+            dt.home_moves_ok = True
+            dt.home()
+            self.assertEqual(dt.pending, ("home",))
+            dt.restore()
+        self.assertIn("MOVES the axis in the negative", drivetest.homing_text(17))
+        self.assertIn("does not move", drivetest.homing_text(35))
+
     def test_home(self):
         run = self.started()
+        self.drive.sdos[(0x6098, 0)] = 35
         dt = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]}),
                                  self.coe(), {"scale": 100.0})
         dt.prepare()
