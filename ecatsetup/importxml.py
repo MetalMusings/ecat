@@ -205,6 +205,20 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
                                  "replaced by cia402.zero-at-start (read the slave from the bus "
                                  "to get the profile)" % (where, index, sub))
             settings.append(_setting(index, sub, data, coe))
+        if x.modparams:
+            rows, mp_notes = quirks.lcec_modparams(x.type, x.modparams)
+            have = {config.parse_obj(st["object"]) for st in settings}
+            for index, sub, dtype, value, name in rows:
+                if (index, sub) in have:
+                    mp_notes.append("0x%04X:%02X: the sdoConfig is kept, not the modParam"
+                                    % (index, sub))
+                    continue
+                row = {"object": config.obj(index, sub), "type": dtype, "value": value}
+                entry = coe.entries.get((index, sub)) if coe else None
+                if entry is not None:
+                    row["name"] = coe.name(index, sub)
+                settings.append(row)
+            notes += ["%s: %s" % (where, n) for n in mp_notes]
         s["settings"] = settings
         for tag in x.unsupported:
             notes.append("%s: <%s> not imported" % (where, tag))

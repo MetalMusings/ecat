@@ -98,6 +98,32 @@ class TestPropose(unittest.TestCase):
         ]
         return s
 
+    def test_stepper_terminal(self):
+        s = sii.Sii(0x2, 0x1B813052, 0x00100000, 0, 0x04, name="EL7041 1Ch. Stepper motor output stage (50V, 5A)")
+        s.pdos = [
+            sii.Pdo(0x1602, "rx", 2, "STM RxPDO-Map Control", False, False, [
+                sii.PdoEntry(0x7010, 0x01, "Enable", "BOOL", 1),
+                sii.PdoEntry(0x7010, 0x02, "Reset", "BOOL", 1),
+                sii.PdoEntry(0x7010, 0x03, "Reduce torque", "BOOL", 1),
+                sii.PdoEntry(0, 0, "", "", 13)]),
+            sii.Pdo(0x1604, "rx", 2, "STM RxPDO-Map Velocity", False, False, [
+                sii.PdoEntry(0x7010, 0x21, "Velocity", "INT", 16)]),
+            sii.Pdo(0x1A03, "tx", 3, "STM TxPDO-Map Status", False, False, [
+                sii.PdoEntry(0x6010, 0x01, "Status__Ready to enable", "BOOL", 1),
+                sii.PdoEntry(0x6010, 0x04, "Status__Error", "BOOL", 1)]),
+        ]
+        p = propose.propose({"position": 1, "dc": False}, s, coe.Dictionary(), device_type=5001)
+        e = {(x.index, x.subindex): x for pd in p.pdos for x in pd.entries}
+        self.assertEqual([(e[(0x7010, i)].pin, e[(0x7010, i)].hal_type) for i in (1, 2, 3)],
+                         [("enable", "bit"), ("reset", "bit"), ("reduce-torque", "bit")])
+        v = e[(0x7010, 0x21)]
+        self.assertEqual((v.pin, v.hal_type, v.scale), ("velocity", "float", 32767.0))
+        self.assertEqual(e[(0x6010, 4)].pin, "error")
+        self.assertTrue(any("motor channel 0x7010" in n for n in p.notes))
+        slave = config.slave_from_proposal(p)
+        cfg = {"ecat": 1, "master": {"interface": "x", "transport": "raw"}, "slaves": [slave]}
+        self.assertEqual(config.check(cfg), [])
+
     def test_analog_range(self):
         self.assertEqual(propose.analog_range("EL3102 2K. Ana. Eingang +/-10V, DIFF"),
                          (-10.0, 10.0, "V"))
@@ -493,6 +519,27 @@ class TestImport(unittest.TestCase):
             return importxml.import_lcec(lcecxml.load(f.name), bus, 1000000)
         finally:
             os.unlink(f.name)
+
+    def test_stepper_modparams(self):
+        xml = LCEC.replace('type="generic"', 'type="EL7041"').replace(
+            '<dcConf', '<modParam name="maxCurrent" value="2.5"/>\n'
+                       '      <modParam name="maxSpeed" value="4000"/>\n'
+                       '      <modParam name="microsteps" value="3"/>\n'
+                       '      <modParam name="kp" value="1"/>\n'
+                       '      <dcConf')
+        cfg, notes = self.load(xml)
+        rows = {x["object"]: (x.get("type"), x.get("value")) for x in cfg["slaves"][0]["settings"]}
+        self.assertEqual(rows["0x8010:01"], ("UINT", 2500))
+        self.assertEqual(rows["0x8012:05"], ("UINT", 2))
+        self.assertNotIn("0x8012:45", rows)
+        self.assertTrue(any("microsteps=3 not imported: 3 is not one of 1, 2, 4" in n for n in notes))
+        self.assertTrue(any("kp=1 not imported" in n for n in notes))
+        self.assertFalse(any("<modParam> not imported" in n for n in notes))
+        # el70x1: raw values, and the position interface
+        cfg, notes = self.load(LCEC.replace('type="generic"', 'type="EL7041-0052"').replace(
+            '<dcConf', '<modParam name="maxCurrent" value="1500"/>\n      <dcConf'))
+        rows = {x["object"]: x.get("value") for x in cfg["slaves"][0]["settings"]}
+        self.assertEqual((rows["0x8010:01"], rows["0x8012:01"]), (1500, 3))
 
     def test_ect60_zero_position_becomes_zero_at_start(self):
         zero = '<sdoConfig idx="2010" subIdx="0"><sdoDataRaw data ="01 00"/></sdoConfig>'

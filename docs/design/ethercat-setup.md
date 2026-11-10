@@ -473,7 +473,7 @@ convenience lcec's drivers give.
 | Encoder (MDP 511) | `el5101`, `el5151`, `el5152`, the encoder channels of `el7342`/`em7004` | Done |
 | `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Built (`cia402.axes`, objects 0x800 apart, pins per axis); not tried on such a drive. |
 | Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog.md](../analog.md)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
-| Stepper and DC motor terminals, velocity mode | `el7041`, `el70x1`, `el7342`, `el2521` | Later. Velocity command, enable, ready and warnings, and position from the encoder channel. |
+| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | Built as a proposal, not a profile ([stepper.md](../stepper.md)): enable, reset and status bits as pins, velocity as -1..1 of the speed range, position in microsteps, the encoder function on the encoder channel; lcec's stepper modParams imported as settings. No auto fault reset. Not tried on a terminal. `el2521` (pulse train) not yet. |
 | Absolute encoders (SSI, EnDat) | `el5002`, `el5032` | Check first whether `generic` plus settings is enough. |
 
 The order is set by what users run; analog I/O and the EL7041 are

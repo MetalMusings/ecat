@@ -172,6 +172,23 @@ def analog_value(e, direction):
             and re.search(r"value|output", _short(e.name)) is not None)
 
 
+# Motor channels of stepper and DC motor terminals (Beckhoff EL70x1,
+# EL7041, EL7342, EP7041): control at 0x7nn0 with "Enable" at :01, a
+# 16-bit "Velocity" at :21 (velocity interface; 0x7FFF is the top of the
+# speed range, 0x8nn2:05) and a 32-bit "Position" at :11 (position
+# interface); status at 0x6nn0 ("Ready to enable", "Error", ...).
+MOTOR_FULL = 0x7FFF
+
+
+def motor_channels(entries):
+    """Control indexes of the motor channels among the mapped entries."""
+    by = {(e.index, e.subindex): e for e in entries}
+    return sorted({e.index for e in entries
+                   if 0x7000 <= e.index <= 0x7FF0 and e.index & 0xF == 0 and e.subindex == 0x01
+                   and e.bitlen == 1 and _short(e.name) == "enable"
+                   and ((e.index, 0x21) in by or (e.index, 0x11) in by)})
+
+
 def kebab(name):
     """"Target Position", "LowpassFilteredVoltage", "Out_Unit1" -> kebab-case."""
     name = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", name.strip())
@@ -295,6 +312,13 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         p.notes.append("encoder %s: channel 0x%04X, %d-bit counter; position, velocity, index "
                        "and latch pins from the encoder function" % (name, index, bits))
 
+    # Motor channels: velocity as a fraction of the speed range.
+    motors = set(motor_channels(mapped))
+    for index in sorted(motors):
+        p.notes.append("motor channel 0x%04X: enable, reset and status bits as pins; settings "
+                       "0x%04X (motor) and 0x%04X (features)" % (index, index + 0x1000,
+                                                                 index + 0x1002))
+
     # Names that occur in more than one PDO get the PDO's name as a prefix.
     counts = {}
     for pd in pdos:
@@ -337,6 +361,15 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                     p.notes.append("%s: a 16-bit counter, which wraps at 65536%s"
                                    % (e.pin, "; a 32-bit set is offered with --pdo-set"
                                       if esi_dev and len(esi_dev.pdo_sets) > 1 else ""))
+                elif (e.index & ~0xF) in motors and e.subindex == 0x21 and e.bitlen == 16:
+                    # velocity interface: the pin is the fraction of the speed range
+                    e.hal_type, e.scale = "float", float(MOTOR_FULL)
+                    p.notes.append("%s: motor velocity, -1..1 of the speed range (0x%04X:05); "
+                                   "0 stops" % (e.pin, (e.index & ~0xF) + 0x1002))
+                elif (e.index & ~0xF) in motors and e.subindex == 0x11 and e.bitlen == 32:
+                    e.hal_type = "s32"
+                    p.notes.append("%s: motor position in microsteps (position interface: "
+                                   "operation mode 0x%04X:01 = 3)" % (e.pin, (e.index & ~0xF) + 0x1002))
                 elif p.profile == 5001 and analog_value(e, pd.direction):
                     rng = analog_range(p.name) or analog_range(getattr(esi_dev, "name", ""))
                     if rng:

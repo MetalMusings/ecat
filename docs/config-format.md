@@ -267,8 +267,10 @@ Some lcec settings are replaced by what ecat does instead
 gets the cia402 profile (read from the bus); as a `generic` slave the
 setting is kept, with a note.
 
-lcec's `initCmds`, `modParam`, `idnConfig` and `watchdog` are not imported
-yet. ecat has no product drivers, so a `modParam` will become settings
+lcec's `initCmds`, `idnConfig` and `watchdog` are not imported yet.
+The stepper drivers' `modParam`s become settings
+([stepper.md](stepper.md#from-lcec)); other drivers' `modParam`s get a
+note. ecat has no product drivers, so a `modParam` will become settings
 rows or process data choices (see the design draft, [Decision: profiles
 with quirks, no product
 drivers](design/ethercat-setup.md#decision-profiles-with-quirks-no-product-drivers)).

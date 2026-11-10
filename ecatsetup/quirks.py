@@ -67,3 +67,86 @@ def of(key):
 def command(slave, index):
     """Why an object of this slave is a command, not a setting; or None."""
     return of(slave).get("commands", {}).get(index)
+
+
+# -- lcec modParams, translated into settings by the XML import
+
+def _milli(text):
+    return int(round(float(text) * 1000))
+
+
+def _enum(table):
+    def conv(text):
+        v = int(float(text))
+        if v not in table:
+            raise ValueError("%s is not one of %s" % (text, ", ".join(str(k) for k in table)))
+        return table[v]
+    return conv
+
+
+def _flag(text):
+    return 1 if text.strip().lower() in ("1", "true", "yes", "on") else 0
+
+
+# What lcec's drivers wrote for each modParam: name -> (index, subindex,
+# type, conversion). lcec_el7041.c lacks a break after motorEMF and the
+# following cases, so it also wrote that value into the objects after it;
+# the import writes only the object each modParam is meant for.
+_EL7041 = {
+    "maxCurrent": (0x8010, 0x01, "UINT", _milli),       # A -> mA
+    "reducedCurrent": (0x8010, 0x02, "UINT", _milli),
+    "nominalVoltage": (0x8010, 0x03, "UINT", _milli),   # x1000, as lcec wrote it
+    "coilResistance": (0x8010, 0x04, "UINT", _milli),   # x1000, as lcec wrote it
+    "motorEMF": (0x8010, 0x05, "UINT", _milli),         # x1000, as lcec wrote it
+    "motorFullsteps": (0x8010, 0x06, "UINT", int),
+    "encoderIncrements": (0x8010, 0x07, "UINT", int),
+    "startVelocity": (0x8010, 0x09, "UINT", int),
+    "driveOnDelay": (0x8010, 0x10, "UINT", int),
+    "driveOffDelay": (0x8010, 0x11, "UINT", int),
+    "maxSpeed": (0x8012, 0x05, "UINT", _enum({1000: 0, 2000: 1, 4000: 2, 8000: 3,
+                                              16000: 4, 32000: 5})),
+    "encoder": (0x8012, 0x08, "USINT", _flag),
+    "microsteps": (0x8012, 0x45, "USINT", _enum({1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6})),
+}
+# lcec_el70x1.c (position interface): raw values, and position mode always
+_EL70X1 = {
+    "maxCurrent": (0x8010, 0x01, "UINT", int),
+    "redCurrent": (0x8010, 0x02, "UINT", int),
+    "nomVoltage": (0x8010, 0x03, "UINT", int),
+    "coilRes": (0x8010, 0x04, "UINT", int),
+    "motorEMF": (0x8010, 0x05, "UINT", int),
+}
+_POSITION_MODE = [(0x8012, 0x01, "USINT", 3,
+                   "operation mode 3 (position interface), which lcec's el70x1 driver set")]
+
+LCEC_MODPARAMS = {
+    "EL7041": (_EL7041, []), "EL7041_1000": (_EL7041, []), "EL7041-1000": (_EL7041, []),
+    "EP7041": (_EL7041, []),
+    "EL7031": (_EL70X1, _POSITION_MODE), "EL7041-0052": (_EL70X1, _POSITION_MODE),
+}
+
+
+def lcec_modparams(lcec_type, modparams):
+    """lcec modParams of a slave as settings: ([(index, subindex, type,
+    value, name)], notes)."""
+    table, always = LCEC_MODPARAMS.get(lcec_type, ({}, []))
+    out, notes = [], []
+    for index, sub, dtype, value, why in always:
+        out.append((index, sub, dtype, value, None))
+        notes.append("0x%04X:%02X = %d added: %s" % (index, sub, value, why))
+    for name, text in modparams:
+        if name not in table:
+            notes.append("modParam %s=%s not imported%s" % (
+                name, text, "" if table else " (no translation for lcec type %s)" % lcec_type))
+            continue
+        index, sub, dtype, conv = table[name]
+        try:
+            value = conv(text)
+        except (TypeError, ValueError) as e:
+            notes.append("modParam %s=%s not imported: %s" % (name, text, e))
+            continue
+        out = [o for o in out if (o[0], o[1]) != (index, sub)]
+        out.append((index, sub, dtype, value, name))
+        notes.append("modParam %s=%s imported as setting 0x%04X:%02X = %d"
+                     % (name, text, index, sub, value))
+    return out, notes

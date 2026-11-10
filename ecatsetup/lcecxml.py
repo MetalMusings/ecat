@@ -56,6 +56,7 @@ class LcecSlave:
     sync0_shift: int = None
     sdos: list = field(default_factory=list)      # (index, subindex or "complete", bytes)
     pdo_list: list = field(default_factory=list)  # [LcecPdo], in file order
+    modparams: list = field(default_factory=list)    # (name, value text), in file order
     unsupported: list = field(default_factory=list)  # element names not imported
 
     @property
@@ -123,7 +124,9 @@ def load(path):
                                               _hex(pdo.get("idx")),
                                               [_entry(e) for e in pdo.findall("pdoEntry")]))
         for child in s:
-            if child.tag in ("initCmds", "modParam", "idnConfig", "watchdog"):
+            if child.tag == "modParam":
+                slave.modparams.append((child.get("name", ""), child.get("value", "")))
+            elif child.tag in ("initCmds", "idnConfig", "watchdog"):
                 slave.unsupported.append(child.tag)
         cfg.slaves.append(slave)
     return cfg
