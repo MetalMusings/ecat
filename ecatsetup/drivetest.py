@@ -127,6 +127,12 @@ def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
         else:
             notes.append("no max profile velocity (0x607F) in the drive: the velocity is "
                          "limited by this program's commands only")
+    if mode == "pp" and has_object(0x6081, 0):
+        # the profile velocity of the moves: also here, for a drive whose 0x6081 is not in
+        # the process data (no pp-velocity pin)
+        limits.append(Limit("profile-velocity", 0x6081, 0, "uint32",
+                            int(round(abs(settings["max-velocity"] * scale))),
+                            "profile velocity %g mm/s (0x6081)" % settings["max-velocity"]))
     for name, value, text in (
             ("following-error", int(round(abs(settings["following-error"] * scale))),
              "following error %g mm" % settings["following-error"]),
@@ -279,8 +285,12 @@ class DriveTest:
                 "%s.max" % self.limit3: repr(self.start + travel),
                 "%s.in1" % self.sel: repr(self.start)})
         elif self.mode == "pp":
-            self.run.setp_many({"%s.pp-velocity" % self.name: repr(float(abs(s["max-velocity"]))),
-                                "%s.pp-relative" % self.name: "FALSE"})
+            values = {"%s.pp-relative" % self.name: "FALSE"}
+            # the pin is there only when 0x6081 is in the process data; else the drive's
+            # own 0x6081, written above, sets the velocity
+            if "%s.pp-velocity" % self.name in self.run.pins("%s.pp-velocity" % self.name):
+                values["%s.pp-velocity" % self.name] = repr(float(abs(s["max-velocity"])))
+            self.run.setp_many(values)
         self.prepared = True
 
     def enable(self, on):

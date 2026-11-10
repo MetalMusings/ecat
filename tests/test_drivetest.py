@@ -118,6 +118,13 @@ class TestDriveTest(TestTestMode):
         with open(self.state, "w") as f:
             json.dump(pins, f)
 
+    def add_fake_pin(self, name, type_="float", dir_="IN", value="0"):
+        with open(self.state) as f:
+            pins = json.load(f)
+        pins[name] = [type_, dir_, value]
+        with open(self.state, "w") as f:
+            json.dump(pins, f)
+
     def setp_log(self):
         with open(self.state + ".setp") as f:
             return f.read().splitlines()
@@ -198,12 +205,26 @@ class TestDriveTest(TestTestMode):
         self.assertFalse(dt.moves)
         self.assertTrue(dt.homes)
 
+    def test_pp_without_a_velocity_pin_writes_0x6081(self):
+        run = self.started()
+        pp = dict(OTHER, cia402={"mode": "pp"})
+        c = self.coe()
+        c.entries = dict(c.entries); c.entries[(0x6081, 0)] = 1
+        self.drive.sdos[(0x6081, 0)] = 10000
+        dt = drivetest.DriveTest(run, pp, c, {"scale": 100.0})
+        dt.prepare()                            # no pp-velocity pin: no error
+        self.assertEqual(self.drive.sdos[(0x6081, 0)], 500)     # 5 mm/s at 100 counts/mm
+        self.assertFalse(any("pp-velocity" in x for x in self.setp_log()))
+        self.assertEqual(dt.restore(), [])
+        self.assertEqual(self.drive.sdos[(0x6081, 0)], 10000)
+
     def test_pp_moves_once_enabled(self):
         run = self.started()
         pp = dict(OTHER, cia402={"mode": "pp"})
         c = self.coe()
         c.entries = dict(c.entries); c.entries[(0x607F, 0)] = 1
         self.drive.sdos[(0x607F, 0)] = 900000
+        self.add_fake_pin("x.pp-velocity")      # 0x6081 is in the process data
         dt = drivetest.DriveTest(run, pp, c, {"scale": 100.0})
         dt.prepare()
         # travel and the maximum profile velocity in the drive
