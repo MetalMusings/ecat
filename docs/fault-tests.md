@@ -3,7 +3,7 @@
 The event log and the report are tried so far on a bus that behaves. This
 is the plan for provoking real faults and checking that the recorder
 catches them, that the diagnosis and the symptom guide name them, and that
-Watch shows them live. Not done yet: each row is filled in when tried.
+Watch shows them live. Results are at the end.
 
 ## Before
 
@@ -47,5 +47,39 @@ the guard; 8 and 9 are stress.
 
 ## Results
 
-(Empty until tried. Date, row, what the log showed, what was wrong in the
-texts or the guide, and the fix.)
+2026-11-10, plasma cutter, LinuxCNC (QtPlasmaC, 1 ms servo thread), 3 drives
+and the EaserCAT, machine switched off. Rows 6-8 need a real drive fault or
+a drive that is enabled and were not tried.
+
+| # | Tried | What the log showed |
+|---|---|---|
+| 1 | Cable between slave 0 port 1 and slave 1 pulled and put back | Working counter incomplete, "1 slaves respond (was 4)", working counter zero. Back: 4 respond, all in OP 10 s later. |
+| 2 | Cable at the master | Working counter zero, "0 slaves respond", all OFFLINE, and a second later `link DOWN`. Back: `link up`, all in SAFEOP, in OP 10 s later. |
+| 3 | Slave 2 powered off and on | "2 slaves respond (was 4)", correct. Back: 4 respond, in OP 10 s later. |
+| 4, 5 | `halcmd stop`, 6 s, `halcmd start` | `servo thread late`, `stop guard` to PREOP and done (60 ms), then `runs the bus again`, all in OP 1 s later. The DC slaves did not stay in SAFEOP. |
+| 9 | Busy loops on every CPU for 25 s | No events. The servo thread's maximum time did not grow. |
+
+In every row the drives stayed in "Ready to switch on" and LinuxCNC kept
+running: the bus recovers by itself, without a restart.
+
+### Found, and what was done
+
+- Fixed: the diagnosis said "No problems found" with `lost 1` at both ends
+  of the pulled cable. It now adds a note that names the cable when two
+  ports at the ends of one cable count the same number of lost links
+  (`lost_link_notes`). It is a note, not a problem: the counters are not
+  cleared and the master's counts since power-on stay.
+- Fixed: `scripts/ecat-events-follow` printed "a new run started" in the
+  middle of a run.
+- Not fixed: when the topology changes, the master reports every slave
+  as not online for a moment: rows 1 and 3 list slaves that were still on
+  the bus (slave 0 and 1 in row 3) as OFFLINE, and again when the
+  slave behind them returns. "N slaves respond" is right. Read the count of
+  responding slaves first; the cause is in how the master reports the
+  slave configurations, so the component needs a closer look.
+- Not fixed: a `working counter zero` of a millisecond, logged as ERROR,
+  comes while the bus climbs back to OP (after rows 1-3 and 5). It is
+  harmless, but the log cannot tell it from a real one.
+- The port counters of the master side and of a slave that lost power
+  start again from zero, so those show nothing: the event log is the
+  record for them.

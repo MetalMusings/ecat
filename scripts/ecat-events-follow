@@ -24,10 +24,10 @@ def main():
             except events.EventsError:
                 time.sleep(0.5)
                 continue
-            key = log.start
+            key = log.pid
             if seen is None:
                 seen = (key, -1)
-            elif seen[0] != key:
+            elif seen[0] != key or log.total <= seen[1]:
                 print("--- a new run started ---")
                 seen = (key, -1)
             for e in log.events:

@@ -255,7 +255,8 @@ def cia402_findings(c):
 def diagnose(positions, seconds=2.0, out=print):
     """Report on the slaves; return the number of problems found."""
     problems = 0
-    for r in examine(positions, seconds):
+    reports = examine(positions, seconds)
+    for r in reports:
         out("Slave %d: %s" % (r.position, r.name))
 
         # application layer state
@@ -311,7 +312,32 @@ def diagnose(positions, seconds=2.0, out=print):
             for line in lines:
                 out("  " + line)
         out("")
+    for line in lost_link_notes(reports):
+        out(line)
     return problems
+
+
+def lost_link_notes(reports):
+    """Notes on cables that lost their link since power-on: the same count of
+    lost links (not a saturated one) on the ports at both ends of a cable.
+    Not problems by themselves: the counters are never cleared by the master."""
+    notes = []
+    by_pos = {r.position: r for r in reports}
+    for r in reports:
+        nxt = by_pos.get(r.position + 1)
+        if nxt is None:
+            continue
+        for a in r.ports:
+            for b in nxt.ports:
+                if 0 < a.now["lost"] < 255 and 0 < b.now["lost"] < 255 and a.now["lost"] == b.now["lost"] \
+                        and a.number != 0 and b.number == 0:
+                    notes.append("Note: the link was lost %d time%s since power-on between slave %d port %d "
+                                 "and slave %d port %d: that cable was disconnected, loose or the slave "
+                                 "behind it lost power (the counters are not cleared; a cable "
+                                 "pulled on purpose counts too)"
+                                 % (a.now["lost"], "" if a.now["lost"] == 1 else "s", r.position, a.number,
+                                    nxt.position, b.number))
+    return notes
 
 
 def _count(v):
