@@ -279,7 +279,7 @@ What each mode is for in LinuxCNC decides how it is done:
 
 | Mode | Process data | Settings (SDOs at start) | Control and status bits |
 |---|---|---|---|
-| PP | 0x607A target position; 0x6081 profile velocity (or a setting) | 0x6083/0x6084 acceleration/deceleration, 0x607D, 0x607F | cw 4 new set-point, 5 change immediately, 6 relative, 8 halt; sw 10 target reached, 12 set-point acknowledge |
+| PP | 0x607A target position; 0x6081 profile velocity (or a setting) | 0x6083/0x6084 acceleration/deceleration, 0x607D, 0x607F | cw 4 new set-point, 5 change immediately (off by default: the ECT60 did not move with it), 6 relative, 8 halt; sw 10 target reached, 12 set-point acknowledge |
 | PV | 0x60FF target velocity; 0x606C actual velocity | 0x6083/0x6084 | cw 8 halt; sw 10 target reached (at speed), 12 speed zero |
 | HM | none beyond control and status words | 0x6098 method, 0x6099:01/02 speeds, 0x609A acceleration, 0x607C home offset | cw 4 start; sw 10 target reached, 12 homing attained, 13 homing error |
 
@@ -541,9 +541,12 @@ described.
   ([linuxcnc.md](../linuxcnc.md)).
 - **CiA 402 homing**: `index-enable` with the drive's own homing
   (`modes: [hm]`); no homing module. Tried on the plasma cutter's X axis
-  ([cia402.md](../cia402.md)). How drives differ in PP mode (the
-  set-point handshake, profile velocity as process data or a setting) is
-  handled as quirks ([Decision: profiles with quirks, no product
+  ([cia402.md](../cia402.md)). PP and PV were tried on the plasma
+  cutter's three ECT60 drives on 2026-11-10 ([test-mode.md](../test-mode.md#pp-pv-and-homing-at-the-machine)):
+  the ECT60 sometimes acknowledges a set-point without starting (the
+  profile gives it again), and torque homing (method 36) does not end.
+  How drives differ in PP mode (the set-point handshake, profile velocity
+  as process data or a setting) is handled as quirks ([Decision: profiles with quirks, no product
   drivers](#decision-profiles-with-quirks-no-product-drivers)).
 - **Devices without a profile**: profiles with quirks, no product
   drivers ([Decision: profiles with quirks, no product

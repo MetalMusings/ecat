@@ -19,7 +19,7 @@ on:
     inputs:
       master_release:
         description: uspace-v* release with the master package (MetalMusings/ethercat, or linuxcnc-ethercat up to 1.0)
-        default: uspace-v0.7
+        default: uspace-v1.1
   push:
     tags: ['ecat-v*']
 
@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 env:
-  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v0.7' }}
+  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.1' }}
 
 jobs:
   deb:
@@ -112,4 +112,4 @@ jobs:
           gh release create "${{ github.ref_name }}" out/*.deb \
             --repo "${{ github.repository }}" --prerelease \
             --title "ecat ${{ github.ref_name }}" \
-            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.9.4 or newer: debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). The window, ecatsetup --gui, needs python3-pyqt5. They need linuxcnc-ethercat-uspace ${{ env.MASTER_RELEASE }} or newer from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases) (1.1 and later; older ones are in [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)); the start check's comparison of the bus needs 1.1. See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."
+            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.9.4 or newer: debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). The window, ecatsetup --gui, needs python3-pyqt5. Built against linuxcnc-ethercat-uspace ${{ env.MASTER_RELEASE }}; 0.7 or newer works, 1.1 or newer is recommended. Get it from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases) (1.1 and later; older ones are in [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)); the start check's comparison of the bus needs 1.1. To try it without disturbing your setup: [docs/try-it.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/try-it.md). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."

@@ -2,13 +2,17 @@
 
 EtherCAT for LinuxCNC, configured without hand-written XML.
 
-**Status: early development.** The HAL component runs a plasma cutter
-(three CiA 402 drives in CSP, one I/O slave). EtherCAT Setup reads,
-proposes, checks, updates and diagnoses a configuration from the command
-line and in its window, and tests it: I/O, SDOs, moving a drive in small
-steps (CSP, PP, PV) and homing it, and writes it into a LinuxCNC configuration, with the
-joints connected to their drives and I/O pins to LinuxCNC. Everything is built in steps, following
-the design draft.
+**Status: early development, tried on one machine.** The HAL component
+runs a plasma cutter (three CiA 402 drives in CSP, one I/O slave); PP and
+PV have been tried on its drives too. EtherCAT Setup reads, proposes,
+checks, updates and diagnoses a configuration from the command line and
+in its window, and tests it: I/O, SDOs, moving a drive in small steps
+(CSP, PP, PV) and homing it. It writes the configuration into a LinuxCNC
+configuration, with the joints connected to their drives and I/O pins to
+LinuxCNC, checks your HAL files against it, and watches a running
+LinuxCNC read only. Everything is built in steps, following the design
+draft. To try it without disturbing your own setup:
+[docs/try-it.md](docs/try-it.md).
 
 `ecat` is planned as:
 
@@ -24,11 +28,13 @@ Read the design draft:
 
 ## Install
 
-Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer:
+Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer (how to
+try them without disturbing your own setup, and to undo it:
+[docs/try-it.md](docs/try-it.md)):
 
 1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 0.7 or newer
    (1.1 or newer recommended: the start check compares the bus with the
-   file only with it), from the `uspace-v*` releases of
+   file only with it; installing 1.1 over 1.0 removes `lcec_uspace`), from the `uspace-v*` releases of
    [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases).
    Up to 1.0 the package was built in
    [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)
@@ -109,10 +115,12 @@ line): [docs/linuxcnc.md](docs/linuxcnc.md). Where each slave's
 proposal comes from, the synchronisation while testing, ESI folders and
 saving a slave as a quirk file: [docs/bring-up.md](docs/bring-up.md).
 
-Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in CSP in
-small steps, hold-to-enable, with a heartbeat and limits written to the
-drive, tried on the plasma cutter's three axes:
-[docs/test-mode.md](docs/test-mode.md). The `ecat` component runs
+Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in small
+steps (CSP, PP, PV) and homing it, hold-to-enable, with a heartbeat and
+limits written to the drive, tried on the plasma cutter's three axes
+(CSP, PP and PV; homing by the current position):
+[docs/test-mode.md](docs/test-mode.md). The window can also watch a
+running LinuxCNC read only, and plots a drive's last seconds. The `ecat` component runs
 the configuration being edited (saved or not) in `halrun` with a servo
 thread, without LinuxCNC. Each slave's Test tab shows its pins live and
 sets the outputs of I/O slaves; pins set during the test go back to 0

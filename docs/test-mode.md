@@ -83,7 +83,9 @@ front of it. The layers 1 to 3 are the same, and instead of layer 4:
   velocity `0x607F` is written to the drive where it has it. The drive
   ramps with its own acceleration (`0x6083`, `0x6084`). The move starts
   once the drive is in "Operation enabled" (the profile ignores
-  `pp-start` before that); releasing the button stops it.
+  `pp-start` before that); releasing the button stops it. The profile
+  velocity is `pp-velocity` if `0x6081` is in the process data, else
+  `0x6081` is written to the drive with the other limits.
 - **PV** (*Run −*, *Run +*): the drive runs at the test's maximum
   velocity while the button is held, and ramps down with its own
   deceleration when it is released. There is no travel limit in PV:
@@ -100,7 +102,21 @@ velocity units are taken as counts per second, the CiA 402 default. For
 a drive with other velocity units, the mm/s shown are off by that
 factor; check with a short run first.
 
-PP, PV and homing are built and unit-tested, not yet tried on a machine.
+Tried on the plasma cutter (2026-11-10, ECT60 drives): see
+[PP, PV and homing at the machine](#pp-pv-and-homing-at-the-machine).
+
+**Set the scale first.** The *Scale* field starts at 1 count per mm
+unless the configuration's HAL files have the drive's `pos-scale`; with
+1, a 1 mm step is 1 count and nothing seems to move. The window asks
+before it writes limits with a scale of 1.
+
+**Homing may move the axis.** The window reads the drive's homing method
+(`0x6098`) when the limits are written, and says what it does. Only
+method 35 (the current position) leaves the axis where it is; any other
+drives it to a limit switch, an index pulse or a stop, and *Home (hold)*
+is refused until *The homing may move the axis* is ticked. The ECT60s
+were found on method 17 (negative limit switch): without a switch the
+axis drives into its end stop.
 
 ### The plot
 
@@ -126,6 +142,32 @@ The configuration open in the window is used to name the slaves; open
 the one LinuxCNC runs (`[ETHERCAT]CONFIG` in its INI file). The
 *Troubleshoot* page has a *Symptoms* guide: what is seen in LinuxCNC,
 what it usually comes from, and where to look.
+
+### PP, PV and homing at the machine
+
+Tried on the plasma cutter's three ECT60 drives on 2026-11-10, with the
+user at the machine (100 counts/mm on X and Y; the test configuration
+had the drives' `0x607D`, `0x607F` as settings):
+
+- **PP** works on X, Y and Z, steps of 1 and 5 mm in both directions,
+  after two findings, both in the profile ([cia402.md](cia402.md)): the
+  ECT60 acknowledges a set-point sometimes without starting (target
+  reached stays set), so the profile gives it again; and with control
+  word bit 5 ("change set immediately") set it acknowledged and did not
+  move at all (`pp-immediate`, off by default). The step starts about
+  50 ms after the drive is enabled, the time the drive needs to report
+  target reached.
+- **PV** works on X, Y and Z in both directions.
+- **Homing, method 35** worked earlier (2026-11-09). **Torque homing**
+  (method 36, `0x2030`) was tried again with the drive test: X moves
+  towards X− at about half the commanded speed (the drive needs 40 % of
+  its rated torque for the friction), stops softly at the end stop with
+  the torque at 70 to 80 %, and the drive never sets "homing attained",
+  with detect limits of 50 % and 60 %. Not usable on the ECT60 without
+  advice from Rtelligent (or a switch the drive can see).
+- Z hangs in a spring suspension and moves when its drive is disabled:
+  with the drive off, the axis can drift.
+- Everything the test wrote to the drives was read back and restored.
 
 ## First test at the machine
 

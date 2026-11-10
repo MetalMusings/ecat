@@ -1881,6 +1881,12 @@ class MoveCard(Card):
         run, s = self.win.test, self.slave
         if run is None or s is None:
             return
+        if self.fields["scale"].value() == 1.0 and QMessageBox.question(
+                self, TITLE, "The scale is 1 count per mm, so a 1 mm step is 1 count and nothing "
+                "seems to move (the velocity is in counts too). Enter the drive's counts per "
+                "mm in the Scale field first.\n\nContinue with a scale of 1?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
         b = self.win.session.bus.get(s["position"])
         dt = drivetest.DriveTest(run, s, b.coe if b else None, self.settings(),
                                  axis=max(self.axis.currentIndex(), 0))
