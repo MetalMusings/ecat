@@ -1933,6 +1933,38 @@ static void test_zero_at_start_pp(void) {
   CHECK_NEAR(PIN_FLOAT("t.pos-fb"), 7, 1e-12);
 }
 
+// ---- the flight recorder ------------------------------------------------
+
+static void test_events_of_the_drive(void) {
+  csp_drive();
+  fake_n_events = 0;
+  // a drive fault, with its error code, once
+  fake_set(S, 0x603F, 0, 0x7500);
+  cycle(SW_FAULT);
+  cycle(SW_FAULT);
+  CHECK_EQ(fake_n_events, 1);
+  CHECK_EQ(fake_events[0].type, ECAT_EV_DRIVE_FAULT);
+  CHECK_EQ((int)fake_events[0].a, 0x7500);
+  CHECK_EQ((int)fake_events[0].b, SW_FAULT);
+  // cleared
+  fake_set(S, 0x603F, 0, 0);
+  cycle(SW_SWITCH_ON_DISABLED);
+  CHECK_EQ(fake_n_events, 2);
+  CHECK_EQ(fake_events[1].type, ECAT_EV_DRIVE_CLEAR);
+  // the profile shuts the drive down (a non-finite command): its reason
+  start(SW_SWITCH_ON_DISABLED);
+  PIN_BIT("x.enable") = 1;
+  run(10);
+  CHECK_EQ(PIN_BIT("x.stat-op-enabled"), 1);
+  PIN_FLOAT("x.pos-cmd") = NAN;
+  run(3);
+  CHECK(PIN_S32("x.fault-reason") != 0);
+  CHECK_EQ(fake_n_events, 3);
+  CHECK_EQ(fake_events[2].type, ECAT_EV_DRIVE_BLOCK);
+  CHECK_EQ((int)fake_events[2].a, PIN_S32("x.fault-reason"));
+  PIN_BIT("x.enable") = 0;
+}
+
 // ---- several axes ----------------------------------------------------
 
 static const fake_entry_t two_axes[] = {
@@ -2007,4 +2039,4 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_homing_pv_drive_does_not_stop, test_homing_csp_waits_for_the_command,
     test_homing_pp_drive_does_not_stop, test_homing_abandoned_while_halting, test_zero_pin_only_with_the_option,
     test_zero_at_start, test_zero_at_start_wraps_as_the_drive, test_zero_at_start_cleared_by_homing, test_zero_at_start_pp,
-    test_zero_at_start_mode_change_into_csp, test_two_axes)
+    test_zero_at_start_mode_change_into_csp, test_two_axes, test_events_of_the_drive)

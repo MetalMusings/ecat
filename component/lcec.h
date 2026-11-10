@@ -30,6 +30,7 @@ extern "C" {
 #include "hal.h"
 #include "lcec_conf.h"
 #include "lcec_autoshift.h"
+#include "ecat_events.h"
 
 /// HAL component name, the same as the module file (ecat.so) and the prefix of
 /// the component's own pins and functions (ecat.read-all, ecat.0.all-op).
@@ -271,6 +272,10 @@ typedef struct lcec_master {
   int dc_time_valid_last;
   lcec_autoshift_t autoshift;       ///< globalShiftTime="auto"
 #endif
+  ecat_events_t *events;            ///< The flight recorder, or NULL (ecat_events.h).
+  ecat_events_master_t ev_last;     ///< What the recorder last saw of the master.
+  ecat_events_limit_t ev_late;      ///< Rate limit of ECAT_EV_LATE.
+  int ev_guard_last;                ///< The stop guard's state the recorder last saw.
 } lcec_master_t;
 
 typedef struct lcec_pdo_entry_reg {
@@ -356,7 +361,11 @@ typedef struct lcec_slave {
   lcec_pdo_entry_reg_t *regs;
   void *profile_data;                        ///< Data of the slave's profile (ecat), if any.
   void *encoder_data;                        ///< Data of the slave's encoder channels (ecat), if any.
+  ecat_events_slave_t ev_last;               ///< What the flight recorder last saw of the slave.
 } lcec_slave_t;
+
+/// Record an event of a slave in its master's flight recorder (ecat_events.h).
+void lcec_event(lcec_slave_t *slave, int type, uint32_t a, uint32_t b);
 
 /// @brief HAL pin description.
 typedef struct {

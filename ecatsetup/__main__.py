@@ -19,7 +19,7 @@ from dataclasses import asdict
 
 import yaml
 
-from . import config, diagnose, esi, importxml, integrate, lcecxml, netif, propose, tool, update
+from . import config, diagnose, esi, events, importxml, integrate, lcecxml, netif, propose, tool, update
 from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F401
 
 
@@ -143,6 +143,13 @@ def main(argv=None):
     ap.add_argument("--update", metavar="FILE",
                     help="update an ecat configuration from the bus, keeping its choices; "
                          "written back with a .bak copy, or to --write")
+    ap.add_argument("--events", nargs="?", const="now", metavar="prev|FILE",
+                    help="show the ecat component's event log (the flight recorder): of the "
+                         "running or last run, 'prev' for the run before, or a saved FILE")
+    ap.add_argument("--report", nargs="?", const="", metavar="FILE",
+                    help="write a report to attach when asking for help: versions, the "
+                         "configuration (--check FILE or --ini), the INI lines, a diagnosis of "
+                         "the bus and the event logs; FILE defaults to ethercat-report-<time>.md")
     ap.add_argument("--diagnose", action="store_true",
                     help="diagnose the slaves: state, cables, the slave's messages, CiA 402")
     ap.add_argument("--seconds", type=float, default=2.0,
@@ -174,8 +181,12 @@ def main(argv=None):
 
     if args.apply:
         sys.exit(apply_file(args))
+    if args.report is not None:
+        sys.exit(write_report(args))
     if args.check:
         sys.exit(check_file(args.check))
+    if args.events:
+        sys.exit(show_events(args))
     if args.diagnose:
         sys.exit(diagnose_bus(args))
     if args.import_xml:
@@ -284,7 +295,42 @@ def diagnose_bus(args):
         print("Cannot reach a master: %s\nStart one with: sudo ethercat-uspace start" % e)
         return 2
     print("No problems found" if not found else "%d problem%s found" % (found, "" if found == 1 else "s"))
+    try:
+        log = events.read()
+        print()
+        events.report(log, last=20)
+    except events.EventsError:
+        pass
     return 1 if found else 0
+
+
+def write_report(args):
+    """Write the report file. Returns an exit code."""
+    from . import report
+    path = args.report or report.default_name()
+    text = report.build(args.check, args.ini, seconds=args.seconds)
+    with open(path, "w") as f:
+        f.write(text)
+    print("Wrote %s (%d lines). Look it through before posting it." % (path, text.count("\n")))
+    return 0
+
+
+def show_events(args):
+    """Print the component's event log. Returns an exit code."""
+    path = {"now": events.PATH, "prev": events.PATH + ".prev"}.get(args.events, args.events)
+    try:
+        log = events.read(path)
+    except events.EventsError as e:
+        print(e)
+        return 1
+    names = {}
+    if log.config and os.path.exists(log.config):
+        try:
+            names = events.names_of(config.load(log.config))
+        except (OSError, yaml.YAMLError):
+            pass
+    events.report(log, names)
+    return 0
 
 
 def update_file(args, proposals, period):

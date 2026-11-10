@@ -310,6 +310,9 @@ typedef struct {
   int32_t pv_target;    // PV: the target velocity written last
   int zero_at_start;    // cia402.zero-at-start
   int zeroed;           // pos-zero has been taken
+  int axis;             // the axis's number in the slave (cia402.axes)
+  int ev_fault;         // the flight recorder has the drive's fault
+  int ev_reason;        // the fault-reason the recorder has
   int32_t zero;         // counts taken off the drive's position
   int pv_wait;          // PV: cycles until "target reached" answers it
 } cia402_t;
@@ -559,6 +562,7 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   for (a = 0; a < n; a++) {
     cia402_t *d = LCEC_HAL_ALLOCATE(cia402_t);
     d->zero_at_start = zero;
+    d->axis = a;
     if ((err = axis_init(slave, d, names[a], (uint16_t)(a * ECAT_CIA402_AXIS_OFFSET), mode, others)) != 0) return err;
     dev->axis[dev->n++] = d;
   }
@@ -642,6 +646,18 @@ static void axis_read(lcec_slave_t *slave, cia402_t *d) {
   if (d->actual_velocity_o.mapped) {
     *d->drv_actual_velocity = EC_READ_S32(&pd[d->actual_velocity_o.os]);
     *d->velocity_fb = *d->drv_actual_velocity / scale_or_one(d->velo_scale);
+  }
+
+  // the flight recorder: the drive's faults, and the profile shutting it down
+  {
+    int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
+    if (faulted && !d->ev_fault) lcec_event(slave, ECAT_EV_DRIVE_FAULT, *d->error_code, sw);
+    if (!faulted && d->ev_fault && d->bus_ok) lcec_event(slave, ECAT_EV_DRIVE_CLEAR, 0, d->axis);
+    if (faulted || d->bus_ok) d->ev_fault = faulted;
+    if (*d->fault_reason != d->ev_reason) {
+      if (*d->fault_reason) lcec_event(slave, ECAT_EV_DRIVE_BLOCK, *d->fault_reason, d->axis);
+      d->ev_reason = *d->fault_reason;
+    }
   }
 }
 

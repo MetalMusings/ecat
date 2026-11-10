@@ -33,7 +33,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, drivetest, esi, integrate, netif, propose, testmode, tool
+from . import config, diagnose, drivetest, esi, events, integrate, netif, propose, testmode, tool
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -1226,6 +1226,12 @@ class TroubleshootPage(QWidget):
         self.all = QPushButton("Examine all")
         self.all.clicked.connect(lambda: win.examine(None))
         row.addWidget(self.all)
+        self.report = QPushButton("Save report...")
+        self.report.setToolTip("Write one file to attach when asking for help: versions, the "
+                               "configuration, the INI lines, a diagnosis of the bus and the "
+                               "event logs. Only reads; nothing is sent anywhere.")
+        self.report.clicked.connect(win.save_report)
+        row.addWidget(self.report)
         lay.addLayout(row)
 
         self.waiting = Card("Not examined yet")
@@ -1274,7 +1280,72 @@ class TroubleshootPage(QWidget):
         self.history_none = self.history.add(label("", "hint", wrap=True))
         body.addWidget(self.history)
         lay.addWidget(self.body)
+
+        # the flight recorder: events of the bus while LinuxCNC ran
+        self.events = Card("Event log", "What the ecat component recorded: link, states, "
+                                        "working counter, drive faults, the stop guard. It is "
+                                        "kept after LinuxCNC stops; the run before is kept too.")
+        er = QHBoxLayout()
+        self.events_run = QComboBox()
+        self.events_run.addItem("This run (or the last)", events.PATH)
+        self.events_run.addItem("The run before", events.PATH + ".prev")
+        self.events_run.currentIndexChanged.connect(lambda _i: self.show_events())
+        er.addWidget(self.events_run)
+        self.events_slave = QCheckBox("Only this slave and the master")
+        self.events_slave.toggled.connect(lambda _on: self.show_events())
+        er.addWidget(self.events_slave)
+        er.addStretch(1)
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self.show_events)
+        er.addWidget(refresh)
+        self.events.lay.addLayout(er)
+        self.events_info = self.events.add(label("", "hint", wrap=True))
+        self.events_table = table(["Time", "", "Event"], 2)
+        self.events.add(self.events_table)
+        lay.addWidget(self.events)
         lay.addStretch(1)
+        self.events_timer = QTimer(self)
+        self.events_timer.setInterval(2000)
+        self.events_timer.timeout.connect(self.show_events)
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        self.show_events()
+        self.events_timer.start()
+
+    def hideEvent(self, ev):
+        self.events_timer.stop()
+        super().hideEvent(ev)
+
+    def show_events(self):
+        """Fill the event log card, newest first."""
+        path = self.events_run.currentData()
+        try:
+            log = events.read(path)
+        except events.EventsError as e:
+            self.events_info.setText(str(e))
+            self.events_table.setRowCount(0)
+            fit_table(self.events_table, minimum=1)
+            return
+        names = events.names_of(self.win.session.cfg)
+        shown = log.events
+        pos = self.win.current if isinstance(self.win.current, int) else None
+        if self.events_slave.isChecked() and pos is not None:
+            shown = [e for e in shown if e.slave in (-1, pos)]
+        self.events_info.setText("ecat %s since %s, %s%s" % (
+            "runs" if log.running else "ran", events.stamp(log.start), log.config or "?",
+            "; %d older events were overwritten" % log.lost if log.lost > 0 else ""))
+        rows = list(reversed(shown[-200:]))
+        t = self.events_table
+        t.setRowCount(len(rows))
+        colours = {"info": None, "warn": QColor("#b26a00"), "error": QColor("#c62828")}
+        for r, e in enumerate(rows):
+            sev, msg = events.text(e, names)
+            t.setItem(r, 0, item(events.stamp(e.time), font=mono()))
+            t.setItem(r, 1, item({"info": "", "warn": "WARN", "error": "ERROR"}[sev],
+                                 colour=colours[sev]))
+            t.setItem(r, 2, item(msg, colour=colours[sev]))
+        fit_table(t, minimum=1)
 
     def fill_slaves(self):
         win = self.win
@@ -2935,6 +3006,30 @@ class MainWindow(QMainWindow):
 
     def diagnose(self, positions):
         self.examine(positions)
+
+    def save_report(self):
+        """Write a report file for asking for help (report.py)."""
+        from . import report
+        s = self.session
+        base = os.path.dirname(os.path.abspath(s.ini_path or s.path or os.path.expanduser("~/x")))
+        path, _ = QFileDialog.getSaveFileName(self, "Save report - %s" % TITLE,
+                                              os.path.join(base, report.default_name()),
+                                              "Report (*.md);;All files (*)")
+        if not path:
+            return
+        cfg_path = s.path if s.path and os.path.exists(s.path) else None
+
+        def work(progress):
+            progress("Writing the report (diagnosing the bus if a master runs)...")
+            text = report.build(cfg_path, s.ini_path if s.ini_path and os.path.exists(s.ini_path)
+                                else None)
+            with open(path, "w") as f:
+                f.write(text)
+            return path
+
+        def done(p):
+            self.status("Wrote %s; look it through before posting it" % p)
+        self.run("Writing the report...", work, done)
 
     # -- the I/O test
 

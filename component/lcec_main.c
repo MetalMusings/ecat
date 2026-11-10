@@ -31,6 +31,8 @@
 #include "ecat_config.h"
 #include "ecat_startcheck.h"
 
+static void lcec_guard_event(struct lcec_master *master, int state);
+
 // slaves the start check compares at most
 #define LCEC_START_CHECK_MAX 512
 
@@ -537,6 +539,7 @@ static void *lcec_activator_main(void *arg) {
   rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "master %s activated in %lld us (helper thread)\n", master->name, (rtapi_get_time() - t0) / 1000);
 
   __atomic_store_n(&master->activated, 1, __ATOMIC_RELEASE);
+  ecat_events_add(master->events, ECAT_EV_ACTIVATED, -1, master->app_time_period, 0);
 #ifdef LCEC_HAVE_GUARD
   lcec_start_guard(master);
 #endif
@@ -640,7 +643,9 @@ static void lcec_guard_tick(lcec_master_t *master) {
     master->guard_start = now;
     state = LCEC_GUARD_TAKING;
     __atomic_store_n(&master->guard_state, state, __ATOMIC_RELEASE);
+    lcec_guard_event(master, state);
   }
+  ecat_events_add_limited(master->events, &master->ev_late, ECAT_EV_LATE, -1, (uint32_t)((now - last) / 1000));
   ecrt_master_receive(master->master);
   ecrt_domain_process(master->domain);
   if (state == LCEC_GUARD_TAKING && master->process_data != NULL) {
@@ -659,6 +664,7 @@ static void lcec_guard_tick(lcec_master_t *master) {
 
   if (state == LCEC_GUARD_TAKING && ((ms.al_states & 0x0C) == 0 || now - master->guard_start > LCEC_GUARD_TIMEOUT)) {
     __atomic_store_n(&master->guard_state, LCEC_GUARD_DONE, __ATOMIC_RELEASE);
+    lcec_guard_event(master, LCEC_GUARD_DONE);
     rtapi_print_msg((ms.al_states & 0x0C) == 0 ? RTAPI_MSG_INFO : RTAPI_MSG_ERR,
         LCEC_MSG_PFX "master %s: the servo thread stopped; %s after %lld ms, outputs zero\n", master->name,
         (ms.al_states & 0x0C) == 0 ? "slaves taken to PREOP" : "slaves still above PREOP",
@@ -733,6 +739,7 @@ static void lcec_guard_resumed(lcec_master_t *master) {
     return;
   }
   __atomic_store_n(&master->guard_state, LCEC_GUARD_IDLE, __ATOMIC_RELEASE);
+  lcec_guard_event(master, LCEC_GUARD_IDLE);
   if (!master->taking_down) {
     ecrt_master_request_al_state(master->master, EC_AL_STATE_OP);
   }
@@ -896,6 +903,16 @@ int rtapi_app_main(void) {
 
   // initialize masters
   for (master = first_master; master != NULL; master = master->next) {
+    // the flight recorder (one master: one file)
+    if (master == first_master) {
+      if ((master->events = ecat_events_open(ECAT_EVENTS_PATH, config)) == NULL) {
+        rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "no event recorder in %s: %s\n", ECAT_EVENTS_PATH, strerror(errno));
+      } else {
+        int n = 0;
+        for (slave = master->first_slave; slave != NULL; slave = slave->next) n++;
+        ecat_events_add(master->events, ECAT_EV_START, -1, n, 0);
+      }
+    }
     // request ethercat master
     if (!(master->master = lcec_request_master(master))) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "requesting master %s (index %d) failed\n", master->name, master->index);
@@ -1089,8 +1106,24 @@ fail0:
 }
 
 /// @brief Shut down LinuxCNC-Ethercat
+void lcec_event(lcec_slave_t *slave, int type, uint32_t a, uint32_t b) {
+  ecat_events_add(slave->master->events, type, slave->index, a, b);
+}
+
+/// Record a change of the stop guard's state (from the guard or the servo thread).
+static void lcec_guard_event(lcec_master_t *master, int state) {
+  if (state != master->ev_guard_last) {
+    ecat_events_add(master->events, ECAT_EV_GUARD, -1, state, master->ev_guard_last);
+    master->ev_guard_last = state;
+  }
+}
+
 void rtapi_app_exit(void) {
   lcec_master_t *master;
+
+  for (master = first_master; master != NULL; master = master->next) {
+    ecat_events_add(master->events, ECAT_EV_STOP, -1, 0, 0);
+  }
 
   // deactivate all masters
   for (master = first_master; master != NULL; master = master->next) {
@@ -1105,6 +1138,10 @@ void rtapi_app_exit(void) {
 #endif
   }
 
+  for (master = first_master; master != NULL; master = master->next) {
+    ecat_events_close(master->events);  // the file stays, for reading afterwards
+    master->events = NULL;
+  }
   lcec_clear_config();
 #ifdef LCEC_HAVE_GUARD
   if (lcec_guard_module >= 0) {
@@ -1892,6 +1929,7 @@ static int lcec_activate_master(lcec_master_t *master) {
   master->process_data_len = ecrt_domain_size(master->domain);
 
   master->activated = 1;
+  ecat_events_add(master->events, ECAT_EV_ACTIVATED, -1, master->app_time_period, 0);
 #endif
   rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "Master %s activated successfully\n", master->name);
   
@@ -1908,6 +1946,7 @@ void lcec_read_master(void *arg, long period) {
   // The servo thread's period is the cycle time (see ecat_config.h)
   if (master->app_time_period == 0) {
     master->app_time_period = period;
+    if (master->events != NULL) master->events->period_ns = (uint32_t)period;
     ecat_config_dc(master);
   }
 
@@ -1950,6 +1989,12 @@ void lcec_read_master(void *arg, long period) {
 
   // update state pins
   lcec_update_master_hal(master->hal_data, &master->ms);
+  // the flight recorder: what changed
+  ecat_events_wc(master->events, &master->ev_last, master->domain_state.wc_state);
+  if (check_states) {
+    ecat_events_master(master->events, &master->ev_last, master->ms.link_up, master->ms.al_states,
+        master->ms.slaves_responding);
+  }
 
   // update global state
   global_ms.slaves_responding += master->ms.slaves_responding;
@@ -1969,6 +2014,11 @@ void lcec_read_master(void *arg, long period) {
       lcec_update_slave_state_hal(slave->hal_state_data, &slave->state);
 #ifdef EC_HAVE_DC_SYNC_FAILED
       dc_sync_failed = dc_sync_failed || slave->state.dc_sync_failed;
+      ecat_events_slave(master->events, &slave->ev_last, slave->index, slave->state.al_state, slave->state.online,
+          slave->state.operational, slave->state.dc_sync_failed);
+#else
+      ecat_events_slave(master->events, &slave->ev_last, slave->index, slave->state.al_state, slave->state.online,
+          slave->state.operational, 0);
 #endif
     }
 
@@ -2060,6 +2110,7 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
       master->autoshift.input_margin = hal_data->auto_shift_input_margin;
       if (lcec_autoshift_update(&master->autoshift, *(hal_data->dc_phased) && *(hal_data->all_op), *(hal_data->send_offset))) {
         master->global_shift_time = master->autoshift.shift;
+        ecat_events_add(master->events, ECAT_EV_SHIFT, -1, master->global_shift_time, master->autoshift.state);
         // two cycles is the aim; the cia402 profile counts on it
         // (STATUS_CYCLES), so three is reported as an error
         rtapi_print_msg(master->autoshift.fits && master->autoshift.state == LCEC_AUTOSHIFT_TWO ? RTAPI_MSG_INFO : RTAPI_MSG_ERR,

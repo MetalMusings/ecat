@@ -62,6 +62,8 @@ python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethe
 python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
 python3 -m ecatsetup --check ethercat.yaml
 python3 -m ecatsetup --diagnose
+python3 -m ecatsetup --events [prev]
+python3 -m ecatsetup --report --ini <machine>.ini
 python3 -m ecatsetup --apply ethercat.yaml --ini <machine>.ini
 python3 -m ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
 python3 -m unittest discover -s tests
@@ -84,7 +86,10 @@ in plain words, with what usually lies behind it), its links and the
 error counters that grow while it watches (`--seconds`, pointing at a
 cable or connector), the slave's own diagnosis history and error
 register, and for a CiA 402 drive its state, error code and what is
-missing to reach "Operation enabled". `--gui` opens EtherCAT Setup's window (needs `python3-pyqt5`), laid out
+missing to reach "Operation enabled". `--events` shows the event log the
+`ecat` component keeps while LinuxCNC runs (link, states, working counter,
+drive faults, the stop guard), and `--report` writes one file to attach
+when asking for help ([docs/events.md](docs/events.md)). `--gui` opens EtherCAT Setup's window (needs `python3-pyqt5`), laid out
 as the mockups in the design draft, with the pages Bus, Slave status,
 Test and HAL & LinuxCNC. Part 1 of the GUI: it reads the bus, lists the
 slaves with their state and how they compare with the file, shows each

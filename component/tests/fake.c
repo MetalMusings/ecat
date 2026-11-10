@@ -232,6 +232,19 @@ void lcec_generic_read(struct lcec_slave *slave, long period) {
   fake_generic_reads++;
 }
 
+fake_event_t fake_events[FAKE_EVENTS];
+int fake_n_events;
+
+void lcec_event(lcec_slave_t *slave, int type, uint32_t a, uint32_t b) {
+  if (fake_n_events < FAKE_EVENTS) {
+    fake_events[fake_n_events].slave = slave->index;
+    fake_events[fake_n_events].type = type;
+    fake_events[fake_n_events].a = a;
+    fake_events[fake_n_events].b = b;
+  }
+  fake_n_events++;
+}
+
 void lcec_generic_write(struct lcec_slave *slave, long period) {
   (void)slave, (void)period;
   fake_generic_writes++;

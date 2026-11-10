@@ -723,7 +723,8 @@ terminals as generic slaves. The next steps follow the use cases above,
 in this order:
 
 1. **Flight recorder and Save report** (e): helps users who ask for help
-   the most, and is useful in a-d too.
+   the most, and is useful in a-d too. Built 2026-11-10
+   ([events.md](../events.md)).
 2. **HAL check and drift** (b): the check, hand edits of `ethercat.hal`
    noticed, renames into the user's files, where each pin is connected.
 3. **The bus changed**, matched by type and order (b); modular devices

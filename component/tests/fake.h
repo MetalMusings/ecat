@@ -51,6 +51,16 @@ void *fake_pin(const char *name);
 /// Calls of lcec_generic_read and lcec_generic_write.
 extern int fake_generic_reads, fake_generic_writes;
 
+/// Events recorded with lcec_event (the flight recorder); set
+/// fake_n_events to 0 to start over.
+#define FAKE_EVENTS 64
+typedef struct {
+  int slave, type;
+  uint32_t a, b;
+} fake_event_t;
+extern fake_event_t fake_events[FAKE_EVENTS];
+extern int fake_n_events;
+
 /// The messages printed since fake_slave(), or since it was set to "".
 extern char fake_msgs[];
 
