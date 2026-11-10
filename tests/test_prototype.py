@@ -126,6 +126,31 @@ class TestPropose(unittest.TestCase):
         cfg = {"ecat": 1, "master": {"interface": "x", "transport": "raw"}, "slaves": [slave]}
         self.assertEqual(config.check(cfg), [])
 
+    def test_read_modules(self):
+        from unittest import mock
+        from ecatsetup import session, tool
+        c = coe.Dictionary()
+        c.objects = {0xF050: "Detected Module Ident List"}
+        vals = {(0xF050, 0): 2, (0xF050, 1): 0x101, (0xF050, 2): 0x202}
+        with mock.patch.object(tool, "upload", lambda pos, i, sub, t: vals.get((i, sub))):
+            self.assertEqual(session.read_modules(3, c, 0xF050), [0x101, 0x202])
+            self.assertIsNone(session.read_modules(3, c, 0xF030))     # not in the dictionary
+            del vals[(0xF050, 2)]
+            self.assertIsNone(session.read_modules(3, c, 0xF050))     # a sub could not be read
+
+    def test_modular_device(self):
+        p = propose.Proposal(1, 2, 3, 0, 0, "Coupler")
+        propose.add_modules(p, [0x101, 0x202], [0x101])
+        self.assertEqual(p.modules, [0x101, 0x202])
+        self.assertIn("modular device: 2 modules detected (0xF050: 0x00000101, 0x00000202)",
+                      p.notes[0])
+        self.assertIn("differ from those detected", p.notes[1])
+        self.assertEqual(config.slave_from_proposal(p)["modules"], ["0x00000101", "0x00000202"])
+        q = propose.Proposal(1, 2, 3, 0, 0, "Terminal")
+        propose.add_modules(q, None, None)
+        self.assertIsNone(q.modules)
+        self.assertNotIn("modules", config.slave_from_proposal(q))
+
     def test_analog_range(self):
         self.assertEqual(propose.analog_range("EL3102 2K. Ana. Eingang +/-10V, DIFF"),
                          (-10.0, 10.0, "V"))
@@ -686,6 +711,76 @@ class TestUpdate(unittest.TestCase):
         self.assertEqual(cfg["master"]["interface"], "enp2s0")
         self.assertIn("dc", cfg["master"])
         self.assertEqual(len(notes), 2)
+
+    def test_linuxcnc_connections_kept_and_pruned(self):
+        self.old["linuxcnc"] = {
+            "joints": [{"joint": 0, "slave": "x-drive", "scale": 100.0}],
+            "nets": [{"signal": "home", "pins": ["io.in-1", "joint.0.home-sw-in"]},
+                     {"signal": "both", "pins": ["io.in-2", "x-drive.out", "motion.digital-in-00"]}],
+            "check-hal-at-start": True}
+        # all there: everything kept (before, an update lost the linuxcnc section)
+        cfg, _ = update.merge(self.old, self.fresh(
+            slave(0, "d0", "0x1", "0xA"), slave(1, "d1", "0x1", "0xA"), slave(2, "i2", "0x2", "0xB")))
+        self.assertEqual(cfg["linuxcnc"], self.old["linuxcnc"])
+        # io gone: its net goes, the other loses io's pin; the joint stays
+        cfg, notes = update.merge(self.old, self.fresh(
+            slave(0, "d0", "0x1", "0xA"), slave(1, "d1", "0x1", "0xA")))
+        self.assertEqual(cfg["linuxcnc"]["nets"], [
+            {"signal": "both", "pins": ["x-drive.out", "motion.digital-in-00"]}])
+        self.assertEqual(cfg["linuxcnc"]["joints"], self.old["linuxcnc"]["joints"])
+        self.assertIn("signal home: pins of slaves not on the bus removed", notes)
+        # one drive left: matched at its position, so y-drive is gone, and its joint
+        self.old["linuxcnc"]["joints"].append({"joint": 1, "slave": "y-drive", "scale": 1.0})
+        cfg, notes = update.merge(self.old, self.fresh(slave(0, "d0", "0x1", "0xA"),
+                                                       slave(1, "i1", "0x2", "0xB")))
+        self.assertEqual(cfg["linuxcnc"]["joints"], [{"joint": 0, "slave": "x-drive", "scale": 100.0}])
+        self.assertTrue(any("joint 1: its drive y-drive is not on the bus" in n for n in notes))
+
+    def test_modules(self):
+        from ecatsetup import session
+        self.old["slaves"][2]["modules"] = ["0x00000101", "0x00000202"]
+        same = slave(2, "i2", "0x2", "0xB")
+        same["modules"] = ["0x00000101", "0x00000202"]
+        fresh = self.fresh(slave(0, "d0", "0x1", "0xA"), slave(1, "d1", "0x1", "0xA"), same)
+        self.assertFalse(update.compare(self.old, fresh).any)
+        other = dict(same, modules=["0x00000101"])
+        fresh = self.fresh(slave(0, "d0", "0x1", "0xA"), slave(1, "d1", "0x1", "0xA"), other)
+        ch = update.compare(self.old, fresh)
+        self.assertEqual(ch.modules, [("io", 2)])
+        cfg, notes = update.merge(self.old, fresh)
+        self.assertTrue(any("its modules changed (0x00000101, the file had 0x00000101, "
+                            "0x00000202); propose it again" in n for n in notes), notes)
+        self.assertEqual(cfg["slaves"][2]["modules"], self.old["slaves"][2]["modules"])
+        # recorded the first time the bus has them
+        del self.old["slaves"][2]["modules"]
+        cfg, _ = update.merge(self.old, fresh)
+        self.assertEqual(cfg["slaves"][2]["modules"], ["0x00000101"])
+        self.assertTrue(session.modules_match(None, [1]))
+        self.assertTrue(session.modules_match(["0x1", "0x2"], [1, 2]))
+        self.assertFalse(session.modules_match(["0x1"], [1, 2]))
+        cfg["slaves"][2]["modules"] = ["x"]
+        self.assertTrue(any("module 'x' is not a hex number" in e for e in config.check(cfg)))
+
+    def test_compare_and_consequences(self):
+        fresh = self.fresh(slave(0, "n0", "0x3", "0xC"), slave(1, "d1", "0x1", "0xA", "0x2"),
+                           slave(2, "d2", "0x1", "0xA"))
+        ch = update.compare(self.old, fresh)
+        self.assertEqual(ch.moved, [("x-drive", "dev 0xA", 0, 1), ("y-drive", "dev 0xA", 1, 2)])
+        self.assertEqual(ch.new, [(0, "dev 0xC")])
+        self.assertEqual(ch.gone, [("io", "dev 0xB", 2)])
+        self.assertEqual(ch.revision, [("x-drive", 1, "0x00000001", "0x2")])
+        self.assertEqual(ch.summary(), "2 moved, 1 new, 1 missing, 1 of another revision")
+        self.assertFalse(update.compare(self.old, self.old).any)
+        self.old["linuxcnc"] = {"nets": [{"signal": "home", "pins": ["io.in-1", "joint.0.home-sw-in"]}]}
+        with tempfile.TemporaryDirectory() as d:
+            ini = os.path.join(d, "m.ini")
+            with open(ini, "w") as f:
+                f.write("[HAL]\nHALFILE = m.hal\n")
+            with open(os.path.join(d, "m.hal"), "w") as f:
+                f.write("net led io.out-3 => pyvcp.led\n")
+            then = update.consequences(self.old, ch, ini)
+        self.assertEqual(then, ["signal home connects io.in-1, which will not exist",
+                                "m.hal:1 uses io.out-3, which will not exist"])
 
 
 

@@ -95,6 +95,8 @@ def slave_from_proposal(p, name=None):
                      "revision": hex32(p.revision)},
         "profile": PROFILES.get(p.profile, "generic"),
     }
+    if getattr(p, "modules", None) is not None:
+        s["modules"] = [hex32(m) for m in p.modules]
     if p.profile == 402:
         s["cia402"] = {"mode": p.mode}
         if getattr(p, "axes", 1) > 1:
@@ -258,6 +260,17 @@ def check(cfg):
                     elif a in names or a in axis_names:
                         err("%s: axis name %r is used for another slave or axis" % (where, a))
                     axis_names.add(a)
+
+        mods = s.get("modules")
+        if mods is not None:
+            if not isinstance(mods, list):
+                err("%s: modules must be a list of module idents" % where)
+            else:
+                for m in mods:
+                    try:
+                        int(str(m), 16)
+                    except ValueError:
+                        err("%s: module %r is not a hex number" % (where, m))
 
         # encoder channels: status index -> name
         encoders = {}

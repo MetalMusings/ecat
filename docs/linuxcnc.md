@@ -184,6 +184,15 @@ check says so, and writing asks first (`--apply` needs
 `--overwrite-edited`): the change would be lost. Move it into a HAL file
 of your own.
 
+**The bus changed.** *Update from bus* (and `--update`) matches the bus
+to the file by type and order: slaves moved by a slave put in or taken
+out before them keep their names and pins, so the HAL files keep working.
+The window shows the changes first, with what depends on slaves that are
+missing: joints and connected pins (removed from the file), and lines in
+your HAL files that use their pins (`--update --ini` prints those too);
+then the HAL check lists what to fix. A modular device whose modules
+changed is reported ([modules.md](modules.md)).
+
 **Renames.** Renaming a slave in the program offers to rename its pins in
 your HAL files in the configuration folder too (each kept as `.bak`;
 comments are left alone). Its joints, connected pins and axes follow

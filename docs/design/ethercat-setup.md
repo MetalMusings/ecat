@@ -729,7 +729,9 @@ in this order:
    noticed, renames into the user's files, where each pin is connected.
    Built 2026-11-10 ([linuxcnc.md](../linuxcnc.md#checking-the-hal-files)).
 3. **The bus changed**, matched by type and order (b); modular devices
-   best effort.
+   best effort. Built 2026-11-10: *Update from bus* shows the changes and
+   what depends on missing slaves first; connections of missing slaves
+   are removed; modules recorded and compared ([modules.md](../modules.md)).
 4. **From a simulated configuration** (a): recognising and replacing the
    simulation, copying library files, the scale, the INI check.
 5. **Bringing up a slave** (c): the sync card, where proposals come

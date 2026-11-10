@@ -38,6 +38,23 @@ def servo_period(ini_path):
         return None
 
 
+def read_modules(pos, coe, index):
+    """A modular device's module list (ETG.5001): 0xF050 the modules it
+    detects, 0xF030 those it is configured for. [ident] or None."""
+    if index not in coe.objects:
+        return None
+    n = tool.upload(pos, index, 0, "uint8")
+    if n is None:
+        return None
+    out = []
+    for sub in range(1, min(int(n), 255) + 1):
+        v = tool.upload(pos, index, sub, "uint32")
+        if v is None:
+            return None
+        out.append(int(v))
+    return out
+
+
 def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
     """Read one slave and propose its configuration: (info, coe, proposal)."""
     info = tool.slave_info(pos)
@@ -50,6 +67,10 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
         modes = tool.upload(pos, 0x6502, 0, "uint32")
     dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
+    if coe:
+        detected = read_modules(pos, coe, 0xF050)
+        configured = read_modules(pos, coe, 0xF030)
+        propose.add_modules(p, detected, configured)
     if p.profile == 402 and mode == "pp":
         # proposed from the drive's own values; the user must check them
         for index, sub, dtype in propose.PP_LIMITS:
@@ -61,6 +82,22 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
                            "0x%04X:%02X=%d" % (i, s_, v) for (i, s_), v in sorted(p.pp_limits.items()))
                            or "none could be read"))
     return info, coe, p
+
+
+def _mods(mods):
+    return ", ".join("0x%08X" % int(str(m), 16) for m in mods) if mods else "none"
+
+
+def modules_match(in_file, on_bus):
+    """Whether a slave's modules on the bus are those in the file. A file
+    without modules (not a modular device, or written before they were
+    recorded) matches anything."""
+    if in_file is None or on_bus is None:
+        return True
+    try:
+        return [int(str(m), 16) for m in in_file] == [int(m) for m in on_bus]
+    except ValueError:
+        return False
 
 
 def compare_bus(cfg, positions, slave_info=None):
@@ -149,6 +186,18 @@ class Session:
         self.path, self.saved = None, None
         return notes + filled
 
+    def fresh(self, interface=None, transport="raw"):
+        """A configuration proposed from the bus as it is."""
+        return config.from_proposals([b.proposal for _, b in sorted(self.bus.items())],
+                                     interface, transport, self.period)
+
+    def bus_changes(self):
+        """How the bus differs from the configuration (update.Changes), or
+        None without both."""
+        if self.cfg is None or not self.bus:
+            return None
+        return update.compare(self.cfg, self.fresh())
+
     def update_from_bus(self, interface=None, transport="raw"):
         """Bring the configuration up to date with the bus, keeping its
         choices (see update.py). Returns the notes."""
@@ -169,6 +218,15 @@ class Session:
         if not self.bus:
             return errors, [], []
         problems, notes = compare_bus(self.cfg, self.bus, lambda pos: self.bus[pos].info)
+        # a modular device's modules, as read with the bus
+        for s in self.cfg.get("slaves") or []:
+            b = self.bus.get(s.get("position"))
+            have = getattr(b.proposal, "modules", None) if b is not None else None
+            if b is not None and not modules_match(s.get("modules"), have):
+                problems.append("slave %d (%s): its modules differ from the file (%s on the bus, "
+                                "%s in the file): propose it again, since its process data "
+                                "depends on them" % (s["position"], s.get("name"),
+                                                     _mods(have), _mods(s.get("modules"))))
         return errors, problems, notes
 
     def save(self, path=None):

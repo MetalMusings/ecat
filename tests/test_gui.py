@@ -4,6 +4,7 @@ itself (offscreen, skipped without PyQt5), against a fake bus.
 Run with: python3 -m unittest discover -s tests
 """
 
+import copy
 import os
 import sys
 import tempfile
@@ -285,6 +286,23 @@ class TestWindow(BusTest):
         self.assertIn("thc · Modular device", self.rows(w)[2][1])
         self.assertIs(w.bus_page.stack.currentWidget(), w.slave_page)
         self.assertTrue(any(r[2] == "thc.output4" for r in gui.config_pins(w.session.cfg)))
+
+    def test_update_from_bus_shows_the_changes_first(self):
+        w = self.window()
+        s = w.session
+        # the file has one slave less: the second becomes new
+        del s.cfg["slaves"][1]
+        self.assertIn("The bus differs from the configuration: 1 new", w.bus_summary())
+        before = copy.deepcopy(s.cfg)
+        with mock.patch.object(gui.QMessageBox, "question",
+                               return_value=gui.QMessageBox.Cancel) as q:
+            w.update_from_bus()
+        self.assertIn("new: position 1", q.call_args[0][2])
+        self.assertEqual(s.cfg, before)
+        with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+            w.update_from_bus()
+        self.assertEqual(len(s.cfg["slaves"]), 2)
+        self.assertIn("matches", w.bus_summary())
 
     def test_zero_at_start(self):
         w = self.window()

@@ -384,12 +384,17 @@ def update_file(args, proposals, period):
         print("Cannot read %s: %s" % (args.update, e))
         return 1
     fresh = config.from_proposals(proposals, args.interface, args.transport or "raw", period)
+    changes = update.compare(old, fresh)
     cfg, notes = update.merge(old, fresh)
     notes += netif.fill_master(cfg, args.interface or netif.master_interface(),
                                keep_transport=bool(args.transport))
     print("Update of %s:" % args.update)
     for n in notes:
         print("  %s" % n)
+    if args.ini:
+        for n in update.consequences(old, changes, args.ini):
+            if ":" in n.split(" ", 1)[0]:     # a HAL file's line
+                print("  then: %s" % n)
     errors = config.check(cfg)
     for e in errors:
         print("Error: %s" % e)

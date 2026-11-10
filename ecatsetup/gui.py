@@ -33,7 +33,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose, testmode, tool
+from . import config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose, testmode, tool, update
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -2868,6 +2868,13 @@ class MainWindow(QMainWindow):
             return "%d slaves on the bus." % len(s.bus)
         odd = [pos for pos in self.positions() if self.file_problem(pos)]
         where = "the saved configuration" if not s.dirty else "the configuration"
+        try:
+            ch = s.bus_changes()
+        except Exception:      # the summary must not fail on an odd file
+            ch = None
+        if ch is not None and (ch.moved or ch.new or ch.gone):
+            return ("The bus differs from %s: %s. Update from bus keeps the names and pins of "
+                    "slaves that moved." % (where, ch.summary()))
         if not odd:
             return "The bus matches %s." % where
         return "The bus matches %s, except slave%s %s." % (
@@ -3025,6 +3032,34 @@ class MainWindow(QMainWindow):
         self.run("Reading the bus...", lambda progress: self.session.read_bus(progress), done)
 
     def update_from_bus(self):
+        s = self.session
+        ch = s.bus_changes()
+        if ch is not None and ch.any:
+            lines = []
+            for name, dev, a, b in ch.moved:
+                lines.append("moved: %s (%s), position %d -> %d; keeps its name and pins"
+                             % (name, dev or "?", a, b))
+            for pos, dev in ch.new:
+                lines.append("new: position %d, %s; proposed from its own data" % (pos, dev or "?"))
+            for name, dev, pos in ch.gone:
+                lines.append("missing: %s (%s) at position %d; left out" % (name, dev or "?", pos))
+            for name, pos in ch.modules:
+                lines.append("modules: %s at %d has other modules; propose it again afterwards"
+                             % (name, pos))
+            for name, pos, a, b in ch.revision:
+                lines.append("revision: %s at %d, %s -> %s; check its process data"
+                             % (name, pos, a, b))
+            then = update.consequences(s.cfg, ch, s.ini_path if s.ini_path and
+                                       os.path.exists(s.ini_path) else None)
+            text = "The bus differs from the configuration:\n\n" + "\n".join(lines)
+            if then:
+                text += "\n\nWhat depends on the missing slaves:\n" + "\n".join(then[:12])
+                if len(then) > 12:
+                    text += "\n... and %d more (the HAL check lists them)" % (len(then) - 12)
+            text += "\n\nUpdate the configuration? (The file is written only when you save.)"
+            if QMessageBox.question(self, TITLE, text,
+                                    QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+                return
         before = copy.deepcopy(self.session.cfg)
         notes = self.session.update_from_bus()
         self.status("Updated from the bus" if self.session.cfg != before else

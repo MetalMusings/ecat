@@ -99,6 +99,7 @@ class Proposal:
     encoders: list = field(default_factory=list)   # (name, status index) of encoder channels
     axes: int = 1        # a CiA 402 drive's axes: the status word at 0x6041 + n * 0x800
     pp_limits: dict = field(default_factory=dict)  # PP: (index, subindex) -> the drive's value
+    modules: list = None  # a modular device's detected modules (0xF050), or None
     notes: list = field(default_factory=list)
 
 
@@ -173,6 +174,23 @@ def analog_value(e, direction):
     return (e.subindex == 0x11 and base <= e.index <= base + 0xFF0 and e.index & 0xF == 0
             and e.bitlen == 16 and e.data_type in ("INT", "UINT")
             and re.search(r"value|output", _short(e.name)) is not None)
+
+
+def add_modules(p, detected, configured):
+    """A modular device (ETG.5001 0xF050/0xF030): best effort. The process
+    data is taken as the slave maps it now; the modules are recorded, so
+    that a change is noticed."""
+    if detected is None:
+        return
+    p.modules = list(detected)
+    ids = ", ".join("0x%08X" % m for m in detected) or "none"
+    p.notes.append("modular device: %d module%s detected (0xF050: %s); the process data is "
+                   "taken as the slave maps it now" % (len(detected), "" if len(detected) == 1
+                                                       else "s", ids))
+    if configured is not None and configured and configured != detected:
+        p.notes.append("modules configured in 0xF030 (%s) differ from those detected: the slave "
+                       "may refuse OP until 0xF030 matches (see docs/modules.md)"
+                       % (", ".join("0x%08X" % m for m in configured)))
 
 
 def kebab(name):

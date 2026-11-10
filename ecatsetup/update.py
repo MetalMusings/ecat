@@ -17,11 +17,21 @@ Every change is reported as a note.
 """
 
 import copy
+from dataclasses import dataclass, field
 
 
 def _kind(s):
     ident = s.get("identity") or {}
     return (int(str(ident.get("vendor")), 16), int(str(ident.get("product")), 16))
+
+
+def _same_modules(s, b):
+    """A modular device's modules in the file (s) and on the bus (b); a
+    file without them matches."""
+    a, c = s.get("modules"), b.get("modules")
+    if a is None or c is None:
+        return True
+    return [int(str(x), 16) for x in a] == [int(str(x), 16) for x in c]
 
 
 def _describe(s):
@@ -54,6 +64,91 @@ def _align(a, b):
         else:
             j += 1
     return pairs
+
+
+@dataclass
+class Changes:
+    """How the bus differs from a configuration, slave by slave."""
+    moved: list = field(default_factory=list)     # [(name, device, old position, new position)]
+    new: list = field(default_factory=list)       # [(position, device)]
+    gone: list = field(default_factory=list)      # [(name, device, position)]
+    revision: list = field(default_factory=list)  # [(name, position, file's, bus's)]
+    modules: list = field(default_factory=list)   # [(name, position)] whose modules changed
+
+    @property
+    def any(self):
+        return bool(self.moved or self.new or self.gone or self.revision or self.modules)
+
+    def summary(self):
+        parts = []
+        for n, what in ((len(self.moved), "moved"), (len(self.new), "new"),
+                        (len(self.gone), "missing"), (len(self.revision), "of another revision"),
+                        (len(self.modules), "with other modules")):
+            if n:
+                parts.append("%d %s" % (n, what))
+        return ", ".join(parts)
+
+
+def compare(old, fresh):
+    """Changes between the configuration and one proposed from the bus,
+    matched as merge() matches them."""
+    ch = Changes()
+    old_slaves = sorted(old.get("slaves") or [], key=lambda s: s["position"])
+    bus = sorted(fresh.get("slaves") or [], key=lambda s: s["position"])
+    pairs = _align(old_slaves, bus)
+    seen_old = {i for i, _ in pairs}
+    seen_bus = {j for _, j in pairs}
+    for i, j in pairs:
+        s, b = old_slaves[i], bus[j]
+        if s["position"] != b["position"]:
+            ch.moved.append((s.get("name"), s.get("device"), s["position"], b["position"]))
+        old_rev = (s.get("identity") or {}).get("revision")
+        new_rev = (b.get("identity") or {}).get("revision")
+        if old_rev is not None and new_rev is not None and int(str(old_rev), 16) != int(str(new_rev), 16):
+            ch.revision.append((s.get("name"), b["position"], old_rev, new_rev))
+        if not _same_modules(s, b):
+            ch.modules.append((s.get("name"), b["position"]))
+    for j, b in enumerate(bus):
+        if j not in seen_bus:
+            ch.new.append((b["position"], b.get("device")))
+    for i, s in enumerate(old_slaves):
+        if i not in seen_old:
+            ch.gone.append((s.get("name"), s.get("device"), s["position"]))
+    return ch
+
+
+def consequences(cfg, changes, ini_path=None):
+    """What depends on the slaves that are gone: joints, connected pins
+    and lines in the HAL files. Readable strings."""
+    from . import config as cfgmod, integrate
+    out = []
+    gone = {name for name, _, _ in changes.gone}
+    prefixes = set()
+    for s in (cfg or {}).get("slaves") or []:
+        if s.get("name") in gone:
+            prefixes |= {x + "." for x in [s["name"]] + cfgmod.axes(s)}
+    gone_axes = {p[:-1] for p in prefixes}
+    for j in integrate.joints(cfg):
+        if j.get("slave") in gone_axes:
+            out.append("joint %d is connected to %s, which is missing: the connection is "
+                       "removed" % (j["joint"], j["slave"]))
+    for n in integrate.nets(cfg):
+        hit = [p for p in n.get("pins") or [] if p.startswith(tuple(prefixes))]
+        if hit:
+            out.append("signal %s connects %s, which will not exist" % (n.get("signal"),
+                                                                       ", ".join(hit)))
+    if ini_path and prefixes:
+        from . import halcheck
+        try:
+            uses = halcheck.uses(ini_path)[0]
+        except OSError:
+            uses = {}
+        for pin, us in sorted(uses.items()):
+            if pin.startswith(tuple(prefixes)):
+                for u in us:
+                    if u.file not in (integrate.LOAD_FILE, integrate.MAIN_FILE):
+                        out.append("%s:%d uses %s, which will not exist" % (u.file, u.line, pin))
+    return out
 
 
 def merge(old, fresh):
@@ -105,10 +200,45 @@ def merge(old, fresh):
                          % (b["position"], s["name"], new_rev, old_rev))
         if s.get("device") != b.get("device") and b.get("device"):
             s["device"] = b["device"]
+        if not _same_modules(s, b):
+            notes.append("slave %d %s: its modules changed (%s, the file had %s); propose it "
+                         "again, since its process data depends on them"
+                         % (b["position"], s["name"], ", ".join(b["modules"]) or "none",
+                            ", ".join(s["modules"]) or "none"))
+        elif "modules" in b and "modules" not in s:
+            s["modules"] = list(b["modules"])
         slaves.append(s)
 
     for s in gone:
         notes.append("slave %s at position %d: not on the bus, left out" % (_describe(s), s["position"]))
 
     cfg["slaves"] = slaves
+    # the LinuxCNC connections, without those of slaves that are gone
+    lc = copy.deepcopy(old.get("linuxcnc"))
+    if lc:
+        from . import config as cfgmod
+        prefixes = tuple(x + "." for s in gone for x in [s.get("name")] + cfgmod.axes(s) if x)
+        axes = {p[:-1] for p in prefixes}
+        own = tuple(x + "." for s in slaves for x in [s.get("name")] + cfgmod.axes(s) if x)
+        js = []
+        for j in lc.get("joints") or []:
+            if j.get("slave") in axes:
+                notes.append("joint %s: its drive %s is not on the bus; the connection is removed"
+                             % (j.get("joint"), j.get("slave")))
+            else:
+                js.append(j)
+        ns = []
+        for n in lc.get("nets") or []:
+            pins = [p for p in n.get("pins") or [] if not p.startswith(prefixes)]
+            if len(pins) != len(n.get("pins") or []):
+                notes.append("signal %s: pins of slaves not on the bus removed" % n.get("signal"))
+            if len(pins) >= 2 and any(p.startswith(own) for p in pins):
+                ns.append(dict(n, pins=pins))
+        for key, v in (("joints", js), ("nets", ns)):
+            if v:
+                lc[key] = v
+            else:
+                lc.pop(key, None)
+        if lc:
+            cfg["linuxcnc"] = lc
     return cfg, notes
