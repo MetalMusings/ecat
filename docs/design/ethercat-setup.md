@@ -557,12 +557,13 @@ plan below is ordered by them.
 
 ### a. A new machine, from a simulated configuration
 
-A user tries LinuxCNC's simulator, picks a configuration and copies it
-into `~/linuxcnc/configs/` with LinuxCNC's configuration picker. That
-copy is the starting point. Its own files are in the folder, but lines
-such as `LIB:core_sim.hal`, `LIB:sim_spindle_encoder.hal` and
-`LIB:simulated_home.hal` still point into LinuxCNC's `hallib`, where the
-simulation is.
+A user tries LinuxCNC's simulator and picks a configuration. The
+starting point is a folder in `~/linuxcnc/configs/` holding that
+configuration: a copy from LinuxCNC, whose repository (and installation)
+has all the simulated configurations under `configs/sim/`. The copy has
+the configuration's own files, but lines such as `LIB:core_sim.hal`,
+`LIB:sim_spindle_encoder.hal` and `LIB:simulated_home.hal` may still
+point into LinuxCNC's `hallib`, where much of the simulation is.
 
 - EtherCAT Setup starts from the copy's INI file and recognises the
   simulated parts: a joint's `motor-pos-cmd` looped back to
