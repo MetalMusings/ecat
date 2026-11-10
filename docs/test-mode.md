@@ -163,8 +163,11 @@ had the drives' `0x607D`, `0x607F` as settings):
   towards X− at about half the commanded speed (the drive needs 40 % of
   its rated torque for the friction), stops softly at the end stop with
   the torque at 70 to 80 %, and the drive never sets "homing attained",
-  with detect limits of 50 % and 60 %. Not usable on the ECT60 without
-  advice from Rtelligent (or a switch the drive can see).
+  with detect limits of 50 % and 60 %, because the drive's speed loop
+  had no integral gain (`0x2030:06` = 0). With `0x2030:06` = 100 and a
+  larger `0x2022` it ends: the drive sets "homing attained" and zeroes
+  the position at the stop, twice in a row
+  ([cia402.md](cia402.md#homing-by-the-drive)).
 - Z hangs in a spring suspension and moves when its drive is disabled:
   with the drive off, the axis can drift.
 - Everything the test wrote to the drives was read back and restored.

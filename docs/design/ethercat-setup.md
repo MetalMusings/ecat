@@ -544,7 +544,8 @@ described.
   ([cia402.md](../cia402.md)). PP and PV were tried on the plasma
   cutter's three ECT60 drives on 2026-11-10 ([test-mode.md](../test-mode.md#pp-pv-and-homing-at-the-machine)):
   the ECT60 sometimes acknowledges a set-point without starting (the
-  profile gives it again), and torque homing (method 36) does not end.
+  profile gives it again), and torque homing (method 36) ends only with an integral gain in
+  the drive's speed loop (`0x2030:06`).
   How drives differ in PP mode (the set-point handshake, profile velocity
   as process data or a setting) is handled as quirks ([Decision: profiles with quirks, no product
   drivers](#decision-profiles-with-quirks-no-product-drivers)).
