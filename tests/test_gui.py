@@ -336,6 +336,15 @@ class TestWindow(BusTest):
         self.assertIn("did not start", warn.call_args[0][2])
         self.assertIn("kernel EtherCAT master", warn.call_args[0][2])
 
+    def test_progress_shows_while_a_test_starts(self):
+        w = self.window()
+        page = w.test_page
+        w.status("ignored")
+        self.assertEqual(page.starting_text.text(), "")
+        page.starting.show()
+        w.status("3/5 Starting halrun")
+        self.assertEqual(page.starting_text.text(), "3/5 Starting halrun")
+
     def test_zero_at_start(self):
         w = self.window()
         s = w.session.slave(0)

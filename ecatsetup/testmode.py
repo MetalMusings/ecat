@@ -199,6 +199,7 @@ class TestRun:
     # -- start and stop
 
     def start(self, progress=lambda text: None, timeout=40.0):
+        progress("1/5 Checking that nothing else uses the network card")
         if os.path.exists(KERNEL_MASTER):
             raise TestError("The kernel EtherCAT master is loaded and may use the network card.\n"
                             "Stop it first: sudo systemctl stop ethercat")
@@ -207,6 +208,7 @@ class TestRun:
         problem = interface_problem(self.cfg)
         if problem:
             raise TestError(problem)
+        progress("2/5 Writing the test configuration")
         self.dir = tempfile.mkdtemp(prefix="ecatsetup-test-")
         cfg_path = os.path.join(self.dir, "ethercat.yaml")
         config.write(self.cfg, cfg_path)
@@ -214,13 +216,19 @@ class TestRun:
         with open(hal_path, "w") as f:
             f.write(hal_file(self.cfg, cfg_path, self.period))
         self.log_path = os.path.join(self.dir, "halrun.log")
-        progress("Starting ecat in halrun (log: %s)" % self.log_path)
+        progress("3/5 Starting halrun and loading the ecat component (log: %s)" % self.log_path)
         self.log = open(self.log_path, "w")
         self.proc = subprocess.Popen([HALRUN, "-I", "-f", hal_path], cwd=self.dir,
                                      stdin=subprocess.PIPE, stdout=self.log,
                                      stderr=subprocess.STDOUT, text=True)
-        end = time.monotonic() + timeout
+        begin = time.monotonic()
+        end = begin + timeout
+        told = 0
         while time.monotonic() < end:
+            waited = int(time.monotonic() - begin)
+            if waited > told:
+                told = waited
+                progress("4/5 Bringing the bus up: waiting for the slaves to reach OP (%d s)" % waited)
             if self.proc.poll() is not None:
                 self._closed()
                 raise TestError("halrun stopped:\n" + self.log_tail())
@@ -238,7 +246,7 @@ class TestRun:
                 raise TestError("ecat could not be started:\n" + ("\n".join(why) if why else tail))
             pins = self._try_pins("ecat.0.")
             if pins.get("ecat.0.all-op") and pins["ecat.0.all-op"].value == "TRUE":
-                progress("All slaves in OP")
+                progress("5/5 All slaves in OP")
                 return
             time.sleep(0.25)
         progress("Not all slaves reached OP in %g s; the test runs anyway" % timeout)

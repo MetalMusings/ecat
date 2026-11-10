@@ -30,7 +30,8 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout,
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
+    QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QScrollArea,
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
@@ -2230,6 +2231,18 @@ class TestPage(QWidget):
         self.watch.clicked.connect(win.start_watch)
         row.addWidget(self.watch)
         self.start_card.add(row)
+        self.starting = QWidget()
+        sl = QVBoxLayout(self.starting)
+        sl.setContentsMargins(0, 0, 0, 0)
+        self.starting_text = label("", "mono", wrap=True)
+        sl.addWidget(self.starting_text)
+        bar = QProgressBar()
+        bar.setRange(0, 0)          # busy: the number of steps is known, not how long each takes
+        bar.setTextVisible(False)
+        bar.setMaximumHeight(8)
+        sl.addWidget(bar)
+        self.starting.hide()
+        self.start_card.add(self.starting)
         lay.addWidget(self.start_card)
 
         # synchronisation, while the test runs
@@ -3361,6 +3374,9 @@ class MainWindow(QMainWindow):
 
     def status(self, text):
         self.statusBar().showMessage(text, 8000)
+        page = getattr(self, "test_page", None)
+        if page is not None and not page.starting.isHidden():
+            page.starting_text.setText(text)
 
     def positions(self):
         s = self.session
@@ -3543,6 +3559,7 @@ class MainWindow(QMainWindow):
 
     def _failed(self, text):
         self._finish_worker()
+        self.test_page.starting.hide()
         if text.startswith("Cannot reach a master"):
             self.session.bus_error = text
         self.set_messages([(RED, "", text.splitlines())])
@@ -3729,6 +3746,7 @@ class MainWindow(QMainWindow):
             return
 
         def started(_):
+            self.test_page.starting.hide()
             self.test = run
             self.test_timer.start()
             self.heartbeat.start()
@@ -3736,6 +3754,8 @@ class MainWindow(QMainWindow):
             self.set_messages([(GREEN, "", ["Test running; log: %s" % run.log_path])])
             if self.tabs.currentWidget() is not self.test_page:
                 self.tabs.setCurrentWidget(self.test_page)
+        self.test_page.starting_text.setText("Starting the test...")
+        self.test_page.starting.show()
         self.run("Starting the test...", lambda progress: run.start(progress), started)
 
     def start_watch(self):
