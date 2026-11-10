@@ -102,6 +102,31 @@ factor; check with a short run first.
 
 PP, PV and homing are built and unit-tested, not yet tried on a machine.
 
+### The plot
+
+While a drive can move, the *Move* card plots the last 10 seconds, one
+strip each with its own scale: the position (from where the test
+started), the following error (CSP: the command less the feedback) and
+the velocity (PP and PV: the position and the velocity). It is drawn from
+the pins, every 200 ms.
+
+## Watching LinuxCNC
+
+*Watch LinuxCNC that runs (read only)* on the *Test* page (or in the
+File menu) shows the pins of the `ecat` component in a LinuxCNC that
+runs, live, the same view as the test without anything that changes
+something: no output can be set, no drive limits are written, no drive is
+enabled, nothing is started or stopped, and *STOP* only ends the
+watching. It reads through `halcmd`, as the same user as LinuxCNC. The
+*Synchronisation* card works too, so a slave's sync and a drive's state
+can be seen while the machine does its work. It stops by itself when
+LinuxCNC ends.
+
+The configuration open in the window is used to name the slaves; open
+the one LinuxCNC runs (`[ETHERCAT]CONFIG` in its INI file). The
+*Troubleshoot* page has a *Symptoms* guide: what is seen in LinuxCNC,
+what it usually comes from, and where to look.
+
 ## First test at the machine
 
 Done on the plasma cutter's three axes (ECT60 drives in CSP) on

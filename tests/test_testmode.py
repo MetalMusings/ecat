@@ -176,6 +176,38 @@ class TestTestMode(unittest.TestCase):
                 run.set_pin(pins[name], True)
         self.assertTrue(run.writable(pins["io.out-1"]))
 
+    def test_watch_reads_and_sets_nothing(self):
+        with open(self.state, "w") as f:       # LinuxCNC runs
+            json.dump(PINS, f)
+        run = testmode.WatchRun(cfg(), 1000000)
+        run.start()
+        self.assertTrue(run.watching and run.running)
+        pins = run.pins("io.")
+        self.assertEqual(sorted(pins), ["io.in-1", "io.level", "io.out-1"])
+        for name in ("io.out-1", "x.enable"):
+            self.assertFalse(run.writable(run.pins()[name]))
+            with self.assertRaisesRegex(testmode.TestError, "only watched"):
+                run.set_pin(run.pins()[name], True)
+        with self.assertRaises(testmode.TestError):
+            run.setp_many({"io.out-1": "TRUE"})
+        run.disable_drives()
+        run.tick_watchdogs()
+        run.stop()
+        self.assertFalse(os.path.exists(self.state + ".setp"))
+        self.assertTrue(os.path.exists(self.state))     # LinuxCNC is left as it was
+        os.unlink(self.state)                           # LinuxCNC ends
+        with self.assertRaisesRegex(testmode.TestError, "has stopped"):
+            run.pins("ecat.0.")
+        self.assertFalse(run.running)
+
+    def test_watch_needs_linuxcnc_with_ecat(self):
+        with self.assertRaisesRegex(testmode.TestError, "does not run"):
+            testmode.WatchRun(cfg()).start()
+        with open(self.state, "w") as f:
+            json.dump({"io.in-1": ["bit", "OUT", "TRUE"]}, f)
+        with self.assertRaisesRegex(testmode.TestError, "ecat component is not loaded"):
+            testmode.WatchRun(cfg()).start()
+
     def test_refuses_with_hal_running(self):
         with open(self.state, "w") as f:
             json.dump(PINS, f)

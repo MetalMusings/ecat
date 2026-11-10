@@ -22,9 +22,10 @@ import copy
 import os
 import re
 import sys
+import time
 
 from PyQt5.QtCore import QThread, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence
+from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence, QPainter, QPen
 from PyQt5.QtWidgets import (
     QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout,
@@ -34,7 +35,7 @@ from PyQt5.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget)
 
 from . import (config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose,
-               quirks, settings, testmode, tool, update)
+               quirks, settings, symptoms, testmode, tool, update)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -310,7 +311,8 @@ class Header(QFrame):
         lay.addWidget(self.save)
         self.stop = QPushButton("STOP")
         self.stop.setObjectName("danger")
-        self.stop.setToolTip("Stop the test: outputs back to 0, halrun ends")
+        self.stop.setToolTip("Stop the test: outputs back to 0, halrun ends. When watching "
+                             "LinuxCNC: stop watching; LinuxCNC is not touched")
         self.stop.clicked.connect(win.stop_test)
         lay.addWidget(self.stop)
 
@@ -1380,6 +1382,12 @@ class TroubleshootPage(QWidget):
         self.events_table = table(["Time", "", "Event"], 2)
         self.events.add(self.events_table)
         lay.addWidget(self.events)
+        guide = Card("Symptoms", "What is seen in LinuxCNC, what it usually comes from, and "
+                                 "where to look here.")
+        self.guide_text = guide.add(label(wrap=True))
+        self.guide_text.setTextFormat(Qt.RichText)
+        self.guide_text.setText(symptoms.html())
+        lay.addWidget(guide)
         lay.addStretch(1)
         self.events_timer = QTimer(self)
         self.events_timer.setInterval(2000)
@@ -1603,6 +1611,89 @@ class PinTable(QTableWidget):
                     it.setText(pins[name].value)
 
 
+LANES = {"csp": [("position", "mm"), ("following error", "mm"), ("velocity", "mm/s")],
+         "pp": [("position", "mm"), ("velocity", "mm/s")],
+         "pv": [("position", "mm"), ("velocity", "mm/s")]}
+
+
+def plot_values(mode, v, start):
+    """{lane: value} of a drive's pins (v(name) -> text or None) for the
+    plot: the position from where the test started, the following error
+    (CSP: the command less the feedback) and the velocity."""
+    try:
+        fb = float(v("pos-fb"))
+    except (TypeError, ValueError):
+        return {}
+    out = {"position": fb - start}
+    if mode == "csp":
+        try:
+            out["following error"] = float(v("pos-cmd")) - fb
+        except (TypeError, ValueError):
+            pass
+    try:
+        out["velocity"] = float(v("velocity-fb"))
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+class Plot(QWidget):
+    """The last seconds of a drive's position, following error and velocity,
+    one strip each with its own scale."""
+
+    SECONDS = 10.0
+    COLOURS = {"position": "#2563eb", "following error": "#b42318", "velocity": "#1a7f37"}
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(170)
+        self.lanes = []
+        self.samples = []      # (time, {lane: value})
+
+    def reset(self, mode):
+        self.lanes = LANES.get(mode, LANES["csp"])
+        self.samples = []
+        self.update()
+
+    def add(self, values, now=None):
+        now = time.monotonic() if now is None else now
+        if values:
+            self.samples = [x for x in self.samples if now - x[0] <= self.SECONDS] + [(now, values)]
+            self.update()
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        n = max(len(self.lanes), 1)
+        h, w = self.height() / n, self.width()
+        p.setFont(mono())
+        now = self.samples[-1][0] if self.samples else 0.0
+        for i, (lane, unit) in enumerate(self.lanes):
+            top = i * h
+            pts = [(t, v[lane]) for t, v in self.samples if lane in v]
+            p.setPen(QPen(QColor("#9ca3af"), 1))
+            p.drawLine(0, int(top + h - 1), w, int(top + h - 1))
+            if not pts:
+                continue
+            lo, hi = min(x[1] for x in pts), max(x[1] for x in pts)
+            if hi - lo < 1e-9:
+                lo, hi = lo - 0.5, hi + 0.5
+            pad = (hi - lo) * 0.1
+            lo, hi = lo - pad, hi + pad
+            line = QPen(QColor(self.COLOURS.get(lane, "#000000")), 2)
+            p.setPen(line)
+            prev = None
+            for t, val in pts:
+                x = w - (now - t) / self.SECONDS * (w - 150) - 0
+                y = top + 4 + (hi - val) / (hi - lo) * (h - 10)
+                if prev:
+                    p.drawLine(int(prev[0]), int(prev[1]), int(x), int(y))
+                prev = (x, y)
+            p.setPen(QPen(QColor(self.COLOURS.get(lane, "#000000"))))
+            p.drawText(6, int(top + 14), "%s %+.3f %s" % (lane, pts[-1][1], unit))
+            p.drawText(6, int(top + h - 5), "%+.3f..%+.3f" % (lo + pad, hi - pad))
+        p.end()
+
+
 class MoveCard(Card):
     """Moving one drive: limits written to it, hold-to-enable, and by its
     mode: jog (CSP), steps (PP) or run (PV); home if it has hm."""
@@ -1618,6 +1709,7 @@ class MoveCard(Card):
         super().__init__("Move")
         self.win = win
         self.slave = None
+        self.plot_for = None
         # before: the limits
         self.setup = QWidget()
         form = QFormLayout(self.setup)
@@ -1706,6 +1798,8 @@ class MoveCard(Card):
         self.where = label("", "mono")
         self.where.setFont(mono())
         ml.addWidget(self.where)
+        self.plot = Plot()
+        ml.addWidget(self.plot)
         self.add(self.moving)
         self.lay.addStretch(1)
 
@@ -1729,11 +1823,14 @@ class MoveCard(Card):
         self.axis_row.labelForField(self.axis).setVisible(len(names) > 1)
         self.slave = slave
         run = self.win.test
-        ok = run is not None and drivetest.testable(slave)
+        ok = run is not None and not run.watching and drivetest.testable(slave)
         dt = self.test()
         mode = drivetest.mode_of(slave)
         self.setup.setVisible(ok and (dt is None or not dt.prepared))
         self.moving.setVisible(dt is not None and dt.prepared)
+        if dt is not None and dt.prepared and self.plot_for != (dt.name, dt.mode):
+            self.plot_for = (dt.name, dt.mode)
+            self.plot.reset(dt.mode)
         self.jog_row.setVisible(mode in ("csp", "pp"))
         self.run_row.setVisible(mode == "pv")
         self.home_button.setVisible(drivetest.can_home(slave))
@@ -1743,7 +1840,9 @@ class MoveCard(Card):
             tip += ". In PP the drive plans the step itself, from where it stands"
         for b in (self.jog_minus, self.jog_plus):
             b.setToolTip(tip)
-        if not ok:
+        if run is not None and run.watching:
+            self.unsupported.setText("LinuxCNC is only watched: nothing here moves the drive.")
+        elif not ok:
             self.unsupported.setText("Only cia402 drives in CSP, PP or PV, or with hm in their "
                                      "modes, can be moved in the test.")
         else:
@@ -1842,6 +1941,7 @@ class MoveCard(Card):
         dt = self.test()
         if dt is None or not dt.prepared:
             return
+        self.plot.add(plot_values(dt.mode, v, dt.start))
         try:
             fb = float(v("pos-fb"))
         except (TypeError, ValueError):
@@ -1960,6 +2060,11 @@ class TestPage(QWidget):
         row = QHBoxLayout()
         row.addWidget(self.start)
         row.addStretch(1)
+        self.watch = QPushButton("Watch LinuxCNC that runs (read only)")
+        self.watch.setToolTip("Show the pins of the ecat component in a running LinuxCNC, live. "
+                              "Nothing is set; the machine is not touched.")
+        self.watch.clicked.connect(win.start_watch)
+        row.addWidget(self.watch)
         self.start_card.add(row)
         lay.addWidget(self.start_card)
 
@@ -2152,6 +2257,7 @@ class TestPage(QWidget):
         self.slave.setCurrentIndex(self.slave.findData(win.current))
         self.slave.blockSignals(False)
         self.start.setEnabled(win.session.cfg is not None and not win.busy)
+        self.watch.setEnabled(win.session.cfg is not None and not win.busy)
 
     def show_slave(self):
         """Lay the page out for the chosen slave and the test's state."""
@@ -2160,7 +2266,12 @@ class TestPage(QWidget):
         running = run is not None and run.running
         self.banner.setVisible(running)
         self.start_card.setVisible(not running)
-        if running:
+        if running and run.watching:
+            self.banner_text.setText(
+                "<b>Watching LinuxCNC</b> &nbsp; The pins are read live from its HAL, every "
+                "200 ms. Nothing is set, started or stopped from here; STOP (top right) ends "
+                "the watching only.")
+        elif running:
             self.banner_text.setText(
                 "<b>Test running</b> &nbsp; ecat in halrun, servo %s. Outputs set here go back "
                 "to 0 when the test stops (STOP, top right). A drive moves only while a button is "
@@ -3014,7 +3125,8 @@ class MainWindow(QMainWindow):
         self.a_esi = act("Add ESI files...", self.add_esi)
         menu.addSeparator()
         self.a_test = act("Start the I/O test", self.start_test)
-        self.a_test_stop = act("Stop the test", self.stop_test)
+        self.a_watch = act("Watch LinuxCNC that runs (read only)", self.start_watch)
+        self.a_test_stop = act("Stop the test or the watching", self.stop_test)
         menu.addSeparator()
         act("Quit", self.close, QKeySequence.Quit)
         self.header.menu_button.setMenu(menu)
@@ -3090,8 +3202,9 @@ class MainWindow(QMainWindow):
                                                 " (from INI)" if s.period else "")) if x))
         testing = self.test is not None
         if testing:
-            if not self.header.status.text().startswith("● TEST"):
-                set_pill(self.header.status, "● TEST MODE · I/O", "amber")
+            if not self.header.status.text().startswith(("● TEST", "● WATCH")):
+                set_pill(self.header.status, "● WATCHING LinuxCNC" if self.test.watching
+                         else "● TEST MODE · I/O", "blue" if self.test.watching else "amber")
         elif s.bus_error and not s.bus:
             set_pill(self.header.status, "● No master", "grey")
         elif s.bus:
@@ -3114,6 +3227,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_read, self.a_import, self.a_open, self.a_esi):
             a.setEnabled(not self.busy)
         self.a_test.setEnabled(has_cfg and not self.busy and not testing)
+        self.a_watch.setEnabled(has_cfg and not self.busy and not testing)
         self.a_test_stop.setEnabled(testing and not self.busy)
         if self.current is None or (self.current != MASTER_ITEM and
                                     self.current not in self.positions()):
@@ -3396,6 +3510,20 @@ class MainWindow(QMainWindow):
                 self.tabs.setCurrentWidget(self.test_page)
         self.run("Starting the test...", lambda progress: run.start(progress), started)
 
+    def start_watch(self):
+        if self.session.cfg is None or self.test is not None:
+            return
+        run = testmode.WatchRun(copy.deepcopy(self.session.cfg), self.session.period)
+
+        def started(_):
+            self.test = run
+            self.test_timer.start()
+            self.set_messages([(GREEN, "", ["Watching LinuxCNC: read only."])])
+            if self.tabs.currentWidget() is not self.test_page:
+                self.tabs.setCurrentWidget(self.test_page)
+            self.refresh()
+        self.run("Looking for LinuxCNC...", lambda progress: run.start(progress), started)
+
     def stop_test(self):
         if self.test is None:
             return
@@ -3419,9 +3547,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, TITLE, "Not all of the drives' values could be written "
                                     "back; they are kept in %s:\n%s"
                                     % (drivetest.RESTORE_FILE, "\n".join(failed)))
+            watched = run.watching
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
+            if watched:
+                self.set_messages([(GREY, "", ["Stopped watching; LinuxCNC was not touched."])])
+                self.refresh()
+                return
             self.set_messages([(GREY, "", [
                 "Test stopped. The free-running master does not come back by itself: to read "
                 "the bus again, sudo ethercat-uspace start"])])
@@ -3480,8 +3613,11 @@ class MainWindow(QMainWindow):
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
-            self.set_messages([(RED, "", ["The test stopped by itself (halrun ended):"] +
-                                tail.splitlines())])
+            if run.watching:
+                self.set_messages([(AMBER, "", ["LinuxCNC has stopped: the watching ended."])])
+            else:
+                self.set_messages([(RED, "", ["The test stopped by itself (halrun ended):"] +
+                                    tail.splitlines())])
             self.refresh()
             return
         try:
@@ -3505,10 +3641,13 @@ class MainWindow(QMainWindow):
         except ValueError:
             responding = "?"
         all_op = get("all-op") == "TRUE"
-        set_pill(self.header.status, "● TEST MODE · %s · %s, %s slaves%s" % (
+        set_pill(self.header.status, "● %s · %s · %s, %s slaves%s" % (
+            "WATCHING" if run.watching else "TEST MODE",
+            "read only" if run.watching else
             "drive can move" if any(dt.prepared for dt in self.drive_tests.values()) else "I/O",
             "all OP" if all_op else "NOT all OP", responding,
-            "" if get("link-up") == "TRUE" else ", link DOWN"), "amber" if all_op else "red")
+            "" if get("link-up") == "TRUE" else ", link DOWN"),
+            ("blue" if all_op else "red") if run.watching else "amber" if all_op else "red")
         if self.tabs.currentWidget() is self.test_page:
             self.test_page.show_sync(lambda n: m["ecat.0." + n].value if "ecat.0." + n in m
                                      else None, run.period)

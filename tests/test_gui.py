@@ -421,6 +421,28 @@ class TestCards(unittest.TestCase):
         self.assertTrue(gui.source_rows(p, SimpleNamespace(coe=None))[2][0])
 
     @unittest.skipIf(gui is None, "PyQt5 is not installed")
+    def test_plot(self):
+        pins = {"pos-fb": "12.5", "pos-cmd": "13.0", "velocity-fb": "-4"}
+        self.assertEqual(gui.plot_values("csp", pins.get, 10.0),
+                         {"position": 2.5, "following error": 0.5, "velocity": -4.0})
+        self.assertEqual(sorted(gui.plot_values("pp", pins.get, 10.0)), ["position", "velocity"])
+        self.assertEqual(gui.plot_values("csp", {}.get, 0.0), {})
+        app = QApplication.instance() or QApplication([])
+        plot = gui.Plot()
+        plot.reset("csp")
+        for i in range(200):
+            plot.add({"position": i / 10, "velocity": 1.0}, now=i * 0.2)
+        self.assertIn(len(plot.samples), (50, 51))     # the last 10 s
+        plot.resize(500, 200)
+        self.assertFalse(plot.grab().isNull())          # paints
+        del app
+
+    def test_symptoms(self):
+        from ecatsetup import symptoms
+        self.assertTrue(all(len(x) == 3 and all(x) for x in symptoms.SYMPTOMS))
+        self.assertIn("zero-at-start", symptoms.html())
+
+    @unittest.skipIf(gui is None, "PyQt5 is not installed")
     def test_sync_rows(self):
         pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
                 "pll-err": "120", "shift-time": "500000", "turnaround-cycles": "2"}

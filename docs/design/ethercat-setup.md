@@ -738,7 +738,9 @@ in this order:
 5. **Bringing up a slave** (c): the sync card, where proposals come
    from, ESI file handling, Save as quirk file. Built 2026-11-10
    ([bring-up.md](../bring-up.md)).
-6. **Watching while LinuxCNC runs and the plot** (d, e).
+6. **Watching while LinuxCNC runs and the plot** (d, e). Built
+   2026-11-10 ([test-mode.md](../test-mode.md#watching-linuxcnc)); the
+   watching is tried against a fake HAL, not a running LinuxCNC.
 7. **The start page**, once the parts exist.
 
 ## Mockups

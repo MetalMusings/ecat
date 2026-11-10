@@ -178,6 +178,8 @@ def interface_problem(cfg):
 
 
 class TestRun:
+    watching = False    # True for WatchRun: nothing may be set
+
     def __init__(self, cfg, period=None):
         errors = config.check(cfg)
         if errors:
@@ -382,3 +384,70 @@ class TestRun:
             text = str(int(value, 0) if isinstance(value, str) else int(value))
         halcmd("setp", pin.name, text)
         self.written[pin.name] = pin.type
+
+
+class WatchRun(TestRun):
+    """A LinuxCNC that runs, watched through its HAL: the pins read live,
+    nothing set, nothing started or stopped. It has the TestRun's reading
+    side, so that the Test page shows the same view; whatever would change
+    something is refused or does nothing."""
+
+    watching = True
+
+    def __init__(self, cfg, period=None):
+        # no check of the configuration: it is what runs that is shown
+        self.cfg = cfg
+        self.period = period or 1000000
+        self.read_only = ("",)
+        self.drives = []
+        self.cia402 = []
+        self.heartbeat = 0
+        self.proc = None
+        self.dir = None
+        self.log_path = None
+        self.written = {}
+        self.gone = False
+
+    def start(self, progress=lambda text: None, timeout=40.0):
+        if not hal_running():
+            raise TestError("LinuxCNC does not run: there is no HAL session to watch")
+        pins = self._try_pins("ecat.0.")
+        if "ecat.0.all-op" not in pins:
+            raise TestError("LinuxCNC runs, but the ecat component is not loaded in it")
+        progress("Watching LinuxCNC")
+
+    @property
+    def running(self):
+        return not self.gone
+
+    def pins(self, prefix=""):
+        try:
+            out = super().pins(prefix)
+        except (TestError, OSError):
+            out = {}
+        if not out and not hal_running():
+            self.gone = True
+            raise TestError("LinuxCNC's HAL cannot be read: it has stopped")
+        return out
+
+    def writable(self, pin):
+        return False
+
+    def set_pin(self, pin, value):
+        raise TestError("%s: LinuxCNC is only watched; nothing is set" % pin.name)
+
+    def setp_many(self, values):
+        if values:
+            raise TestError("LinuxCNC is only watched; nothing is set")
+
+    def stop(self, timeout=20.0):
+        pass
+
+    def take_down(self, timeout=2.0):
+        return False
+
+    def disable_drives(self):
+        pass
+
+    def tick_watchdogs(self):
+        pass
