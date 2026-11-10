@@ -641,6 +641,8 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   copy_str(sc->type_name, "generic");
   sc->vid = get_int(c, ident, "vendor", 0);
   sc->pid = get_int(c, ident, "product", 0);
+  sc->revision = get_int(c, ident, "revision", 0);
+  copy_str(sc->device, get_str(c, s, "device"));
   sc->configPdos = get_bool(c, s, "configure-pdos", 1);
   c->cia402 = profile != NULL && !strcmp(profile, "cia402");
   c->cia402_modes = 0;
@@ -790,6 +792,7 @@ char *ecat_config_load(const char *path, size_t *length) {
   copy_str(mc->name, "0");
   copy_str(mc->interface, get_str(&c, master, "interface"));
   copy_str(mc->transport, get_str(&c, master, "transport"));
+  mc->startCheck = get_bool(&c, master, "start-check", 1);
   mc->appTimePeriod = 0;  // the servo thread's period, see ecat_config.h
   mc->refClockSyncCycles = get_int(&c, mdc, "ref-clock-sync-cycles", 0);
   // true: the servo thread follows the DC reference clock (lcec's

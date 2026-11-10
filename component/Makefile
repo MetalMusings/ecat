@@ -31,7 +31,7 @@ endif
 CFLAGS_ECAT := $(EXTRA_CFLAGS) -Wall -I. -I$(USPACE_BUILD)/include -MMD -MP
 
 objs := lcec_main.o lcec_ethercat.o lcec_pins.o lcec_malloc.o lcec_lookup.o \
-	lcec_modparam.o lcec_devicelist.o lcec_autoshift.o ecat_config.o devices/lcec_generic.o devices/ecat_cia402.o devices/ecat_encoder.o
+	lcec_modparam.o lcec_devicelist.o lcec_autoshift.o ecat_config.o ecat_startcheck.o devices/lcec_generic.o devices/ecat_cia402.o devices/ecat_encoder.o
 
 .PHONY: all install clean check
 all: ecat.so
@@ -56,11 +56,12 @@ ecat.so: $(objs)
 
 # Unit tests: a device's code with a fake of HAL, the master and lcec
 # (tests/fake.c), so that its read and write functions run without a bus.
-tests := tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift
+tests := tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck
 tests/test_cia402: tests/test_cia402.o tests/fake.o devices/ecat_cia402.o
 tests/test_encoder: tests/test_encoder.o tests/fake.o devices/ecat_encoder.o
 tests/test_config: tests/test_config.o tests/fake.o ecat_config.o
 tests/test_autoshift: tests/test_autoshift.o tests/fake.o lcec_autoshift.o
+tests/test_startcheck: tests/test_startcheck.o tests/fake.o ecat_startcheck.o
 -include tests/*.d
 
 $(tests):

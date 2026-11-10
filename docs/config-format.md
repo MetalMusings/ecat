@@ -98,6 +98,7 @@ run in.
 |---|---|
 | `interface` | Network interface of the bus, such as `enp2s0`. |
 | `transport` | `raw` (default, any network card), `xdp-native` (driver with XDP support, such as `igc` or `igb`) or `xdp-skb`. |
+| `start-check` | `true` (default): the component stops at load when the bus differs from the file (below). `false`: it only warns, and starts with the slaves that match. |
 | `dc.ref-clock-sync-cycles` | How often the DC clocks are synchronised, in cycles. |
 | `dc.servo-thread-follows-ref-clock` | `true`: LinuxCNC's servo thread is steered to follow the DC reference clock (the first DC slave); `false`: the slaves' clocks follow the PC's clock. Called `sync-to-ref-clock` before; that name is an error now. |
 | `dc.sync0-shift-ns` | Time from the nominal start of the servo period to SYNC0, for all DC slaves, in ns; or `auto` (below). *Global shift time* in EtherCAT Setup, `globalShiftTime` in lcec. |
@@ -137,6 +138,34 @@ anyway if it is not. The pins `<slave>.slave-dc-sync-failed`,
 this happened, for example to keep the machine from being switched on.
 They need the userspace master of linuxcnc-ethercat-uspace 0.5 or later;
 with older master headers they stay false.
+
+### The start check
+
+When the component is loaded (`loadrt ecat`), before it configures the
+slaves, it:
+
+- refuses to start when the kernel EtherCAT master is loaded and its
+  configuration (`/etc/ethercat.conf`, `MASTER0_DEVICE`) gives it the same
+  network card, by name, MAC address or `ff:ff:ff:ff:ff:ff`; or when that
+  configuration cannot be read. Two masters on one card do not work:
+  `sudo systemctl stop ethercat` (and `disable` to keep it stopped);
+- waits for the link (up to 10 s) and the master's scan of the bus;
+- compares each slave in the file with the slave at its position:
+  vendor and product must be the same. A different or missing slave stops
+  the load with one line per slave, for example
+
+  ```
+  ecat: slave 2 is EL2008 (vendor 0x00000002, product 0x07D83052); the configuration expects EL1008 there (vendor 0x00000002, product 0x03F03052) as io
+  ecat: the bus does not match the configuration, so ecat does not start: run EtherCAT Setup (ecatsetup --gui) to update it, or set master: start-check: false to start anyway
+  ```
+
+  A different revision is only a warning, and slaves after the last one
+  in the file are only mentioned: they stay in PREOP, unused.
+
+With `master: start-check: false`, a difference or a missing link is a
+warning and the component starts as before: the master configures the
+slaves that match and leaves the others alone. The check of the kernel
+master is always made.
 
 ## slaves
 

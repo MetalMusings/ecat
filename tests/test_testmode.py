@@ -23,7 +23,11 @@ import json, os, sys
 state = os.environ["FAKE_HAL_STATE"]
 if os.environ.get("FAKE_HAL_FAIL"):
     # as halrun -I: the error in the file is reported, and it goes on reading commands
-    print("ecat: userspace master: cannot start master on enp2s0", flush=True)
+    print("ecat: slave 1 is EL2008 (vendor 0x00000002, product 0x07D83052); the configuration "
+          "expects d there", flush=True)
+    print("ecat: the bus does not match the configuration, so ecat does not start", flush=True)
+    print("ecat: failure, clearing config", flush=True)
+    print("ecat: exiting", flush=True)
     print("%s:2: insmod for ecat failed, returned -1" % sys.argv[-1], flush=True)
     for line in sys.stdin:
         pass
@@ -200,8 +204,13 @@ class TestTestMode(unittest.TestCase):
         with mock.patch.dict(os.environ, {"FAKE_HAL_FAIL": "1"}):
             run = testmode.TestRun(cfg())
             t0 = time.monotonic()
-            with self.assertRaisesRegex(testmode.TestError, "(?s)ecat could not be started.*insmod for ecat failed"):
+            with self.assertRaises(testmode.TestError) as e:
                 run.start(timeout=10)
+            # the component's own reasons, not halrun's or its farewell
+            self.assertEqual(str(e.exception), "ecat could not be started:\n"
+                             "ecat: slave 1 is EL2008 (vendor 0x00000002, product 0x07D83052); "
+                             "the configuration expects d there\n"
+                             "ecat: the bus does not match the configuration, so ecat does not start")
             self.assertLess(time.monotonic() - t0, 5)
             self.assertFalse(run.running)
 

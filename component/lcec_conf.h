@@ -79,6 +79,7 @@ typedef struct {
   char name[LCEC_CONF_STR_MAXLEN];
   char interface[LCEC_CONF_STR_MAXLEN];  ///< Network interface for the userspace master (lcec_uspace); empty if not given.
   char transport[LCEC_CONF_STR_MAXLEN];  ///< Transport for the userspace master (lcec_uspace), such as raw; empty if not given.
+  int startCheck;  ///< master.start-check: 1 (default) stops when the bus differs, 0 only warns.
 } LCEC_CONF_MASTER_T;
 
 typedef struct {
@@ -96,6 +97,8 @@ typedef struct {
   size_t idnConfigLength;
   unsigned int modParamCount;
   char name[LCEC_CONF_STR_MAXLEN];
+  uint32_t revision;                    ///< identity.revision, 0 if not given (for the start check).
+  char device[LCEC_CONF_STR_MAXLEN];    ///< The device name in the file (for the start check).
 } LCEC_CONF_SLAVE_T;
 
 typedef struct {

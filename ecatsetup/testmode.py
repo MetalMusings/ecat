@@ -236,7 +236,8 @@ class TestRun:
                     self.proc.terminate()
                     self.proc.wait(5)
                 self._closed()
-                raise TestError("ecat could not be started:\n" + tail)
+                why = self.ecat_errors()
+                raise TestError("ecat could not be started:\n" + ("\n".join(why) if why else tail))
             pins = self._try_pins("ecat.0.")
             if pins.get("ecat.0.all-op") and pins["ecat.0.all-op"].value == "TRUE":
                 progress("All slaves in OP")
@@ -341,6 +342,19 @@ class TestRun:
         self.log.close()
         self.proc = None
         self.written = {}
+
+    # what ecat says when it gives up, which says nothing on its own
+    NOISE = ("requesting master", "failure, clearing config", "exiting", "returning -")
+
+    def ecat_errors(self):
+        """The component's own messages in the log (the start check's among
+        them), without the lines it adds when it gives up."""
+        try:
+            with open(self.log_path, errors="replace") as f:
+                lines = [x.rstrip("\n") for x in f if x.startswith("ecat: ")]
+        except (OSError, TypeError):
+            return []
+        return [x for x in lines if not x[6:].startswith(self.NOISE)]
 
     def log_tail(self, lines=15):
         try:

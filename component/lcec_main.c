@@ -29,6 +29,16 @@
 #include "devices/ecat_cia402.h"
 #include "devices/ecat_encoder.h"
 #include "ecat_config.h"
+#include "ecat_startcheck.h"
+
+// slaves the start check compares at most
+#define LCEC_START_CHECK_MAX 512
+
+// Exported by the userspace master from linuxcnc-ethercat-uspace 1.1. Weak,
+// so that ecat still loads with an older master; the start check then only
+// checks for the kernel master.
+#pragma weak ecrt_master
+#pragma weak ecrt_master_get_slave
 #include "lcec.h"
 #include "rtapi_app.h"
 //#include <linuxcnc/rtapi_mutex.h>
@@ -283,6 +293,136 @@ static int lcec_uspace_take_interface(const char *interface) {
   return 0;
 }
 
+/// @brief Refuse to share the network card with the kernel master.
+///
+/// Both would send on the card. The kernel master is loaded when
+/// /dev/EtherCAT0 exists; its configuration says which card it takes.
+static int lcec_uspace_kernel_master_check(const char *interface) {
+  static const char *confs[] = {"/etc/ethercat.conf", "/etc/sysconfig/ethercat", NULL};
+  static char text[8192];
+  char mac[32] = "", path[128], what[160];
+  const char *conf = NULL;
+  size_t n = 0;
+  FILE *f;
+  int i;
+
+  if (access("/dev/EtherCAT0", F_OK) != 0) {
+    return 0;
+  }
+  snprintf(path, sizeof(path), "/sys/class/net/%s/address", interface);
+  if ((f = fopen(path, "r")) != NULL) {
+    if (fgets(mac, sizeof(mac), f) == NULL) mac[0] = 0;
+    mac[strcspn(mac, "\n")] = 0;
+    fclose(f);
+  }
+  for (i = 0; confs[i] != NULL && conf == NULL; i++) {
+    if ((f = fopen(confs[i], "r")) != NULL) {
+      n = fread(text, 1, sizeof(text) - 1, f);
+      text[n] = 0;
+      fclose(f);
+      conf = confs[i];
+    }
+  }
+  if (conf == NULL) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX
+        "the kernel EtherCAT master is loaded (/dev/EtherCAT0) and its configuration cannot be read, so it may use %s too. "
+        "Stop it first: sudo systemctl stop ethercat (and disable it to keep it stopped)\n", interface);
+    return -1;
+  }
+  if (ecat_kernel_master_uses(text, interface, mac[0] ? mac : NULL, what, sizeof(what))) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX
+        "the kernel EtherCAT master is loaded and uses %s (%s in %s); two masters on one card do not work. "
+        "Stop it first: sudo systemctl stop ethercat (and disable it to keep it stopped)\n", interface, what, conf);
+    return -1;
+  }
+  return 0;
+}
+
+static void lcec_start_check_report(int level, const char *text, void *arg) {
+  int stop = *(int *)arg;
+  int prio = level == ECAT_CHECK_ERROR ? (stop ? RTAPI_MSG_ERR : RTAPI_MSG_WARN)
+                                       : (level == ECAT_CHECK_WARN ? RTAPI_MSG_WARN : RTAPI_MSG_INFO);
+  rtapi_print_msg(prio, LCEC_MSG_PFX "%s\n", text);
+}
+
+/// @brief The start check: compare the bus with the configuration.
+///
+/// Waits for the master's scan (link up, then all expected slaves, or
+/// LCEC_START_CHECK_SCAN_MS after the link came up), then compares
+/// position, vendor and product of each configured slave. With
+/// master.start-check (the default) a difference stops the load with a
+/// message per slave; with start-check: false it is only a warning, and
+/// the master configures what it can, as before.
+#define LCEC_START_CHECK_LINK_MS 10000
+#define LCEC_START_CHECK_SCAN_MS 5000
+static int lcec_start_check(lcec_master_t *master) {
+  ec_master_info_t info;
+  static ecat_expect_t expect[LCEC_START_CHECK_MAX];
+  static ecat_found_t found[LCEC_START_CHECK_MAX];
+  lcec_slave_t *slave;
+  int n_expect = 0, need = 0, waited = 0, link_at = -1, settled = 0, n_found, i, errors;
+  int stop = master->start_check;
+
+  if (ecrt_master == NULL || ecrt_master_get_slave == NULL) {
+    rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX
+        "start check: the bus is not compared with the configuration: it needs linuxcnc-ethercat-uspace 1.1 or later\n");
+    return 0;
+  }
+  for (slave = master->first_slave; slave != NULL && n_expect < LCEC_START_CHECK_MAX; slave = slave->next) {
+    expect[n_expect].position = slave->index;
+    expect[n_expect].vid = slave->vid;
+    expect[n_expect].pid = slave->pid;
+    expect[n_expect].revision = slave->revision;
+    expect[n_expect].device = slave->device;
+    expect[n_expect].name = slave->name;
+    if (slave->index + 1 > need) need = slave->index + 1;
+    n_expect++;
+  }
+  for (;;) {
+    if (ecrt_master(master->master, &info) != 0) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "start check: cannot read the master's state\n");
+      return stop ? -1 : 0;
+    }
+    if (info.link_up && link_at < 0) link_at = waited;
+    if (info.link_up && !info.scan_busy && info.slave_count >= (unsigned)need) {
+      if (++settled >= 2) break;  // the same twice: the scan is done
+    } else {
+      settled = 0;
+    }
+    if (link_at < 0 && waited >= LCEC_START_CHECK_LINK_MS) {
+      rtapi_print_msg(stop ? RTAPI_MSG_ERR : RTAPI_MSG_WARN, LCEC_MSG_PFX
+          "start check: no link on %s after %d s: is the cable in, and the first slave powered?\n",
+          master->interface, LCEC_START_CHECK_LINK_MS / 1000);
+      return stop ? -1 : 0;
+    }
+    if (link_at >= 0 && waited - link_at >= LCEC_START_CHECK_SCAN_MS && !info.scan_busy) break;
+    usleep(100000);
+    waited += 100;
+  }
+  n_found = info.slave_count < LCEC_START_CHECK_MAX ? (int)info.slave_count : LCEC_START_CHECK_MAX;
+  for (i = 0; i < n_found; i++) {
+    ec_slave_info_t si;
+    memset(&found[i], 0, sizeof(found[i]));
+    if (ecrt_master_get_slave(master->master, i, &si) == 0) {
+      found[i].vid = si.vendor_id;
+      found[i].pid = si.product_code;
+      found[i].revision = si.revision_number;
+      strncpy(found[i].name, si.name, sizeof(found[i].name) - 1);
+    }
+  }
+  errors = ecat_startcheck_compare(expect, n_expect, found, n_found, lcec_start_check_report, &stop);
+  if (errors) {
+    rtapi_print_msg(stop ? RTAPI_MSG_ERR : RTAPI_MSG_WARN, LCEC_MSG_PFX
+        "the bus does not match the configuration%s: run EtherCAT Setup (ecatsetup --gui) to update it%s\n",
+        stop ? ", so ecat does not start" : "",
+        stop ? ", or set master: start-check: false to start anyway" : "");
+    return stop ? -1 : 0;
+  }
+  rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "start check: the bus matches the configuration (%d slaves, %.1f s)\n",
+      n_found, waited / 1000.0);
+  return 0;
+}
+
 /// @brief Start a master inside this process (userspace IgH master).
 ///
 /// The kernel master gets its network interface from /etc/ethercat.conf.
@@ -316,6 +456,10 @@ static ec_master_t *lcec_request_master(lcec_master_t *master) {
     // rtapi_app is setuid root but keeps the user's fsuid, which may not
     // create the socket in /run. Use fsuid 0 while the library makes it.
     uid_t user = setfsuid(0);
+    if (lcec_uspace_kernel_master_check(interface) < 0) {
+      setfsuid(user);
+      return NULL;
+    }
     // Before ecrt_lib_init(): it replaces the socket of an ec_master daemon.
     if (lcec_uspace_take_interface(interface) < 0) {
       setfsuid(user);
@@ -758,6 +902,9 @@ int rtapi_app_main(void) {
       goto fail2;
     }
 #ifdef EC_USPACE_MASTER
+    if (lcec_start_check(master) != 0) {
+      goto fail2;
+    }
     if (lcec_start_activator(master) != 0) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s: cannot start the activation thread\n", master->name);
       goto fail2;
@@ -1050,6 +1197,7 @@ int lcec_parse_config(void) {
         master->global_shift_time = master_conf->globalShiftTime;
         // sync0-shift-ns: auto, see ecat_config_dc
         master->auto_shift = master_conf->autoShift;
+        master->start_check = master_conf->startCheck;
 
         // add master to list
         LCEC_LIST_APPEND(first_master, last_master, master);
@@ -1085,6 +1233,9 @@ int lcec_parse_config(void) {
         slave->index = slave_conf->index;
         strncpy(slave->name, slave_conf->name, LCEC_CONF_STR_MAXLEN);
         slave->name[LCEC_CONF_STR_MAXLEN - 1] = 0;
+        slave->revision = slave_conf->revision;
+        strncpy(slave->device, slave_conf->device, LCEC_CONF_STR_MAXLEN);
+        slave->device[LCEC_CONF_STR_MAXLEN - 1] = 0;
         slave->master = master;
 
         // add slave to list

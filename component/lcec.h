@@ -230,6 +230,7 @@ typedef struct lcec_master {
   char name[LCEC_CONF_STR_MAXLEN];  ///< Name of master.
   char interface[LCEC_CONF_STR_MAXLEN];  ///< Network interface for the userspace master; empty if not given.
   char transport[LCEC_CONF_STR_MAXLEN];  ///< Transport for the userspace master; empty if not given.
+  int start_check;                       ///< Stop at load when the bus differs from the configuration.
   ec_master_t *master;              ///< EtherCAT master structure.
   unsigned long mutex;              ///< Mutex for locking operations.
   ec_pdo_entry_reg_t *pdo_entry_regs;
@@ -326,6 +327,8 @@ typedef struct lcec_slave {
   char name[LCEC_CONF_STR_MAXLEN];           ///< Slave name.
   uint32_t vid;                              ///< Slave's vendor ID
   uint32_t pid;                              ///< Slave's EtherCAT PID/device ID.
+  uint32_t revision;                         ///< Revision the configuration was made with; 0 if not given.
+  char device[LCEC_CONF_STR_MAXLEN];         ///< The device name in the configuration.
   ec_sync_info_t *sync_info;                 ///< Sync Manager configuration.
   ec_slave_config_t *config;                 ///< Configuration data.
   ec_slave_config_state_t state;             ///< Slave state.

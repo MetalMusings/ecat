@@ -165,6 +165,8 @@ def check(cfg):
     master = cfg.get("master") or {}
     if master.get("transport", "raw") not in TRANSPORTS:
         err("master: unknown transport %r" % master.get("transport"))
+    if not isinstance(master.get("start-check", True), bool):
+        err("master.start-check: must be true or false")
     mdc = master.get("dc") or {}
     if "sync-to-ref-clock" in mdc:
         err("master.dc.sync-to-ref-clock is now called servo-thread-follows-ref-clock")
