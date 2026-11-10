@@ -85,6 +85,8 @@ class Proposal:
     name: str
     profile: int = None
     profile_source: str = ""
+    esi_revision: int = None    # the revision of the ESI file's device, when there is one
+    esi_exact: bool = False     # the ESI file is for the slave's revision
     drive_modes: list = field(default_factory=list)
     mode: str = ""
     pdos: list = field(default_factory=list)
@@ -249,6 +251,7 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
 
     if esi_dev:
         p.esi_path = esi_dev.path
+        p.esi_revision, p.esi_exact = esi_dev.revision, bool(esi_exact)
         if not esi_exact:
             p.notes.append("ESI file is for revision 0x%08X, the slave is 0x%08X"
                            % (esi_dev.revision, sii.revision))
@@ -385,6 +388,11 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     if used:
         p.notes.append("pins %s from the quirk file %s" % (
             ", ".join(used), os.path.basename(quirks.of((p.vendor_id, p.product_code))["path"])))
+    qset = quirks.settings((p.vendor_id, p.product_code))
+    if qset:
+        p.notes.append("settings %s from the quirk file %s" % (
+            ", ".join(st["object"] for st in qset),
+            os.path.basename(quirks.of((p.vendor_id, p.product_code))["path"])))
     p.pdos = pdos
 
     # Distributed clocks: an ESI operation mode, else the SII's.

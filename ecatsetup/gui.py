@@ -33,7 +33,8 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose, testmode, tool, update
+from . import (config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose,
+               quirks, settings, testmode, tool, update)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -569,6 +570,36 @@ class MasterView(QWidget):
         self.win.changed()
 
 
+def source_rows(p, b):
+    """[(ok, text)] saying where a slave's proposal came from: ok True,
+    False (something is missing or guessed) or None (nothing known)."""
+    if not p:
+        return [(None, "Not read from the bus: Rescan to see the slave's own data")]
+    rows = [(True, "Slave's own EEPROM (SII): identity, PDOs, sync managers")]
+    has_coe = b is not None and b.coe is not None and bool(b.coe)
+    rows.append((has_coe, "CoE dictionary read from the slave: settings with their names and "
+                 "types" if has_coe else "No CoE dictionary: names come from the SII"))
+    if p.esi_path:
+        if p.esi_exact:
+            rows.append((True, "ESI file %s, for this revision" % os.path.basename(p.esi_path)))
+        else:
+            rows.append((False, "ESI file %s is for revision 0x%08X, the slave is 0x%08X: "
+                         "check what it gave" % (os.path.basename(p.esi_path),
+                                                 p.esi_revision or 0, p.revision or 0)))
+    else:
+        rows.append((False, "No ESI file: predefined PDO sets, DC modes, and the units and "
+                     "value names of settings come from one (Choose ESI files...)"))
+    rows.append((True, "Process data: %s" % (p.pdo_source or "-")))
+    rows.append((bool(p.dc_source) or None, "DC: %s" % (p.dc_source or "not used")))
+    if p.profile:
+        rows.append((True, "Profile %s from %s" % (propose.PROFILE_NAMES.get(p.profile, p.profile),
+                                                   p.profile_source or "?")))
+    q = quirks.of((p.vendor_id, p.product_code))
+    if q:
+        rows.append((True, "Quirk file %s" % os.path.basename(q["path"])))
+    return rows
+
+
 class SlaveView(QWidget):
     """One slave on the Bus page."""
 
@@ -635,7 +666,7 @@ class SlaveView(QWidget):
         two.setSpacing(16)
         self.source = Card("Where the configuration comes from")
         self.source_rows = []
-        for _ in range(3):
+        for _ in range(7):
             r = QHBoxLayout()
             mark = pill()
             mark.setFixedWidth(26)
@@ -649,6 +680,12 @@ class SlaveView(QWidget):
         self.esi_button = QPushButton("Choose ESI files...")
         self.esi_button.clicked.connect(win.add_esi)
         esi_row.addWidget(self.esi_button)
+        self.quirk_button = QPushButton("Save as quirk file...")
+        self.quirk_button.setToolTip(
+            "Save this slave's pins and settings as your own quirk file for the device "
+            "(vendor and product), so the next proposal for one starts from them")
+        self.quirk_button.clicked.connect(self.save_quirk)
+        esi_row.addWidget(self.quirk_button)
         esi_row.addStretch(1)
         self.source.add(esi_row)
         self.source.lay.addStretch(1)
@@ -766,6 +803,28 @@ class SlaveView(QWidget):
         lay.addWidget(self.notes)
         lay.addStretch(1)
 
+    def save_quirk(self):
+        s = self.win.session.slave(self.position)
+        if not s or not quirks.identity(s):
+            return
+        start = os.path.join(quirks.user_dir(), quirks.file_name(s))
+        q = quirks.of(s)
+        if q and not q["path"].startswith(quirks.SHIPPED):
+            start = q["path"]
+        path, _ = QFileDialog.getSaveFileName(self, "Save as quirk file - %s" % TITLE, start,
+                                              "Quirk files (*.yaml)")
+        if not path:
+            return
+        try:
+            quirks.save(s, path)
+        except (OSError, quirks.QuirkError) as e:
+            QMessageBox.warning(self, TITLE, "Could not save the quirk file: %s" % e)
+            return
+        where = "" if os.path.dirname(os.path.abspath(path)) == os.path.abspath(
+            quirks.user_dir()) else (" It is read only from %s; move it there to use it."
+                                     % quirks.user_dir())
+        self.win.status("Quirk file saved: %s.%s" % (path, where))
+
     # -- showing
 
     def show_slave(self, position):
@@ -816,17 +875,8 @@ class SlaveView(QWidget):
         self.name.setText((s or {}).get("name", ""))
 
         # sources
-        rows = []
-        if p:
-            rows.append((True, "Slave's own EEPROM (SII): PDOs, sync managers"))
-            has_coe = b.coe is not None and bool(b.coe)
-            rows.append((has_coe, "CoE dictionary read from the slave" if has_coe else
-                         "No CoE dictionary: names come from the SII"))
-            rows.append((bool(p.esi_path), "ESI file: %s" % os.path.basename(p.esi_path)
-                         if p.esi_path else "No ESI file for this product"))
-        else:
-            rows.append((None, "Not read from the bus: Rescan to see the slave's own data"))
-        for (mark, text), row in zip(self.source_rows, rows + [None] * 3):
+        rows = source_rows(p, b)
+        for (mark, text), row in zip(self.source_rows, rows + [None] * len(self.source_rows)):
             if row is None:
                 mark.hide()
                 text.hide()
@@ -1811,7 +1861,76 @@ class MoveCard(Card):
         self.where.setText(text)
 
 
+def sync_rows(cfg, get, offsets, period):
+    """[(ok, text)] about the bus's synchronisation while the test runs.
+    get(name): an ecat.0 pin's value as text, or None; offsets: send-offset
+    samples (ns); period: the servo period (ns)."""
+    rows = []
+    all_op = get("all-op") == "TRUE"
+    rows.append((all_op, "All slaves in OP" if all_op else "Not all slaves in OP"))
+    m = (cfg or {}).get("master") or {}
+    dc_slaves = [s for s in (cfg or {}).get("slaves") or [] if s.get("dc")]
+    if not dc_slaves:
+        rows.append((None, "No slave uses distributed clocks: no SYNC0 to place"))
+        return rows
+    if get("dc-sync-failed") == "TRUE":
+        rows.append((False, "The master's DC sync check timed out for a slave: its clock was "
+                     "not within 10 us when SYNC0 started (Troubleshoot, Event log)"))
+    else:
+        rows.append((True, "DC: %d slave%s, clocks in step" % (
+            len(dc_slaves), "" if len(dc_slaves) == 1 else "s")))
+    follows = ((m.get("dc") or {}).get("servo-thread-follows-ref-clock") is True)
+    if follows:
+        phased = get("dc-phased") == "TRUE"
+        rows.append((phased, "The servo thread follows the reference clock%s (pll-err %s ns)"
+                     % ("" if phased else ": not locked yet", get("pll-err") or "?")))
+    try:
+        shift = int(get("shift-time") or 0)
+    except ValueError:
+        shift = 0
+    try:
+        turn = int(get("turnaround-cycles") or 0)
+    except ValueError:
+        turn = 0
+    auto = (m.get("dc") or {}).get("sync0-shift-ns") == "auto"
+    if auto and turn == 0:
+        rows.append((None, "SYNC0 shift: measuring the frame's timing (2 s after all OP)"))
+    elif turn == 2 or not auto:
+        rows.append((True if turn in (0, 2) else False,
+                     "SYNC0 %d us after the start of the cycle%s" % (
+                         shift // 1000, ", turn-around 2 cycles" if turn == 2 else "")))
+    else:
+        rows.append((False, "Turn-around %d cycles, SYNC0 at %d us: the frame's timing varies "
+                     "too much for 2 (servo thread latency); drive profiles count on 2"
+                     % (turn, shift // 1000)))
+    if len(offsets) >= 5 and period:
+        lo, hi = min(offsets), max(offsets)
+        ok = hi - lo < period // 4
+        rows.append((ok, "Frame sent %d..%d us into the cycle (%d samples)%s" % (
+            lo // 1000, hi // 1000, len(offsets),
+            "" if ok else ": it varies by more than a quarter cycle, check the latency")))
+    return rows
+
+
 class TestPage(QWidget):
+    def show_sync(self, get, period):
+        """Fill the synchronisation card from the ecat.0 pins (get)."""
+        try:
+            self.offsets = (self.offsets + [int(get("send-offset"))])[-50:]
+        except (TypeError, ValueError):
+            pass
+        rows = sync_rows(self.win.session.cfg, get, self.offsets, period)
+        for (mark, text), row in zip(self.sync_rows, rows + [None] * len(self.sync_rows)):
+            mark.setVisible(row is not None)
+            text.setVisible(row is not None)
+            if row is None:
+                continue
+            ok, t = row
+            set_pill(mark, "✓" if ok else "!" if ok is False else "–",
+                     "green" if ok else "red" if ok is False else "grey")
+            text.setText(t)
+        self.sync_card.show()
+
     def __init__(self, win):
         super().__init__()
         self.win = win
@@ -1843,6 +1962,25 @@ class TestPage(QWidget):
         row.addStretch(1)
         self.start_card.add(row)
         lay.addWidget(self.start_card)
+
+        # synchronisation, while the test runs
+        self.sync_card = Card("Synchronisation", "Distributed clocks, where SYNC0 falls in the "
+                                                 "cycle and when the frame is sent; from the "
+                                                 "component's ecat.0 pins.")
+        self.sync_rows = []
+        for _ in range(7):
+            r = QHBoxLayout()
+            mark = pill()
+            mark.setFixedWidth(26)
+            mark.setAlignment(Qt.AlignCenter)
+            text = label(wrap=True)
+            r.addWidget(mark)
+            r.addWidget(text, 1)
+            self.sync_card.add(r)
+            self.sync_rows.append((mark, text))
+        self.offsets = []
+        lay.addWidget(self.sync_card)
+        self.sync_card.hide()
 
         row = QHBoxLayout()
         self.title = label("", "bigTitle")
@@ -3140,6 +3278,10 @@ class MainWindow(QMainWindow):
             return
         self.session.esi_paths.append(path)
         self.session.esi_devices = esi.load_dirs(self.session.esi_paths)
+        try:
+            settings.add_esi_folder(os.path.abspath(path))   # remembered for the next run
+        except OSError:
+            pass
         self.status("%d device descriptions read" % len(self.session.esi_devices))
         if self.session.bus:
             self.read_bus()
@@ -3278,6 +3420,8 @@ class MainWindow(QMainWindow):
                                     "back; they are kept in %s:\n%s"
                                     % (drivetest.RESTORE_FILE, "\n".join(failed)))
             self.test = None
+            self.test_page.sync_card.hide()
+            self.test_page.offsets = []
             self.set_messages([(GREY, "", [
                 "Test stopped. The free-running master does not come back by itself: to read "
                 "the bus again, sudo ethercat-uspace start"])])
@@ -3334,6 +3478,8 @@ class MainWindow(QMainWindow):
             tail = run.log_tail()
             run.stop()
             self.test = None
+            self.test_page.sync_card.hide()
+            self.test_page.offsets = []
             self.set_messages([(RED, "", ["The test stopped by itself (halrun ended):"] +
                                 tail.splitlines())])
             self.refresh()
@@ -3364,6 +3510,8 @@ class MainWindow(QMainWindow):
             "all OP" if all_op else "NOT all OP", responding,
             "" if get("link-up") == "TRUE" else ", link DOWN"), "amber" if all_op else "red")
         if self.tabs.currentWidget() is self.test_page:
+            self.test_page.show_sync(lambda n: m["ecat.0." + n].value if "ecat.0." + n in m
+                                     else None, run.period)
             self.test_page.update_values()
 
     # -- files
@@ -3464,12 +3612,16 @@ class MainWindow(QMainWindow):
             self.test.stop()
             self.heartbeat.stop()
             self.test = None
+            self.test_page.sync_card.hide()
+            self.test_page.offsets = []
         event.accept()
 
 
 def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName(TITLE)
+    # the ESI folders given before, then those on the command line
+    esi_paths = list(dict.fromkeys(settings.esi_folders() + list(esi_paths)))
     win = MainWindow(Session(esi_paths, ini_path, mode))
     if path:
         if os.path.exists(path):

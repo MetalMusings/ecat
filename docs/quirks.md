@@ -18,6 +18,13 @@ them, so the written files say everything that happens.
 | `~/.config/ecatsetup/devices/*.yaml` (or `$ECATSETUP_DEVICES`) | Your own. A file here for a vendor and product replaces the one that comes with the program. |
 | `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `beckhoff-el7041.yaml`, `beckhoff-el70x1-position.yaml`. |
 
+*Save as quirk file...* on a slave's page writes one from a slave as you
+have configured it: its identity, the pin names, HAL types, scales and
+offsets of its process data, and its settings. It is saved as
+`<vendor>-<product>.yaml` in your folder, and the next slave of that
+device (vendor and product) is proposed with them. Add the rest
+(`commands`, `limits`, `hal`) by hand if the device needs them.
+
 A file that cannot be read is skipped, with a warning in the window and
 from `ecatsetup --check`. To share one, post it or propose it for the
 program, with where each fact comes from (a manual, a test on a machine).
@@ -30,6 +37,9 @@ match: {vendor: '0x00000002', product: '0x1B813052'}
 
 pins:                      # when the slave is proposed
   '0x7010:21': {pin: velocity, hal-type: float, scale: 32767}
+
+settings:                  # added to the slave when it is proposed
+- {object: '0x8010:01', name: Maximal current, type: UINT, value: 1500}
 
 commands:                  # objects that are commands, not settings
   '0x2010': Zero Position, a command
@@ -62,6 +72,7 @@ serves the import alone.
 |---|---|
 | `match` | `vendor` and `product` of the device. |
 | `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [config-format.md](config-format.md). Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. |
+| `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [config-format.md](config-format.md). |
 | `commands` | Per object index: why it is a command. The test mode does not write it. |
 | `limits` | For the drive test: `following-error`, `max-torque`, `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), or `travel` and the others as a text saying why the drive's own object is not used. |
 | `hal` | `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |

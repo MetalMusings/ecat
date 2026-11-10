@@ -14,6 +14,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # quirk files: only those that come with the program
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 sys.path.insert(0, os.path.dirname(__file__))
 
 from ecatsetup import config, integrate  # noqa: E402

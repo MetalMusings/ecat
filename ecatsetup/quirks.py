@@ -16,7 +16,7 @@ import os
 import yaml
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
-KEYS = {"name", "match", "commands", "limits", "pins", "hal", "lcec"}
+KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec"}
 
 
 def user_dir():
@@ -73,6 +73,17 @@ def parse(data, path="<quirk>"):
             raise QuirkError("pins.%s needs a pin" % k)
         pins[(index, sub or 0)] = dict(v)
     q["pins"] = pins
+    settings = []
+    for v in data.get("settings") or []:
+        if not isinstance(v, dict) or "object" not in v or "type" not in v or "value" not in v:
+            raise QuirkError("settings need object, type and value")
+        index, sub = _obj(v["object"])
+        st = {"object": "0x%04X:%02X" % (index, sub or 0), "type": str(v["type"]),
+              "value": v["value"]}
+        if v.get("name"):
+            st["name"] = str(v["name"])
+        settings.append(st)
+    q["settings"] = settings
     hal = data.get("hal")
     if hal is not None:
         if not isinstance(hal, dict) or not isinstance(hal.get("lines", []), list):
@@ -153,6 +164,11 @@ def pins(key):
     return of(key).get("pins", {})
 
 
+def settings(key):
+    """[{"object", "type", "value", "name"}]: settings a new slave gets."""
+    return of(key).get("settings", [])
+
+
 def lcec_sdo(key):
     """{(index, subindex): (replacement, note)} for an lcec sdoConfig."""
     return of(key).get("lcec", {}).get("sdo", {})
@@ -203,3 +219,52 @@ def lcec_modparams(lcec_type, modparams):
         notes.append("modParam %s=%s imported as setting 0x%04X:%02X = %d"
                      % (name, text, index, sub, value))
     return out, notes
+
+
+def from_slave(slave):
+    """A quirk file's content (a dict to write as YAML) from a configured
+    slave: its identity, the pins it was given and its settings, so that the
+    next proposal for the same device starts from them."""
+    ident = identity(slave)
+    if not ident:
+        raise QuirkError("the slave has no vendor and product")
+    out = {"name": str(slave.get("device") or slave.get("name") or "device"),
+           "match": {"vendor": "0x%08X" % ident[0], "product": "0x%08X" % ident[1]}}
+    pins = {}
+    for kind in ("outputs", "inputs"):
+        for pdo in (slave.get("process-data") or {}).get(kind) or []:
+            for e in pdo.get("entries") or []:
+                if not e.get("pin"):
+                    continue
+                d = {"pin": e["pin"]}
+                for k in ("hal-type", "scale", "offset"):
+                    if e.get(k) is not None:
+                        d[k] = e[k]
+                pins[str(e.get("object"))] = d
+    if pins:
+        out["pins"] = pins
+    sts = [{k: st[k] for k in ("object", "name", "type", "value") if k in st}
+           for st in slave.get("settings") or []]
+    if sts:
+        out["settings"] = sts
+    return out
+
+
+def file_name(slave):
+    """<vendor>-<product>.yaml for a slave's quirk file."""
+    ident = identity(slave) or (0, 0)
+    return "%08x-%08x.yaml" % ident
+
+
+def save(slave, path=None):
+    """Write a slave's quirk file into the user's folder (or path); returns
+    the path. Reloads the quirks."""
+    data = from_slave(slave)
+    path = path or os.path.join(user_dir(), file_name(slave))
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write("# Quirk file for %s, saved by EtherCAT Setup from a configured slave.\n"
+                "# See docs/quirks.md. Edit freely.\n" % data["name"])
+        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    load(reload=True)
+    return path

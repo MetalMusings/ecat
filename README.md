@@ -105,7 +105,9 @@ CSP drives and writes the configuration into the LinuxCNC configuration:
 `ethercat.yaml`, `ethercat-load.hal`, `ethercat.hal` and the INI changes,
 commenting out only the lines in your HAL files that would clash, each
 changed file kept as `.bak` (`--apply` does the same from the command
-line): [docs/linuxcnc.md](docs/linuxcnc.md).
+line): [docs/linuxcnc.md](docs/linuxcnc.md). Where each slave's
+proposal comes from, the synchronisation while testing, ESI folders and
+saving a slave as a quirk file: [docs/bring-up.md](docs/bring-up.md).
 
 Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in CSP in
 small steps, hold-to-enable, with a heartbeat and limits written to the

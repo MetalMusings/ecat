@@ -13,9 +13,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 # quirk files: only those that come with the program, unless a test says so
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 
 from ecatsetup import config, integrate, quirks  # noqa: E402
+from ecatsetup import propose  # noqa: E402
 from test_integrate import Folder  # noqa: E402
+from test_prototype import easercat  # noqa: E402
 
 EL7041 = {"vendor": "0x00000002", "product": "0x1B813052"}
 
@@ -76,9 +79,61 @@ class TestFiles(unittest.TestCase):
         for data, msg in (({"match": {"vendor": "0x2"}}, "match needs vendor and product"),
                           ({"pins": {"0x7010:01": {}}}, "pins.0x7010:01 needs a pin"),
                           ({"limits": {"travel": 3}}, "limits.travel needs object and type"),
-                          ({"commands": {"x": "y"}}, "object 'x' is not a hex number")):
+                          ({"commands": {"x": "y"}}, "object 'x' is not a hex number"),
+                          ({"settings": [{"object": "0x2000:01"}]},
+                           "settings need object, type and value")):
             with self.assertRaisesRegex(quirks.QuirkError, msg):
                 quirks.parse(data)
+
+
+class TestSaved(unittest.TestCase):
+    """Save as quirk file: a configured slave's pins and settings become
+    the next proposal's."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        os.environ["ECATSETUP_DEVICES"] = self.dir.name
+        quirks.load(reload=True)
+
+    def tearDown(self):
+        os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+        quirks.load(reload=True)
+        self.dir.cleanup()
+
+    def proposal(self):
+        s, d = easercat()
+        return propose.propose({"position": 3, "dc": False}, s, d, device_type=5001)
+
+    def test_round_trip(self):
+        s = config.slave_from_proposal(self.proposal(), "io")
+        self.assertEqual(s["settings"], [])
+        e = next(e for pd in s["process-data"]["inputs"] for e in pd["entries"]
+                 if e["object"] == "0x6001:02")
+        e["pin"], e["scale"] = "voltage", 2.0
+        s["settings"].append({"object": "0x2000:02", "name": "I2C_address", "type": "USINT",
+                              "value": 72})
+        data = quirks.from_slave(s)
+        self.assertEqual(data["match"], {"vendor": s["identity"]["vendor"],
+                                         "product": s["identity"]["product"]})
+        self.assertEqual(data["pins"]["0x6001:02"], {"pin": "voltage", "hal-type": "float",
+                                                     "scale": 2.0})
+        path = quirks.save(s)
+        self.assertEqual(os.path.dirname(path), self.dir.name)
+        self.assertEqual(quirks.problems, [])
+        self.assertEqual(quirks.of(s)["path"], path)
+
+        p = self.proposal()
+        again = config.slave_from_proposal(p, "io")
+        e = next(e for pd in again["process-data"]["inputs"] for e in pd["entries"]
+                 if e["object"] == "0x6001:02")
+        self.assertEqual((e["pin"], e["scale"]), ("voltage", 2.0))
+        self.assertEqual(again["settings"], [{"object": "0x2000:02", "type": "USINT",
+                                              "value": 72, "name": "I2C_address"}])
+        self.assertTrue(any("settings 0x2000:02 from the quirk file" in n for n in p.notes))
+
+    def test_no_identity(self):
+        with self.assertRaises(quirks.QuirkError):
+            quirks.from_slave({"name": "x"})
 
 
 class TestHal(Folder):

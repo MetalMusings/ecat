@@ -11,6 +11,7 @@ import re
 
 import yaml
 
+from . import quirks
 from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS, ENCODER_INPUTS, ENCODER_OUTPUTS, PP_LIMITS
 
 FORMAT_VERSION = 1
@@ -114,6 +115,11 @@ def slave_from_proposal(p, name=None):
                    "sync0-cycles": p.dc_sync0_factor, "sync0-shift-ns": p.dc_shift}
     s["settings"] = [{"object": obj(i, sub), "type": t, "value": p.pp_limits[(i, sub)]}
                      for i, sub, t in PP_LIMITS if (i, sub) in p.pp_limits]
+    # a quirk file's settings for this device (one saved from an earlier slave)
+    have = {parse_obj(st["object"]) for st in s["settings"]}
+    for st in quirks.settings((p.vendor_id, p.product_code)):
+        if parse_obj(st["object"]) not in have:
+            s["settings"].append(dict(st))
     return s
 
 

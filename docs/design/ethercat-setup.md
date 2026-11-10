@@ -736,7 +736,8 @@ in this order:
    simulation, copying library files, the scale, the INI check. Built
    2026-11-10 ([linuxcnc.md](../linuxcnc.md#from-a-simulated-configuration)).
 5. **Bringing up a slave** (c): the sync card, where proposals come
-   from, ESI file handling, Save as quirk file.
+   from, ESI file handling, Save as quirk file. Built 2026-11-10
+   ([bring-up.md](../bring-up.md)).
 6. **Watching while LinuxCNC runs and the plot** (d, e).
 7. **The start page**, once the parts exist.
 

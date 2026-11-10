@@ -14,6 +14,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # quirk files: only those that come with the program
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from ecatsetup import config, session, tool  # noqa: E402
@@ -398,6 +399,44 @@ class TestWindow(BusTest):
         self.assertFalse(w.test_page.start_card.isHidden())
         self.assertTrue(w.test_page.io.isHidden())
         self.assertTrue(w.header.stop.isHidden())
+
+
+class TestCards(unittest.TestCase):
+    """Where a proposal came from, and the synchronisation card."""
+
+    @unittest.skipIf(gui is None, "PyQt5 is not installed")
+    def test_source_rows(self):
+        from types import SimpleNamespace
+        from ecatsetup import propose
+        self.assertIsNone(gui.source_rows(None, None)[0][0])
+        p = propose.Proposal(position=0, vendor_id=1, product_code=2, revision=3, serial=0, name="x")
+        p.pdo_source, p.profile = "SII", 0
+        rows = gui.source_rows(p, SimpleNamespace(coe=None))
+        self.assertEqual([r[0] for r in rows], [True, False, False, True, None])
+        self.assertIn("No ESI file", rows[2][1])
+        p.esi_path, p.esi_revision, p.esi_exact = "/x/dev.xml", 2, False
+        rows = gui.source_rows(p, SimpleNamespace(coe=None))
+        self.assertIn("dev.xml is for revision 0x00000002, the slave is 0x00000003", rows[2][1])
+        p.esi_exact = True
+        self.assertTrue(gui.source_rows(p, SimpleNamespace(coe=None))[2][0])
+
+    @unittest.skipIf(gui is None, "PyQt5 is not installed")
+    def test_sync_rows(self):
+        pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
+                "pll-err": "120", "shift-time": "500000", "turnaround-cycles": "2"}
+        cfg = {"master": {"dc": {"servo-thread-follows-ref-clock": True,
+                                 "sync0-shift-ns": "auto"}},
+               "slaves": [{"name": "d", "dc": {"assign-activate": "0x0300"}}]}
+        rows = gui.sync_rows(cfg, pins.get, [100000 + i * 1000 for i in range(10)], 1000000)
+        self.assertEqual([r[0] for r in rows], [True] * 5, rows)
+        self.assertIn("SYNC0 500 us after the start of the cycle, turn-around 2", rows[3][1])
+        pins.update({"dc-sync-failed": "TRUE", "turnaround-cycles": "3", "dc-phased": "FALSE"})
+        rows = gui.sync_rows(cfg, pins.get, [0, 0, 0, 0, 400000], 1000000)
+        self.assertEqual([r[0] for r in rows], [True, False, False, False, False], rows)
+        pins["turnaround-cycles"] = "0"
+        self.assertIsNone(gui.sync_rows(cfg, pins.get, [], 1000000)[3][0])
+        rows = gui.sync_rows({"slaves": [{"name": "io"}]}, pins.get, [], 1000000)
+        self.assertEqual([r[0] for r in rows], [True, None])
 
 
 class TestSteps(unittest.TestCase):
