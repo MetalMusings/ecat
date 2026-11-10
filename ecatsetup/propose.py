@@ -57,6 +57,8 @@ class Entry:
     role: str            # "profile" (cia402), "encoder", "pin" or "gap"
     pin: str = ""
     hal_type: str = ""
+    scale: float = None  # float pins of integer entries: read raw * scale + offset,
+    offset: float = None  # written as (value + offset) * scale
 
 
 @dataclass
@@ -122,6 +124,49 @@ def encoder_owned(index, entries):
     return {(e.index, e.subindex) for e in entries
             if (e.index == index and e.subindex in ENCODER_INPUTS)
             or (e.index == index + 0x1000 and e.subindex in ENCODER_OUTPUTS)}
+
+
+# Analog channels laid out as in ETG.5001 (Beckhoff EL3xxx/EL4xxx): a
+# 16-bit value at 0x6nn0:11 (inputs) or 0x7nn0:11 (outputs), whose full
+# scale 0x7FFF is the top of the measuring range.
+ANALOG_FULL = 0x7FFF
+_NUM = r"(\d+(?:[.,]\d+)?)"
+_UNIT = r"\s*(mV|V|mA|uA|µA)\b"
+
+
+def analog_range(text):
+    """The measuring range in a device's name, such as "EL3102 2Ch. Ana.
+    Input +/-10V" or "4..20 mA": (low, high, unit), or None."""
+    t = (text or "").replace("±", "+/-")
+    m = re.search(r"\+/-\s*" + _NUM + _UNIT, t)
+    if m:
+        v = float(m.group(1).replace(",", "."))
+        return -v, v, m.group(2).replace("µ", "u")
+    m = re.search(_NUM + r"\s*(?:-|\.\.|…|to)\s*" + _NUM + _UNIT, t)
+    if m:
+        lo, hi = (float(x.replace(",", ".")) for x in m.group(1, 2))
+        if hi > lo:
+            return lo, hi, m.group(3).replace("µ", "u")
+    return None
+
+
+def analog_scaling(rng, output):
+    """scale and offset of a float pin for a range: raw 0 is the low end of
+    a range that starts at 0 or above (0..10 V, 4..20 mA) and 0 of one
+    around 0 (+/-10 V); raw 0x7FFF is the high end."""
+    lo, hi, _ = rng
+    zero = lo if lo >= 0 else 0.0
+    if output:
+        return ANALOG_FULL / (hi - zero), -zero
+    return (hi - zero) / ANALOG_FULL, zero
+
+
+def analog_value(e, direction):
+    """Whether an entry is an analog channel's value."""
+    base = 0x6000 if direction == "tx" else 0x7000
+    return (e.subindex == 0x11 and base <= e.index <= base + 0xFF0 and e.index & 0xF == 0
+            and e.bitlen == 16 and e.data_type in ("INT", "UINT")
+            and re.search(r"value|output", _short(e.name)) is not None)
 
 
 def kebab(name):
@@ -277,6 +322,18 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                     p.notes.append("%s: a 16-bit counter, which wraps at 65536%s"
                                    % (e.pin, "; a 32-bit set is offered with --pdo-set"
                                       if esi_dev and len(esi_dev.pdo_sets) > 1 else ""))
+                elif p.profile == 5001 and analog_value(e, pd.direction):
+                    rng = analog_range(p.name) or analog_range(getattr(esi_dev, "name", ""))
+                    if rng:
+                        e.hal_type = "float"
+                        e.scale, e.offset = analog_scaling(rng, pd.direction == "rx")
+                        p.notes.append("%s: analog %s, %g..%g %s from the device's name; the pin "
+                                       "is in %s" % (e.pin, "output" if pd.direction == "rx"
+                                                     else "input", rng[0], rng[1], rng[2], rng[2]))
+                    else:
+                        p.notes.append("%s: analog %s in raw counts (0x7FFF is the top of the "
+                                       "range); no range found in the device's name"
+                                       % (e.pin, "output" if pd.direction == "rx" else "input"))
     p.pdos = pdos
 
     # Distributed clocks: an ESI operation mode, else the SII's.
@@ -299,8 +356,11 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
 
     # Settings: writable vendor objects, for the user to choose.
     if coe:
+        # vendor objects, and a modular device's channel settings (0x8nn0,
+        # such as an analog terminal's filter and user scaling)
         p.settings = [e for (i, s), e in sorted(coe.entries.items())
-                      if 0x2000 <= i < 0x6000 and e.writable and s >= 0
+                      if (0x2000 <= i < 0x6000 or (p.profile == 5001 and 0x8000 <= i < 0x9000))
+                      and e.writable and s >= 0
                       and not (s == 0 and coe.subentries(i))]
     return p
 

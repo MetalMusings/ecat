@@ -76,6 +76,10 @@ def _entry(e):
     elif e.pin:
         d["pin"] = e.pin
         d["hal-type"] = e.hal_type
+        if getattr(e, "scale", None) is not None:
+            d["scale"] = e.scale
+        if getattr(e, "offset", None):
+            d["offset"] = e.offset
     return d
 
 

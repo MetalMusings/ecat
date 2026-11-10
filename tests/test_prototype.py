@@ -86,6 +86,60 @@ class TestPropose(unittest.TestCase):
         s.dc_modes = [sii.DcMode("DC", 0x300, 0, 0, 1), sii.DcMode("Synchron", 0, 0, 0, 1)]
         return s
 
+    def analog_sii(self, name):
+        s = sii.Sii(0x2, 0x0C1E3052, 0x00140000, 0, 0x04, name=name)
+        s.pdos = [
+            sii.Pdo(0x1A00, "tx", 3, "AI Standard Channel 1", False, False, [
+                sii.PdoEntry(0x6000, 1, "Status__Underrange", "BOOL", 1),
+                sii.PdoEntry(0x6000, 7, "Status__Error", "BOOL", 1),
+                sii.PdoEntry(0x6000, 0x11, "Value", "INT", 16)]),
+            sii.Pdo(0x1600, "rx", 2, "AO Outputs Channel 1", False, False, [
+                sii.PdoEntry(0x7000, 0x11, "Analog output", "INT", 16)]),
+        ]
+        return s
+
+    def test_analog_range(self):
+        self.assertEqual(propose.analog_range("EL3102 2K. Ana. Eingang +/-10V, DIFF"),
+                         (-10.0, 10.0, "V"))
+        self.assertEqual(propose.analog_range("EL3052 2Ch. Ana. Input 4-20mA"), (4.0, 20.0, "mA"))
+        self.assertEqual(propose.analog_range("EL4002 0..10 V"), (0.0, 10.0, "V"))
+        self.assertEqual(propose.analog_range("±75 mV"), (-75.0, 75.0, "mV"))
+        self.assertIsNone(propose.analog_range("EL3202 PT100 (RTD)"))
+        self.assertIsNone(propose.analog_range("EL1008 8Ch. Dig. Input 24V, 3ms"))
+        # raw 0x7FFF is the top; 0 the bottom of 4..20 mA, or 0 of +/-10 V
+        sc, off = propose.analog_scaling((4.0, 20.0, "mA"), output=False)
+        self.assertAlmostEqual(0x7FFF * sc + off, 20.0)
+        self.assertAlmostEqual(0 * sc + off, 4.0)
+        sc, off = propose.analog_scaling((4.0, 20.0, "mA"), output=True)
+        self.assertAlmostEqual((12.0 + off) * sc, 0x7FFF / 2)
+        sc, off = propose.analog_scaling((-10.0, 10.0, "V"), output=False)
+        self.assertAlmostEqual(-0x7FFF * sc + off, -10.0)
+
+    def test_analog_terminal(self):
+        p = propose.propose({"position": 2, "dc": False},
+                            self.analog_sii("EL3102 2Ch. Ana. Input +/-10V, Diff."),
+                            coe.Dictionary(), device_type=5001)
+        e = {(x.index, x.subindex): x for pd in p.pdos for x in pd.entries}
+        v, out = e[(0x6000, 0x11)], e[(0x7000, 0x11)]
+        self.assertEqual((v.pin, v.hal_type), ("value", "float"))
+        self.assertAlmostEqual(v.scale, 10.0 / 0x7FFF)
+        self.assertEqual(out.hal_type, "float")
+        self.assertAlmostEqual(out.scale, 0x7FFF / 10.0)
+        self.assertEqual(e[(0x6000, 7)].pin, "error")
+        self.assertTrue(any("value: analog input, -10..10 V" in n for n in p.notes))
+        s = config.slave_from_proposal(p)
+        entry = s["process-data"]["inputs"][0]["entries"][2]
+        self.assertEqual((entry["hal-type"], round(entry["scale"], 9)), ("float", round(10 / 0x7FFF, 9)))
+        self.assertNotIn("offset", entry)
+        cfg = {"ecat": 1, "master": {"interface": "x", "transport": "raw"}, "slaves": [s]}
+        self.assertEqual(config.check(cfg), [])
+        # no range in the name: raw counts, with a note
+        p = propose.propose({"position": 2, "dc": False}, self.analog_sii("Analog box"),
+                            coe.Dictionary(), device_type=5001)
+        v = next(x for pd in p.pdos for x in pd.entries if x.subindex == 0x11)
+        self.assertEqual(v.hal_type, "s32")
+        self.assertTrue(any("raw counts" in n for n in p.notes))
+
     def test_cia402_drive(self):
         s = self.cia402_sii([sii.PdoEntry(0x6041, 0, "Status Word", "UINT", 16),
                              sii.PdoEntry(0x6064, 0, "Position Actual Value", "DINT", 32)])
