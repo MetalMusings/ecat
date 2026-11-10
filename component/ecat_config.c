@@ -675,7 +675,18 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       mp->id = ECAT_MP_CIA402_MODES;
       copy_str(mp->name, "cia402.modes");
       mp->value.u32 = c->cia402_modes;
-      ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount = 2;
+      ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount++;
+    }
+    if (get_bool(c, get(c, s, "cia402"), "zero-at-start", 0)) {
+      if ((mp = append(b, sizeof(*mp))) == NULL) {
+        error(c, "out of memory");
+        return;
+      }
+      mp->confType = lcecConfTypeModParam;
+      mp->id = ECAT_MP_CIA402_ZERO_AT_START;
+      copy_str(mp->name, "cia402.zero-at-start");
+      mp->value.u32 = 1;
+      ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount++;
     }
   } else if (profile == NULL || (strcmp(profile, "generic") && strcmp(profile, "mdp"))) {
     error(c, "profile \"%s\" is not supported (cia402, mdp, generic)", profile ? profile : "");

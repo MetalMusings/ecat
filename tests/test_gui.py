@@ -284,6 +284,20 @@ class TestWindow(BusTest):
         self.assertIs(w.bus_page.stack.currentWidget(), w.slave_page)
         self.assertTrue(any(r[2] == "thc.output4" for r in gui.config_pins(w.session.cfg)))
 
+    def test_zero_at_start(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp", "zero-at-start": True}
+        w.select_slave(0)
+        page = w.slave_page
+        self.assertTrue(page.zero_at_start.isChecked())
+        page.zero_at_start.setChecked(False)
+        self.assertNotIn("zero-at-start", s["cia402"])
+        page.zero_at_start.setChecked(True)
+        self.assertIs(s["cia402"]["zero-at-start"], True)
+        self.assertIn("zero-at-start: true", w.hal_page.yaml.toPlainText())
+
     def test_settings(self):
         w = self.window()
         w.select_slave(0)

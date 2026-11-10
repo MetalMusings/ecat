@@ -1564,6 +1564,39 @@ static void test_mode_change_into_csp_waits_for_the_command(void) {
   CHECK_EQ(mm.pos, at + 35);
 }
 
+static void test_zero_at_start_mode_change_into_csp(void) {
+  lcec_slave_modparam_t mp[4] = {{.id = ECAT_MP_CIA402_MODE}, {.id = ECAT_MP_CIA402_MODES},
+                                 {.id = ECAT_MP_CIA402_ZERO_AT_START}, {.id = -1}};
+  mp[0].value.u32 = 3;
+  mp[1].value.u32 = BIT(8);
+  mp[2].value.u32 = 1;
+  S = fake_slave("m", mm_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 3);
+  memset(&mm, 0, sizeof(mm));
+  mm.ramp = 100;
+  mm.sw = SW_READY;
+  cw_now = 0;
+  mm.pos = 1000;
+  PIN_BIT("m.enable") = 1;
+  PIN_FLOAT("m.velocity-cmd") = 50;
+  mm_run(20);
+  PIN_FLOAT("m.velocity-cmd") = 0;
+  mm_run(10);
+  CHECK_EQ(PIN_S32("m.pos-zero"), 1000);
+  int32_t at = mm.pos;
+  CHECK(at > 1100);
+  // to CSP: held until pos-cmd, counted from the zero, is at the drive
+  PIN_FLOAT("m.pos-cmd") = 0;
+  PIN_S32("m.opmode-cmd") = 8;
+  mm_run(20);
+  CHECK_EQ(mm_mode(), 8);
+  CHECK_EQ(mm.pos, at);
+  PIN_FLOAT("m.pos-cmd") = at - 1000 + 5;
+  mm_run(1);
+  CHECK_EQ(mm.pos, at + 5);
+}
+
 static void test_mode_change_into_csv_waits_for_zero(void) {
   mm_drive(3, BIT(9));
   PIN_BIT("m.enable") = 1;
@@ -1765,6 +1798,141 @@ static void test_homing_abandoned_while_halting(void) {
   CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
 }
 
+// ---- zero at start -----------------------------------------------------
+
+static lcec_slave_t *zero_drive(unsigned modes) {
+  lcec_slave_modparam_t mp[3] = {{.id = ECAT_MP_CIA402_ZERO_AT_START}, {.id = ECAT_MP_CIA402_MODES}, {.id = -1}};
+  mp[0].value.u32 = 1;
+  mp[1].value.u32 = modes;
+  if (!modes) mp[1].id = -1;
+  S = fake_slave("x", csp_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 8);
+  return S;
+}
+
+static void test_zero_pin_only_with_the_option(void) {
+  csp_drive();
+  CHECK(fake_find("x.pos-zero") == NULL);
+  zero_drive(0);
+  CHECK(fake_find("x.pos-zero") != NULL);
+}
+
+static void test_zero_at_start(void) {
+  int i;
+  zero_drive(0);
+  PIN_FLOAT("x.pos-scale") = 100;
+  // before the bus is up, nothing is taken and pos-fb is 0
+  fake_bus(S, 0);
+  fake_set(S, 0x6064, 0, 999);
+  cycle(SW_READY);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0, 0);
+  CHECK_EQ(PIN_S32("x.pos-zero"), 0);
+  // the first cycle in OP takes the drive's position
+  fake_bus(S, 1);
+  fake_set(S, 0x6064, 0, 12345);
+  cycle(SW_READY);
+  CHECK_EQ(PIN_S32("x.pos-zero"), 12345);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0, 0);
+  CHECK_EQ(PIN_S32("x.drv-actual-position"), 12345);
+  // motion follows pos-fb while disabled; enabling does not move the drive
+  PIN_FLOAT("x.pos-cmd") = 0;
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(5);
+  CHECK_EQ(sw_now, SW_ENABLED);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 12345);
+  // the command counts from there
+  PIN_FLOAT("x.pos-cmd") = 0.5;
+  cycle(SW_ENABLED);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 12395);
+  CHECK_EQ(PIN_S32("x.drv-target-position"), 12395);
+  fake_set(S, 0x6064, 0, 12395);
+  cycle(SW_ENABLED);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0.5, 1e-12);
+  // taken once: a bus loss and return keeps it
+  PIN_BIT("x.enable") = 0;
+  fake_bus(S, 0);
+  for (i = 0; i < 3; i++) cycle(SW_READY);
+  fake_bus(S, 1);
+  fake_set(S, 0x6064, 0, 20000);
+  cycle(SW_READY);
+  CHECK_EQ(PIN_S32("x.pos-zero"), 12345);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 76.55, 1e-9);
+}
+
+static void test_zero_at_start_wraps_as_the_drive(void) {
+  zero_drive(0);
+  fake_set(S, 0x6064, 0, (uint32_t)(INT32_MAX - 5));
+  cycle(SW_READY);
+  CHECK_EQ(PIN_S32("x.pos-zero"), INT32_MAX - 5);
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(5);
+  PIN_FLOAT("x.pos-cmd") = 10;  // 10 counts on: past the drive's INT32_MAX
+  cycle(SW_ENABLED);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), INT32_MIN + 4);
+  fake_set(S, 0x6064, 0, (uint32_t)(INT32_MIN + 4));
+  cycle(SW_ENABLED);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 10, 0);
+}
+
+static void test_zero_at_start_cleared_by_homing(void) {
+  int i;
+  zero_drive(1u << 6);
+  memset(&hm, 0, sizeof(hm));
+  hm.cycles = 30;
+  hm.home = 0;
+  PIN_FLOAT("x.pos-scale") = 100;
+  fake_set(S, 0x6064, 0, 5000);
+  hm_enable();
+  CHECK_EQ(PIN_S32("x.pos-zero"), 5000);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0, 0);
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 60 && !PIN_BIT("x.stat-homed"); i++) hm_cycle();
+  for (i = 0; i < 10; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  // the drive's position is the homed one: no offset any more
+  CHECK_EQ(PIN_S32("x.pos-zero"), 0);
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0, 0);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
+static void test_zero_at_start_pp(void) {
+  int i;
+  lcec_slave_modparam_t mp[3] = {{.id = ECAT_MP_CIA402_MODE}, {.id = ECAT_MP_CIA402_ZERO_AT_START}, {.id = -1}};
+  mp[0].value.u32 = 1;
+  mp[1].value.u32 = 1;
+  S = fake_slave("t", pp_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 1);
+  memset(&ppd, 0, sizeof(ppd));
+  ppd.step = 10;
+  ppd.sw = SW_READY;
+  cw_now = 0;
+  PIN_FLOAT("t.pos-scale") = 10;
+  ppd.pos = 123;
+  pp_enable();
+  CHECK_EQ(PIN_S32("t.pos-zero"), 123);
+  // absolute: from the zero
+  PIN_FLOAT("t.pp-target") = 5;
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 100 && !PIN_BIT("t.pp-done"); i++) pp_cycle();
+  CHECK_EQ(ppd.pos, 173);
+  CHECK_NEAR(PIN_FLOAT("t.pos-fb"), 5, 1e-12);
+  // relative: as it is
+  PIN_BIT("t.pp-start") = 0;
+  pp_cycle();
+  PIN_BIT("t.pp-relative") = 1;
+  PIN_FLOAT("t.pp-target") = 2;
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 5; i++) pp_cycle();
+  for (i = 0; i < 100 && !PIN_BIT("t.pp-done"); i++) pp_cycle();
+  CHECK_EQ(ppd.pos, 193);
+  CHECK_NEAR(PIN_FLOAT("t.pos-fb"), 7, 1e-12);
+}
+
 RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
@@ -1786,4 +1954,6 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_mode_change_into_csv_waits_for_zero, test_mode_change_not_taken, test_mode_change_drive_does_not_stop,
     test_mode_change_asked_back, test_homing_halts_pv_first, test_homing_halts_pp_first,
     test_homing_pv_drive_does_not_stop, test_homing_csp_waits_for_the_command,
-    test_homing_pp_drive_does_not_stop, test_homing_abandoned_while_halting)
+    test_homing_pp_drive_does_not_stop, test_homing_abandoned_while_halting, test_zero_pin_only_with_the_option,
+    test_zero_at_start, test_zero_at_start_wraps_as_the_drive, test_zero_at_start_cleared_by_homing, test_zero_at_start_pp,
+    test_zero_at_start_mode_change_into_csp)

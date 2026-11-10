@@ -65,6 +65,15 @@
 /// following error, and `index-enable` is cleared at the end: `pos-fb`
 /// then jumps to the drive's new position, as an encoder's count does at
 /// its index. A homing error or timeout shuts the drive down.
+///
+/// Zero at start (`cia402.zero-at-start`): positions count from where the
+/// drive stands when the bus first reaches OP, for drives that keep their
+/// position from an earlier run. The drive's position at that moment is
+/// kept in `pos-zero` (counts) and taken off `pos-fb` and added to the
+/// drive's target, so `pos-fb` starts at 0; nothing is written to the
+/// drive. `drv-actual-position` and `drv-target-position` stay the drive's
+/// own counts. Homing by the drive sets `pos-zero` back to 0, since the
+/// drive's position is then the homed one.
 
 #include "ecat_cia402.h"
 
@@ -245,6 +254,8 @@ typedef struct {
   hal_bit_t *pp_done;
   // with more than one mode
   hal_s32_t *opmode_cmd;
+  // with zero-at-start
+  hal_s32_t *pos_zero;
   // parameters
   hal_float_t pos_scale;
   hal_float_t velo_scale;
@@ -297,6 +308,9 @@ typedef struct {
   int pp_rel;           // PP: relative
   int pp_halt_wait;     // PP: cycles until target reached answers the end of a halt
   int32_t pv_target;    // PV: the target velocity written last
+  int zero_at_start;    // cia402.zero-at-start
+  int zeroed;           // pos-zero has been taken
+  int32_t zero;         // counts taken off the drive's position
   int pv_wait;          // PV: cycles until "target reached" answers it
 } cia402_t;
 
@@ -369,6 +383,11 @@ static const lcec_pindesc_t pp_pins[] = {
 // only with 0x6081 in the process data
 static const lcec_pindesc_t pp_velocity_pins[] = {
     {HAL_FLOAT, HAL_IN, offsetof(cia402_t, pp_velocity), "%s.pp-velocity"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_pindesc_t zero_pins[] = {
+    {HAL_S32, HAL_OUT, offsetof(cia402_t, pos_zero), "%s.pos-zero"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -448,6 +467,7 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   for (p = slave->modparams; p != NULL && p->id != -1; p++) {
     if (p->id == ECAT_MP_CIA402_MODES) others = p->value.u32;
     if (p->id == ECAT_MP_CIA402_MODE) mode = p->value.u32;
+    if (p->id == ECAT_MP_CIA402_ZERO_AT_START) d->zero_at_start = p->value.u32 != 0;
   }
   // ecat_config.c has checked these too
   if (mode != MODE_CSP && mode != MODE_CSV && mode != MODE_PV && mode != MODE_PP) {
@@ -495,6 +515,7 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   if (d->allowed & ~MODE_BIT(MODE_HOMING) & ~MODE_BIT(mode)) {
     if ((err = lcec_pin_newf_list(d, mode_pins, slave->name)) != 0) return err;
   }
+  if (d->zero_at_start && (err = lcec_pin_newf_list(d, zero_pins, slave->name)) != 0) return err;
 
   // after the parameters are made, which zeroes them
   d->mode = mode;
@@ -530,6 +551,10 @@ static int32_t clamp_s32(double v) {
 }
 
 static double scale_or_one(hal_float_t s) { return (s > -1e-20 && s < 1e-20) ? 1.0 : s; }
+
+// Positions with pos-zero: wrapping as the drive's 32-bit counter does.
+static int32_t from_drive(cia402_t *d, int32_t counts) { return (int32_t)((uint32_t)counts - (uint32_t)d->zero); }
+static int32_t to_drive(cia402_t *d, int32_t counts) { return (int32_t)((uint32_t)counts + (uint32_t)d->zero); }
 
 static void cia402_read(lcec_slave_t *slave, long period) {
   cia402_t *d = slave->profile_data;
@@ -574,7 +599,13 @@ static void cia402_read(lcec_slave_t *slave, long period) {
   if (d->error_code_o.mapped) *d->error_code = EC_READ_U16(&pd[d->error_code_o.os]);
   if (d->actual_position_o.mapped) {
     *d->drv_actual_position = EC_READ_S32(&pd[d->actual_position_o.os]);
-    *d->pos_fb = *d->drv_actual_position / scale_or_one(d->pos_scale);
+    if (d->zero_at_start && !d->zeroed && d->bus_ok) {
+      d->zero = *d->drv_actual_position;
+      d->zeroed = 1;
+    }
+    // with zero-at-start, 0 until the position is taken
+    *d->pos_fb = d->zero_at_start && !d->zeroed ? 0 : from_drive(d, *d->drv_actual_position) / scale_or_one(d->pos_scale);
+    if (d->pos_zero != NULL) *d->pos_zero = d->zero;
   }
   // homing for motion: no following error until index-enable is cleared
   if (d->hs != HS_IDLE && d->hs_index) *d->pos_fb = *d->pos_cmd;
@@ -685,6 +716,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
         d->hs = HS_IDLE;
         if (d->hs_index) *d->index_enable = 0;
         d->index_old = 0;
+        // the drive's position is the homed one now
+        d->zero = 0;
         // the position has changed: CSP must not jump to an old command
         if (d->active == MODE_CSP) d->sync = 1;
       } else if (d->hs_ns > MODE_CHANGE_NS) {
@@ -727,8 +760,9 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
   // for a set-point (acknowledge low); it replaces a move in progress
   if (d->pp_pending && in_pp && !ack && d->pp != PP_SET) {
     d->pp_pending = 0;
-    d->pp_set = clamp_s32(*d->pp_target * scale_or_one(d->pos_scale));
     d->pp_rel = *d->pp_relative;
+    d->pp_set = clamp_s32(*d->pp_target * scale_or_one(d->pos_scale));
+    if (!d->pp_rel) d->pp_set = to_drive(d, d->pp_set);
     d->pp_vel = d->pp_velocity != NULL ? (uint32_t)clamp_s32(fabs(*d->pp_velocity) * scale_or_one(d->velo_scale)) : 0;
     d->pp = PP_SET;
     d->pp_ns = 0;
@@ -965,7 +999,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   if (run && d->sync) {
     // after a mode change: start from the actual values, without a jump
     if (d->active == MODE_CSP) {
-      long long dist = (long long)clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale)) - *d->drv_actual_position;
+      long long dist = (long long)clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale)) - from_drive(d, *d->drv_actual_position);
       if (dist >= -SYNC_COUNTS && dist <= SYNC_COUNTS) d->sync = 0;
     } else if (d->active == MODE_CSV) {
       if (clamp_s32(*d->velocity_cmd * scale_or_one(d->velo_scale)) == 0) d->sync = 0;
@@ -976,7 +1010,7 @@ static void cia402_write(lcec_slave_t *slave, long period) {
   run = run && !d->sync;
   if (d->target_position_o.mapped) {
     if (run && d->active == MODE_CSP) {
-      *d->drv_target_position = clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale));
+      *d->drv_target_position = to_drive(d, clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale)));
     } else if (run && d->active == MODE_PP && d->pp != PP_IDLE) {
       *d->drv_target_position = d->pp_set;
     } else {

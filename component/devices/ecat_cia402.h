@@ -19,6 +19,10 @@
 /// bit mask, bit n for mode n; only homing, bit 6, so far).
 #define ECAT_MP_CIA402_MODES 0x4021
 
+/// modParam id for cia402.zero-at-start (value 1): positions count from
+/// where the drive stands when the bus first reaches OP.
+#define ECAT_MP_CIA402_ZERO_AT_START 0x4022
+
 /// Set up a cia402 slave: its generic pins, then the profile's pins.
 int ecat_cia402_init(int comp_id, lcec_slave_t *slave);
 

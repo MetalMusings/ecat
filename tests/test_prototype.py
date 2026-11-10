@@ -130,6 +130,9 @@ class TestPropose(unittest.TestCase):
         self.assertTrue(any("needs the setting 0x607D:01" in e
                             for e in config.check(drive({"mode": "csp", "modes": ["pp"]}))))
         self.assertTrue(any("must be a list" in e for e in config.check(drive({"mode": "csp", "modes": "hm"}))))
+        self.assertEqual(config.check(drive({"mode": "csp", "zero-at-start": True})), [])
+        self.assertTrue(any("zero-at-start must be true or false" in e
+                            for e in config.check(drive({"mode": "csp", "zero-at-start": "yes"}))))
         # PV needs the velocity objects, not the position ones
         pv = drive({"mode": "pv"})
         self.assertTrue(any("needs 0x60FF" in e for e in config.check(pv)))

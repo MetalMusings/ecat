@@ -675,6 +675,14 @@ class SlaveView(QWidget):
             modes.addWidget(cb)
         modes.addStretch(1)
         cform.addRow("Other modes", modes)
+        self.zero_at_start = QCheckBox("Position counts from 0 at start")
+        self.zero_at_start.setToolTip(
+            "For a drive that keeps its position from an earlier run. The position the drive "
+            "reports when the bus reaches OP is taken as 0 (pin pos-zero); nothing is written to "
+            "the drive. Homing by the drive clears it. Instead of an SDO such as the ECT60's "
+            "0x2010 (Zero Position).")
+        self.zero_at_start.toggled.connect(self.general_edited)
+        cform.addRow("Start position", self.zero_at_start)
         self.supported = QHBoxLayout()
         self.supported.addStretch(1)
         cform.addRow("Supported (0x6502)", self.supported)
@@ -851,6 +859,7 @@ class SlaveView(QWidget):
             for m, cb in self.other_modes.items():
                 cb.setChecked(m in (c.get("modes") or []))
                 cb.setEnabled(m != c.get("mode"))
+            self.zero_at_start.setChecked(bool(c.get("zero-at-start")))
             while self.supported.count() > 1:
                 w = self.supported.takeAt(0).widget()
                 if w:
@@ -986,6 +995,10 @@ class SlaveView(QWidget):
                 c["modes"] = others
             else:
                 c.pop("modes", None)
+            if self.zero_at_start.isChecked():
+                c["zero-at-start"] = True
+            else:
+                c.pop("zero-at-start", None)
         s["configure-pdos"] = self.configure_pdos.isChecked()
         if self.dc.isChecked():
             dc = s.setdefault("dc", {})

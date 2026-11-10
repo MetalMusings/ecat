@@ -531,6 +531,22 @@ static void test_cia402_modes(void) {
   CHECK_FAILS(CIA402("hm", CSP_OUT, CSP_IN), "cia402.mode must be csp, csv, pv or pp");
 }
 
+static void test_cia402_zero_at_start(void) {
+  CHECK_EQ(load(CIA402("csp, zero-at-start: true", CSP_OUT, CSP_IN)), 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 2);
+  CHECK_EQ(MODPARAM(1)->id, ECAT_MP_CIA402_ZERO_AT_START);
+  CHECK_EQ(MODPARAM(1)->value.u32, 1);
+  // with other modes too
+  CHECK_EQ(load(CIA402("csp, modes: [hm], zero-at-start: true", CSP_OUT, CSP_IN)), 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 3);
+  CHECK_EQ(MODPARAM(1)->id, ECAT_MP_CIA402_MODES);
+  CHECK_EQ(MODPARAM(2)->id, ECAT_MP_CIA402_ZERO_AT_START);
+  // false or left out: no record
+  CHECK_EQ(load(CIA402("csp, zero-at-start: false", CSP_OUT, CSP_IN)), 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 1);
+  CHECK_FAILS(CIA402("csp, zero-at-start: 1", CSP_OUT, CSP_IN), "zero-at-start: \"1\" is not true or false");
+}
+
 // ---- encoder channels -------------------------------------------------
 
 #define ENCODER(encoders, outputs, inputs) \
@@ -633,7 +649,7 @@ static void test_too_many_encoders(void) {
   CHECK_FAILS(yaml, "more than 16 encoder channels");
 }
 
-RUN_TESTS("config", test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
+RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_types, test_entry_errors, test_split, test_file_errors, test_slave_errors, test_dc, test_settings,
     test_cia402_csp, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders)

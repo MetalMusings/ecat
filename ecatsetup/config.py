@@ -212,6 +212,8 @@ def check(cfg):
             if m not in CIA402_OTHER_MODES:
                 err("%s: cia402 mode %r is not supported in modes (%s)"
                     % (where, m, ", ".join(sorted(CIA402_OTHER_MODES))))
+        if profile == "cia402" and not isinstance((s.get("cia402") or {}).get("zero-at-start", False), bool):
+            err("%s: cia402 zero-at-start must be true or false" % where)
 
         # encoder channels: status index -> name
         encoders = {}
