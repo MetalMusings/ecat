@@ -32,13 +32,12 @@ Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer (how to
 try them without disturbing your own setup, and to undo it:
 [docs/try-it.md](docs/try-it.md)):
 
-1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 0.7 or newer
-   (1.1 or newer recommended: the start check compares the bus with the
-   file only with it; installing 1.1 over 1.0 removes `lcec_uspace`), from the `uspace-v*` releases of
+1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 1.1 or newer,
+   from the `uspace-v*` releases of
    [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases).
-   Up to 1.0 the package was built in
-   [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)
-   and also held the frozen `lcec_uspace`; 1.1 has the master only;
+   The package is named as before but holds the master only; installing
+   1.1 over a 1.0 built in the old linuxcnc-ethercat repository removes
+   that package's frozen `lcec_uspace`;
 2. `linuxcnc-ecat` from this repository's `ecat-v*`
    [releases](https://github.com/MetalMusings/ecat/releases): the `ecat`
    HAL component and the `ecatsetup` command.
@@ -57,7 +56,7 @@ the master package, `linuxcnc-uspace-dev` and `libyaml-dev` installed
 files) and proposes their process data, distributed clocks and HAL pins,
 optionally compared with an lcec XML file. Apart from the test mode
 below, it only reads from the bus. It needs a running userspace master
-(`sudo ethercat-uspace start`, or LinuxCNC with `lcec_uspace` or `ecat`). Installed from the package it
+(`sudo ethercat-uspace start`, or LinuxCNC with `ecat`). Installed from the package it
 is the command `ecatsetup`; from this repository, `python3 -m ecatsetup`:
 
 ```
@@ -96,7 +95,9 @@ register, and for a CiA 402 drive its state, error code and what is
 missing to reach "Operation enabled". `--events` shows the event log the
 `ecat` component keeps while LinuxCNC runs (link, states, working counter,
 drive faults, the stop guard), and `--report` writes one file to attach
-when asking for help ([docs/events.md](docs/events.md)). `--gui` opens EtherCAT Setup's window (its *Start* tab lists the tasks and the steps of each) (needs `python3-pyqt5`), laid out
+when asking for help ([docs/events.md](docs/events.md); what the log shows
+for a pulled cable, lost power or a stopped servo thread:
+[docs/fault-tests.md](docs/fault-tests.md)). `--gui` opens EtherCAT Setup's window (its *Start* tab lists the tasks and the steps of each) (needs `python3-pyqt5`), laid out
 as the mockups in the design draft, with the pages Bus, Slave status,
 Test and HAL & LinuxCNC. Part 1 of the GUI: it reads the bus, lists the
 slaves with their state and how they compare with the file, shows each
@@ -118,7 +119,9 @@ saving a slave as a quirk file: [docs/bring-up.md](docs/bring-up.md).
 Part 2 adds the I/O test, and part 3 moving a CiA 402 drive in small
 steps (CSP, PP, PV) and homing it, hold-to-enable, with a heartbeat and
 limits written to the drive, tried on the plasma cutter's three axes
-(CSP, PP and PV; homing by the current position):
+(CSP, PP and PV; homing by the current position, or by a method
+chosen from the ones the drive supports, with the INI lines it needs:
+[docs/cia402.md](docs/cia402.md)):
 [docs/test-mode.md](docs/test-mode.md). The window can also watch a
 running LinuxCNC read only, and plots a drive's last seconds. The `ecat` component runs
 the configuration being edited (saved or not) in `halrun` with a servo
@@ -180,7 +183,7 @@ addf ecat.write-all servo-thread
   waits for it. `ecat.0.guard-state` shows it (0 the servo thread runs, 1
   taking the slaves down, 2 done) and `ecat.0.guard-cycles` counts the
   cycles it sent; while the machine runs that stays 0. It needs
-  linuxcnc-ethercat-uspace 0.7 or newer. After `halcmd stop` and `start`
+  linuxcnc-ethercat-uspace 1.1 or newer. After `halcmd stop` and `start`
   the slaves are asked back to OP; DC slaves (such as the ECT60) then stop
   in SAFEOP with a synchronization error, as they did before the guard:
   restart instead.
@@ -213,7 +216,8 @@ against a userspace build of the IgH EtherCAT master
 [stratuMAK/ethercat](https://github.com/stratuMAK/ethercat)). `lcec_uspace`
 is frozen; it stays in
 [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat)
-(see its `INSTALL-USPACE.md`) with master packages up to 1.0. Unlike linuxcnc-ethercat, `ecat` will not
+(see its `INSTALL-USPACE.md`), with master packages up to 1.0, and is not
+needed for ecat. Unlike linuxcnc-ethercat, `ecat` will not
 read lcec's XML files; they can be imported instead. ecat is a project
 of its own: it keeps no backward compatibility with linuxcnc-ethercat
 and does not take in its future changes. The userspace master is

@@ -9,8 +9,7 @@
 #
 # The package is built against the userspace master package
 # linuxcnc-ethercat-uspace from a uspace-v* release of MetalMusings/ethercat
-# (1.1 and later) or, for older ones, of MetalMusings/linuxcnc-ethercat,
-# and LinuxCNC 2.9.4: from linuxcnc.org on Debian 12, Debian's own on 13.
+# (1.1 or later) and LinuxCNC 2.9.4: from linuxcnc.org on Debian 12, Debian's own on 13.
 
 name: Package
 
@@ -18,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       master_release:
-        description: uspace-v* release with the master package (MetalMusings/ethercat, or linuxcnc-ethercat up to 1.0)
+        description: uspace-v* release of MetalMusings/ethercat with the master package (1.1 or later)
         default: uspace-v1.1
   push:
     tags: ['ecat-v*']
@@ -68,12 +67,8 @@ jobs:
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
-          # from the master's own repository since 1.1, before that from linuxcnc-ethercat
-          for repo in ethercat linuxcnc-ethercat; do
-            url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/$repo/releases/tags/$MASTER_RELEASE" 2>/dev/null \
-              | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p' || true)
-            [ -n "$url" ] && break
-          done
+          url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
+            | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p')
           test -n "$url" || { echo "no ${{ matrix.id }} package in $MASTER_RELEASE"; exit 1; }
           curl -fsSL -o /tmp/master.deb "$url"
           apt-get install -y --no-install-recommends /tmp/master.deb
