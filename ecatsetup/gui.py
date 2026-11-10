@@ -35,7 +35,7 @@ from PyQt5.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget)
 
 from . import (config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose,
-               quirks, settings, symptoms, testmode, tool, update)
+               quirks, settings, symptoms, tasks, testmode, tool, update)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -3022,6 +3022,45 @@ class HalPage(QWidget):
 
 # -- the window
 
+class StartPage(QWidget):
+    """Where to begin: the tasks, each with its steps and where to do them."""
+
+    def __init__(self, win):
+        super().__init__()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        content = QWidget()
+        lay = page_layout(content)
+        outer.addWidget(scroll(content))
+        lay.addWidget(label("What do you want to do?", "bigTitle"))
+        self.state = label("", "hint", wrap=True)
+        lay.addWidget(self.state)
+        self.buttons = []
+        for title, when, steps in tasks.TASKS:
+            card = Card(title, when)
+            for n, (text, target, button) in enumerate(steps, 1):
+                row = QHBoxLayout()
+                num = pill(str(n), "blue")
+                num.setFixedWidth(26)
+                num.setAlignment(Qt.AlignCenter)
+                row.addWidget(num)
+                row.addWidget(label(text, wrap=True), 1)
+                b = QPushButton(button)
+                b.clicked.connect(lambda _c=False, t=target: win.go(t))
+                row.addWidget(b)
+                self.buttons.append((target, b))
+                card.add(row)
+            lay.addWidget(card)
+        lay.addStretch(1)
+
+    def show_state(self, win):
+        s = win.session
+        parts = ["configuration: %s" % ("open" if s.cfg is not None else "none"),
+                 "bus: %s" % ("%d slaves read" % len(s.bus) if s.bus else "not read"),
+                 "INI file: %s" % (os.path.basename(s.ini_path) if s.ini_path else "none")]
+        self.state.setText("   ·   ".join(parts))
+
+
 class NavTabs(QStackedWidget):
     """Pages under a white strip of tabs, as in the mockups."""
 
@@ -3074,10 +3113,12 @@ class MainWindow(QMainWindow):
         self.header = Header(self)
         lay.addWidget(self.header)
         self.tabs = NavTabs()
+        self.start_page = StartPage(self)
         self.bus_page = BusPage(self)
         self.trouble_page = TroubleshootPage(self)
         self.test_page = TestPage(self)
         self.hal_page = HalPage(self)
+        self.tabs.addTab(self.start_page, "Start")
         self.tabs.addTab(self.bus_page, "Bus")
         self.tabs.addTab(self.trouble_page, "Slave status")
         self.tabs.addTab(self.test_page, "Test")
@@ -3087,7 +3128,21 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
         self._actions()
+        # the start page when there is nothing yet, else where the work is
+        if session.cfg is not None or session.bus:
+            self.tabs.setCurrentWidget(self.bus_page)
         self.refresh()
+
+    def go(self, target):
+        """A start page button: a page or an action."""
+        pages = {"bus": self.bus_page, "status": self.trouble_page, "test": self.test_page,
+                 "hal": self.hal_page}
+        actions = {"scan": self.read_bus, "open": self.open_file, "update": self.update_from_bus,
+                   "esi": self.add_esi, "watch": self.start_watch}
+        if target in pages:
+            self.show_tab(pages[target])
+        elif target in actions and not self.busy:
+            actions[target]()
 
     @property
     def slave_page(self):
@@ -3274,6 +3329,8 @@ class MainWindow(QMainWindow):
             self.test_page.show_slave()
         elif page is self.hal_page:
             self.hal_page.refresh()
+        elif page is self.start_page:
+            self.start_page.show_state(self)
 
     def set_messages(self, groups):
         """groups: [(colour, prefix, [message])]."""

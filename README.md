@@ -90,7 +90,7 @@ register, and for a CiA 402 drive its state, error code and what is
 missing to reach "Operation enabled". `--events` shows the event log the
 `ecat` component keeps while LinuxCNC runs (link, states, working counter,
 drive faults, the stop guard), and `--report` writes one file to attach
-when asking for help ([docs/events.md](docs/events.md)). `--gui` opens EtherCAT Setup's window (needs `python3-pyqt5`), laid out
+when asking for help ([docs/events.md](docs/events.md)). `--gui` opens EtherCAT Setup's window (its *Start* tab lists the tasks and the steps of each) (needs `python3-pyqt5`), laid out
 as the mockups in the design draft, with the pages Bus, Slave status,
 Test and HAL & LinuxCNC. Part 1 of the GUI: it reads the bus, lists the
 slaves with their state and how they compare with the file, shows each

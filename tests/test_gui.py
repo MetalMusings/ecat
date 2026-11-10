@@ -246,6 +246,29 @@ class TestWindow(BusTest):
             out.append((it.data(gui.Qt.UserRole), texts))
         return out
 
+    def test_start_page(self):
+        from ecatsetup import tasks
+        w = self.window()
+        pages = {"bus": w.bus_page, "status": w.trouble_page, "test": w.test_page,
+                 "hal": w.hal_page}
+        known = set(pages) | {"scan", "open", "update", "esi", "watch"}
+        self.assertEqual({t for _, _, steps in tasks.TASKS for _, t, _ in steps} - known, set())
+        self.assertEqual(len(w.start_page.buttons), sum(len(x[2]) for x in tasks.TASKS))
+        self.assertIs(w.tabs.currentWidget(), w.bus_page)       # a configuration is open
+        for target, page in pages.items():
+            w.go(target)
+            self.assertIs(w.tabs.currentWidget(), page)
+        w.show_tab(w.start_page)
+        self.assertIn("configuration: open", w.start_page.state.text())
+        with mock.patch.object(w, "start_watch") as watch:
+            w.go("watch")
+            watch.assert_called_once()
+        # nothing open yet: it starts there
+        s = session.Session()
+        w2 = gui.MainWindow(s)
+        self.addCleanup(w2.close)
+        self.assertIs(w2.tabs.currentWidget(), w2.start_page)
+
     def test_list_and_pages(self):
         w = self.window()
         rows = self.rows(w)

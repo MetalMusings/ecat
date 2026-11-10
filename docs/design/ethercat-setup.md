@@ -741,7 +741,9 @@ in this order:
 6. **Watching while LinuxCNC runs and the plot** (d, e). Built
    2026-11-10 ([test-mode.md](../test-mode.md#watching-linuxcnc)); the
    watching is tried against a fake HAL, not a running LinuxCNC.
-7. **The start page**, once the parts exist.
+7. **The start page**, once the parts exist. Built 2026-11-10: the *Start* tab
+   (`ecatsetup/tasks.py`) lists the five tasks with their steps and a button
+   for each; it opens first when nothing is loaded.
 
 ## Mockups
 
