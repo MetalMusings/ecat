@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Print the ecat event log live, one line per new event, until Ctrl-C.
+
+For fault tests at the machine: leave it running in a terminal, provoke
+the fault, and see at once what the recorder caught. Usage:
+
+    scripts/ecat-events-follow [--ini MACHINE.ini]
+"""
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from ecatsetup import events  # noqa: E402
+
+
+def main():
+    seen = None          # (start, index) of the last event printed
+    print("Following %s (Ctrl-C to stop)" % events.PATH)
+    try:
+        while True:
+            try:
+                log = events.read()
+            except events.EventsError:
+                time.sleep(0.5)
+                continue
+            key = log.start
+            if seen is None:
+                seen = (key, -1)
+            elif seen[0] != key:
+                print("--- a new run started ---")
+                seen = (key, -1)
+            for e in log.events:
+                if e.index > seen[1]:
+                    sev, msg = events.text(e)
+                    print("%s %-5s %s" % (events.stamp(e.time),
+                                          {"info": "", "warn": "WARN", "error": "ERROR"}[sev], msg),
+                          flush=True)
+                    seen = (key, e.index)
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
