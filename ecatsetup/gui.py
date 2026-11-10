@@ -3096,6 +3096,9 @@ class MainWindow(QMainWindow):
         self.test_timer = QTimer(self)
         self.test_timer.setInterval(200)
         self.test_timer.timeout.connect(self.poll_test)
+        self.pending_timer = QTimer(self)
+        self.pending_timer.setInterval(25)
+        self.pending_timer.timeout.connect(self.pending_tick)
         self.drive_tests = {}   # slave name -> drivetest.DriveTest
         self.tested_drives = set()  # drives moved in the test since the program started
         # the heartbeat: a drive is shut down in the servo thread if it stops
@@ -3562,6 +3565,7 @@ class MainWindow(QMainWindow):
             self.test = run
             self.test_timer.start()
             self.heartbeat.start()
+            self.pending_timer.start()
             self.set_messages([(GREEN, "", ["Test running; log: %s" % run.log_path])])
             if self.tabs.currentWidget() is not self.test_page:
                 self.tabs.setCurrentWidget(self.test_page)
@@ -3599,6 +3603,7 @@ class MainWindow(QMainWindow):
 
         def stopped(failed):
             self.heartbeat.stop()
+            self.pending_timer.stop()
             self.drive_tests = {}
             if failed:
                 QMessageBox.warning(self, TITLE, "Not all of the drives' values could be written "
@@ -3624,6 +3629,11 @@ class MainWindow(QMainWindow):
             self.test.set_pin(pin, value)
         except (testmode.TestError, ValueError) as e:
             self.status(str(e))
+
+    def pending_tick(self):
+        if self.test is not None and not self.test.watching and not self.busy and \
+                any(dt.pending is not None for dt in self.drive_tests.values()):
+            self.service_pending()
 
     def tick(self):
         """The drives' heartbeat, every 100 ms while the test runs."""
@@ -3659,6 +3669,18 @@ class MainWindow(QMainWindow):
         else:
             self.status("Written back: %s" % "; ".join(done))
 
+    def service_pending(self):
+        """A PP move, PV run or homing asked for while the drive was
+        enabling: given as soon as the drive is enabled (every 25 ms)."""
+        for dt in list(self.drive_tests.values()):
+            if dt.pending is not None:
+                try:
+                    on = dt.pin("stat-op-enabled") == "TRUE"
+                    if dt.tick(on):
+                        self.tested_drives.add(dt.name)
+                except testmode.TestError as e:
+                    self.status(str(e))
+
     def poll_test(self):
         run = self.test
         if run is None or self.busy:
@@ -3681,15 +3703,7 @@ class MainWindow(QMainWindow):
             m = run.pins("ecat.0.")
         except testmode.TestError:
             return
-        # a PP move, PV run or homing asked for while the drive was enabling
-        for dt in list(self.drive_tests.values()):
-            if dt.pending is not None:
-                try:
-                    on = dt.pin("stat-op-enabled") == "TRUE"
-                    if dt.tick(on):
-                        self.tested_drives.add(dt.name)
-                except testmode.TestError as e:
-                    self.status(str(e))
+        self.service_pending()
 
         def get(n):
             return m["ecat.0." + n].value if "ecat.0." + n in m else "?"
@@ -3807,6 +3821,7 @@ class MainWindow(QMainWindow):
             self.drive_tests = {}
             self.test.stop()
             self.heartbeat.stop()
+            self.pending_timer.stop()
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []

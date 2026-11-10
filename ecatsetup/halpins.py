@@ -58,7 +58,7 @@ CIA402_PV = [("at-speed", "bit", "out"), ("zero-speed", "bit", "out")]
 CIA402_PP = [
     ("pp-target", "float", "in"), ("pp-start", "bit", "in"), ("pp-relative", "bit", "in"),
     ("pp-halt", "bit", "in"), ("pp-done", "bit", "out"), ("pp-timeout-ms", "u32", "rw"),
-    ("pp-immediate", "bit", "rw"), ("pp-hold-start", "bit", "rw"),
+    ("pp-immediate", "bit", "rw"),
 ]
 CIA402_PP_VELOCITY = [("pp-velocity", "float", "in")]
 CIA402_STOP = [("stop-timeout-ms", "u32", "rw")]

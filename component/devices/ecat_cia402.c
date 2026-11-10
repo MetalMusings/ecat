@@ -129,6 +129,8 @@
 #define CW_CHANGE_IMMEDIATELY 0x0020  // PP
 #define CW_RELATIVE 0x0040            // PP
 #define SW_SET_POINT_ACK 0x1000       // in PP
+#define PP_START_CYCLES 6             // PP: cycles after the acknowledge to wait for target reached to clear
+#define PP_RETRIES 2                  // PP: set-points given again when the drive does not start
 // After a mode change into CSP, pos-cmd is followed once it is this close
 // to the actual position, in counts
 #define SYNC_COUNTS 10
@@ -166,6 +168,7 @@ enum {
 enum {
   PP_IDLE = 0,  // no move since enable
   PP_SET,       // new set-point (bit 4) given, waiting for acknowledge (bit 12)
+  PP_RETRY,     // the drive acknowledged but did not start: waiting for the acknowledge to go
   PP_MOVING,    // acknowledged; waiting for target reached
   PP_DONE,      // at the target
 };
@@ -267,7 +270,6 @@ typedef struct {
   hal_u32_t stop_timeout_ms;
   hal_u32_t pp_timeout_ms;
   hal_bit_t pp_immediate;   // PP: "change set immediately" (bit 5) with every set-point; the ECT60 acknowledges and then does not move with it
-  hal_bit_t pp_hold_start;  // PP: keep 'new set-point' (bit 4) high until the target is reached
 
   // process data
   obj_t error_code_o, controlword_o, statusword_o, modes_o, modes_display_o;
@@ -304,6 +306,9 @@ typedef struct {
   int pp;               // PP_*
   long long pp_ns;      // PP: time of this move
   int pp_start_old;
+  int pp_retries;       // PP: set-points given again because the drive did not start
+  int pp_wait;          // PP: cycles left for target reached to clear after the acknowledge
+  int pp_started;       // PP: the drive showed that it took the set-point
   int pp_pending;       // PP: a start not yet given to the drive
   int32_t pp_set;       // PP: the set-point given, counts
   uint32_t pp_vel;      // PP: its profile velocity
@@ -409,7 +414,6 @@ static const lcec_paramdesc_t stop_params[] = {
 static const lcec_paramdesc_t pp_params[] = {
     {HAL_U32, HAL_RW, offsetof(cia402_t, pp_timeout_ms), "%s.pp-timeout-ms"},
     {HAL_BIT, HAL_RW, offsetof(cia402_t, pp_immediate), "%s.pp-immediate"},
-    {HAL_BIT, HAL_RW, offsetof(cia402_t, pp_hold_start), "%s.pp-hold-start"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -527,7 +531,6 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
   d->stop_timeout_ms = 10000;
   d->pp_timeout_ms = 60000;
   d->pp_immediate = 0;
-  d->pp_hold_start = 0;
   d->pos_scale = 1.0;
   d->velo_scale = 1.0;
   d->auto_fault_reset = 1;
@@ -825,6 +828,7 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
     if (!d->pp_rel) d->pp_set = to_drive(d, d->pp_set);
     d->pp_vel = d->pp_velocity != NULL ? (uint32_t)clamp_s32(fabs(*d->pp_velocity) * scale_or_one(d->velo_scale)) : 0;
     d->pp = PP_SET;
+    d->pp_retries = 0;
     d->pp_ns = 0;
     *d->pp_done = 0;
   }
@@ -832,21 +836,41 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
     case PP_SET:
       if (ack) {
         d->pp = PP_MOVING;  // bit 4 low: the drive drops the acknowledge
+        // a drive that took the set-point clears target reached with the
+        // acknowledge, or a few cycles later
+        d->pp_started = !(sw & SW_TARGET_REACHED);
+        d->pp_wait = PP_START_CYCLES;
       } else {
         bits |= CW_NEW_SET_POINT;
       }
       break;
+    case PP_RETRY:
+      if (!ack) d->pp = PP_SET;
+      break;
     case PP_MOVING:
       // after the acknowledge, "target reached" answers this set-point;
       // while halted it means standing still, not at the target
-      if (d->pp_hold_start && *d->pp_start) bits |= CW_NEW_SET_POINT;  // level, as long as pp-start is high
-      if (!ack && (sw & SW_TARGET_REACHED) && !*d->pp_halt && d->pp_halt_wait == 0) {
+      if (!d->pp_started && !*d->pp_halt) {
+        if (!(sw & SW_TARGET_REACHED)) {
+          d->pp_started = 1;
+        } else if (--d->pp_wait <= 0) {
+          // The ECT60 sometimes acknowledges a set-point and does not start (target
+          // reached stays set); the same set-point given again is taken.
+          if (d->pp_retries < PP_RETRIES) {
+            d->pp_retries++;
+            d->pp = PP_RETRY;
+          } else {
+            d->pp_started = 1;  // a move too short for the drive to show
+          }
+        }
+      }
+      if (d->pp == PP_MOVING && d->pp_started && !ack && (sw & SW_TARGET_REACHED) && !*d->pp_halt && d->pp_halt_wait == 0) {
         d->pp = PP_DONE;
         *d->pp_done = 1;
       }
       break;
   }
-  if (d->pp == PP_SET || d->pp == PP_MOVING) {
+  if (d->pp == PP_SET || d->pp == PP_RETRY || d->pp == PP_MOVING) {
     bits |= (d->pp_immediate ? CW_CHANGE_IMMEDIATELY : 0) | (d->pp_rel ? CW_RELATIVE : 0);
     if (!*d->pp_halt) d->pp_ns += period;
     if (d->pp_timeout_ms != 0 && d->pp_ns > (long long)d->pp_timeout_ms * 1000000LL) block(d, WHY_PP_TIMEOUT);

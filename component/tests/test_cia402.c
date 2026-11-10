@@ -1001,6 +1001,7 @@ static struct {
   int ack, moving, no_ack;
   int ack_hold;   // cycles the acknowledge stays after bit 4 goes low
   int start_in;   // cycles until an accepted set-point starts to move
+  int ignore;     // set-points it acknowledges without taking (as the ECT60 does)
   unsigned sw, cw_old;
 } ppd;
 
@@ -1036,10 +1037,14 @@ static unsigned pp_cycle(void) {
     if (ppd.start_in > 0 && --ppd.start_in == 0) ppd.moving = ppd.pos != ppd.target;
     if ((cw & 0x10) && !(ppd.cw_old & 0x10) && !ppd.ack && !ppd.no_ack) {
       int32_t t = (int32_t)fake_get(S, 0x607A, 0);
-      ppd.target = (cw & 0x40) ? ppd.target + t : t;
       ppd.ack = 1;
       ppd.ack_hold = 2;
-      ppd.start_in = 2;  // target reached still shows the last move until then
+      if (ppd.ignore > 0) {
+        ppd.ignore--;
+      } else {
+        ppd.target = (cw & 0x40) ? ppd.target + t : t;
+        ppd.start_in = 2;  // target reached still shows the last move until then
+      }
     }
     if (!(cw & 0x10) && ppd.ack && ppd.ack_hold-- <= 0) ppd.ack = 0;
     if (ppd.moving && !(cw & 0x100)) {
@@ -1087,25 +1092,64 @@ static void test_pp_needs_positions(void) {
   CHECK(strstr(fake_msgs, "PP and CSP need 0x607A and 0x6064") != NULL);
 }
 
-// pp-immediate adds "change set immediately" (bit 5); pp-hold-start keeps the
-// new set-point bit high as long as pp-start is.
-static void test_pp_immediate_and_hold_start(void) {
+// pp-immediate adds "change set immediately" (bit 5).
+static void test_pp_immediate(void) {
   pp_drive(pp_entries);
   PIN_FLOAT("t.pos-scale") = 10;
   PIN_FLOAT("t.velo-scale") = 100;
   PIN_FLOAT("t.pp-target") = 50;
   PIN_FLOAT("t.pp-velocity") = 2;
   PIN_BIT("t.pp-immediate") = 1;
-  PIN_BIT("t.pp-hold-start") = 1;
   ppd.pos = 123;
   pp_enable();
   PIN_BIT("t.pp-start") = 1;
   CHECK_EQ(pp_cycle(), 0x003F);
-  pp_cycle();                     // acknowledged
-  CHECK_EQ(pp_cycle() & 0x10, 0x10);   // still held: pp-start is high
-  PIN_BIT("t.pp-start") = 0;
-  pp_run(3);
-  CHECK_EQ(pp_cycle() & 0x30, 0x20);   // released; bit 5 stays with pp-immediate
+}
+
+// A drive that acknowledges a set-point without taking it, target reached
+// staying set (the ECT60): the profile gives it again, and pp-done does not
+// answer the first acknowledge.
+static void test_pp_set_point_given_again(void) {
+  int i, done_early = 0, news = 0;
+  unsigned old = 0;
+  pp_drive(pp_entries);
+  PIN_FLOAT("t.pos-scale") = 10;
+  PIN_FLOAT("t.velo-scale") = 100;
+  PIN_FLOAT("t.pp-target") = 50;
+  PIN_FLOAT("t.pp-velocity") = 2;
+  ppd.pos = 123;
+  ppd.target = 123;
+  pp_enable();
+  ppd.ignore = 1;
+  PIN_BIT("t.pp-start") = 1;
+  for (i = 0; i < 60; i++) {
+    unsigned cw = pp_cycle();
+    if ((cw & 0x10) && !(old & 0x10)) news++;
+    old = cw;
+    if (ppd.pos != 500 && PIN_BIT("t.pp-done")) done_early = 1;
+  }
+  CHECK_EQ(ppd.pos, 500);
+  CHECK(news >= 2);
+  CHECK_EQ(done_early, 0);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 1);
+  // never taken: given twice more, then it counts as a move too short to show
+  pp_drive(pp_entries);
+  PIN_FLOAT("t.pos-scale") = 10;
+  PIN_FLOAT("t.pp-target") = 50;
+  ppd.pos = 500;
+  ppd.target = 500;
+  pp_enable();
+  ppd.ignore = 99;
+  PIN_BIT("t.pp-start") = 1;
+  news = 0;
+  old = 0;
+  for (i = 0; i < 80; i++) {
+    unsigned cw = pp_cycle();
+    if ((cw & 0x10) && !(old & 0x10)) news++;
+    old = cw;
+  }
+  CHECK_EQ(news, 3);
+  CHECK_EQ(PIN_BIT("t.pp-done"), 1);
 }
 
 static void test_pp_moves_only_on_start(void) {
@@ -2049,7 +2093,7 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_pv_pins, test_pv_needs_target_velocity,
     test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,
     test_pv_stop_timeout, test_pv_standstill_switches_off_after_the_status_answers, test_pv_halts_on_a_fault,
-    test_pv_not_at_speed_in_another_mode, test_pp_pins, test_pp_needs_positions, test_pp_immediate_and_hold_start, test_pp_moves_only_on_start,
+    test_pv_not_at_speed_in_another_mode, test_pp_pins, test_pp_needs_positions, test_pp_immediate, test_pp_set_point_given_again, test_pp_moves_only_on_start,
     test_pp_done_not_from_an_old_target_reached, test_pp_relative_and_a_new_move, test_pp_start_while_acknowledging, test_pp_halt,
     test_pp_halts_before_switching_off, test_pp_timeouts, test_pp_timeout_paused_while_halted,
     test_pp_start_waits_for_the_mode, test_pp_bad_command, test_opmode_cmd_only_with_more_modes,
