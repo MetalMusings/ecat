@@ -10,6 +10,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# quirk files: only those that come with the program
+os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 
 from ecatsetup import update, diagnose, coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
 
@@ -119,7 +121,7 @@ class TestPropose(unittest.TestCase):
         v = e[(0x7010, 0x21)]
         self.assertEqual((v.pin, v.hal_type, v.scale), ("velocity", "float", 32767.0))
         self.assertEqual(e[(0x6010, 4)].pin, "error")
-        self.assertTrue(any("motor channel 0x7010" in n for n in p.notes))
+        self.assertTrue(any("from the quirk file beckhoff-el7041.yaml" in n for n in p.notes), p.notes)
         slave = config.slave_from_proposal(p)
         cfg = {"ecat": 1, "master": {"interface": "x", "transport": "raw"}, "slaves": [slave]}
         self.assertEqual(config.check(cfg), [])

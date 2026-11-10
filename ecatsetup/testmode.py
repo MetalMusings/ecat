@@ -98,9 +98,6 @@ class Pin:
         return "Pin(%s %s %s %s)" % (self.name, self.type, self.dir, self.value)
 
 
-# Objects that are commands, not settings, which the test mode does not
-# write: (vendor, product) -> {index: why}; from quirks.py.
-SDO_COMMANDS = {k: q["commands"] for k, q in quirks.QUIRKS.items() if "commands" in q}
 # a data type of the configuration file -> the ethercat tool's
 TOOL_TYPES = {"BOOL": "bool", "SINT": "int8", "INT": "int16", "DINT": "int32", "LINT": "int64",
               "USINT": "uint8", "UINT": "uint16", "UDINT": "uint32", "ULINT": "uint64",
@@ -109,7 +106,8 @@ TOOL_TYPES = {"BOOL": "bool", "SINT": "int8", "INT": "int16", "DINT": "int32", "
 
 def sdo_write_refused(slave, index, subindex):
     """Why test mode does not write this object to the slave, or None."""
-    why = SDO_COMMANDS.get(quirks.identity(slave), {}).get(index)
+    # objects that are commands, not settings (quirk files)
+    why = quirks.command(slave, index)
     if why:
         return why
     for direction in ("outputs", "inputs"):

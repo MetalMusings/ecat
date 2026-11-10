@@ -50,5 +50,6 @@ user scaling enabled (`0x8nn0:01`) reports scaled raw values; the pin's
 ## Not yet
 
 - Tried with unit tests only, not on a terminal.
-- Ranges come from the name. A quirk entry per product
-  (`ecatsetup/quirks.py`) can give one where the name does not.
+- Ranges come from the name. Where the name has none, a
+  [quirk file](quirks.md) can give the value's pin its `scale` and
+  `offset` under `pins`.

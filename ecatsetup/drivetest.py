@@ -34,7 +34,8 @@ import json
 import os
 from dataclasses import asdict, dataclass
 
-from . import config, quirks, testmode, tool
+from . import config, testmode, tool
+from . import quirks as q
 
 RESTORE_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or
                             os.path.expanduser("~/.local/state"), "ecatsetup", "drive-limits.json")
@@ -43,10 +44,6 @@ RESTORE_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or
 DEFAULTS = {"scale": 1.0, "max-velocity": 5.0, "max-acceleration": 50.0, "travel": 20.0,
             "following-error": 2.0, "max-torque": 30.0}
 
-# Where a drive keeps a limit, if not in the CiA 402 object: (vendor,
-# product) -> {limit: (index, subindex, tool type), or why the drive's
-# object is not used}; from quirks.py.
-LIMIT_QUIRKS = {k: q["limits"] for k, q in quirks.QUIRKS.items() if "limits" in q}
 STANDARD_LIMITS = {
     "following-error": (0x6065, 0, "uint32"),
     "max-torque": (0x6072, 0, "uint16"),
@@ -82,7 +79,7 @@ class Limit:
     original: int = None
 
 
-identity = quirks.identity
+identity = q.identity
 
 
 def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
@@ -106,7 +103,8 @@ def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
     limits, notes = [], []
     mode = mode_of(slave) or "csp"
     travel = int(round(abs(settings["travel"] * scale)))
-    quirks = LIMIT_QUIRKS.get(identity(slave), {})
+    # where the drive keeps a limit, if not in the CiA 402 object (quirk files)
+    quirks = q.limits(slave)
     if mode == "pv":
         notes.append("PV runs while a button is held: there is no travel limit")
     elif isinstance(quirks.get("travel"), str) and mode == "csp":

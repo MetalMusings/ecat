@@ -1,0 +1,19 @@
+# lcec's el70x1 driver: the EL7031 and the EL7041-0052 with the position
+# interface. Only the import of lcec XML files: the terminals themselves
+# are matched by beckhoff-el7041.yaml (same product code) or need no quirk.
+# See docs/quirks.md.
+name: Beckhoff EL70x1, position interface (lcec el70x1)
+
+lcec:
+  types: [EL7031, EL7041-0052]
+  modparams:
+    maxCurrent: {object: '0x8010:01', type: UINT}
+    redCurrent: {object: '0x8010:02', type: UINT}
+    nomVoltage: {object: '0x8010:03', type: UINT}
+    coilRes: {object: '0x8010:04', type: UINT}
+    motorEMF: {object: '0x8010:05', type: UINT}
+  settings:
+  - object: '0x8012:01'
+    type: USINT
+    value: 3
+    note: operation mode 3 (position interface), which lcec's el70x1 driver always set

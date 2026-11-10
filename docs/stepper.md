@@ -1,24 +1,32 @@
 # Stepper and DC motor terminals
 
 Stepper terminals such as the Beckhoff EL7031, EL7041, EL7041-0052 and
-EP7041, and DC motor terminals such as the EL7342, follow ETG.5001. They
-need no profile and no C code: EtherCAT Setup proposes them as `generic`
-slaves. Each motor channel is set up like this:
+EP7041, and DC motor terminals such as the EL7342, are handled as
+ordinary `generic` slaves: no profile and no code of their own. EtherCAT
+Setup proposes a pin for each object, named after it (`enable`, `reset`,
+`reduce-torque`, `velocity`, `ready-to-enable`, `error`, ...).
+
+What is special about a product goes into a [quirk file](quirks.md).
+The EL7041 has one, `beckhoff-el7041.yaml`, which gives:
 
 | Object | Pin | |
 |---|---|---|
-| `0x7nn0:01` Enable | `enable` (bit, in) | The output stage is on while true. |
-| `0x7nn0:02` Reset | `reset` (bit, in) | A rising edge clears an error. |
-| `0x7nn0:03` Reduce torque | `reduce-torque` (bit, in) | The reduced current (`0x8nn0:02`) while true. |
-| `0x7nn0:21` Velocity | `velocity` (float, in) | Velocity interface: -1..1 of the speed range. |
-| `0x7nn0:11` Position | `position` (s32, in) | Position interface: the target in microsteps. |
-| `0x6nn0:01`... Status | `ready-to-enable`, `ready`, `warning`, `error`, `moving-positive`, ... (bit, out) | |
+| `0x7010:01` Enable | `enable` (bit, in) | The output stage is on while true. |
+| `0x7010:02` Reset | `reset` (bit, in) | A rising edge clears an error. |
+| `0x7010:03` Reduce torque | `reduce-torque` (bit, in) | The reduced current (`0x8010:02`) while true. |
+| `0x7010:21` Velocity | `velocity` (float, in) | Velocity interface: -1..1 of the speed range. |
+| `0x6010:04` Error | `error` (bit, out) | |
+
+and HAL lines that reset an error when `enable` comes on again (below).
+For another terminal, copy that file, change `match` and the objects, and
+put it in `~/.config/ecatsetup/devices/`. Without a quirk file, the
+velocity is an `s32` pin in raw values (±32767).
 
 `nn` is the channel: the EL7041's motor is `0x7010`/`0x6010`, its
 encoder `0x7000`/`0x6000`. The encoder channel is handled by the
 [encoder function](encoder.md) when its counter and latch C are mapped.
 
-The velocity pin has `scale: 32767`: 1.0 is the top of the speed range
+With the quirk file, the velocity pin has `scale: 32767`: 1.0 is the top of the speed range
 set in `0x8nn2:05` (0: 1000, 1: 2000, 2: 4000, 3: 8000, 4: 16000, 5: 32000
 full steps per second). The terminal holds the written value within
 ±32767.
@@ -98,11 +106,33 @@ objects; the import writes each value only into its own object. The pins
 differ from lcec's (`enable` instead of `srv-enable`, and so on): the
 HAL files must be changed.
 
+## Resetting an error
+
+lcec's EL7041 driver pulsed `reset` when `enable` came on again after an
+error. The quirk file does the same in HAL: when the configuration is
+written into LinuxCNC, `ethercat.hal` gets, for a terminal `x-stm`,
+
+```
+loadrt and2 names=x-stm-auto-reset
+loadrt edge names=x-stm-enable-edge
+addf x-stm-enable-edge servo-thread
+addf x-stm-auto-reset servo-thread
+...
+setp x-stm-enable-edge.in-edge FALSE
+setp x-stm-enable-edge.out-width-ns 10000000
+net x-enable => x-stm-enable-edge.in
+net x-stm-enable-rise x-stm-enable-edge.out => x-stm-auto-reset.in0
+net x-stm-error x-stm.error
+net x-stm-error => x-stm-auto-reset.in1
+net x-stm-reset x-stm-auto-reset.out => x-stm.reset
+```
+
+The lines are left out, with a note, when nothing drives `enable` yet,
+when your HAL files connect `reset` themselves, or when they load `edge`
+or `and2` (HAL loads a component once).
+
 ## Not yet
 
 - Tried with unit tests only, not on a terminal.
-- No auto fault reset: lcec's EL7041 driver pulsed `reset` on a new
-  `enable` after an error. Connect a reset button, or `enable` through a
-  `oneshot`, to `reset`.
-- Writing a joint to a stepper terminal is not in *HAL & LinuxCNC* yet;
+- Writing a joint to a stepper terminal is not in *HAL & LinuxCNC*;
   connect it in your HAL files as above.

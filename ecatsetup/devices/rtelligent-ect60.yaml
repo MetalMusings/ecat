@@ -1,0 +1,29 @@
+# Rtelligent ECT60 (ECT60V202), a CiA 402 stepper drive with encoder.
+# A quirk file: what EtherCAT Setup knows about a device beyond its ESI
+# file, SII and dictionary. See docs/quirks.md.
+name: Rtelligent ECT60
+match: {vendor: '0x00000A88', product: '0x0A880002'}
+
+# Objects that are commands, not settings: the test mode does not write
+# them, and a configuration should not set them at every start.
+commands:
+  '0x2010': Zero Position on the ECT60, a command, not a setting
+
+# Where the drive test finds its limits (instead of the CiA 402 objects).
+limits:
+  # "Position trace error Limit", in pulses (drive error 0x8611 when exceeded)
+  following-error: {object: '0x2022:00', type: uint32}
+  # tried on a plasma cutter, 2026-11-09: in CSP it moved 4.6 mm past a
+  # 0x607D limit of 1 mm, without an error
+  travel: the ECT60 ignores its software position limits (0x607D) in CSP
+
+# Importing lcec XML files.
+lcec:
+  sdo:
+    # written at every start to make the drive report 0; did not work as a
+    # start-up SDO (a plasma cutter, 2026-11-10)
+    '0x2010:00':
+      replace: cia402.zero-at-start
+      note: >-
+        0x2010 (Zero Position) replaced by cia402.zero-at-start: the drive's
+        position at start counts as 0, without writing to it

@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# quirk files: only those that come with the program
+os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 
 from ecatsetup import testmode  # noqa: E402
 

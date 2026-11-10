@@ -189,7 +189,7 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
         elif x.type != "generic" and prop and "dc" in s:
             pass   # from the slave's own data
         settings = []
-        replace = quirks.of((x.vendor_id, x.product_code)).get("import", {})
+        replace = quirks.lcec_sdo((x.vendor_id, x.product_code))
         for index, sub, data in x.sdos:
             if sub == "complete":
                 notes.append("%s: SDO 0x%04X complete access not imported" % (where, index))

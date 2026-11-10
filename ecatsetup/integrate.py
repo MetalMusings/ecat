@@ -507,6 +507,87 @@ def propose_joints(ini_path, cfg):
     return out
 
 
+# -- HAL lines from quirk files
+
+_PLACE = re.compile(r"\{(name|pin|signal)(?::([0-9A-Fa-fx]+:[0-9A-Fa-fx]+))?\}")
+
+
+def _slave_objects(slave):
+    """{(index, subindex): (pin, HAL direction)} of a slave's pins."""
+    out = {}
+    for kind in ("outputs", "inputs"):
+        for pdo in (slave.get("process-data") or {}).get(kind) or []:
+            for e in pdo.get("entries") or []:
+                if "pin" in e:
+                    try:
+                        out[config.parse_obj(e.get("object"))] = (
+                            "%s.%s" % (slave["name"], e["pin"]), "in" if kind == "outputs" else "out")
+                    except ValueError:
+                        pass
+    return out
+
+
+def quirk_hal(cfg, pin_sig, user_loaded, p):
+    """The HAL lines quirk files give the configuration's slaves:
+    ({component: [instances]}, [functions], [lines]). pin_sig: pin ->
+    signal, as the files will connect them. Notes and refusals go to the
+    plan p."""
+    from . import quirks
+    loads, addf, lines = {}, [], []
+    for s in (cfg or {}).get("slaves") or []:
+        q = quirks.of(s)
+        hal = q.get("hal")
+        if not hal:
+            continue
+        name, objs = s.get("name"), _slave_objects(s)
+        made, why = [], None
+
+        def fill(text):
+            def one(m):
+                nonlocal why
+                kind, o = m.group(1), m.group(2)
+                if kind == "name":
+                    return name
+                obj = config.parse_obj(o)
+                if obj not in objs:
+                    why = why or "%s has no pin" % o
+                    return m.group(0)
+                pin, way = objs[obj]
+                if kind == "pin":
+                    if pin in pin_sig:
+                        why = why or "%s is connected in your HAL files" % pin
+                    return pin
+                if pin in pin_sig:
+                    return pin_sig[pin]
+                if way == "in":
+                    why = why or "nothing drives %s" % pin
+                    return m.group(0)
+                sig = default_signal(pin)
+                if sig not in {x for x in pin_sig.values()}:
+                    made.append("net %s %s" % (sig, pin))
+                pin_sig[pin] = sig
+                return sig
+            return _PLACE.sub(one, text)
+
+        text = [fill(x) for x in hal["lines"]]
+        funcs = [fill(x) for x in hal["addf"]]
+        insts = {c: [fill(x) for x in v] for c, v in hal["load"].items()}
+        clash = sorted(set(insts) & user_loaded)
+        if clash:
+            why = why or "your HAL files load %s, which HAL loads only once" % ", ".join(clash)
+        if why:
+            p.notes.append("%s: the HAL lines of the quirk file %s are left out: %s"
+                           % (name, os.path.basename(q["path"]), why))
+            continue
+        for c, v in insts.items():
+            loads.setdefault(c, []).extend(v)
+        addf += funcs
+        lines += ["# %s: from the quirk file %s" % (name, os.path.basename(q["path"]))] + \
+            made + text
+        p.notes.append("%s: HAL lines from the quirk file %s" % (name, os.path.basename(q["path"])))
+    return loads, addf, lines
+
+
 # -- the plan
 
 @dataclass
@@ -724,6 +805,31 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
         for s, pins in extra:
             body.append("net %s %s" % (s, " ".join(dict.fromkeys(pins))))
         body.append("")
+
+    # HAL lines from quirk files, with the signals as they are now
+    pin_sig = {}
+    for sig_name, sig_pins in old_sig.items():
+        for pin in sig_pins:
+            pin_sig.setdefault(pin, sig_name)
+    for line in body:
+        t = line.split("#", 1)[0].split()
+        if t and t[0] == "net" and len(t) > 2:
+            for pin in net_pins(t)[1]:
+                pin_sig[pin] = t[1]
+    user_loaded = set()
+    for path in hal_files:
+        for _, _, t in statements(original(read_text(path))):
+            if t[0] == "loadrt" and len(t) > 1:
+                user_loaded.add(t[1])
+    q_loads, q_addf, q_lines = quirk_hal(cfg, pin_sig, user_loaded, p)
+    if q_addf:
+        # after ecat.read-all, before ecat.write-all
+        body[1:1] = ["addf %s servo-thread" % f for f in q_addf]
+    if q_lines:
+        body += q_lines + [""]
+    if q_loads:
+        body[0:0] = ["loadrt %s names=%s" % (comp, ",".join(names))
+                     for comp, names in sorted(q_loads.items())]
 
     load = HEADER + "\n# Loads the component before the other HAL files, so that the slaves'\n" \
         "# pins exist for them.\nloadrt ecat config=[ETHERCAT]CONFIG\n"

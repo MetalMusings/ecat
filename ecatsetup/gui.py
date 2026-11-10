@@ -3196,4 +3196,10 @@ def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
     if read_bus:
         win.read_bus()
     QTimer.singleShot(500, win.offer_restore)
+    from . import quirks
+    quirks.load()
+    if quirks.problems:
+        QTimer.singleShot(700, lambda: QMessageBox.warning(
+            win, TITLE, "Quirk files that could not be read (they are not used):\n\n"
+            + "\n".join(quirks.problems)))
     return app.exec_()

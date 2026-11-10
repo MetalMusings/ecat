@@ -1,51 +1,123 @@
-"""Quirks: what EtherCAT Setup knows about particular devices beyond
-their ESI file, SII and dictionary, per (vendor, product).
+"""Quirks: what EtherCAT Setup knows about particular devices beyond their
+ESI file, SII and dictionary, read from quirk files (docs/quirks.md).
 
-Quirks act only through what EtherCAT Setup writes into ethercat.yaml or
-does in its test mode; the component has no quirk table, so that the
-file stays complete and predictable (docs/design/ethercat-setup.md,
-"Decision: profiles with quirks, no product drivers"). A new entry is
-data, not code: propose one with the device's vendor and product codes,
-and a source (manual, or a test on a machine) for each fact.
-
-Keys of an entry:
-
-- "name": the device, for messages;
-- "commands": {index: why} objects that are commands, not settings: the
-  test mode does not write them, and a configuration should not set them
-  at every start;
-- "limits": where the drive test finds a limit, if not in the CiA 402
-  object: {limit: (index, subindex, ethercat tool type)}, or a text
-  saying why the drive's object is not used;
-- "import": {(index, subindex): (what, note)} lcec sdoConfig entries that
-  the import replaces: what is "cia402.zero-at-start" or None (dropped).
+Quirk files are YAML, one per device or family: those that come with
+EtherCAT Setup (ecatsetup/devices/*.yaml) and the user's own
+(~/.config/ecatsetup/devices/*.yaml, or $ECATSETUP_DEVICES). A user's file
+for the same vendor and product replaces the one that came with the
+program. Quirks act only through what EtherCAT Setup writes (ethercat.yaml,
+ethercat.hal) or does in its test mode; the component never reads them,
+so that the written files stay complete and predictable.
 """
 
-ECT60 = (0x00000A88, 0x0A880002)
+import glob
+import os
 
-QUIRKS = {
-    ECT60: {
-        "name": "Rtelligent ECT60",
-        "commands": {
-            0x2010: "Zero Position on the ECT60: a command, not a setting",
-        },
-        "limits": {
-            # "Position trace error Limit", in pulses (drive error 0x8611
-            # when exceeded)
-            "following-error": (0x2022, 0, "uint32"),
-            # tried on the plasma cutter, 2026-11-09: in CSP it moved 4.6 mm
-            # past a 0x607D limit of 1 mm, without an error
-            "travel": "the ECT60 ignores its software position limits (0x607D) in CSP",
-        },
-        "import": {
-            # written at every start to make the drive report 0; did not
-            # work as a start-up SDO (the plasma cutter, 2026-11-10)
-            (0x2010, 0): ("cia402.zero-at-start",
-                          "0x2010 (Zero Position) replaced by cia402.zero-at-start: the "
-                          "drive's position at start counts as 0, without writing to it"),
-        },
-    },
-}
+import yaml
+
+SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
+KEYS = {"name", "match", "commands", "limits", "pins", "hal", "lcec"}
+
+
+def user_dir():
+    return os.environ.get("ECATSETUP_DEVICES") or os.path.join(
+        os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+        "ecatsetup", "devices")
+
+
+class QuirkError(ValueError):
+    pass
+
+
+def _hex(text, what):
+    try:
+        return int(str(text), 16)
+    except ValueError:
+        raise QuirkError("%s %r is not a hex number" % (what, text))
+
+
+def _obj(text):
+    """"0x2022:00" -> (0x2022, 0); "0x2010" -> (0x2010, None)."""
+    index, _, sub = str(text).partition(":")
+    return _hex(index, "object"), (_hex(sub, "subindex") if sub else None)
+
+
+def parse(data, path="<quirk>"):
+    """Check a quirk file's content; returns it with objects parsed."""
+    if not isinstance(data, dict):
+        raise QuirkError("not a YAML mapping")
+    unknown = set(data) - KEYS
+    if unknown:
+        raise QuirkError("unknown keys %s" % ", ".join(sorted(unknown)))
+    q = {"name": str(data.get("name") or os.path.basename(path)), "path": path}
+    m = data.get("match")
+    if m is not None:
+        if not isinstance(m, dict) or "vendor" not in m or "product" not in m:
+            raise QuirkError("match needs vendor and product")
+        q["match"] = (_hex(m["vendor"], "vendor"), _hex(m["product"], "product"))
+    q["commands"] = {_obj(k)[0]: str(v) for k, v in (data.get("commands") or {}).items()}
+    limits = {}
+    for k, v in (data.get("limits") or {}).items():
+        if isinstance(v, str):
+            limits[k] = v
+        elif isinstance(v, dict) and "object" in v and "type" in v:
+            index, sub = _obj(v["object"])
+            limits[k] = (index, sub or 0, str(v["type"]))
+        else:
+            raise QuirkError("limits.%s needs object and type, or a text" % k)
+    q["limits"] = limits
+    pins = {}
+    for k, v in (data.get("pins") or {}).items():
+        index, sub = _obj(k)
+        if not isinstance(v, dict) or not v.get("pin"):
+            raise QuirkError("pins.%s needs a pin" % k)
+        pins[(index, sub or 0)] = dict(v)
+    q["pins"] = pins
+    hal = data.get("hal")
+    if hal is not None:
+        if not isinstance(hal, dict) or not isinstance(hal.get("lines", []), list):
+            raise QuirkError("hal needs lines (a list)")
+        q["hal"] = {"load": {str(k): [str(x) for x in v]
+                             for k, v in (hal.get("load") or {}).items()},
+                    "addf": [str(x) for x in hal.get("addf") or []],
+                    "lines": [str(x) for x in hal.get("lines") or []]}
+    lcec = data.get("lcec") or {}
+    q["lcec"] = {"types": [str(t) for t in lcec.get("types") or []],
+                 "sdo": {}, "modparams": {}, "settings": []}
+    for k, v in (lcec.get("sdo") or {}).items():
+        index, sub = _obj(k)
+        q["lcec"]["sdo"][(index, sub or 0)] = (v.get("replace"), str(v.get("note", "")))
+    for k, v in (lcec.get("modparams") or {}).items():
+        index, sub = _obj(v.get("object"))
+        q["lcec"]["modparams"][k] = (index, sub or 0, str(v.get("type")), v.get("convert"),
+                                     v.get("values"))
+    for v in lcec.get("settings") or []:
+        index, sub = _obj(v.get("object"))
+        q["lcec"]["settings"].append((index, sub or 0, str(v.get("type")), int(v.get("value")),
+                                      str(v.get("note", ""))))
+    return q
+
+
+_cache = None
+problems = []   # files that could not be read, as text
+
+
+def load(reload=False):
+    """All quirks: the user's first, then those that came with the program."""
+    global _cache
+    if _cache is not None and not reload:
+        return _cache
+    del problems[:]
+    out = []
+    for d in (user_dir(), SHIPPED):
+        for path in sorted(glob.glob(os.path.join(d, "*.yaml"))):
+            try:
+                with open(path) as f:
+                    out.append(parse(yaml.safe_load(f), path))
+            except (OSError, yaml.YAMLError, TypeError, ValueError, AttributeError) as e:
+                problems.append("%s: %s" % (path, e))
+    _cache = out
+    return out
 
 
 def identity(slave):
@@ -58,10 +130,11 @@ def identity(slave):
 
 
 def of(key):
-    """The quirks of a (vendor, product), or of a configuration's slave."""
+    """The quirk of a (vendor, product), or of a configuration's slave; {}
+    if there is none. The user's file wins."""
     if isinstance(key, dict):
         key = identity(key)
-    return QUIRKS.get(key, {})
+    return next((q for q in load() if q.get("match") == key), {}) if key else {}
 
 
 def command(slave, index):
@@ -69,79 +142,59 @@ def command(slave, index):
     return of(slave).get("commands", {}).get(index)
 
 
-# -- lcec modParams, translated into settings by the XML import
+def limits(slave):
+    """{limit: (index, subindex, tool type), or why the drive's object is
+    not used} for the drive test."""
+    return of(slave).get("limits", {})
 
-def _milli(text):
-    return int(round(float(text) * 1000))
+
+def pins(key):
+    """{(index, subindex): {"pin", "hal-type", "scale", "offset"}}."""
+    return of(key).get("pins", {})
 
 
-def _enum(table):
-    def conv(text):
+def lcec_sdo(key):
+    """{(index, subindex): (replacement, note)} for an lcec sdoConfig."""
+    return of(key).get("lcec", {}).get("sdo", {})
+
+
+def for_lcec_type(lcec_type):
+    return next((q for q in load() if lcec_type in q["lcec"]["types"]), {})
+
+
+def _convert(conv, values, text):
+    if values:
         v = int(float(text))
-        if v not in table:
-            raise ValueError("%s is not one of %s" % (text, ", ".join(str(k) for k in table)))
-        return table[v]
-    return conv
-
-
-def _flag(text):
-    return 1 if text.strip().lower() in ("1", "true", "yes", "on") else 0
-
-
-# What lcec's drivers wrote for each modParam: name -> (index, subindex,
-# type, conversion). lcec_el7041.c lacks a break after motorEMF and the
-# following cases, so it also wrote that value into the objects after it;
-# the import writes only the object each modParam is meant for.
-_EL7041 = {
-    "maxCurrent": (0x8010, 0x01, "UINT", _milli),       # A -> mA
-    "reducedCurrent": (0x8010, 0x02, "UINT", _milli),
-    "nominalVoltage": (0x8010, 0x03, "UINT", _milli),   # x1000, as lcec wrote it
-    "coilResistance": (0x8010, 0x04, "UINT", _milli),   # x1000, as lcec wrote it
-    "motorEMF": (0x8010, 0x05, "UINT", _milli),         # x1000, as lcec wrote it
-    "motorFullsteps": (0x8010, 0x06, "UINT", int),
-    "encoderIncrements": (0x8010, 0x07, "UINT", int),
-    "startVelocity": (0x8010, 0x09, "UINT", int),
-    "driveOnDelay": (0x8010, 0x10, "UINT", int),
-    "driveOffDelay": (0x8010, 0x11, "UINT", int),
-    "maxSpeed": (0x8012, 0x05, "UINT", _enum({1000: 0, 2000: 1, 4000: 2, 8000: 3,
-                                              16000: 4, 32000: 5})),
-    "encoder": (0x8012, 0x08, "USINT", _flag),
-    "microsteps": (0x8012, 0x45, "USINT", _enum({1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6})),
-}
-# lcec_el70x1.c (position interface): raw values, and position mode always
-_EL70X1 = {
-    "maxCurrent": (0x8010, 0x01, "UINT", int),
-    "redCurrent": (0x8010, 0x02, "UINT", int),
-    "nomVoltage": (0x8010, 0x03, "UINT", int),
-    "coilRes": (0x8010, 0x04, "UINT", int),
-    "motorEMF": (0x8010, 0x05, "UINT", int),
-}
-_POSITION_MODE = [(0x8012, 0x01, "USINT", 3,
-                   "operation mode 3 (position interface), which lcec's el70x1 driver set")]
-
-LCEC_MODPARAMS = {
-    "EL7041": (_EL7041, []), "EL7041_1000": (_EL7041, []), "EL7041-1000": (_EL7041, []),
-    "EP7041": (_EL7041, []),
-    "EL7031": (_EL70X1, _POSITION_MODE), "EL7041-0052": (_EL70X1, _POSITION_MODE),
-}
+        if v not in values:
+            raise ValueError("%s is not one of %s" % (text, ", ".join(str(k) for k in values)))
+        return int(values[v])
+    if conv == "milli":
+        return int(round(float(text) * 1000))
+    if conv == "flag":
+        return 1 if str(text).strip().lower() in ("1", "true", "yes", "on") else 0
+    if conv in (None, "int"):
+        return int(float(text))
+    raise ValueError("unknown conversion %r" % conv)
 
 
 def lcec_modparams(lcec_type, modparams):
     """lcec modParams of a slave as settings: ([(index, subindex, type,
     value, name)], notes)."""
-    table, always = LCEC_MODPARAMS.get(lcec_type, ({}, []))
+    q = for_lcec_type(lcec_type)
+    table = q.get("lcec", {}).get("modparams", {})
     out, notes = [], []
-    for index, sub, dtype, value, why in always:
+    for index, sub, dtype, value, why in q.get("lcec", {}).get("settings", []):
         out.append((index, sub, dtype, value, None))
         notes.append("0x%04X:%02X = %d added: %s" % (index, sub, value, why))
     for name, text in modparams:
         if name not in table:
             notes.append("modParam %s=%s not imported%s" % (
-                name, text, "" if table else " (no translation for lcec type %s)" % lcec_type))
+                name, text, "" if table else " (no quirk file translates lcec type %s)"
+                % lcec_type))
             continue
-        index, sub, dtype, conv = table[name]
+        index, sub, dtype, conv, values = table[name]
         try:
-            value = conv(text)
+            value = _convert(conv, values, text)
         except (TypeError, ValueError) as e:
             notes.append("modParam %s=%s not imported: %s" % (name, text, e))
             continue

@@ -356,6 +356,10 @@ def check_file(path):
     errors = config.check(cfg)
     for e in errors:
         print("Error: %s" % e)
+    from . import quirks
+    quirks.load()
+    for e in quirks.problems:
+        print("Warning: quirk file not read: %s" % e)
     if errors:
         return 1
     print("%s: %d slaves, no errors in the file" % (path, len(cfg["slaves"])))
