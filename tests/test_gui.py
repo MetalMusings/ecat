@@ -328,6 +328,14 @@ class TestWindow(BusTest):
         self.assertEqual(len(s.cfg["slaves"]), 2)
         self.assertIn("matches", w.bus_summary())
 
+    def test_a_test_that_cannot_start_says_why_in_a_dialog(self):
+        w = self.window()
+        w.worker = mock.Mock()
+        with mock.patch.object(gui.QMessageBox, "warning") as warn:
+            w._failed("Test mode: The kernel EtherCAT master is loaded.\nStop it first")
+        self.assertIn("did not start", warn.call_args[0][2])
+        self.assertIn("kernel EtherCAT master", warn.call_args[0][2])
+
     def test_zero_at_start(self):
         w = self.window()
         s = w.session.slave(0)

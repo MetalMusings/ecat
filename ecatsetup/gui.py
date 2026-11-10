@@ -3548,6 +3548,9 @@ class MainWindow(QMainWindow):
         self.set_messages([(RED, "", text.splitlines())])
         self.status(text.splitlines()[0])
         self.refresh()
+        if text.startswith("Test mode: "):
+            # the messages are not on the Test page: without this the button seems dead
+            QMessageBox.warning(self, TITLE, "The test did not start.\n\n" + text[len("Test mode: "):])
 
     # -- actions
 
