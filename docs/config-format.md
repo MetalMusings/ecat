@@ -167,6 +167,15 @@ warning and the component starts as before: the master configures the
 slaves that match and leaves the others alone. The check of the kernel
 master is always made.
 
+Tried on the plasma cutter (2026-11-10, halrun, no motion): with the
+kernel master running, ecat refused before it took the card; with it
+stopped, the matching file loaded after waiting 3.5 s for the link and
+the scan, a wrong product code on slave 3 and an extra slave 4 in the
+file each stopped the load with their own line. The comparison needs
+linuxcnc-ethercat-uspace 1.1 (`ecrt_master()` and
+`ecrt_master_get_slave()` exported); with 1.0 only the kernel master is
+checked.
+
 ## slaves
 
 | Key | Meaning |
