@@ -266,6 +266,8 @@ typedef struct {
   hal_u32_t home_timeout_ms;
   hal_u32_t stop_timeout_ms;
   hal_u32_t pp_timeout_ms;
+  hal_bit_t pp_immediate;   // PP: "change set immediately" (bit 5) with every set-point; the ECT60 acknowledges and then does not move with it
+  hal_bit_t pp_hold_start;  // PP: keep 'new set-point' (bit 4) high until the target is reached
 
   // process data
   obj_t error_code_o, controlword_o, statusword_o, modes_o, modes_display_o;
@@ -406,6 +408,8 @@ static const lcec_paramdesc_t stop_params[] = {
 
 static const lcec_paramdesc_t pp_params[] = {
     {HAL_U32, HAL_RW, offsetof(cia402_t, pp_timeout_ms), "%s.pp-timeout-ms"},
+    {HAL_BIT, HAL_RW, offsetof(cia402_t, pp_immediate), "%s.pp-immediate"},
+    {HAL_BIT, HAL_RW, offsetof(cia402_t, pp_hold_start), "%s.pp-hold-start"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -522,6 +526,8 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
   d->home_timeout_ms = 60000;
   d->stop_timeout_ms = 10000;
   d->pp_timeout_ms = 60000;
+  d->pp_immediate = 0;
+  d->pp_hold_start = 0;
   d->pos_scale = 1.0;
   d->velo_scale = 1.0;
   d->auto_fault_reset = 1;
@@ -833,6 +839,7 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
     case PP_MOVING:
       // after the acknowledge, "target reached" answers this set-point;
       // while halted it means standing still, not at the target
+      if (d->pp_hold_start && *d->pp_start) bits |= CW_NEW_SET_POINT;  // level, as long as pp-start is high
       if (!ack && (sw & SW_TARGET_REACHED) && !*d->pp_halt && d->pp_halt_wait == 0) {
         d->pp = PP_DONE;
         *d->pp_done = 1;
@@ -840,7 +847,7 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
       break;
   }
   if (d->pp == PP_SET || d->pp == PP_MOVING) {
-    bits |= CW_CHANGE_IMMEDIATELY | (d->pp_rel ? CW_RELATIVE : 0);
+    bits |= (d->pp_immediate ? CW_CHANGE_IMMEDIATELY : 0) | (d->pp_rel ? CW_RELATIVE : 0);
     if (!*d->pp_halt) d->pp_ns += period;
     if (d->pp_timeout_ms != 0 && d->pp_ns > (long long)d->pp_timeout_ms * 1000000LL) block(d, WHY_PP_TIMEOUT);
   }

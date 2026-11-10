@@ -1087,6 +1087,27 @@ static void test_pp_needs_positions(void) {
   CHECK(strstr(fake_msgs, "PP and CSP need 0x607A and 0x6064") != NULL);
 }
 
+// pp-immediate adds "change set immediately" (bit 5); pp-hold-start keeps the
+// new set-point bit high as long as pp-start is.
+static void test_pp_immediate_and_hold_start(void) {
+  pp_drive(pp_entries);
+  PIN_FLOAT("t.pos-scale") = 10;
+  PIN_FLOAT("t.velo-scale") = 100;
+  PIN_FLOAT("t.pp-target") = 50;
+  PIN_FLOAT("t.pp-velocity") = 2;
+  PIN_BIT("t.pp-immediate") = 1;
+  PIN_BIT("t.pp-hold-start") = 1;
+  ppd.pos = 123;
+  pp_enable();
+  PIN_BIT("t.pp-start") = 1;
+  CHECK_EQ(pp_cycle(), 0x003F);
+  pp_cycle();                     // acknowledged
+  CHECK_EQ(pp_cycle() & 0x10, 0x10);   // still held: pp-start is high
+  PIN_BIT("t.pp-start") = 0;
+  pp_run(3);
+  CHECK_EQ(pp_cycle() & 0x30, 0x20);   // released; bit 5 stays with pp-immediate
+}
+
 static void test_pp_moves_only_on_start(void) {
   int i;
   pp_drive(pp_entries);
@@ -1103,7 +1124,7 @@ static void test_pp_moves_only_on_start(void) {
   CHECK_EQ(PIN_BIT("t.pp-done"), 0);
   // start: set-point 500 at 200 counts/s, with the handshake
   PIN_BIT("t.pp-start") = 1;
-  CHECK_EQ(pp_cycle(), 0x003F);  // enable operation, new set-point, change immediately
+  CHECK_EQ(pp_cycle(), 0x001F);  // enable operation, new set-point (not "change immediately")
   CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 500);
   CHECK_EQ(fake_get(S, 0x6081, 0), 200);
   CHECK_EQ(pp_cycle() & 0x10, 0);  // acknowledged: bit 4 low
@@ -1144,7 +1165,7 @@ static void test_pp_relative_and_a_new_move(void) {
   PIN_FLOAT("t.pp-target") = 30;
   PIN_BIT("t.pp-relative") = 1;
   PIN_BIT("t.pp-start") = 1;
-  CHECK_EQ(pp_cycle(), 0x007F);  // relative
+  CHECK_EQ(pp_cycle(), 0x005F);  // relative
   for (i = 0; i < 20; i++) pp_cycle();
   CHECK_EQ(ppd.pos, 130);
   CHECK_EQ(PIN_BIT("t.pp-done"), 1);
@@ -2028,7 +2049,7 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_pv_pins, test_pv_needs_target_velocity,
     test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,
     test_pv_stop_timeout, test_pv_standstill_switches_off_after_the_status_answers, test_pv_halts_on_a_fault,
-    test_pv_not_at_speed_in_another_mode, test_pp_pins, test_pp_needs_positions, test_pp_moves_only_on_start,
+    test_pv_not_at_speed_in_another_mode, test_pp_pins, test_pp_needs_positions, test_pp_immediate_and_hold_start, test_pp_moves_only_on_start,
     test_pp_done_not_from_an_old_target_reached, test_pp_relative_and_a_new_move, test_pp_start_while_acknowledging, test_pp_halt,
     test_pp_halts_before_switching_off, test_pp_timeouts, test_pp_timeout_paused_while_halted,
     test_pp_start_waits_for_the_mode, test_pp_bad_command, test_opmode_cmd_only_with_more_modes,
