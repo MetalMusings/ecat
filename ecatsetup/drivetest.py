@@ -34,7 +34,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 
-from . import quirks, testmode, tool
+from . import config, quirks, testmode, tool
 
 RESTORE_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or
                             os.path.expanduser("~/.local/state"), "ecatsetup", "drive-limits.json")
@@ -85,11 +85,24 @@ class Limit:
 identity = quirks.identity
 
 
-def plan_limits(slave, has_object, scale, start_counts, settings):
+def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
     """The limits to write to a drive, and notes on those it cannot take.
 
     has_object(index, subindex): whether the drive's dictionary has it;
-    scale: counts per machine unit; start_counts: the drive's position."""
+    scale: counts per machine unit; start_counts: the drive's position;
+    axis: the axis of a drive with several, whose CiA 402 objects are at
+    index + axis * 0x800 (vendor objects of quirks are not moved)."""
+    off = axis * config.AXIS_OFFSET
+    if off:
+        # planned as axis 0, then moved to the axis's objects
+        limits, notes = plan_limits(
+            slave, lambda i, sub: has_object(i + off if 0x6000 <= i < 0x6800 else i, sub),
+            scale, start_counts, settings)
+        for lim in limits:
+            if 0x6000 <= lim.index < 0x6800:
+                lim.text = lim.text.replace("0x%04X" % lim.index, "0x%04X" % (lim.index + off))
+                lim.index += off
+        return limits, notes
     limits, notes = [], []
     mode = mode_of(slave) or "csp"
     travel = int(round(abs(settings["travel"] * scale)))
@@ -177,13 +190,17 @@ def restore_pending():
 class DriveTest:
     """One drive, prepared for moving: limits written, HAL set up."""
 
-    def __init__(self, run, slave, coe=None, settings=None):
+    def __init__(self, run, slave, coe=None, settings=None, axis=0):
         if not testable(slave):
             raise testmode.TestError("%s cannot be moved in the test: only cia402 drives in "
                                      "CSP, PP or PV, or with hm in their modes" % slave["name"])
         self.run, self.slave, self.coe = run, slave, coe
         self.settings = dict(DEFAULTS, **(settings or {}))
-        self.name = slave["name"]
+        names = config.axes(slave)
+        if not 0 <= axis < len(names):
+            raise testmode.TestError("%s has no axis %d" % (slave["name"], axis))
+        self.axis = axis
+        self.name = names[axis]         # the axis's pin prefix
         self.position = slave["position"]
         self.mode = mode_of(slave)
         self.homes = can_home(slave)
@@ -231,7 +248,8 @@ class DriveTest:
             first["%s.home" % self.name] = "FALSE"
         self.run.setp_many(first)
         counts = int(self.pin("drv-actual-position"))
-        self.limits, self.notes = plan_limits(self.slave, self._has, s["scale"], counts, s)
+        self.limits, self.notes = plan_limits(self.slave, self._has, s["scale"], counts, s,
+                                              self.axis)
         # the drive's own values first, kept in a file until put back
         for lim in self.limits:
             lim.original = tool.upload(self.position, lim.index, lim.subindex, lim.dtype)

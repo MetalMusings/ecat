@@ -24,6 +24,8 @@ import re
 import shutil
 from dataclasses import dataclass, field
 
+from . import config
+
 LOAD_FILE = "ethercat-load.hal"
 MAIN_FILE = "ethercat.hal"
 COMMENT = "#ecatsetup: "
@@ -256,11 +258,13 @@ def resolve(value, ini_entries):
 
 
 def drives(cfg):
-    """{name: slave} of the drives a joint can be connected to."""
+    """{name: slave} of the drives a joint can be connected to: the pin
+    prefix of each CSP axis (the slave's name, or its cia402.axes)."""
     out = {}
     for s in (cfg or {}).get("slaves") or []:
         if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp":
-            out[s.get("name")] = s
+            for a in config.axes(s):
+                out[a] = s
     return out
 
 
@@ -285,12 +289,24 @@ def set_joint(cfg, joint, slave=None, scale=None):
 
 
 def rename_slave(cfg, old, new):
+    """A slave renamed from old to new: its joints and nets follow, and so
+    do its axes named after it (old-1, old-2 become new-1, new-2)."""
+    renamed = {old: new}
+    for s in (cfg or {}).get("slaves") or []:
+        ax = (s.get("cia402") or {}).get("axes") if s.get("name") == new else None
+        if isinstance(ax, list):
+            for i, a in enumerate(ax):
+                if isinstance(a, str) and a.startswith(old + "-"):
+                    ax[i] = renamed[a] = new + a[len(old):]
     for j in joints(cfg):
-        if j.get("slave") == old:
-            j["slave"] = new
+        if j.get("slave") in renamed:
+            j["slave"] = renamed[j["slave"]]
     for n in nets(cfg):
-        n["pins"] = [new + p[len(old):] if p.startswith(old + ".") else p
-                     for p in n.get("pins") or []]
+        out = []
+        for p in n.get("pins") or []:
+            prefix = next((o for o in renamed if p.startswith(o + ".")), None)
+            out.append(renamed[prefix] + p[len(prefix):] if prefix else p)
+        n["pins"] = out
 
 
 # -- inputs and outputs: nets between the slaves' pins and LinuxCNC's
@@ -384,8 +400,11 @@ def slave_pins(cfg):
 
 
 def own_prefixes(cfg):
-    """The pin prefixes of the configuration's slaves: "<name>."."""
-    return [s.get("name") + "." for s in (cfg or {}).get("slaves") or [] if s.get("name")]
+    """The pin prefixes of the configuration's slaves and axes: "<name>."."""
+    out = []
+    for s in (cfg or {}).get("slaves") or []:
+        out += [x + "." for x in [s.get("name")] + config.axes(s) if x]
+    return list(dict.fromkeys(out))
 
 
 def is_own(cfg, pin):

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 
 # CiA 402 objects that the drive profile handles itself (no HAL pin); the
 # profile gives them its own pins (component/devices/ecat_cia402.c).
+# a drive with several axes: axis n's objects at index + n * 0x800
+AXIS_OFFSET = 0x800
 CIA402_PROFILE = {0x603F, 0x6040, 0x6041, 0x6060, 0x6061,
                   0x6064, 0x606C, 0x607A, 0x6081, 0x60FF}
 # Other CiA 402 process data, with fixed pin names and types.
@@ -92,6 +94,7 @@ class Proposal:
     esi_path: str = ""
     settings: list = field(default_factory=list)   # writable vendor objects
     encoders: list = field(default_factory=list)   # (name, status index) of encoder channels
+    axes: int = 1        # a CiA 402 drive's axes: the status word at 0x6041 + n * 0x800
     pp_limits: dict = field(default_factory=dict)  # PP: (index, subindex) -> the drive's value
     notes: list = field(default_factory=list)
 
@@ -268,7 +271,14 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     if p.profile == 402:
         need_rx, need_tx = CIA402_MODES.get(mode, (set(), set()))
         have = {e.index for pd in pdos for e in pd.entries}
-        missing = (need_rx | need_tx) - have
+        # several axes (ETG.6010: axis n at index + n * 0x800)
+        while p.axes < 4 and 0x6041 + p.axes * AXIS_OFFSET in have:
+            p.axes += 1
+        if p.axes > 1:
+            p.notes.append("%d axes: each gets its own pins (cia402.axes)" % p.axes)
+        missing = set()
+        for a in range(p.axes):
+            missing |= {i + a * AXIS_OFFSET for i in need_rx | need_tx} - have
         if missing:
             p.notes.append("the default PDOs lack %s for %s; the mapping must be changed"
                            % (", ".join("0x%04X" % i for i in sorted(missing)), mode.upper()))
@@ -302,12 +312,17 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                                % (e.index, e.subindex, "ESI" if esi_dev else "SII",
                                   e.data_type, coe_t, coe_t))
                 e.data_type = coe_t
-            if p.profile == 402 and e.index in CIA402_PROFILE:
+            if p.profile == 402 and any(e.index - a * AXIS_OFFSET in CIA402_PROFILE
+                                        for a in range(p.axes)):
                 e.role = "profile"
             elif (e.index, e.subindex) in enc_owned:
                 e.role = "encoder"
-            elif p.profile == 402 and e.index in CIA402_PINS:
-                e.pin, e.hal_type = CIA402_PINS[e.index]
+            elif p.profile == 402 and any(e.index - a * AXIS_OFFSET in CIA402_PINS
+                                          for a in range(p.axes)):
+                a = next(a for a in range(p.axes) if e.index - a * AXIS_OFFSET in CIA402_PINS)
+                e.pin, e.hal_type = CIA402_PINS[e.index - a * AXIS_OFFSET]
+                if p.axes > 1:
+                    e.pin = "%s-%d" % (e.pin, a + 1)
             else:
                 # Beckhoff names a record's members "Status__Latch C valid":
                 # the part before "__" repeats the record's name.

@@ -454,6 +454,30 @@ static void test_cia402_csp(void) {
   CHECK_EQ(ENTRY(0)->halPin[0], 0);
 }
 
+#define CSP_OUT2 P("0x6840:00", 16, "UINT") P("0x687A:00", 32, "DINT")
+#define CSP_IN2 P("0x6841:00", 16, "UINT") P("0x6864:00", 32, "DINT")
+
+static void test_cia402_axes(void) {
+  CHECK_EQ(load(CIA402("csp, axes: [x1, x2]", CSP_OUT CSP_OUT2, CSP_IN CSP_IN2)), 0);
+  CHECK_EQ(fake_msgs[0], 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 3);
+  CHECK_EQ(MODPARAM(1)->id, ECAT_MP_CIA402_AXIS);
+  CHECK(!strcmp(MODPARAM(1)->value.str, "x1"));
+  CHECK(!strcmp(MODPARAM(2)->value.str, "x2"));
+  // the second axis's objects are the profile's too, and each axis needs its own
+  CHECK_FAILS(CIA402("csp, axes: [x1, x2]", CSP_OUT CSP_OUT2, CSP_IN P("0x6864:00", 32, "DINT")),
+      "the cia402 profile needs 0x6841:00");
+  // without axes, 0x6840 is not the profile's
+  CHECK_FAILS(CIA402("csp", CSP_OUT CSP_OUT2, CSP_IN CSP_IN2), "0x6840:00: the cia402 profile does not handle this object");
+  CHECK_FAILS(CIA402("csp, axes: [a, b, c, d, e]", CSP_OUT, CSP_IN), "cia402.axes: a list of 1 to 4 names");
+  CHECK_FAILS(CIA402("pp, axes: [x1, x2]", CSP_OUT CSP_OUT2, CSP_IN CSP_IN2
+                     "  settings:\n"
+                     "  - {object: '0x607D:01', type: DINT, value: -1}\n"
+                     "  - {object: '0x607D:02', type: DINT, value: 1}\n"
+                     "  - {object: '0x607F:00', type: UDINT, value: 1}\n"),
+      "cia402 mode pp needs the settings 0x687D:01 and 0x687D:02");
+}
+
 static void test_cia402_csv(void) {
   CHECK_EQ(load(CIA402("csv", P("0x6040:00", 16, "UINT") P("0x60FF:00", 32, "DINT"),
                P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT"))),
@@ -658,5 +682,5 @@ static void test_too_many_encoders(void) {
 
 RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_types, test_entry_errors, test_split, test_file_errors, test_slave_errors, test_dc, test_settings,
-    test_cia402_csp, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
+    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders)

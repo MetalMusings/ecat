@@ -27,6 +27,9 @@ DATA_TYPES = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT",
               "ULINT", "REAL", "LREAL"}
 # LinuxCNC 2.9 has no 64-bit pins: LINT and ULINT entries are float pins
 HAL_TYPES = {"bit", "s32", "u32", "float"}
+# a drive with several axes (cia402.axes): axis n's objects at index + n * 0x800
+AXIS_OFFSET = 0x800
+MAX_AXES = 4
 CIA402_MODES = {"csp", "csv", "pv", "pp"}
 # other modes a cia402 drive may switch to (cia402.modes); they need the
 # mode objects to change modes
@@ -94,6 +97,8 @@ def slave_from_proposal(p, name=None):
     }
     if p.profile == 402:
         s["cia402"] = {"mode": p.mode}
+        if getattr(p, "axes", 1) > 1:
+            s["cia402"]["axes"] = ["%s-%d" % (s["name"], n + 1) for n in range(p.axes)]
     if p.encoders:
         s["encoders"] = [{"name": n, "index": "0x%04X" % i} for n, i in p.encoders]
     pd = {"outputs": [], "inputs": []}
@@ -159,6 +164,24 @@ def load(path):
         return yaml.safe_load(f)
 
 
+def axes(slave):
+    """The pin prefixes of a cia402 slave's axes: its cia402.axes, or its
+    own name for a drive with one axis; [] for other slaves."""
+    if (slave or {}).get("profile") != "cia402":
+        return []
+    names = ((slave.get("cia402") or {}).get("axes"))
+    return list(names) if isinstance(names, list) and names else [slave.get("name")]
+
+
+def axis_of(cfg, prefix):
+    """(slave, axis number) of a cia402 axis's pin prefix, or (None, None)."""
+    for s in (cfg or {}).get("slaves") or []:
+        for n, a in enumerate(axes(s)):
+            if a == prefix:
+                return s, n
+    return None, None
+
+
 def check(cfg):
     """Errors in a configuration, as readable strings; empty if it is fine."""
     errors = []
@@ -186,7 +209,7 @@ def check(cfg):
     if not isinstance(slaves, list) or not slaves:
         return errors + ["slaves: none"]
 
-    positions, names, pins = set(), set(), set()
+    positions, names, pins, axis_names = set(), set(), set(), set()
     for i, s in enumerate(slaves):
         where = "slave %s" % s.get("position", "#%d" % i)
         pos, name = s.get("position"), s.get("name")
@@ -197,7 +220,7 @@ def check(cfg):
         positions.add(pos)
         if not isinstance(name, str) or not _NAME.match(name):
             err("%s: name %r must be letters, digits, '-', '_' and '.'" % (where, name))
-        elif name in names:
+        elif name in names or name in axis_names:
             err("%s: name %r used twice" % (where, name))
         names.add(name)
         ident = s.get("identity") or {}
@@ -221,6 +244,20 @@ def check(cfg):
                     % (where, m, ", ".join(sorted(CIA402_OTHER_MODES))))
         if profile == "cia402" and not isinstance((s.get("cia402") or {}).get("zero-at-start", False), bool):
             err("%s: cia402 zero-at-start must be true or false" % where)
+        # several axes: axis n has the objects at index + n * 0x800
+        n_axes = 1
+        if profile == "cia402" and "axes" in (s.get("cia402") or {}):
+            axes = s["cia402"]["axes"]
+            if not isinstance(axes, list) or not 1 <= len(axes) <= MAX_AXES:
+                err("%s: cia402 axes must be a list of 1 to %d names" % (where, MAX_AXES))
+            else:
+                n_axes = len(axes)
+                for a in axes:
+                    if not isinstance(a, str) or not _NAME.match(a):
+                        err("%s: axis name %r must be letters, digits, '-', '_' and '.'" % (where, a))
+                    elif a in names or a in axis_names:
+                        err("%s: axis name %r is used for another slave or axis" % (where, a))
+                    axis_names.add(a)
 
         # encoder channels: status index -> name
         encoders = {}
@@ -275,7 +312,9 @@ def check(cfg):
                         continue
                     if e.get("use") == "gap":
                         continue
-                    if profile == "cia402" and o[1] == 0 and o[0] in CIA402_PROFILE:
+                    base = next((o[0] - a * AXIS_OFFSET for a in range(n_axes)
+                                 if o[0] - a * AXIS_OFFSET in CIA402_PROFILE), None)
+                    if profile == "cia402" and o[1] == 0 and base is not None:
                         if e.get("use") != "profile":
                             err("%s: %s is handled by the cia402 profile; give it use: profile"
                                 % (where, e["object"]))
@@ -330,11 +369,14 @@ def check(cfg):
             for m in [(s.get("cia402") or {}).get("mode")] + other_modes:
                 r, t = CIA402_NEEDS.get(m, (set(), set()))
                 rx, tx = rx | r, tx | t
-            for i in sorted((rx | tx) - owned):
-                err("%s: the cia402 profile needs 0x%04X:00 in the process data" % (where, i))
-            if other_modes:
-                for i in sorted(CIA402_MODE_OBJECTS - owned - rx - tx):
-                    err("%s: changing modes needs 0x%04X:00 in the process data" % (where, i))
+            for a in range(n_axes):
+                off = a * AXIS_OFFSET
+                for i in sorted((rx | tx) - {x - off for x in owned}):
+                    err("%s: the cia402 profile needs 0x%04X:00 in the process data" % (where, i + off))
+                if other_modes:
+                    for i in sorted(CIA402_MODE_OBJECTS - {x - off for x in owned} - rx - tx):
+                        err("%s: changing modes needs 0x%04X:00 in the process data"
+                            % (where, i + off))
         dc = s.get("dc")
         if dc is not None:
             aa = dc.get("assign-activate")
@@ -364,9 +406,11 @@ def check(cfg):
                 err("%s: setting %s has neither value nor data" % (where, st.get("object")))
         if profile == "cia402" and "pp" in [(s.get("cia402") or {}).get("mode")] + other_modes:
             # the drive plans PP moves itself: it must know its limits
-            for i, sub, _ in PP_LIMITS:
-                if (i, sub) not in set_objects:
-                    err("%s: cia402 mode pp needs the setting %s" % (where, obj(i, sub)))
+            for a in range(n_axes):
+                for i, sub, _ in PP_LIMITS:
+                    if (i + a * AXIS_OFFSET, sub) not in set_objects:
+                        err("%s: cia402 mode pp needs the setting %s"
+                            % (where, obj(i + a * AXIS_OFFSET, sub)))
     return errors + check_joints(cfg) + check_nets(cfg)
 
 
@@ -381,8 +425,9 @@ def check_joints(cfg):
     js = lc.get("joints") or []
     if not isinstance(js, list):
         return ["linuxcnc.joints: must be a list"]
-    csp = {s.get("name") for s in cfg.get("slaves") or []
-           if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp"}
+    csp = {a for s in cfg.get("slaves") or []
+           if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp"
+           for a in axes(s)}
     numbers, slaves = set(), set()
     for j in js:
         n = j.get("joint") if isinstance(j, dict) else None
@@ -448,7 +493,8 @@ def check_nets(cfg):
             if x in taken:
                 errors.append("%s: %s is connected by joint %d" % (where, x, taken[x]))
             slave = next((s for name, s in names.items()
-                          if name and x.startswith(name + ".")), None)
+                          if name and x.startswith(name + ".")), None) or \
+                axis_of(cfg, x.rsplit(".", 1)[0])[0]
             if slave is not None:
                 mine = True
                 if x not in own and slave.get("profile") in (None, "generic") and \

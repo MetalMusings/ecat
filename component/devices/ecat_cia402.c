@@ -419,6 +419,13 @@ static const lcec_paramdesc_t params[] = {
 static void cia402_read(lcec_slave_t *slave, long period);
 static void cia402_write(lcec_slave_t *slave, long period);
 
+/// A drive's axes: one, or several (cia402.axes), each with its own
+/// objects (index + n * 0x800), pins and state.
+typedef struct {
+  int n;
+  cia402_t *axis[ECAT_CIA402_MAX_AXES];
+} cia402_dev_t;
+
 /// Find an object in the slave's process data and register it.
 static int find(lcec_slave_t *slave, uint16_t index, obj_t *o) {
   const ec_sync_info_t *sm;
@@ -438,84 +445,73 @@ static int find(lcec_slave_t *slave, uint16_t index, obj_t *o) {
   return 0;
 }
 
-int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
-  lcec_slave_modparam_t *p;
-  cia402_t *d;
-  int err, mode = MODE_CSP;
-  unsigned int others = 0;
+/// Set up one axis: its objects at index + off, its pins with the prefix.
+static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_t off, int mode, unsigned int others) {
+  int err;
 
-  if ((err = lcec_generic_init(comp_id, slave)) != 0) return err;
-
-  d = LCEC_HAL_ALLOCATE(cia402_t);
-  slave->profile_data = d;
-  slave->proc_read = cia402_read;
-  slave->proc_write = cia402_write;
-
-  if (find(slave, OBJ_ERROR_CODE, &d->error_code_o) || find(slave, OBJ_CONTROLWORD, &d->controlword_o) ||
-      find(slave, OBJ_STATUSWORD, &d->statusword_o) || find(slave, OBJ_MODES, &d->modes_o) ||
-      find(slave, OBJ_MODES_DISPLAY, &d->modes_display_o) || find(slave, OBJ_ACTUAL_POSITION, &d->actual_position_o) ||
-      find(slave, OBJ_ACTUAL_VELOCITY, &d->actual_velocity_o) || find(slave, OBJ_TARGET_POSITION, &d->target_position_o) ||
-      find(slave, OBJ_TARGET_VELOCITY, &d->target_velocity_o) || find(slave, OBJ_PROFILE_VELOCITY, &d->profile_velocity_o)) {
+  if (find(slave, OBJ_ERROR_CODE + off, &d->error_code_o) || find(slave, OBJ_CONTROLWORD + off, &d->controlword_o) ||
+      find(slave, OBJ_STATUSWORD + off, &d->statusword_o) || find(slave, OBJ_MODES + off, &d->modes_o) ||
+      find(slave, OBJ_MODES_DISPLAY + off, &d->modes_display_o) ||
+      find(slave, OBJ_ACTUAL_POSITION + off, &d->actual_position_o) ||
+      find(slave, OBJ_ACTUAL_VELOCITY + off, &d->actual_velocity_o) ||
+      find(slave, OBJ_TARGET_POSITION + off, &d->target_position_o) ||
+      find(slave, OBJ_TARGET_VELOCITY + off, &d->target_velocity_o) ||
+      find(slave, OBJ_PROFILE_VELOCITY + off, &d->profile_velocity_o)) {
     return -EIO;
   }
   // ecat_config.c has checked these; a safety net
   if (!d->controlword_o.mapped || !d->statusword_o.mapped) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 needs 0x6040 and 0x6041 in the process data\n", slave->name);
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 needs 0x%04X and 0x%04X in the process data\n", name,
+        OBJ_CONTROLWORD + off, OBJ_STATUSWORD + off);
     return -EINVAL;
-  }
-
-  for (p = slave->modparams; p != NULL && p->id != -1; p++) {
-    if (p->id == ECAT_MP_CIA402_MODES) others = p->value.u32;
-    if (p->id == ECAT_MP_CIA402_MODE) mode = p->value.u32;
-    if (p->id == ECAT_MP_CIA402_ZERO_AT_START) d->zero_at_start = p->value.u32 != 0;
   }
   // ecat_config.c has checked these too
   if (mode != MODE_CSP && mode != MODE_CSV && mode != MODE_PV && mode != MODE_PP) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 mode %d is not supported\n", slave->name, mode);
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 mode %d is not supported\n", name, mode);
     return -EINVAL;
   }
   if (others & ~(MODE_BIT(MODE_PP) | MODE_BIT(MODE_PV) | MODE_BIT(MODE_HOMING) | MODE_BIT(MODE_CSP) | MODE_BIT(MODE_CSV))) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 modes 0x%x are not supported\n", slave->name, others);
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: cia402 modes 0x%x are not supported\n", name, others);
     return -EINVAL;
   }
   d->allowed = MODE_BIT(mode) | others;
   d->can_home = (d->allowed & MODE_BIT(MODE_HOMING)) != 0;
   if ((d->allowed & (MODE_BIT(MODE_PV) | MODE_BIT(MODE_CSV))) && !d->target_velocity_o.mapped) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PV and CSV need 0x60FF in the process data\n", slave->name);
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PV and CSV need 0x60FF in the process data\n", name);
     return -EINVAL;
   }
   if ((d->allowed & (MODE_BIT(MODE_PP) | MODE_BIT(MODE_CSP))) &&
       (!d->target_position_o.mapped || !d->actual_position_o.mapped)) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PP and CSP need 0x607A and 0x6064 in the process data\n", slave->name);
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: PP and CSP need 0x607A and 0x6064 in the process data\n", name);
     return -EINVAL;
   }
   // changing modes needs the mode and its display; ecat_config.c has checked this too
   if (others && (!d->modes_o.mapped || !d->modes_display_o.mapped)) {
-    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: changing modes needs 0x6060 and 0x6061 in the process data\n", slave->name);
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: changing modes needs 0x6060 and 0x6061 in the process data\n", name);
     return -EINVAL;
   }
 
-  if ((err = lcec_pin_newf_list(d, pins, slave->name)) != 0) return err;
-  if ((err = lcec_param_newf_list(d, params, slave->name)) != 0) return err;
+  if ((err = lcec_pin_newf_list(d, pins, name)) != 0) return err;
+  if ((err = lcec_param_newf_list(d, params, name)) != 0) return err;
   if (d->can_home) {
-    if ((err = lcec_pin_newf_list(d, homing_pins, slave->name)) != 0) return err;
-    if ((err = lcec_param_newf_list(d, homing_params, slave->name)) != 0) return err;
+    if ((err = lcec_pin_newf_list(d, homing_pins, name)) != 0) return err;
+    if ((err = lcec_param_newf_list(d, homing_params, name)) != 0) return err;
   }
   if (d->allowed & MODE_BIT(MODE_PV)) {
-    if ((err = lcec_pin_newf_list(d, pv_pins, slave->name)) != 0) return err;
+    if ((err = lcec_pin_newf_list(d, pv_pins, name)) != 0) return err;
   }
   if (d->allowed & MODE_BIT(MODE_PP)) {
-    if ((err = lcec_pin_newf_list(d, pp_pins, slave->name)) != 0) return err;
-    if (d->profile_velocity_o.mapped && (err = lcec_pin_newf_list(d, pp_velocity_pins, slave->name)) != 0) return err;
-    if ((err = lcec_param_newf_list(d, pp_params, slave->name)) != 0) return err;
+    if ((err = lcec_pin_newf_list(d, pp_pins, name)) != 0) return err;
+    if (d->profile_velocity_o.mapped && (err = lcec_pin_newf_list(d, pp_velocity_pins, name)) != 0) return err;
+    if ((err = lcec_param_newf_list(d, pp_params, name)) != 0) return err;
   }
   if (d->allowed & (MODE_BIT(MODE_PV) | MODE_BIT(MODE_PP))) {
-    if ((err = lcec_param_newf_list(d, stop_params, slave->name)) != 0) return err;
+    if ((err = lcec_param_newf_list(d, stop_params, name)) != 0) return err;
   }
   if (d->allowed & ~MODE_BIT(MODE_HOMING) & ~MODE_BIT(mode)) {
-    if ((err = lcec_pin_newf_list(d, mode_pins, slave->name)) != 0) return err;
+    if ((err = lcec_pin_newf_list(d, mode_pins, name)) != 0) return err;
   }
-  if (d->zero_at_start && (err = lcec_pin_newf_list(d, zero_pins, slave->name)) != 0) return err;
+  if (d->zero_at_start && (err = lcec_pin_newf_list(d, zero_pins, name)) != 0) return err;
 
   // after the parameters are made, which zeroes them
   d->mode = mode;
@@ -529,6 +525,43 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   d->enable_timeout_ms = 2000;
   d->watchdog_ms = 0;
   d->state = ST_UNKNOWN;
+  return 0;
+}
+
+int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
+  lcec_slave_modparam_t *p;
+  cia402_dev_t *dev;
+  const char *names[ECAT_CIA402_MAX_AXES];
+  int err, a, n = 0, mode = MODE_CSP, zero = 0;
+  unsigned int others = 0;
+
+  if ((err = lcec_generic_init(comp_id, slave)) != 0) return err;
+
+  for (p = slave->modparams; p != NULL && p->id != -1; p++) {
+    if (p->id == ECAT_MP_CIA402_MODES) others = p->value.u32;
+    if (p->id == ECAT_MP_CIA402_MODE) mode = p->value.u32;
+    if (p->id == ECAT_MP_CIA402_ZERO_AT_START) zero = p->value.u32 != 0;
+    if (p->id == ECAT_MP_CIA402_AXIS) {
+      // ecat_config.c has checked the count
+      if (n >= ECAT_CIA402_MAX_AXES) {
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s: more than %d axes\n", slave->name, ECAT_CIA402_MAX_AXES);
+        return -EINVAL;
+      }
+      names[n++] = p->value.str;
+    }
+  }
+  if (n == 0) names[n++] = slave->name;  // one axis, named after the slave
+
+  dev = LCEC_HAL_ALLOCATE(cia402_dev_t);
+  slave->profile_data = dev;
+  slave->proc_read = cia402_read;
+  slave->proc_write = cia402_write;
+  for (a = 0; a < n; a++) {
+    cia402_t *d = LCEC_HAL_ALLOCATE(cia402_t);
+    d->zero_at_start = zero;
+    if ((err = axis_init(slave, d, names[a], (uint16_t)(a * ECAT_CIA402_AXIS_OFFSET), mode, others)) != 0) return err;
+    dev->axis[dev->n++] = d;
+  }
   return 0;
 }
 
@@ -556,13 +589,10 @@ static double scale_or_one(hal_float_t s) { return (s > -1e-20 && s < 1e-20) ? 1
 static int32_t from_drive(cia402_t *d, int32_t counts) { return (int32_t)((uint32_t)counts - (uint32_t)d->zero); }
 static int32_t to_drive(cia402_t *d, int32_t counts) { return (int32_t)((uint32_t)counts + (uint32_t)d->zero); }
 
-static void cia402_read(lcec_slave_t *slave, long period) {
-  cia402_t *d = slave->profile_data;
+static void axis_read(lcec_slave_t *slave, cia402_t *d) {
   uint8_t *pd = slave->master->process_data;
   uint16_t sw;
   int8_t md = 0;
-
-  lcec_generic_read(slave, period);
 
   d->bus_ok = slave->master->domain_state.wc_state == EC_WC_COMPLETE && slave->state.operational;
   sw = EC_READ_U16(&pd[d->statusword_o.os]);
@@ -613,6 +643,14 @@ static void cia402_read(lcec_slave_t *slave, long period) {
     *d->drv_actual_velocity = EC_READ_S32(&pd[d->actual_velocity_o.os]);
     *d->velocity_fb = *d->drv_actual_velocity / scale_or_one(d->velo_scale);
   }
+}
+
+static void cia402_read(lcec_slave_t *slave, long period) {
+  cia402_dev_t *dev = slave->profile_data;
+  int a;
+
+  lcec_generic_read(slave, period);
+  for (a = 0; a < dev->n; a++) axis_read(slave, dev->axis[a]);
 }
 
 /// PV, PP: whether the drive stands still (zero speed in PV, target
@@ -855,8 +893,7 @@ static uint16_t mode_change(cia402_t *d, int run, int enable, long period) {
   return (d->mc == MC_STOP && (d->active == MODE_PV || d->active == MODE_PP)) ? CW_HALT : 0;
 }
 
-static void cia402_write(lcec_slave_t *slave, long period) {
-  cia402_t *d = slave->profile_data;
+static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   uint8_t *pd = slave->master->process_data;
   int enable = *d->enable;
   int enable_edge = enable && !d->enable_old;
@@ -1041,6 +1078,12 @@ static void cia402_write(lcec_slave_t *slave, long period) {
     *d->at_speed = run && d->active == MODE_PV && d->pv_wait == 0 && (*d->statusword & SW_TARGET_REACHED) &&
                    (!d->modes_display_o.mapped || *d->opmode_display == MODE_PV);
   }
+}
 
+static void cia402_write(lcec_slave_t *slave, long period) {
+  cia402_dev_t *dev = slave->profile_data;
+  int a;
+
+  for (a = 0; a < dev->n; a++) axis_write(slave, dev->axis[a], period);
   lcec_generic_write(slave, period);
 }

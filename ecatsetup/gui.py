@@ -1429,7 +1429,8 @@ class PinTable(QTableWidget):
             r = self.rowCount()
             self.insertRow(r)
             self.rows[name] = r
-            for c, v in enumerate((name[len(prefix):], pin.type, pin.value)):
+            short = name[len(prefix):] if name.startswith(prefix) else name   # an axis's pin
+            for c, v in enumerate((short, pin.type, pin.value)):
                 self.setItem(r, c, item(v, font=mono() if c == 2 else None))
             if run.writable(pin):
                 self.setCellWidget(r, 3, self._setter(pin))
@@ -1474,6 +1475,11 @@ class MoveCard(Card):
         form = QFormLayout(self.setup)
         form.setContentsMargins(0, 0, 0, 0)
         self.fields = {}
+        self.axis = QComboBox()
+        self.axis.setToolTip("The drive has several axes: the one to move")
+        self.axis.currentIndexChanged.connect(lambda _i: self.slave and self.show_drive(self.slave))
+        form.addRow("Axis", self.axis)
+        self.axis_row = form
         for key, text, lo, hi, dec in self.SETTINGS:
             box = QDoubleSpinBox()
             box.setRange(lo, hi)
@@ -1555,10 +1561,24 @@ class MoveCard(Card):
         self.add(self.moving)
         self.lay.addStretch(1)
 
+    def axis_name(self):
+        """The pin prefix of the axis chosen (the slave's name for one axis)."""
+        names = config.axes(self.slave)
+        i = self.axis.currentIndex() if self.axis.count() == len(names) else 0
+        return names[max(i, 0)] if names else None
+
     def test(self):
-        return self.win.drive_tests.get(self.slave["name"]) if self.slave else None
+        return self.win.drive_tests.get(self.axis_name()) if self.slave else None
 
     def show_drive(self, slave):
+        names = config.axes(slave)
+        if slave is not self.slave or self.axis.count() != len(names):
+            self.axis.blockSignals(True)
+            self.axis.clear()
+            self.axis.addItems(names)
+            self.axis.blockSignals(False)
+        self.axis.setVisible(len(names) > 1)
+        self.axis_row.labelForField(self.axis).setVisible(len(names) > 1)
         self.slave = slave
         run = self.win.test
         ok = run is not None and drivetest.testable(slave)
@@ -1583,7 +1603,7 @@ class MoveCard(Card):
             if dt is None:
                 scale = drivetest.hal_scale(os.path.dirname(os.path.abspath(
                     self.win.session.ini_path)) if self.win.session.ini_path else "",
-                    slave["name"])
+                    self.axis_name())
                 if scale:
                     self.fields["scale"].setValue(scale)
                     self.fields["scale"].setToolTip("From the configuration's HAL files")
@@ -1598,13 +1618,14 @@ class MoveCard(Card):
         if run is None or s is None:
             return
         b = self.win.session.bus.get(s["position"])
-        dt = drivetest.DriveTest(run, s, b.coe if b else None, self.settings())
+        dt = drivetest.DriveTest(run, s, b.coe if b else None, self.settings(),
+                                 axis=max(self.axis.currentIndex(), 0))
         try:
             dt.prepare()
         except (testmode.TestError, tool.ToolError) as e:
             QMessageBox.warning(self, TITLE, "The drive was not prepared:\n%s" % e)
             return
-        self.win.drive_tests[s["name"]] = dt
+        self.win.drive_tests[dt.name] = dt
         self.show_drive(s)
 
     def do_restore(self):
@@ -1612,7 +1633,7 @@ class MoveCard(Card):
         if dt is None:
             return
         failed = dt.restore()
-        del self.win.drive_tests[self.slave["name"]]
+        del self.win.drive_tests[dt.name]
         if failed:
             QMessageBox.warning(self, TITLE, "Not all of the drive's values could be written back; "
                                 "they are kept in %s:\n%s" % (drivetest.RESTORE_FILE,
@@ -1871,6 +1892,21 @@ class TestPage(QWidget):
         s = self.win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
         return "%s." % s["name"] if s and s.get("name") else None
 
+    def _axis_prefix(self):
+        """The drive axis's pin prefix, when it is not the slave's name (a
+        drive with several axes); else None."""
+        s = self.win.session.slave(self.position) if isinstance(self.position, int) else None
+        if not s or len(config.axes(s)) < 2 or self.move.slave is not s:
+            return None
+        return self.move.axis_name() + "."
+
+    def _pins(self, run, prefix):
+        pins = run.pins(prefix)
+        axis = self._axis_prefix()
+        if axis:
+            pins.update(run.pins(axis))
+        return pins
+
     def fill_slaves(self):
         win = self.win
         self.slave.blockSignals(True)
@@ -1917,14 +1953,15 @@ class TestPage(QWidget):
             self.shown_for = None
             return
         prefix = self._prefix()
+        if is402:
+            self.move.show_drive(s)     # first: it knows the axis
         try:
-            pins = run.pins(prefix)
+            pins = self._pins(run, prefix)
         except testmode.TestError as e:
             win.status(str(e))
             return
         if is402:
             self.all_pins.fill(pins, prefix, run)
-            self.move.show_drive(s)
         else:
             self.outputs.fill({n: p for n, p in pins.items() if p.dir == "IN"}, prefix, run)
             self.inputs.fill({n: p for n, p in pins.items() if p.dir != "IN"}, prefix, run)
@@ -1938,15 +1975,17 @@ class TestPage(QWidget):
             return
         if pins is None:
             try:
-                pins = run.pins(prefix)
+                pins = self._pins(run, prefix)
             except testmode.TestError:
                 return
             if (self.position, prefix, frozenset(pins)) != self.shown_for:
                 self.show_slave()
                 return
 
+        axis = self._axis_prefix()
+
         def v(name):
-            p = pins.get(prefix + name)
+            p = (pins.get(axis + name) if axis else None) or pins.get(prefix + name)
             return p.value if p else None
         op = v("slave-state-op") == "TRUE"
         set_pill(self.state, "OP" if op else "not OP" if v("slave-online") == "TRUE" else
@@ -2069,9 +2108,10 @@ def config_pins(cfg):
                         if p:
                             rows.append((s["position"], "%s bit %d" % (e.get("object"), i),
                                          "%s.%s" % (name, p), "bit", way))
-        if s.get("profile") == "cia402":
-            rows.append((s["position"], "CiA 402 profile", "%s.*" % name, "",
-                         "see docs/cia402.md"))
+        names = config.axes(s)
+        for n, a in enumerate(names):
+            rows.append((s["position"], "CiA 402 axis %d" % n if len(names) > 1 else "CiA 402 profile",
+                         "%s.*" % a, "", "see docs/cia402.md"))
         for ch in s.get("encoders") or []:
             rows.append((s["position"], "encoder %s" % ch.get("index"),
                          "%s.%s.*" % (name, ch.get("name")), "", "see docs/encoder.md"))

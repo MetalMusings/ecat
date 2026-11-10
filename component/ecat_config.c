@@ -40,8 +40,9 @@ typedef struct {
   int cia402;         // the slave being read has the cia402 profile
   unsigned int cia402_modes;  // the other modes it may switch to (bit n: mode n)
   unsigned int cia402_all;    // mode and modes
-  unsigned int pp_limits;     // settings 0x607D:01, 0x607D:02, 0x607F:00 seen (bits 0-2)
-  unsigned int owned; // which of the profile's objects it has (bits of cia402_objects)
+  int n_axes;         // the drive's axes (cia402.axes), 1 without
+  unsigned int pp_limits[ECAT_CIA402_MAX_AXES];  // per axis: settings 0x607D:01, 0x607D:02, 0x607F:00 seen (bits 0-2)
+  unsigned int owned[ECAT_CIA402_MAX_AXES];      // per axis: which of the profile's objects it has (bits of cia402_objects)
   int n_enc;          // the slave's encoder channels
   uint16_t enc_index[MAX_ENCODERS];   // their status indexes
   unsigned int enc_owned[MAX_ENCODERS];  // which of enc_objects each has
@@ -73,6 +74,14 @@ static int cia402_object(uint16_t index, uint8_t subindex) {
   int i;
   for (i = 0; i < N_CIA402_OBJECTS; i++)
     if (cia402_objects[i].index == index && subindex == 0) return i;
+  return -1;
+}
+
+/// The axis of a drive's object (index + axis * 0x800), or -1.
+static int cia402_axis(ctx_t *c, uint16_t index, uint16_t base) {
+  int a;
+  for (a = 0; a < c->n_axes; a++)
+    if (index == base + a * ECAT_CIA402_AXIS_OFFSET) return a;
   return -1;
 }
 
@@ -304,7 +313,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   long long bits = get_int(c, e, "bits", 0);
   uint16_t index = 0;
   uint8_t subindex = 0;
-  int i, k, ch = 0;
+  int i, k, ch = 0, a, ax;
 
   if ((pe = append(b, sizeof(*pe))) == NULL) {
     error(c, "out of memory");
@@ -323,7 +332,12 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   pe->floatScale = 1.0;
   pe->floatOffset = 0.0;
   if (use != NULL && !strcmp(use, "gap")) return;
-  i = cia402_object(index, subindex);
+  // a drive's object, of axis ax (index + ax * 0x800)
+  i = -1;
+  ax = 0;
+  for (a = 0; a < (c->cia402 ? c->n_axes : 1) && i < 0; a++) {
+    if ((i = cia402_object((uint16_t)(index - a * ECAT_CIA402_AXIS_OFFSET), subindex)) >= 0) ax = a;
+  }
   k = enc_object(c, index, subindex, &ch);
   if (use != NULL && !strcmp(use, "profile")) {
     if (pin != NULL || get(c, e, "split") != NULL) {
@@ -334,7 +348,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
       } else if (cia402_objects[i].bits != bits) {
         error(c, "%s: the cia402 profile needs %d bits", object, cia402_objects[i].bits);
       } else {
-        c->owned |= 1u << i;
+        c->owned[ax] |= 1u << i;
       }
     } else if (k >= 0) {
       if (enc_objects[k].output != output) {
@@ -500,7 +514,7 @@ static void process_data(ctx_t *c, buf_t *b, yaml_node_t *pd, LCEC_CONF_SLAVE_T 
 // ---- settings ----
 
 static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
-  int i;
+  int i, ax;
   for (i = 0; i < seq_len(list); i++) {
     yaml_node_t *st = seq_item(c, list, i);
     const char *object = get_str(c, st, "object");
@@ -512,8 +526,8 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
     LCEC_CONF_SDOCONF_T *sc;
 
     if (parse_object(c, object, &index, &subindex) < 0) continue;
-    if (index == 0x607D && (subindex == 1 || subindex == 2)) c->pp_limits |= 1u << (subindex - 1);
-    if (index == 0x607F && subindex == 0) c->pp_limits |= 4;
+    if ((ax = cia402_axis(c, index, 0x607D)) >= 0 && (subindex == 1 || subindex == 2)) c->pp_limits[ax] |= 1u << (subindex - 1);
+    if ((ax = cia402_axis(c, index, 0x607F)) >= 0 && subindex == 0) c->pp_limits[ax] |= 4;
     if (get(c, st, "value") != NULL) {
       const dtype_t *dt = find_dtype(get_str(c, st, "type"));
       if (dt == NULL) {
@@ -624,6 +638,7 @@ static void encoders(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
 }
 
 static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
+  int a;
   yaml_node_t *ident = get(c, s, "identity");
   yaml_node_t *dc = get(c, s, "dc");
   const char *name = get_str(c, s, "name");
@@ -652,7 +667,8 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   c->cia402 = profile != NULL && !strcmp(profile, "cia402");
   c->cia402_modes = 0;
   c->cia402_all = 0;
-  c->owned = 0;
+  memset(c->owned, 0, sizeof(c->owned));
+  c->n_axes = 1;
   if (c->cia402) {
     const char *mode = get_str(c, get(c, s, "cia402"), "mode");
     LCEC_CONF_MODPARAM_T *mp;
@@ -683,6 +699,33 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       copy_str(mp->name, "cia402.modes");
       mp->value.u32 = c->cia402_modes;
       ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount++;
+    }
+    {
+      // several axes: one modparam per axis, its pin prefix
+      yaml_node_t *axes = get(c, get(c, s, "cia402"), "axes");
+      int a, n = seq_len(axes);
+      if (axes != NULL && (n < 1 || n > ECAT_CIA402_MAX_AXES)) {
+        error(c, "cia402.axes: a list of 1 to %d names", ECAT_CIA402_MAX_AXES);
+        n = 0;
+      }
+      for (a = 0; a < n; a++) {
+        yaml_node_t *item = seq_item(c, axes, a);
+        const char *ax_name = item != NULL && item->type == YAML_SCALAR_NODE ? (const char *)item->data.scalar.value : NULL;
+        if (ax_name == NULL || !ax_name[0] || strlen(ax_name) >= LCEC_CONF_STR_MAXLEN) {
+          error(c, "cia402.axes: axis %d needs a name (a pin prefix) shorter than %d characters", a, LCEC_CONF_STR_MAXLEN);
+          continue;
+        }
+        if ((mp = append(b, sizeof(*mp))) == NULL) {
+          error(c, "out of memory");
+          return;
+        }
+        mp->confType = lcecConfTypeModParam;
+        mp->id = ECAT_MP_CIA402_AXIS;
+        copy_str(mp->name, "cia402.axes");
+        copy_str(mp->value.str, ax_name);
+        ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount++;
+      }
+      if (n > 0) c->n_axes = n;
     }
     if (get_bool(c, get(c, s, "cia402"), "zero-at-start", 0)) {
       if ((mp = append(b, sizeof(*mp))) == NULL) {
@@ -730,10 +773,13 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       need[n_need++] = 0x6060;
       need[n_need++] = 0x6061;
     }
-    for (j = 0; j < n_need; j++) {
-      i = cia402_object(need[j], 0);
-      if (!(c->owned & (1u << i))) error(c, "the cia402 profile needs 0x%04X:00 with \"use: profile\"%s", need[j],
-                                          j >= n_mode_objects ? " to change modes" : "");
+    for (a = 0; a < c->n_axes; a++) {
+      for (j = 0; j < n_need; j++) {
+        i = cia402_object(need[j], 0);
+        if (!(c->owned[a] & (1u << i))) error(c, "the cia402 profile needs 0x%04X:00 with \"use: profile\"%s",
+                                               need[j] + a * ECAT_CIA402_AXIS_OFFSET,
+                                               j >= n_mode_objects ? " to change modes" : "");
+      }
     }
   }
   for (i = 0; i < c->n_enc; i++) {
@@ -741,13 +787,16 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       error(c, "encoder %s needs 0x%04X:11 (counter value) with \"use: profile\"", c->enc_name[i], c->enc_index[i]);
     }
   }
-  c->pp_limits = 0;
+  memset(c->pp_limits, 0, sizeof(c->pp_limits));
   settings(c, b, get(c, s, "settings"), off);
   if (c->cia402) {
     // the drive plans PP moves itself: it must know its limits
-    if ((c->cia402_all & (1u << 1)) && c->pp_limits != 7) {
-      error(c, "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02 (software position limits) "
-               "and 0x607F:00 (max profile velocity)");
+    for (a = 0; a < c->n_axes; a++) {
+      if ((c->cia402_all & (1u << 1)) && c->pp_limits[a] != 7) {
+        unsigned o = a * ECAT_CIA402_AXIS_OFFSET;
+        error(c, "cia402 mode pp needs the settings 0x%04X:01 and 0x%04X:02 (software position limits) "
+                 "and 0x%04X:00 (max profile velocity)", 0x607D + o, 0x607D + o, 0x607F + o);
+      }
     }
   }
   c->where[0] = 0;

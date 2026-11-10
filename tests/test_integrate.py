@@ -415,3 +415,35 @@ class TestNets(Folder):
         lc["nets"] = [{"signal": "a", "pins": ["x.enable", "motion.digital-out-00"]},
                       {"signal": "b", "pins": ["x.drv-din-0", "motion.digital-in-00"]}]
         self.assertEqual(config.check(c), ["linuxcnc.nets: a: x.enable is connected by joint 0"])
+
+
+class TestAxes(Folder):
+    def cfg(self):
+        c = cfg()
+        x = c["slaves"][0]
+        x["cia402"]["axes"] = ["x-1", "x-2"]
+        for kind, objs in (("outputs", ("0x6840:00", "0x687A:00")), ("inputs", ("0x6841:00", "0x6864:00"))):
+            x["process-data"][kind][0]["entries"] += [
+                {"object": o, "bits": 16 if o.endswith("40:00") or o.endswith("41:00") else 32,
+                 "type": "UINT" if o.endswith("40:00") or o.endswith("41:00") else "DINT",
+                 "use": "profile"} for o in objs]
+        return c
+
+    def test_joints_on_axes(self):
+        c = self.cfg()
+        self.assertEqual(config.check(c), [])
+        self.assertEqual(sorted(integrate.drives(c)), ["x-1", "x-2", "y"])
+        integrate.set_joint(c, 0, "x-1", 100.0)
+        integrate.set_joint(c, 1, "x-2", 50.0)
+        self.assertEqual(config.check(c), [])
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        main = next(ch.new for ch in p.changes if ch.name == "ethercat.hal")
+        self.assertIn("net y-pos-cmd joint.1.motor-pos-cmd => x-2.pos-cmd", main)
+        self.assertIn("setp x-1.pos-scale 100.0", main)
+        # the slave renamed: its axes and their joints follow
+        c["slaves"][0]["name"] = "gantry"
+        integrate.rename_slave(c, "x", "gantry")
+        self.assertEqual(c["slaves"][0]["cia402"]["axes"], ["gantry-1", "gantry-2"])
+        self.assertEqual([j["slave"] for j in integrate.joints(c)], ["gantry-1", "gantry-2"])
+        self.assertEqual(config.check(c), [])

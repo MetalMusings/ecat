@@ -47,9 +47,11 @@ def jog_names(i):
 
 
 def csp_drives(cfg):
-    """Names of the cia402 slaves in CSP, which the drive test can move."""
-    return [s["name"] for s in cfg.get("slaves") or []
-            if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp"]
+    """Pin prefixes of the cia402 axes in CSP (a slave's name, or its
+    cia402.axes), which the drive test can move."""
+    return [a for s in cfg.get("slaves") or []
+            if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp"
+            for a in config.axes(s)]
 
 
 def hal_file(cfg, cfg_path, period):
@@ -76,8 +78,8 @@ def hal_file(cfg, cfg_path, period):
             # until the drive test sets it: no motion at all
             "setp %s.maxv 0" % jog]
     for s in cfg.get("slaves") or []:
-        if s.get("profile") == "cia402":
-            lines.append("setp %s.watchdog-ms %d" % (s["name"], WATCHDOG_MS))
+        for a in config.axes(s):
+            lines.append("setp %s.watchdog-ms %d" % (a, WATCHDOG_MS))
     lines += ["addf ecat.write-all servo-thread", "start", ""]
     return "\n".join(lines)
 
@@ -118,7 +120,8 @@ def sdo_write_refused(slave, index, subindex):
                         return "0x%04X:%02X is process data: set its pin instead" % (index, subindex)
                 except ValueError:
                     pass
-    if slave.get("profile") == "cia402" and 0x6040 <= index <= 0x67FF:
+    if slave.get("profile") == "cia402" and any(
+            0x6040 <= index - n * config.AXIS_OFFSET <= 0x67FF for n in range(len(config.axes(slave)))):
         return "CiA 402 objects of a drive are written only in the CiA 402 test mode"
     return None
 
@@ -154,8 +157,9 @@ def hal_running():
 def read_only_prefixes(cfg):
     """Pin prefixes that test mode does not set: CiA 402 drives (moved only
     in the CiA 402 test mode) and the master."""
-    return tuple(["ecat."] + ["%s." % s["name"] for s in cfg.get("slaves") or []
-                              if s.get("profile") == "cia402"])
+    return tuple(["ecat."] + ["%s." % x for s in cfg.get("slaves") or []
+                              if s.get("profile") == "cia402"
+                              for x in dict.fromkeys([s["name"]] + config.axes(s))])
 
 
 def interface_problem(cfg):
@@ -184,7 +188,8 @@ class TestRun:
         self.period = period or 1000000
         self.read_only = read_only_prefixes(cfg)
         self.drives = csp_drives(cfg)
-        self.cia402 = [s["name"] for s in cfg.get("slaves") or [] if s.get("profile") == "cia402"]
+        # the axes' pin prefixes (a slave's name, or its cia402.axes)
+        self.cia402 = [a for s in cfg.get("slaves") or [] for a in config.axes(s)]
         self.heartbeat = 0
         self.proc = None
         self.dir = None

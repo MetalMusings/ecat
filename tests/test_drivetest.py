@@ -68,6 +68,16 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(got["following-error"], (0x6065, 20))
         self.assertEqual(got["max-torque"], (0x6072, 300))
 
+    def test_second_axis(self):
+        s = dict(drivetest.DEFAULTS, scale=10.0)
+        other = dict(OTHER, cia402={"mode": "csp", "axes": ["a", "b"]})
+        has = {(0x687D, 1), (0x687D, 2), (0x6865, 0), (0x6872, 0), (0x2022, 0)}
+        limits, _ = drivetest.plan_limits(other, lambda i, sub: (i, sub) in has, 10.0, 0, s, axis=1)
+        got = {lim.name: (lim.index, lim.subindex) for lim in limits}
+        self.assertEqual(got, {"travel-min": (0x687D, 1), "travel-max": (0x687D, 2),
+                               "following-error": (0x6865, 0), "max-torque": (0x6872, 0)})
+        self.assertIn("0x6865", next(lim.text for lim in limits if lim.name == "following-error"))
+
     def test_no_limits_in_drive(self):
         _, notes = drivetest.plan_limits(ECT60, lambda i, sub: False, 1.0, 0, drivetest.DEFAULTS)
         self.assertTrue(any("0x607D" in n for n in notes))
@@ -290,7 +300,14 @@ class TestMoveCard(unittest.TestCase):
         card.show_drive(dict(OTHER, cia402={"mode": "pv"}))
         self.assertEqual((shown(card.jog_row), shown(card.run_row), shown(card.home_button)),
                          (False, True, False))
+        two = dict(OTHER, cia402={"mode": "csp", "axes": ["a", "b"]})
+        card.show_drive(two)
+        self.assertTrue(shown(card.axis))
+        self.assertEqual(card.axis_name(), "a")
+        card.axis.setCurrentIndex(1)
+        self.assertEqual(card.axis_name(), "b")
         card.show_drive(dict(OTHER, cia402={"mode": "csv"}))
+        self.assertFalse(shown(card.axis))
         self.assertFalse(shown(card.setup))
         self.assertIn("Only cia402 drives", card.unsupported.text())
         w.test = None

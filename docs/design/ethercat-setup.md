@@ -471,7 +471,7 @@ convenience lcec's drivers give.
 | `cia402` | the CiA 402 drivers above; EL72xx/EL7411 in CiA 402 mode | Done, one axis per slave |
 | `mdp`, `generic` | digital I/O (`el1xxx`, `el2xxx`, `el2202`, `digitalcombo`, `easyio`, `epocat`, `ex260`, `ep9214`), status bits (`el95xx`, `el9410`), `passive` | Done |
 | Encoder (MDP 511) | `el5101`, `el5151`, `el5152`, the encoder channels of `el7342`/`em7004` | Done |
-| `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Next. An extension of `cia402`. |
+| `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Built (`cia402.axes`, objects 0x800 apart, pins per axis); not tried on such a drive. |
 | Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog.md](../analog.md)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
 | Stepper and DC motor terminals, velocity mode | `el7041`, `el70x1`, `el7342`, `el2521` | Later. Velocity command, enable, ready and warnings, and position from the encoder channel. |
 | Absolute encoders (SSI, EnDat) | `el5002`, `el5032` | Check first whether `generic` plus settings is enough. |

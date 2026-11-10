@@ -154,6 +154,44 @@ class TestPropose(unittest.TestCase):
         self.assertEqual((p.dc_assign, p.dc_sync0_factor), (0x300, 1))
         self.assertEqual(p.notes, [])
 
+    def test_two_axes(self):
+        s = sii.Sii(0xA88, 0xA880010, 1, 0, 0x04, name="ECT60x2")
+        s.pdos = [
+            sii.Pdo(0x1600, "rx", 2, "Receive PDO 1", False, False, [
+                sii.PdoEntry(0x6040, 0, "Control Word", "UINT", 16),
+                sii.PdoEntry(0x607A, 0, "Target Position", "DINT", 32),
+                sii.PdoEntry(0x6840, 0, "Control Word", "UINT", 16),
+                sii.PdoEntry(0x687A, 0, "Target Position", "DINT", 32)]),
+            sii.Pdo(0x1A00, "tx", 3, "Transmit PDO 1", False, False, [
+                sii.PdoEntry(0x6041, 0, "Status Word", "UINT", 16),
+                sii.PdoEntry(0x6064, 0, "Position Actual Value", "DINT", 32),
+                sii.PdoEntry(0x60FD, 0, "Digital Inputs", "UDINT", 32),
+                sii.PdoEntry(0x6841, 0, "Status Word", "UINT", 16),
+                sii.PdoEntry(0x6864, 0, "Position Actual Value", "DINT", 32),
+                sii.PdoEntry(0x68FD, 0, "Digital Inputs", "UDINT", 32)]),
+        ]
+        p = propose.propose({"position": 0, "dc": True}, s, coe.Dictionary(), device_type=0x192)
+        self.assertEqual(p.axes, 2)
+        roles = {e.index: (e.role, e.pin) for pd in p.pdos for e in pd.entries}
+        self.assertEqual(roles[0x6840], ("profile", ""))
+        self.assertEqual(roles[0x6864], ("profile", ""))
+        self.assertEqual(roles[0x60FD], ("pin", "digital-inputs-1"))
+        self.assertEqual(roles[0x68FD], ("pin", "digital-inputs-2"))
+        slave = config.slave_from_proposal(p, "xy")
+        self.assertEqual(slave["cia402"], {"mode": "csp", "axes": ["xy-1", "xy-2"]})
+        cfg = {"ecat": 1, "master": {"interface": "x", "transport": "raw"}, "slaves": [slave]}
+        self.assertEqual(config.check(cfg), [])
+        self.assertEqual(config.axes(slave), ["xy-1", "xy-2"])
+        # each axis needs its objects; names must not clash
+        out = slave["process-data"]["inputs"][0]["entries"]
+        del out[3]                                 # 0x6841
+        self.assertIn("slave 0: the cia402 profile needs 0x6841:00 in the process data",
+                      config.check(cfg))
+        slave["cia402"]["axes"] = ["xy", "xy-2"]
+        self.assertTrue(any("axis name 'xy' is used" in e for e in config.check(cfg)))
+        slave["cia402"]["axes"] = ["a", "b", "c", "d", "e"]
+        self.assertTrue(any("axes must be a list of 1 to 4" in e for e in config.check(cfg)))
+
     def test_cia402_missing_entries(self):
         s = self.cia402_sii([sii.PdoEntry(0x6041, 0, "Status Word", "UINT", 16)])
         p = propose.propose({"position": 0, "dc": True}, s, coe.Dictionary(), device_type=0x192)

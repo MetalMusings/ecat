@@ -1933,6 +1933,57 @@ static void test_zero_at_start_pp(void) {
   CHECK_NEAR(PIN_FLOAT("t.pos-fb"), 7, 1e-12);
 }
 
+// ---- several axes ----------------------------------------------------
+
+static const fake_entry_t two_axes[] = {
+    {0x6040, 0, 16}, {0x607A, 0, 32}, {0x6840, 0, 16}, {0x687A, 0, 32},  // outputs
+    {0x6041, 0, 16}, {0x6064, 0, 32}, {0x6841, 0, 16}, {0x6864, 0, 32},  // inputs
+    FAKE_END,
+};
+
+static void test_two_axes(void) {
+  lcec_slave_modparam_t mp[3] = {{.id = ECAT_MP_CIA402_AXIS}, {.id = ECAT_MP_CIA402_AXIS}, {.id = -1}};
+  strcpy(mp[0].value.str, "x1");
+  strcpy(mp[1].value.str, "x2");
+  S = fake_slave("xy", two_axes, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  // each axis has its own pins, under its own name; none under the slave's
+  CHECK(fake_find("x1.enable") != NULL && fake_find("x2.enable") != NULL);
+  CHECK(fake_find("xy.enable") == NULL);
+  PIN_FLOAT("x1.pos-scale") = 10.0;
+  PIN_FLOAT("x2.pos-scale") = 100.0;
+
+  // x2 is enabled, x1 not; their status words are their own
+  fake_set(S, 0x6041, 0, SW_SWITCH_ON_DISABLED);
+  fake_set(S, 0x6064, 0, 500);
+  fake_set(S, 0x6864, 0, 7000);
+  PIN_BIT("x2.enable") = 1;
+  unsigned sw2 = SW_SWITCH_ON_DISABLED, cw2 = 0;
+  int i;
+  for (i = 0; i < 10; i++) {
+    unsigned cw;
+    fake_set(S, 0x6841, 0, sw2);
+    PIN_FLOAT("x2.pos-cmd") = PIN_FLOAT("x2.pos-fb");
+    S->proc_read(S, PERIOD);
+    S->proc_write(S, PERIOD);
+    cw = fake_get(S, 0x6840, 0);
+    sw2 = drive(sw2, cw, cw2);
+    cw2 = cw;
+  }
+  CHECK_EQ(PIN_BIT("x2.stat-op-enabled"), 1);
+  CHECK_EQ(PIN_BIT("x1.stat-op-enabled"), 0);
+  CHECK((fake_get(S, 0x6040, 0) & 0x0F) != 0x0F);  // x1 is not enabled
+  CHECK_NEAR(PIN_FLOAT("x1.pos-fb"), 50.0, 1e-9);
+  CHECK_NEAR(PIN_FLOAT("x2.pos-fb"), 70.0, 1e-9);
+  // x2 follows its command into its own target; x1 holds its actual position
+  PIN_FLOAT("x2.pos-cmd") = 70.5;
+  fake_set(S, 0x6841, 0, sw2);
+  S->proc_read(S, PERIOD);
+  S->proc_write(S, PERIOD);
+  CHECK_EQ((int32_t)fake_get(S, 0x687A, 0), 7050);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 500);
+}
+
 RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
@@ -1956,4 +2007,4 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_homing_pv_drive_does_not_stop, test_homing_csp_waits_for_the_command,
     test_homing_pp_drive_does_not_stop, test_homing_abandoned_while_halting, test_zero_pin_only_with_the_option,
     test_zero_at_start, test_zero_at_start_wraps_as_the_drive, test_zero_at_start_cleared_by_homing, test_zero_at_start_pp,
-    test_zero_at_start_mode_change_into_csp)
+    test_zero_at_start_mode_change_into_csp, test_two_axes)

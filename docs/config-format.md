@@ -186,6 +186,7 @@ checked.
 | `identity` | `vendor`, `product`, and optionally `revision`. At start the component compares them with the bus. |
 | `profile` | `cia402` (CiA 402 drive), `mdp` (modular device, ETG.5001) or `generic`. |
 | `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01`, `0x607D:02` and `0x607F:00`). |
+| `cia402.axes` | For `cia402`: a drive with several axes in one slave (such as a two-axis ECT60x2): a list of 1 to 4 names, the axes' pin prefixes. Axis n uses the CiA 402 objects at index + n × 0x800 (`0x6040`, `0x6840`, `0x7040`, `0x7840`); see [cia402.md](cia402.md#several-axes). Without it, the drive has one axis named after the slave. |
 | `cia402.zero-at-start` | For `cia402`: `true` makes positions count from where the drive stands when the bus first reaches OP, for drives that keep their position from an earlier run (see [cia402.md](cia402.md#zero-at-start)). Default `false`. |
 | `cia402.modes` | For `cia402`: other modes the drive may change to: `hm` for homing by the drive's own method, and `csp`, `csv`, `pv`, `pp` to choose with the `opmode-cmd` pin. It needs `0x6060` and `0x6061`, and each mode's objects, in the process data. |
 | `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder.md](encoder.md). |

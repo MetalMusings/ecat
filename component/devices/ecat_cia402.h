@@ -23,6 +23,13 @@
 /// where the drive stands when the bus first reaches OP.
 #define ECAT_MP_CIA402_ZERO_AT_START 0x4022
 
+/// modParam id for one axis of a drive with several (cia402.axes; value:
+/// the axis's pin prefix). Given once per axis, in order: axis n uses the
+/// CiA 402 objects at index + n * ECAT_CIA402_AXIS_OFFSET.
+#define ECAT_MP_CIA402_AXIS 0x4023
+#define ECAT_CIA402_AXIS_OFFSET 0x800
+#define ECAT_CIA402_MAX_AXES 4
+
 /// Set up a cia402 slave: its generic pins, then the profile's pins.
 int ecat_cia402_init(int comp_id, lcec_slave_t *slave);
 
