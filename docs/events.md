@@ -22,7 +22,7 @@ The component records, with the time to the millisecond:
 | DC sync check | The master's check that a slave's clock is within 10 us before SYNC0 starts. |
 | drive fault | A CiA 402 drive's fault, with its error code (`0x603F`) as text. |
 | the profile shut the drive down | The cia402 profile's `fault-reason` (watchdog, enable timeout, no valid process data, ...), see [cia402.md](cia402.md). |
-| stop guard | The servo thread stopped: the guard takes the slaves to PREOP; or it runs again. |
+| stop guard | The servo thread stopped: the guard takes the slaves to PREOP, and says whether they got there (or it gave up, with the states they were left in); or the servo thread runs again. |
 | servo thread late | The guard sent a cycle for a servo thread more than a quarter period late (at most one line a second, with the number left out). |
 | SYNC0 shift | `sync0-shift-ns: auto` chose a shift, with the turn-around in cycles. |
 
@@ -68,3 +68,11 @@ writes one Markdown file (`ethercat-report-<date>-<time>.md`) with:
 
 It only reads, and sends nothing anywhere. It holds file paths and the
 machine's configuration: look it through before posting it.
+
+## Tried
+
+On the plasma cutter (2026-11-10, halrun with the servo thread, no
+motion): the log showed the load, the activation 4 s later, the four
+slaves from PREOP to OP within a second, the working counter coming up,
+and at the stop the late servo thread, the guard taking over and its
+done 55 ms later.

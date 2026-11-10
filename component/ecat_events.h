@@ -37,7 +37,7 @@ enum {
   ECAT_EV_DRIVE_FAULT = 30,  // a: error code 0x603F, b: status word
   ECAT_EV_DRIVE_BLOCK = 31,  // the profile shut the drive down; a: fault-reason, b: axis
   ECAT_EV_DRIVE_CLEAR = 32,  // the drive's fault cleared; b: axis
-  ECAT_EV_GUARD = 40,       // a: stop guard state (0 idle, 1 taking down, 2 done), b: before
+  ECAT_EV_GUARD = 40,       // a: stop guard state (0 idle, 1 taking down, 2 done), b: done: the slaves' AL states
   ECAT_EV_LATE = 41,        // the guard sent a cycle for a late servo thread; a: lateness us, b: suppressed since
   ECAT_EV_SHIFT = 42,       // the automatic SYNC0 shift changed; a: shift ns, b: turn-around cycles
 };

@@ -31,7 +31,7 @@
 #include "ecat_config.h"
 #include "ecat_startcheck.h"
 
-static void lcec_guard_event(struct lcec_master *master, int state);
+static void lcec_guard_event(struct lcec_master *master, int state, unsigned al_states);
 
 // slaves the start check compares at most
 #define LCEC_START_CHECK_MAX 512
@@ -643,7 +643,7 @@ static void lcec_guard_tick(lcec_master_t *master) {
     master->guard_start = now;
     state = LCEC_GUARD_TAKING;
     __atomic_store_n(&master->guard_state, state, __ATOMIC_RELEASE);
-    lcec_guard_event(master, state);
+    lcec_guard_event(master, state, 0);
   }
   ecat_events_add_limited(master->events, &master->ev_late, ECAT_EV_LATE, -1, (uint32_t)((now - last) / 1000));
   ecrt_master_receive(master->master);
@@ -664,7 +664,7 @@ static void lcec_guard_tick(lcec_master_t *master) {
 
   if (state == LCEC_GUARD_TAKING && ((ms.al_states & 0x0C) == 0 || now - master->guard_start > LCEC_GUARD_TIMEOUT)) {
     __atomic_store_n(&master->guard_state, LCEC_GUARD_DONE, __ATOMIC_RELEASE);
-    lcec_guard_event(master, LCEC_GUARD_DONE);
+    lcec_guard_event(master, LCEC_GUARD_DONE, ms.al_states);
     rtapi_print_msg((ms.al_states & 0x0C) == 0 ? RTAPI_MSG_INFO : RTAPI_MSG_ERR,
         LCEC_MSG_PFX "master %s: the servo thread stopped; %s after %lld ms, outputs zero\n", master->name,
         (ms.al_states & 0x0C) == 0 ? "slaves taken to PREOP" : "slaves still above PREOP",
@@ -739,7 +739,7 @@ static void lcec_guard_resumed(lcec_master_t *master) {
     return;
   }
   __atomic_store_n(&master->guard_state, LCEC_GUARD_IDLE, __ATOMIC_RELEASE);
-  lcec_guard_event(master, LCEC_GUARD_IDLE);
+  lcec_guard_event(master, LCEC_GUARD_IDLE, 0);
   if (!master->taking_down) {
     ecrt_master_request_al_state(master->master, EC_AL_STATE_OP);
   }
@@ -1111,9 +1111,9 @@ void lcec_event(lcec_slave_t *slave, int type, uint32_t a, uint32_t b) {
 }
 
 /// Record a change of the stop guard's state (from the guard or the servo thread).
-static void lcec_guard_event(lcec_master_t *master, int state) {
+static void lcec_guard_event(lcec_master_t *master, int state, unsigned al_states) {
   if (state != master->ev_guard_last) {
-    ecat_events_add(master->events, ECAT_EV_GUARD, -1, state, master->ev_guard_last);
+    ecat_events_add(master->events, ECAT_EV_GUARD, -1, state, al_states);
     master->ev_guard_last = state;
   }
 }

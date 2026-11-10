@@ -29,7 +29,7 @@ GUARD, LATE, SHIFT = 40, 41, 42
 # how serious an event is, for the window: "info", "warn" or "error"
 WC_STATES = {0: "zero", 1: "incomplete", 2: "complete"}
 GUARD_STATES = {0: "the servo thread runs the bus again", 1: "the servo thread stopped; "
-                "taking the slaves to PREOP", 2: "done: outputs zero, slaves in PREOP or given up"}
+                "taking the slaves to PREOP", 2: "done"}
 FAULT_REASONS = {
     1: "drive fault", 2: "no valid process data (working counter, or the slave not in OP)",
     3: "\"Operation enabled\" not reached in time", 4: "the drive left \"Operation enabled\"",
@@ -131,10 +131,11 @@ def text(e, names=None):
         return ("warn" if e.a < e.b else "info",
                 "%d slaves respond (was %d)" % (e.a, e.b))
     if t == WC:
-        return ("info" if e.a == 2 else "error",
+        # from zero, on the way up at the start, incomplete is normal
+        return ("info" if e.a == 2 or (e.a == 1 and e.b == 0) else "error",
                 "working counter %s (was %s)%s" % (
                     WC_STATES.get(e.a, e.a), WC_STATES.get(e.b, e.b),
-                    "" if e.a == 2 else ": process data not exchanged with every slave"))
+                    "" if e.a == 2 or e.b == 0 else ": process data not exchanged with every slave"))
     if t == SLAVE_AL:
         return ("warn" if e.a & 0x10 or (e.b & 0x0F) == 8 else "info",
                 "%s: %s (was %s)" % (who, _al(e.a), _al(e.b) if e.b else "unknown"))
@@ -154,6 +155,10 @@ def text(e, names=None):
         return "error", "%s: the profile shut the drive down%s: fault-reason %d, %s" % (
             who, " (axis %d)" % e.b if e.b else "", e.a, FAULT_REASONS.get(e.a, "?"))
     if t == GUARD:
+        if e.a == 2:
+            if e.b & 0x0C:
+                return "error", "stop guard: gave up, slaves still in %s (outputs zero)" % _states(e.b)
+            return "info", "stop guard: done, outputs zero, slaves in %s" % _states(e.b)
         return ("info" if e.a == 0 else "warn", "stop guard: %s" % GUARD_STATES.get(e.a, e.a))
     if t == LATE:
         return "warn", "servo thread late: %d us since its last write%s" % (
