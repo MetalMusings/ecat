@@ -239,6 +239,8 @@ class DriveTest:
             self.limit3 = self.sel = None
         self.limits, self.notes = [], []
         self.start = None       # machine units, at prepare()
+        self.homing = False         # a homing was started and has not ended
+        self.home_seen = False      # ... and the profile has been seen homing
         self.homing_method = None   # 0x6098 of the drive, read at prepare()
         self.home_moves_ok = False  # the user accepts a homing that moves the axis
         self.target = None
@@ -336,6 +338,7 @@ class DriveTest:
                 values["%s.in1" % self.sel] = repr(self.target)
         else:
             self.pending = None
+            self.homing = False
             if self.mode == "pv":
                 values["%s.velocity-cmd" % self.name] = "0"
             if self.mode == "pp":
@@ -400,7 +403,30 @@ class DriveTest:
             self.run.setp_many({"%s.velocity-cmd" % self.name: repr(what[1])})
         elif what[0] == "home":
             self.run.setp_many({"%s.home" % self.name: "TRUE"})
+            self.homing = True
+            self.home_seen = False
         return what[0]
+
+    def home_result(self):
+        """While a homing runs: "homed" when the drive reports it attained
+        (the position is the homed one now), "error" when it failed, else
+        None. Only after the profile has been seen homing (stat-homed from
+        an earlier homing stays set until the next starts). The caller
+        disables the drive."""
+        if not self.homing:
+            return None
+        pins = self.run.pins("%s." % self.name)
+
+        def on(name):
+            p = pins.get("%s.%s" % (self.name, name))
+            return p is not None and p.value == "TRUE"
+        if on("stat-homing"):
+            self.home_seen = True
+        result = ("error" if on("home-error") else
+                  "homed" if self.home_seen and on("stat-homed") and not on("stat-homing") else None)
+        if result:
+            self.homing = False
+        return result
 
     def fault_reset(self, on):
         self.run.setp_many({"%s.fault-reset" % self.name: "TRUE" if on else "FALSE"})

@@ -95,7 +95,11 @@ front of it. The layers 1 to 3 are the same, and instead of layer 4:
   drive homes by the method and speeds in its settings (`0x6098`,
   `0x6099`, `0x609A`); the card shows *in progress*, *homed* or *error*.
   Releasing the button stops the homing. Try the method first with the
-  drive away from its end stops.
+  drive away from its end stops. When the drive reports the homing
+  attained (`stat-homed`), the window disables the drive by itself, so
+  the axis does not go on pressing against its stop, and the Home button
+  turns green ("✓ Homed: position is 0") until the next homing; on an
+  error it turns red.
 
 The scale (counts per mm) is also used as `velo-scale`: the drive's
 velocity units are taken as counts per second, the CiA 402 default. For

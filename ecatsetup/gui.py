@@ -92,6 +92,10 @@ QPushButton#primary:disabled { background: #8fb2ee; border-color: #8fb2ee; }
 QPushButton#danger { background: #b42318; color: white; border: 2px solid white; font-weight: 700;
               padding: 6px 18px; }
 QPushButton#big { padding: 14px; font-size: 15px; font-weight: 600; }
+QPushButton#home-ok { color: white; background: #1a7f37; border: 2px solid #14532d;
+              border-radius: 6px; font-weight: 700; }
+QPushButton#home-failed { color: white; background: #b42318; border: 2px solid #7a1710;
+              border-radius: 6px; font-weight: 700; }
 QPushButton#hold { padding: 16px; font-size: 15px; font-weight: 600; color: #14532d;
               background: #e6f6ea; border: 2px solid #1a7f37; border-radius: 8px; }
 QPushButton#hold:pressed { background: #b7e4c3; }
@@ -1947,10 +1951,27 @@ class MoveCard(Card):
         if dt is not None:
             dt.home_moves_ok = on
 
+    def home_finished(self, dt, result):
+        """A homing ended: the Home button says how it went, until the next one."""
+        ok = result == "homed"
+        if self.test() is dt:
+            self.home_state("home-ok" if ok else "home-failed",
+                            "✓ Homed: position is 0" if ok else "✕ Homing failed")
+        self.win.status("%s: homing %s%s" % (dt.name, "done" if ok else "failed",
+                        "; the position is the homed one and the drive is disabled" if ok else
+                        " (the drive reported an error)"))
+
+    def home_state(self, name, text):
+        self.home_button.setObjectName(name)
+        self.home_button.setText(text)
+        self.home_button.style().unpolish(self.home_button)
+        self.home_button.style().polish(self.home_button)
+
     def home(self):
         dt = self.test()
         if dt is None:
             return
+        self.home_state("", "Home (hold)")
         try:
             dt.enable(True)
             dt.home()
@@ -3660,7 +3681,7 @@ class MainWindow(QMainWindow):
 
     def pending_tick(self):
         if self.test is not None and not self.test.watching and not self.busy and \
-                any(dt.pending is not None for dt in self.drive_tests.values()):
+                any(dt.pending is not None or dt.homing for dt in self.drive_tests.values()):
             self.service_pending()
 
     def tick(self):
@@ -3699,8 +3720,18 @@ class MainWindow(QMainWindow):
 
     def service_pending(self):
         """A PP move, PV run or homing asked for while the drive was
-        enabling: given as soon as the drive is enabled (every 25 ms)."""
+        enabling: given as soon as the drive is enabled (every 25 ms). A
+        homing that ended: the drive is disabled (the axis does not go on
+        pressing against its stop) and the Move card says how it went."""
         for dt in list(self.drive_tests.values()):
+            if dt.homing:
+                try:
+                    result = dt.home_result()
+                    if result:
+                        dt.enable(False)
+                        self.test_page.move.home_finished(dt, result)
+                except testmode.TestError as e:
+                    self.status(str(e))
             if dt.pending is not None:
                 try:
                     on = dt.pin("stat-op-enabled") == "TRUE"

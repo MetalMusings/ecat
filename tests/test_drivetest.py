@@ -294,6 +294,39 @@ class TestDriveTest(TestTestMode):
         self.assertIn("MOVES the axis in the negative", drivetest.homing_text(17))
         self.assertIn("does not move", drivetest.homing_text(35))
 
+    def test_home_result(self):
+        run = self.started()
+        self.drive.sdos[(0x6098, 0)] = 35
+        for pin in ("stat-homed", "stat-homing", "home-error"):
+            self.add_fake_pin("x." + pin, "bit", "OUT", "FALSE")
+        dt = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]}),
+                                 self.coe(), {"scale": 100.0})
+        dt.prepare()
+        self.assertIsNone(dt.home_result())          # no homing started
+        dt.enable(True)
+        dt.home()
+        dt.tick(True)
+        self.assertTrue(dt.homing)
+        # stat-homed left from an earlier homing does not count before the profile homes
+        self.set_fake_pin("x.stat-homed", "TRUE")
+        self.assertIsNone(dt.home_result())
+        self.set_fake_pin("x.stat-homing", "TRUE")
+        self.set_fake_pin("x.stat-homed", "FALSE")
+        self.assertIsNone(dt.home_result())
+        self.set_fake_pin("x.stat-homing", "FALSE")
+        self.set_fake_pin("x.stat-homed", "TRUE")
+        self.assertEqual(dt.home_result(), "homed")
+        self.assertFalse(dt.homing)
+        self.assertIsNone(dt.home_result())          # reported once
+        # a failure
+        dt.enable(True)
+        dt.home()
+        dt.tick(True)
+        self.set_fake_pin("x.home-error", "TRUE")
+        self.assertEqual(dt.home_result(), "error")
+        dt.enable(False)
+        self.assertFalse(dt.homing)
+
     def test_home(self):
         run = self.started()
         self.drive.sdos[(0x6098, 0)] = 35
@@ -346,6 +379,19 @@ class TestMoveCard(unittest.TestCase):
         self.assertEqual((shown(card.jog_row), shown(card.run_row), shown(card.home_button)),
                          (True, False, True))
         self.assertIn("plans the step itself", card.jog_plus.toolTip())
+        # the Home button says how a homing went, until the next one
+        class Done:
+            name = "x"
+        done = Done()
+        card.test = lambda: done
+        card.home_finished(done, "homed")
+        self.assertEqual(card.home_button.objectName(), "home-ok")
+        self.assertTrue(card.home_button.text().startswith("✓"))
+        card.home_finished(done, "error")
+        self.assertEqual(card.home_button.objectName(), "home-failed")
+        card.home_state("", "Home (hold)")
+        self.assertEqual(card.home_button.text(), "Home (hold)")
+        del card.test
         card.show_drive(dict(OTHER, cia402={"mode": "pv"}))
         self.assertEqual((shown(card.jog_row), shown(card.run_row), shown(card.home_button)),
                          (False, True, False))
