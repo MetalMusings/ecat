@@ -377,6 +377,21 @@ class TestConfig(unittest.TestCase):
         self.assertIn("scale and offset need", errors)
         self.assertIn("neither value nor data", errors)
 
+    def test_64_bit_entries_are_float_pins(self):
+        self.assertEqual(propose.HAL_TYPES["LINT"], "float")
+        self.assertEqual(propose.HAL_TYPES["ULINT"], "float")
+        cfg = self.easercat_config()
+        e = cfg["slaves"][0]["process-data"]["inputs"][0]["entries"][0]
+        e.pop("split", None)
+        e.update(bits=64, type="LINT", pin="big", **{"hal-type": "s32"})
+        self.assertTrue(any("a LINT entry needs hal-type float" in x for x in config.check(cfg)))
+        e["hal-type"] = "s64"
+        self.assertTrue(any("unknown hal-type 's64'" in x for x in config.check(cfg)))
+        e["hal-type"] = "float"
+        self.assertFalse(any("LINT" in x or "hal-type" in x for x in config.check(cfg)))
+        cfg["master"]["start-check"] = "yes"
+        self.assertIn("master.start-check: must be true or false", config.check(cfg))
+
 
 class TestImport(unittest.TestCase):
     def test_auto_shift(self):

@@ -25,7 +25,8 @@ HEADER = """\
 PROFILES = {402: "cia402", 5001: "mdp"}
 DATA_TYPES = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT",
               "ULINT", "REAL", "LREAL"}
-HAL_TYPES = {"bit", "s32", "u32", "s64", "u64", "float"}
+# LinuxCNC 2.9 has no 64-bit pins: LINT and ULINT entries are float pins
+HAL_TYPES = {"bit", "s32", "u32", "float"}
 CIA402_MODES = {"csp", "csv", "pv", "pp"}
 # other modes a cia402 drive may switch to (cia402.modes); they need the
 # mode objects to change modes
@@ -296,6 +297,9 @@ def check(cfg):
                         own = [e["pin"]]
                         if e.get("hal-type") not in HAL_TYPES:
                             err("%s: %s has unknown hal-type %r" % (where, e["object"], e.get("hal-type")))
+                        elif e.get("type") in ("LINT", "ULINT") and e.get("hal-type") != "float":
+                            err("%s: %s: a %s entry needs hal-type float (HAL has no 64-bit pins)"
+                                % (where, e["object"], e["type"]))
                         if ("scale" in e or "offset" in e) and not (
                                 e.get("hal-type") == "float" and e.get("type") in INTEGER_TYPES):
                             err("%s: %s: scale and offset need an integer type and hal-type float"

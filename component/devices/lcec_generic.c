@@ -20,6 +20,7 @@
 /// @brief Driver for Generic devices, controlled by XML
 
 #include "lcec_generic.h"
+#include "lcec_generic_int64.h"
 
 #include "../lcec.h"
 
@@ -54,6 +55,10 @@ int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
   for (i = 0; i < slave->generic_pdo_entry_count; i++, hal_data++) {
     // PDO mapping
     lcec_pdo_init(slave, hal_data->pdo_idx, hal_data->pdo_sidx, &hal_data->pdo_os, &hal_data->pdo_bp);
+    if (hal_data->bitLength == 64 && (hal_data->pdo_bp != 0 || hal_data->bitOffset != 0)) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "%s.%s: a 64-bit entry must start on a byte\n", slave->name, hal_data->name);
+      return -EINVAL;
+    }
 
     switch (hal_data->type) {
       case HAL_BIT:
@@ -146,7 +151,10 @@ void lcec_generic_read(lcec_slave_t *slave, long period) {
         break;
 
       case HAL_FLOAT:
-        if (hal_data->subType == lcecPdoEntTypeFloatUnsigned) {
+        if (hal_data->bitLength == 64) {
+          // LINT, ULINT: byte aligned, checked when the file is read
+          fval = lcec_generic_read_int64(&pd[hal_data->pdo_os], hal_data->subType == lcecPdoEntTypeFloatUnsigned);
+        } else if (hal_data->subType == lcecPdoEntTypeFloatUnsigned) {
           fval = lcec_generic_read_u32(pd, hal_data);
         } else if (hal_data->subType == lcecPdoEntTypeFloatIeee) {
           fval = EC_READ_REAL(&pd[hal_data->pdo_os]);
@@ -203,7 +211,9 @@ void lcec_generic_write(lcec_slave_t *slave, long period) {
         fval += hal_data->floatOffset;
         fval *= hal_data->floatScale;
 
-        if (hal_data->subType == lcecPdoEntTypeFloatUnsigned) {
+        if (hal_data->bitLength == 64) {
+          lcec_generic_write_int64(&pd[hal_data->pdo_os], hal_data->subType == lcecPdoEntTypeFloatUnsigned, fval);
+        } else if (hal_data->subType == lcecPdoEntTypeFloatUnsigned) {
           lcec_generic_write_u32(pd, hal_data, (hal_u32_t)fval);
         } else if (hal_data->subType == lcecPdoEntTypeFloatIeee) {
           EC_WRITE_REAL(&pd[hal_data->pdo_os], fval);

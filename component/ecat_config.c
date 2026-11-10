@@ -376,6 +376,11 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   if (pin != NULL) {
     const char *hal = get_str(c, e, "hal-type");
     copy_str(pe->halPin, pin);
+    if (dt->bytes == 8 && !dt->is_float && (hal == NULL || strcmp(hal, "float"))) {
+      // LinuxCNC 2.9 has no 64-bit pins: a float carries it, exact up to 2^53
+      error(c, "%s: a %s entry needs hal-type float (HAL has no 64-bit pins)", object, dt->name);
+      return;
+    }
     if (hal != NULL && !strcmp(hal, "bit")) {
       pe->halType = HAL_BIT;
     } else if (hal != NULL && !strcmp(hal, "s32")) {

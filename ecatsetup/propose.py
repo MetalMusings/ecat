@@ -36,7 +36,7 @@ PROFILE_NAMES = {402: "CiA 402 drive", 5001: "Modular device (ETG.5001)"}
 
 HAL_TYPES = {"BOOL": "bit", "SINT": "s32", "INT": "s32", "DINT": "s32",
              "USINT": "u32", "UINT": "u32", "UDINT": "u32", "REAL": "float",
-             "LINT": "s64", "ULINT": "u64", "LREAL": "float"}
+             "LINT": "float", "ULINT": "float", "LREAL": "float"}  # no 64-bit HAL pins
 # The ethercat tool's CoE type names, in ESI/SII terms.
 # Unsigned 32-bit entries that are counts which wrap, such as encoder
 # counters and latched positions: proposed as s32 pins.

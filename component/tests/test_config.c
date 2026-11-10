@@ -249,11 +249,18 @@ static void test_hal_types(void) {
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatIeee);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LREAL, pin: p, hal-type: float}")), 0);
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatDoubleIeee);
+  // 64-bit integers: only as float
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: float}")), 0);
+  CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatSigned);
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: float}")), 0);
+  CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatUnsigned);
 }
 
 static void test_entry_errors(void) {
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p, hal-type: s64}"), "hal-type \"s64\" is not supported");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p}"), "hal-type \"\" is not supported");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: s32}"), "a LINT entry needs hal-type float");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: u32}"), "a ULINT entry needs hal-type float");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: WORD, pin: p, hal-type: u32}"), "unknown type \"WORD\"");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 0, type: UINT, pin: p, hal-type: u32}"), "bits must be 1 to 64");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 65, type: UINT, pin: p, hal-type: u32}"), "bits must be 1 to 64");
