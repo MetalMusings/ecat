@@ -47,8 +47,8 @@ SYMPTOMS = [
 FLOW = [
     ("Save a report now (Save report...).",
      "It holds the event log of this run and the one before, which is what happened while "
-     "nobody looked. Only this run and the one before are kept, so a restart of LinuxCNC "
-     "pushes this run out of reach after one more start: do it before you restart."),
+     "nobody looked. Only this run and the one before are kept: each start of LinuxCNC "
+     "drops the older of the two, so save the report before you restart."),
     ("If the fault is still there or can be repeated, keep LinuxCNC running and press Watch "
      "LinuxCNC (read only).",
      "It shows the ecat pins live, the sync state and each drive's state and status word, and "
