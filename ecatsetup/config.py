@@ -422,6 +422,8 @@ def check_joints(cfg):
         return errors
     if not isinstance(lc, dict):
         return ["linuxcnc: must be a mapping"]
+    if not isinstance(lc.get("check-hal-at-start", False), bool):
+        errors.append("linuxcnc.check-hal-at-start: must be true or false")
     js = lc.get("joints") or []
     if not isinstance(js, list):
         return ["linuxcnc.joints: must be a list"]

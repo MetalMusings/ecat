@@ -727,6 +727,7 @@ in this order:
    ([events.md](../events.md)).
 2. **HAL check and drift** (b): the check, hand edits of `ethercat.hal`
    noticed, renames into the user's files, where each pin is connected.
+   Built 2026-11-10 ([linuxcnc.md](../linuxcnc.md#checking-the-hal-files)).
 3. **The bus changed**, matched by type and order (b); modular devices
    best effort.
 4. **From a simulated configuration** (a): recognising and replacing the

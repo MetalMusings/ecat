@@ -33,7 +33,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget)
 
-from . import config, diagnose, drivetest, esi, events, integrate, netif, propose, testmode, tool
+from . import config, diagnose, drivetest, esi, events, halcheck, integrate, netif, propose, testmode, tool
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -984,7 +984,8 @@ class SlaveView(QWidget):
         old = s.get("name")
         s["name"] = self.name.text().strip()
         if old != s["name"]:
-            integrate.rename_slave(self.win.session.cfg, old, s["name"])
+            renamed = integrate.rename_slave(self.win.session.cfg, old, s["name"])
+            self.offer_rename_in_hal(renamed)
         if s.get("profile") == "cia402":
             c = s.setdefault("cia402", {})
             c["mode"] = self.mode.currentData()
@@ -1061,6 +1062,32 @@ class SlaveView(QWidget):
             box.setEnabled("pin" in e)
             box.blockSignals(False)
         self.loading = False
+
+    def offer_rename_in_hal(self, renamed):
+        """After a rename: offer to rename the pins in the user's HAL files too."""
+        ini = self.win.session.ini_path
+        if not ini or not os.path.exists(ini):
+            return
+        try:
+            p = integrate.rename_in_hal(ini, renamed)
+        except OSError:
+            return
+        if not p.changes:
+            return
+        files = "\n".join("%s: %s" % (c.name, c.what) for c in p.changes)
+        if QMessageBox.question(
+                self, TITLE, "Your HAL files use the old name:\n\n%s\n\nRename the pins there "
+                "too? Each file is kept as .bak first; comments are left as they are."
+                % files, QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+            self.win.status("Your HAL files still use the old name: rename the pins there by "
+                            "hand, or the HAL check (HAL & LinuxCNC page) lists them")
+            return
+        try:
+            integrate.apply(p)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, TITLE, "Not renamed:\n%s" % e)
+            return
+        self.win.status("Renamed in %s" % ", ".join(c.name for c in p.changes))
 
     def hal_type_edited(self, row, text):
         if self.loading:
@@ -2320,7 +2347,18 @@ class HalPage(QWidget):
         self.other_nets = pins.add(label("", "hint", wrap=True))
         self.io_proposal = {}
         self.hal_signals = {}
+        self.hal_uses = {}
         left.addWidget(pins)
+
+        # the HAL files against the configuration
+        self.check_card = Card("HAL check", "Your HAL files, ethercat-load.hal and ethercat.hal "
+                                            "against this configuration, as LinuxCNC would read "
+                                            "them: pins that do not exist (a slave renamed, an "
+                                            "entry removed), pins on two signals, two writers.")
+        self.check_text = self.check_card.add(label("", wrap=True))
+        self.check_table = table(["", "Where", "What"], 2)
+        self.check_card.add(self.check_table)
+        left.addWidget(self.check_card)
         yaml_card = Card("File contents", "ethercat.yaml as it will be written.")
         self.yaml = QPlainTextEdit()
         self.yaml.setReadOnly(True)
@@ -2346,6 +2384,12 @@ class HalPage(QWidget):
         apply.add(self.code)
         self.problems = apply.add(label("", "problemText", wrap=True))
         self.notes = apply.add(label("", "hint", wrap=True))
+        self.check_at_start = QCheckBox("Check the HAL files when LinuxCNC starts")
+        self.check_at_start.setToolTip("ethercat-load.hal runs ecatsetup --check-hal first: "
+                                       "LinuxCNC stops with a clear message when a HAL file uses "
+                                       "a pin the configuration does not have. Takes a second.")
+        self.check_at_start.toggled.connect(self.check_at_start_edited)
+        apply.add(self.check_at_start)
         buttons = QHBoxLayout()
         self.write_button = QPushButton("Write")
         self.write_button.setObjectName("primary")
@@ -2369,14 +2413,60 @@ class HalPage(QWidget):
         if self.win.tabs.currentWidget() is self:
             self.show_joints()
             self.show_plan()
+            self.show_check()
+        self.check_at_start.blockSignals(True)
+        self.check_at_start.setChecked(integrate.check_at_start(s.cfg))
+        self.check_at_start.setEnabled(s.cfg is not None)
+        self.check_at_start.blockSignals(False)
+
+    def check_at_start_edited(self, on):
+        cfg = self.win.session.cfg
+        if cfg is None or on == integrate.check_at_start(cfg):
+            return
+        lc = cfg.setdefault("linuxcnc", {})
+        if on:
+            lc["check-hal-at-start"] = True
+        else:
+            lc.pop("check-hal-at-start", None)
+            if not lc:
+                cfg.pop("linuxcnc", None)
+        self.win.changed()
+
+    def show_check(self):
+        s, ini = self.win.session, self.ini()
+        t = self.check_table
+        t.setRowCount(0)
+        if ini is None or s.cfg is None:
+            self.check_text.setText("Choose the machine's INI file to check its HAL files.")
+            fit_table(t, minimum=1)
+            return
+        try:
+            found = halcheck.check(ini, s.cfg)
+        except OSError as e:
+            self.check_text.setText(str(e))
+            return
+        errors = sum(1 for f in found if f.severity == "error")
+        self.check_text.setText(
+            "The HAL files match the configuration." if not found else
+            "%d error%s, %d warning%s. Errors are what HAL would refuse at start, or what cannot "
+            "work." % (errors, "" if errors == 1 else "s", len(found) - errors,
+                       "" if len(found) - errors == 1 else "s"))
+        t.setRowCount(len(found))
+        for r, f in enumerate(sorted(found, key=lambda f: (f.severity != "error", f.file, f.line))):
+            colour = QColor("#c62828") if f.severity == "error" else QColor("#b26a00")
+            t.setItem(r, 0, item("ERROR" if f.severity == "error" else "WARN", colour=colour))
+            t.setItem(r, 1, item("%s:%d" % (f.file, f.line) if f.line else f.file, font=mono()))
+            t.setItem(r, 2, item(f.text, colour=colour))
+        fit_table(t, minimum=1)
 
     def show_pins(self):
         s, ini = self.win.session, self.ini()
-        self.hal_signals, self.io_proposal = {}, {}
+        self.hal_signals, self.io_proposal, self.hal_uses = {}, {}, {}
         if ini and s.cfg is not None:
             try:
                 self.hal_signals = integrate.signals(integrate.user_hal_files(ini))
                 self.io_proposal = integrate.propose_nets(ini, s.cfg)
+                self.hal_uses = halcheck.uses(ini)[0]
             except OSError:
                 pass
         own = integrate.slave_pins(s.cfg)
@@ -2413,6 +2503,9 @@ class HalPage(QWidget):
                       for sig, pins in self.hal_signals.items() if pin in pins]
             for sig, pins in theirs:
                 tip.append("In your HAL files: %s %s" % (sig, " ".join(pins)))
+            for u in self.hal_uses.get(pin, []):
+                tip.append("  %s:%d %s" % (u.file, u.line, "net %s" % u.signal if u.signal
+                                           else "setp"))
             if not tip:
                 tip.append("Not connected; type LinuxCNC pins, or choose one")
             box.setToolTip("\n".join(tip))
@@ -2605,9 +2698,16 @@ class HalPage(QWidget):
                 ".bak. LinuxCNC must not run with this configuration now." % (d, "\n".join(names)),
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
+        if self.plan.edited and QMessageBox.warning(
+                self, TITLE, "%s was changed by hand since EtherCAT Setup wrote it. Writing "
+                "replaces the change (Show all changes shows it as removed); move it into a "
+                "HAL file of your own first if it is needed.\n\nWrite anyway?"
+                % ", ".join(self.plan.edited),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
         try:
             s.save(dest)
-            written = integrate.apply(self.plan)
+            written = integrate.apply(self.plan, overwrite_edited=True)
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, TITLE, "Not all was written:\n%s" % e)
             self.win.refresh(keep_page=True)

@@ -150,6 +150,10 @@ def main(argv=None):
                     help="write a report to attach when asking for help: versions, the "
                          "configuration (--check FILE or --ini), the INI lines, a diagnosis of "
                          "the bus and the event logs; FILE defaults to ethercat-report-<time>.md")
+    ap.add_argument("--check-hal", nargs="?", const="", metavar="INI",
+                    help="check the HAL files of a LinuxCNC configuration against its "
+                         "ethercat.yaml: pins that do not exist, pins on two signals, two "
+                         "writers; INI defaults to --ini or $INI_FILE_NAME (as LinuxCNC sets it)")
     ap.add_argument("--diagnose", action="store_true",
                     help="diagnose the slaves: state, cables, the slave's messages, CiA 402")
     ap.add_argument("--seconds", type=float, default=2.0,
@@ -162,6 +166,9 @@ def main(argv=None):
                          "the file, ethercat-load.hal, ethercat.hal and the INI changes, after "
                          "showing them; joints connected to drives in your HAL files are taken over")
     ap.add_argument("--yes", action="store_true", help="for --apply, write without asking")
+    ap.add_argument("--overwrite-edited", action="store_true",
+                    help="for --apply, replace ethercat.hal or ethercat-load.hal even though "
+                         "they were changed by hand")
     ap.add_argument("--net", action="append", default=[], metavar="PIN=PIN[,PIN...]",
                     help="for --apply, connect a slave's pin to LinuxCNC pins (repeatable); "
                          "PIN= with nothing after it removes the connection")
@@ -181,6 +188,8 @@ def main(argv=None):
 
     if args.apply:
         sys.exit(apply_file(args))
+    if args.check_hal is not None:
+        sys.exit(check_hal(args))
     if args.report is not None:
         sys.exit(write_report(args))
     if args.check:
@@ -270,6 +279,10 @@ def apply_file(args):
     integrate.describe(p)
     if p.errors:
         return 1
+    if p.edited and not args.overwrite_edited:
+        print("\nNothing written: %s changed by hand. Move the change into a HAL file of your "
+              "own, or give --overwrite-edited." % ", ".join(p.edited))
+        return 1
     if not args.yes:
         try:
             if input("\nWrite %s and these files? [y/N] " % dest).strip().lower() not in ("y", "yes"):
@@ -281,7 +294,7 @@ def apply_file(args):
     if os.path.exists(dest):
         shutil.copyfile(dest, dest + ".bak")
     config.write(cfg, dest)
-    for path in [dest] + integrate.apply(p):
+    for path in [dest] + integrate.apply(p, overwrite_edited=args.overwrite_edited):
         print("Wrote %s" % path)
     return 0
 
@@ -302,6 +315,36 @@ def diagnose_bus(args):
     except events.EventsError:
         pass
     return 1 if found else 0
+
+
+def check_hal(args):
+    """The HAL check. Returns 1 if HAL would refuse something, else 0."""
+    from . import halcheck
+    ini = args.check_hal or args.ini or os.environ.get("INI_FILE_NAME")
+    if not ini:
+        print("--check-hal needs the INI file (or INI_FILE_NAME, as LinuxCNC sets it)")
+        return 2
+    e = integrate.read_ini(ini) if os.path.exists(ini) else []
+    name = integrate.ini_get(e, "ETHERCAT", "CONFIG")
+    if not name:
+        print("%s has no [ETHERCAT]CONFIG" % ini)
+        return 2
+    path = os.path.join(os.path.dirname(os.path.abspath(ini)), name)
+    try:
+        cfg = config.load(path)
+    except (OSError, yaml.YAMLError) as x:
+        print("Cannot read %s: %s" % (path, x))
+        return 1
+    found = halcheck.check(ini, cfg)
+    for f in found:
+        print("ecatsetup: %s" % f)
+    errors = sum(1 for f in found if f.severity == "error")
+    if errors:
+        print("ecatsetup: the HAL files do not match %s: %d error%s (EtherCAT Setup, HAL & "
+              "LinuxCNC page, shows them)" % (name, errors, "" if errors == 1 else "s"))
+    elif not found:
+        print("ecatsetup: the HAL files match %s" % name)
+    return 1 if errors else 0
 
 
 def write_report(args):

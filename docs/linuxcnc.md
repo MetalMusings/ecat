@@ -152,6 +152,43 @@ Not written:
 - when a HAL file outside the configuration folder (from LinuxCNC's
   `hallib`) would have to change: copy it into the folder.
 
+## Checking the HAL files
+
+HAL files are edited by hand, and drift from `ethercat.yaml`: a slave
+renamed in the program but not in a HAL file, a PDO entry removed, a pin
+connected twice. The HAL check reads every HAL file of the INI file,
+with `ethercat-load.hal` and `ethercat.hal`, as LinuxCNC would, and
+reports:
+
+| | |
+|---|---|
+| error | a pin of a slave, an axis or `ecat` that the configuration does not have, with the nearest one (`did you mean io.out-1?`), also under the slaves' old names (`lcec.0.E7000.out-1` after a rename) |
+| error | a pin on two signals, a `setp` of a connected pin, a `setp` of an output of a slave: HAL refuses these |
+| error | a signal with two writers |
+| warning | a signal on a slave's input with other pins but nothing that writes it (a signal with only the slave's pin may be written by a GUI's Python code, as in QtPlasmaC, and is not reported) |
+| warning | `ethercat-load.hal` or `ethercat.hal` changed by hand (below) |
+
+It is on the *HAL & LinuxCNC* page (*HAL check*), and on the command
+line: `ecatsetup --check-hal <machine>.ini`. With *Check the HAL files
+when LinuxCNC starts* (`linuxcnc: {check-hal-at-start: true}`),
+`ethercat-load.hal` runs `ecatsetup --check-hal` before it loads `ecat`:
+LinuxCNC then stops with the check's lines instead of halcmd's "pin not
+found". It takes about a second.
+
+The tooltip of a pin on the *Inputs and outputs* card shows every line
+where your HAL files use it.
+
+**Hand edits of `ethercat.hal`.** The program writes a checksum into
+`ethercat-load.hal` and `ethercat.hal`. When one was changed since, the
+check says so, and writing asks first (`--apply` needs
+`--overwrite-edited`): the change would be lost. Move it into a HAL file
+of your own.
+
+**Renames.** Renaming a slave in the program offers to rename its pins in
+your HAL files in the configuration folder too (each kept as `.bak`;
+comments are left alone). Its joints, connected pins and axes follow
+anyway.
+
 ## Tried
 
 On a copy of the plasma cutter's configuration (three ECT60 in CSP, one

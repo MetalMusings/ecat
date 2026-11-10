@@ -246,6 +246,7 @@ linuxcnc:
 | Key | Meaning |
 |---|---|
 | `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0). Each joint and each slave once. |
+| `check-hal-at-start` | `true`: `ethercat-load.hal` runs the HAL check (`ecatsetup --check-hal`) when LinuxCNC starts ([linuxcnc.md](linuxcnc.md#checking-the-hal-files)). |
 | `nets` | A list of `signal` (a HAL signal name: no blanks or `#`, at most 47 characters, each once) and `pins` (at least two; at least one of them a slave's pin; each pin in one net only, and not a pin a joint's connection takes). |
 
 ## Importing lcec XML files

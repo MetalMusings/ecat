@@ -62,6 +62,7 @@ python3 -m ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethe
 python3 -m ecatsetup --ini <machine>.ini --update ethercat.yaml
 python3 -m ecatsetup --check ethercat.yaml
 python3 -m ecatsetup --diagnose
+python3 -m ecatsetup --check-hal <machine>.ini
 python3 -m ecatsetup --events [prev]
 python3 -m ecatsetup --report --ini <machine>.ini
 python3 -m ecatsetup --apply ethercat.yaml --ini <machine>.ini

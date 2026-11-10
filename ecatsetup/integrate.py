@@ -268,6 +268,11 @@ def drives(cfg):
     return out
 
 
+def check_at_start(cfg):
+    """linuxcnc.check-hal-at-start: run the HAL check when LinuxCNC starts."""
+    return ((cfg or {}).get("linuxcnc") or {}).get("check-hal-at-start") is True
+
+
 def joints(cfg):
     """The configuration's joint list: [{"joint", "slave", "scale"}]."""
     return ((cfg or {}).get("linuxcnc") or {}).get("joints") or []
@@ -307,6 +312,39 @@ def rename_slave(cfg, old, new):
             prefix = next((o for o in renamed if p.startswith(o + ".")), None)
             out.append(renamed[prefix] + p[len(prefix):] if prefix else p)
         n["pins"] = out
+    return renamed
+
+
+def rename_in_hal(ini_path, renamed):
+    """What renaming pin prefixes ({old: new}, from rename_slave) changes in
+    the user's HAL files in the configuration folder: a Plan of FileChanges
+    and how many pins each file has. Comments are left alone, and so are
+    ecatsetup's own files (written again) and LinuxCNC's hallib."""
+    p = Plan()
+    d = os.path.dirname(os.path.abspath(ini_path))
+    pats = [(re.compile(r"(?<!\S)" + re.escape(old + ".")), new + ".")
+            for old, new in sorted(renamed.items(), key=lambda kv: -len(kv[0])) if old != new]
+    if not pats:
+        return p
+    for path in user_hal_files(ini_path):
+        if not path.endswith(".hal") or os.path.dirname(os.path.abspath(path)) != d:
+            continue
+        try:
+            text = read_text(path)
+        except OSError:
+            continue
+        count, lines = 0, []
+        for line in text.splitlines(keepends=True):
+            body, hash_, comment = line.partition("#")
+            for pat, new in pats:
+                body, n = pat.subn(new, body)
+                count += n
+            lines.append(body + hash_ + comment)
+        new_text = "".join(lines)
+        if new_text != text:
+            p.changes.append(FileChange(path, "change", text, new_text,
+                                        "%d pin%s renamed" % (count, "" if count == 1 else "s")))
+    return p
 
 
 # -- inputs and outputs: nets between the slaves' pins and LinuxCNC's
@@ -326,7 +364,10 @@ KNOWN_PINS = [
     (r"motion\.probe-input", "bit", "in"),
     (r"motion\.feed-hold", "bit", "in"),
     (r"motion\.enable", "bit", "in"),
-    (r"joint\.\d+\.(home-sw-in|pos-lim-sw-in|neg-lim-sw-in)", "bit", "in"),
+    (r"joint\.\d+\.(home-sw-in|pos-lim-sw-in|neg-lim-sw-in|amp-fault-in)", "bit", "in"),
+    (r"joint\.\d+\.amp-enable-out", "bit", "out"),
+    (r"joint\.\d+\.motor-pos-cmd", "float", "out"),
+    (r"joint\.\d+\.motor-pos-fb", "float", "in"),
     (r"spindle\.\d+\.(on|forward|reverse|brake)", "bit", "out"),
     (r"spindle\.\d+\.(speed-out|speed-out-abs|speed-out-rps|speed-out-rps-abs)",
      "float", "out"),
@@ -609,6 +650,7 @@ class Plan:
     commented: list = field(default_factory=list)   # [(file name, line number, text)]
     errors: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    edited: list = field(default_factory=list)      # ecatsetup's files changed by hand
 
 
 def _managed(cfg):
@@ -832,13 +874,22 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
                      for comp, names in sorted(q_loads.items())]
 
     load = HEADER + "\n# Loads the component before the other HAL files, so that the slaves'\n" \
-        "# pins exist for them.\nloadrt ecat config=[ETHERCAT]CONFIG\n"
+        "# pins exist for them.\n"
+    if check_at_start(cfg):
+        load += "\n# linuxcnc.check-hal-at-start: the HAL files against the configuration, before\n" \
+            "# anything is loaded (ecatsetup --check-hal reads INI_FILE_NAME)\n" \
+            "loadusr -w ecatsetup --check-hal\n"
+    load += "loadrt ecat config=[ETHERCAT]CONFIG\n"
     main = HEADER + "\n# The last HALFILE: the servo thread exists now. ecat.read-all goes first\n" \
         "# in the thread, ecat.write-all last.\n" + "\n".join(body).rstrip() + "\n"
+    from . import halcheck
     for fname, text, what in ((LOAD_FILE, load, "loads ecat"),
                               (MAIN_FILE, main, "functions and joints")):
+        text = halcheck.with_checksum(text)
         path = os.path.join(d, fname)
         old = read_text(path) if os.path.exists(path) else ""
+        if old and halcheck.edited(old):
+            p.edited.append(fname)
         if old != text:
             p.changes.append(FileChange(path, "change" if old else "new", old, text, what))
     old_ini = read_text(ini_path)
@@ -867,11 +918,16 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
     return p
 
 
-def apply(p):
+def apply(p, overwrite_edited=False):
     """Write a plan's files; each existing file is kept as .bak first.
-    Returns the paths written."""
+    Returns the paths written. A file of ecatsetup's own that was changed
+    by hand is replaced only with overwrite_edited."""
     if p.errors:
         raise ValueError("not written:\n  " + "\n  ".join(p.errors))
+    if p.edited and not overwrite_edited:
+        raise ValueError("not written: %s changed by hand since EtherCAT Setup wrote it; move "
+                         "the change into a HAL file of your own, or write anyway"
+                         % ", ".join(p.edited))
     written = []
     for c in p.changes:
         if os.path.exists(c.path):
@@ -901,5 +957,8 @@ def describe(p, out=print):
                                              c.name + ".bak", c.name, n=1)).rstrip())
     for n in p.notes:
         out("note: %s" % n)
+    for f in p.edited:
+        out("warning: %s was changed by hand since EtherCAT Setup wrote it; writing replaces "
+            "the change (the diff above shows it as removed)" % f)
     for e in p.errors:
         out("error: %s" % e)
