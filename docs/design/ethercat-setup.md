@@ -549,10 +549,141 @@ described.
   drivers ([Decision: profiles with quirks, no product
   drivers](#decision-profiles-with-quirks-no-product-drivers)).
 
+## Use cases
+
+Agreed with the user on 2026-11-10. These are the main things people do
+with EtherCAT Setup; the window should lead into each of them, and the
+plan below is ordered by them.
+
+### a. A new machine, from a simulated configuration
+
+A user tries LinuxCNC's simulator, picks a configuration and copies it
+into `~/linuxcnc/configs/` with LinuxCNC's configuration picker. That
+copy is the starting point. Its own files are in the folder, but lines
+such as `LIB:core_sim.hal`, `LIB:sim_spindle_encoder.hal` and
+`LIB:simulated_home.hal` still point into LinuxCNC's `hallib`, where the
+simulation is.
+
+- EtherCAT Setup starts from the copy's INI file and recognises the
+  simulated parts: a joint's `motor-pos-cmd` looped back to
+  `motor-pos-fb`, `sim_home_switch`, `sim_spindle`, simulated limit
+  switches.
+- A library file that must change is copied into the configuration
+  folder first, with a note (today the program stops with an error).
+  LinuxCNC's own files are never changed.
+- Step by step: joints (the loop-back replaced by a drive), home and
+  limit switches (the simulated ones replaced by inputs), spindle (a PV
+  drive or an output), the scale (from the drive's counts per revolution
+  and the screw's lead), then a test of each axis, writing, and the start.
+- The INI file is checked against the bus: `SERVO_PERIOD` against DC,
+  `MAX_VELOCITY` against the drive's maximum speed, `FERROR` values.
+- Everything else in the copy stays as it was.
+
+### b. Changing a configuration that runs
+
+New I/O, another scale, modules added or moved. Users often edit their
+HAL files by hand, and those then drift from `ethercat.yaml`. That is
+the main problem here; it cannot be prevented, so the program finds it.
+
+- **One place per connection.** What the program connects is in
+  `ethercat.hal`, which the user never has to edit; what the user
+  connects is in their own files. The program reads both and shows,
+  for each pin, where it is connected.
+- **Hand edits of `ethercat.hal` are noticed** (a checksum in its
+  header): the user can take the change into the program or move it to
+  a file of their own, instead of it being overwritten.
+- **A HAL check**, when writing, with `--check` and in the window: pins
+  in HAL files that the configuration does not have (after a rename or a
+  removed PDO), pins connected twice, signals nothing writes, inputs
+  nothing drives. Optionally also at LinuxCNC's start (`loadusr -w` in
+  `ethercat-load.hal`), for a clear message instead of halcmd's "pin not
+  found"; it costs a second or two, so it is a choice.
+- **A rename follows into the user's HAL files** too, if they want (with
+  `.bak`); today only `ethercat.hal` follows. This is probably the most
+  common cause of drift.
+- **Taking over from the HAL files** (joints and I/O, built) also works
+  after hand edits: edit freely, then let the program take over.
+- **The bus changed**: the bus is matched to the file by type and order,
+  showing slaves added, removed and moved. Moved slaves keep their names
+  and pins, so HAL files keep working (today a slave inserted in the
+  middle shifts every position after it).
+
+**Modular devices**, best effort until users report back. A coupler with
+terminals (EK1100) already works: each terminal is a slave of its own.
+The hard case is one slave with modules in slots, whose process data
+depends on the modules:
+
+- read the modules the slave reports (`0xF050`) and take the process data
+  the coupler has mapped, as it is; compare with the configured modules
+  (`0xF030`) and say so clearly when they differ;
+- with an ESI file, build the process data per slot from its modules and
+  slots, and write `0xF030` as a setting;
+- the start check compares the modules as it compares the slaves.
+
+### c. Bringing up a new slave
+
+Getting it to work with the master: process data, DC and
+synchronisation, settings.
+
+- **ESI files**: for now the user provides the file, or there is none.
+  The program remembers the folder, shows which device and revision a
+  file matched, and warns when the revision differs. Without an ESI file
+  it works from the SII and the CoE dictionary, as today, and says what
+  is missing (names and units of settings, predefined PDO sets,
+  sometimes DC modes) and that an ESI file gives them.
+- **Where each proposal comes from** (ESI, SII, CoE, quirk file) is
+  shown, so that it is clear what is known and what is guessed.
+- **A sync card** in test mode: DC state, the shift chosen,
+  `turnaround-cycles` (should be 2), the spread of `send-offset`, whether
+  SYNC0 synced. All of it is pins already; it needs showing and
+  explaining.
+- **Save as quirk file**: the pin names, scales and settings chosen for
+  a product become a quirk file, to share and to ship.
+
+### d. Using a slave by hand
+
+Reading and setting I/O, moving to positions, trying homing: testing a
+slave's functions on their own. Test mode does this (I/O, SDOs, CSP, PP,
+PV, homing, with its safety layers).
+
+- A small plot in the Move card: position, following error and velocity
+  over the last seconds.
+- PP, PV and homing to be tried on the plasma cutter.
+
+### e. Troubleshooting while LinuxCNC runs
+
+Something unexpected happens in LinuxCNC that the user thinks may come
+from a slave. The Troubleshoot page reads the master and the slaves over
+IPC while LinuxCNC runs (AL states, error codes, port error counters),
+but by the time the user looks, the fault has often passed.
+
+- **A flight recorder in the component**: a ring buffer of time-stamped
+  events (AL state changes, working counter drops, drive faults with
+  `0x603F`, DC sync, late cycles, the stop guard stepping in), read
+  afterwards by the window and `ecatsetup --diagnose`.
+- **Save report**: one file with `ethercat.yaml`, the diagnosis, the
+  event log, versions and the relevant INI lines, to attach to a forum
+  post.
+- **Watching while LinuxCNC runs**: the pins live, read only, the same
+  view as test mode without changing anything.
+- **A symptom guide** on the Troubleshoot page, from what has been
+  learnt: following error at enable (`zero-at-start`), a varying
+  turn-around (`sync0-shift-ns`), working counter drops (cables, port
+  error counters).
+
+### For all of them
+
+A start page in the window with the five tasks, leading to the pages
+and the order for each. The pages exist; what is missing is the way in
+for someone who does not know where to begin.
+
 ## Open questions
 
-- **Modular devices**: how slots and modules are detected and chosen.
-- **ESI files**: licensing, finding the right file and revision.
+- **Modular devices**: how slots and modules are detected and chosen;
+  best effort for now (see [use case b](#b-changing-a-configuration-that-runs)),
+  waiting for users' reports.
+- **ESI files**: licensing, finding the right file and revision. For now
+  the user provides the file, or works without one.
 
 ## Plan
 
@@ -583,6 +714,25 @@ file, `ethercat-load.hal`, `ethercat.hal` (joints connected to CSP drives)
 and the INI changes is built and tried on a copy of the plasma cutter's
 configuration and run in LinuxCNC; connecting I/O pins from the program
 and the start check are not built.
+
+Where it stands (2026-11-10): connecting I/O pins from the program and
+the start check are built; test mode also moves drives in PP and PV and
+homes them; quirk files, several axes per drive, analog and stepper
+terminals as generic slaves. The next steps follow the use cases above,
+in this order:
+
+1. **Flight recorder and Save report** (e): helps users who ask for help
+   the most, and is useful in a-d too.
+2. **HAL check and drift** (b): the check, hand edits of `ethercat.hal`
+   noticed, renames into the user's files, where each pin is connected.
+3. **The bus changed**, matched by type and order (b); modular devices
+   best effort.
+4. **From a simulated configuration** (a): recognising and replacing the
+   simulation, copying library files, the scale, the INI check.
+5. **Bringing up a slave** (c): the sync card, where proposals come
+   from, ESI file handling, Save as quirk file.
+6. **Watching while LinuxCNC runs and the plot** (d, e).
+7. **The start page**, once the parts exist.
 
 ## Mockups
 
