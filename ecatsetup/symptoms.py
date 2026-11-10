@@ -11,8 +11,8 @@ SYMPTOMS = [
     ("A drive switches itself off, or will not enable",
      "The profile shut it down: the heartbeat (watchdog) stopped, the enable timed out, or the "
      "process data was not valid.",
-     "The slave's fault-reason pin and drive fault events (Event log); the Test page shows the "
-     "CiA 402 state and statusword; its error code (0x603F) is in the diagnosis."),
+     "The slave's fault-reason pin and drive fault events (Event log); Watch LinuxCNC shows the "
+     "CiA 402 state and status word live; its error code (0x603F) is in the diagnosis."),
     ("Slaves drop out for a moment (working counter incomplete)",
      "A cable or connector, or a slave losing power; the master does not see the frames come "
      "back.",
@@ -41,6 +41,28 @@ SYMPTOMS = [
      "The start check found other slaves on the bus than ethercat.yaml describes.",
      "Bus page, Update from the bus: what moved, is new, or is gone, and what depends on it."),
 ]
+
+
+# What to do when a running machine seems to behave wrongly: (step, why)
+FLOW = [
+    ("Save a report now (Save report...).",
+     "It holds the event log of this run and the one before, which is what happened while "
+     "nobody looked. Only this run and the one before are kept, so a restart of LinuxCNC "
+     "pushes this run out of reach after one more start: do it before you restart."),
+    ("If the fault is still there or can be repeated, keep LinuxCNC running and press Watch "
+     "LinuxCNC (read only).",
+     "It shows the ecat pins live, the sync state and each drive's state and status word, and "
+     "changes nothing. Repeat what went wrong and watch which value changes first."),
+    ("Look the symptom up below, and save a second report afterwards.",
+     "The event log then also holds what you did while watching. Post the report with a few "
+     "words on what you saw in LinuxCNC; look it through first, it holds paths from your "
+     "computer."),
+]
+
+
+def flow_html():
+    """The steps as rich text."""
+    return "<ol>%s</ol>" % "".join("<li><b>%s</b><br>%s</li>" % (a, b) for a, b in FLOW)
 
 
 def html():

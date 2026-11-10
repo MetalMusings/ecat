@@ -336,6 +336,15 @@ class TestWindow(BusTest):
         self.assertIn("did not start", warn.call_args[0][2])
         self.assertIn("kernel EtherCAT master", warn.call_args[0][2])
 
+    def test_troubleshoot_page_has_the_flow(self):
+        w = self.window()
+        page = w.trouble_page
+        with mock.patch.object(w, "start_watch") as watch:
+            page.watch_button.click()
+        watch.assert_called_once()
+        self.assertIn("Save a report", "".join(
+            lab.text() for lab in page.findChildren(gui.QLabel)))
+
     def test_sdo_card_is_off_while_watching(self):
         w = self.window()
         run = mock.Mock(running=True, watching=True)
@@ -520,6 +529,9 @@ class TestCards(unittest.TestCase):
         from ecatsetup import symptoms
         self.assertTrue(all(len(x) == 3 and all(x) for x in symptoms.SYMPTOMS))
         self.assertIn("zero-at-start", symptoms.html())
+        flow = symptoms.flow_html()
+        self.assertTrue(flow.index("Save a report") < flow.index("Watch LinuxCNC"))
+        self.assertIn("Watch LinuxCNC shows", symptoms.html())
 
     @unittest.skipIf(gui is None, "PyQt5 is not installed")
     def test_sync_rows(self):

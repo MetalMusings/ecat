@@ -1450,6 +1450,22 @@ class TroubleshootPage(QWidget):
         row.addWidget(self.report)
         lay.addLayout(row)
 
+        flow = Card("Something seems wrong in a running machine",
+                    "What to do, in this order. None of it changes anything on the machine.")
+        flow_text = flow.add(label(wrap=True))
+        flow_text.setTextFormat(Qt.RichText)
+        flow_text.setText(symptoms.flow_html())
+        flow_row = QHBoxLayout()
+        report2 = QPushButton("Save report...")
+        report2.clicked.connect(win.save_report)
+        flow_row.addWidget(report2)
+        self.watch_button = QPushButton("Watch LinuxCNC (read only)")
+        self.watch_button.clicked.connect(lambda: win.start_watch())
+        flow_row.addWidget(self.watch_button)
+        flow_row.addStretch(1)
+        flow.lay.addLayout(flow_row)
+        lay.addWidget(flow)
+
         self.waiting = Card("Not examined yet")
         self.waiting.add(label("Examining only reads: the slave's state (INIT, PREOP, SAFEOP, OP) "
                                "and AL status code, the error counters per port while they are "
