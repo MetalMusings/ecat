@@ -251,6 +251,12 @@ and otherwise left out. With a master running, settings get names and
 types from the slaves' CoE dictionaries, and mappings are checked against
 them. The import prints a note for everything it changes or leaves out.
 
+Some lcec settings are replaced by what ecat does instead
+(`ecatsetup/quirks.py`): an Rtelligent ECT60's `sdoConfig` of `0x2010`
+(Zero Position) becomes `cia402: {zero-at-start: true}` when the slave
+gets the cia402 profile (read from the bus); as a `generic` slave the
+setting is kept, with a note.
+
 lcec's `initCmds`, `modParam`, `idnConfig` and `watchdog` are not imported
 yet. ecat has no product drivers, so a `modParam` will become settings
 rows or process data choices (see the design draft, [Decision: profiles

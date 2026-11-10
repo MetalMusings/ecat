@@ -394,6 +394,32 @@ class TestConfig(unittest.TestCase):
 
 
 class TestImport(unittest.TestCase):
+    def load(self, xml, bus=None):
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as f:
+            f.write(xml)
+        try:
+            return importxml.import_lcec(lcecxml.load(f.name), bus, 1000000)
+        finally:
+            os.unlink(f.name)
+
+    def test_ect60_zero_position_becomes_zero_at_start(self):
+        zero = '<sdoConfig idx="2010" subIdx="0"><sdoDataRaw data ="01 00"/></sdoConfig>'
+        xml = LCEC.replace('<dcConf', zero + '\n      <dcConf')
+        # generic: kept, with a note
+        cfg, notes = self.load(xml)
+        self.assertIn("0x2010:00", [x["object"] for x in cfg["slaves"][0]["settings"]])
+        self.assertTrue(any("would be replaced by cia402.zero-at-start" in n for n in notes))
+        # with the cia402 profile from the bus: replaced
+        xml = xml.replace('type="generic"', 'type="DeASDA"')
+        p = propose.Proposal(0, 0xa88, 0xa880002, 0, 0, "ECT60", profile=402, mode="csp")
+        cfg, notes = self.load(xml, {0: (None, None, p)})
+        s = cfg["slaves"][0]
+        self.assertEqual(s["profile"], "cia402")
+        self.assertIs(s["cia402"]["zero-at-start"], True)
+        self.assertNotIn("0x2010:00", [x["object"] for x in s["settings"]])
+        self.assertIn("0x2000:00", [x["object"] for x in s["settings"]])
+        self.assertTrue(any("replaced by cia402.zero-at-start" in n for n in notes))
+
     def test_auto_shift(self):
         xml = LCEC.replace("<master idx", '<master globalShiftTime="auto" idx')
         with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as f:

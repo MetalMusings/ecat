@@ -34,7 +34,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 
-from . import testmode, tool
+from . import quirks, testmode, tool
 
 RESTORE_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or
                             os.path.expanduser("~/.local/state"), "ecatsetup", "drive-limits.json")
@@ -45,17 +45,8 @@ DEFAULTS = {"scale": 1.0, "max-velocity": 5.0, "max-acceleration": 50.0, "travel
 
 # Where a drive keeps a limit, if not in the CiA 402 object: (vendor,
 # product) -> {limit: (index, subindex, tool type), or why the drive's
-# object is not used}.
-LIMIT_QUIRKS = {
-    (0x00000A88, 0x0A880002): {
-        # Rtelligent ECT60: "Position trace error Limit", in pulses (drive
-        # error 0x8611 when exceeded)
-        "following-error": (0x2022, 0, "uint32"),
-        # tried on the plasma cutter, 2026-11-09: in CSP it moved 4.6 mm
-        # past a 0x607D limit of 1 mm, without an error
-        "travel": "the ECT60 ignores its software position limits (0x607D) in CSP",
-    },
-}
+# object is not used}; from quirks.py.
+LIMIT_QUIRKS = {k: q["limits"] for k, q in quirks.QUIRKS.items() if "limits" in q}
 STANDARD_LIMITS = {
     "following-error": (0x6065, 0, "uint32"),
     "max-torque": (0x6072, 0, "uint16"),
@@ -91,12 +82,7 @@ class Limit:
     original: int = None
 
 
-def identity(slave):
-    ident = slave.get("identity") or {}
-    try:
-        return int(str(ident.get("vendor")), 16), int(str(ident.get("product")), 16)
-    except ValueError:
-        return None
+identity = quirks.identity
 
 
 def plan_limits(slave, has_object, scale, start_counts, settings):

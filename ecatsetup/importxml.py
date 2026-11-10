@@ -10,7 +10,7 @@ Every import gives a list of notes saying what was changed or left out.
 
 import re
 
-from . import config, propose
+from . import config, propose, quirks
 
 # lcec hal types -> (hal-type, data type for a given bit length or None)
 _SIGNED = {8: "SINT", 16: "INT", 32: "DINT", 64: "LINT"}
@@ -189,10 +189,21 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
         elif x.type != "generic" and prop and "dc" in s:
             pass   # from the slave's own data
         settings = []
+        replace = quirks.of((x.vendor_id, x.product_code)).get("import", {})
         for index, sub, data in x.sdos:
             if sub == "complete":
                 notes.append("%s: SDO 0x%04X complete access not imported" % (where, index))
                 continue
+            if (index, sub) in replace:
+                what, why = replace[(index, sub)]
+                if what == "cia402.zero-at-start" and s.get("profile") == "cia402":
+                    s.setdefault("cia402", {})["zero-at-start"] = True
+                    notes.append("%s: %s" % (where, why))
+                    continue
+                if what == "cia402.zero-at-start":
+                    notes.append("%s: 0x%04X:%02X kept; with the cia402 profile it would be "
+                                 "replaced by cia402.zero-at-start (read the slave from the bus "
+                                 "to get the profile)" % (where, index, sub))
             settings.append(_setting(index, sub, data, coe))
         s["settings"] = settings
         for tag in x.unsupported:
