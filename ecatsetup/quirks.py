@@ -16,7 +16,7 @@ import os
 import yaml
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
-KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec"}
+KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec", "homing"}
 
 
 def user_dir():
@@ -92,6 +92,9 @@ def parse(data, path="<quirk>"):
                              for k, v in (hal.get("load") or {}).items()},
                     "addf": [str(x) for x in hal.get("addf") or []],
                     "lines": [str(x) for x in hal.get("lines") or []]}
+    homing = data.get("homing")
+    if homing is not None:
+        q["homing"] = _homing(homing)
     lcec = data.get("lcec") or {}
     q["lcec"] = {"types": [str(t) for t in lcec.get("types") or []],
                  "sdo": {}, "modparams": {}, "settings": []}
@@ -107,6 +110,33 @@ def parse(data, path="<quirk>"):
         q["lcec"]["settings"].append((index, sub or 0, str(v.get("type")), int(v.get("value")),
                                       str(v.get("note", ""))))
     return q
+
+
+def _homing(data):
+    """homing: methods (numbers), describe (text, needs, moves per method),
+    extras (settings per method)."""
+    if not isinstance(data, dict) or set(data) - {"methods", "describe", "extras"}:
+        raise QuirkError("homing takes methods, describe and extras")
+    out = {"methods": [], "describe": {}, "extras": {}}
+    for n in data.get("methods") or []:
+        out["methods"].append(int(n))
+    for n, v in (data.get("describe") or {}).items():
+        if not isinstance(v, dict):
+            raise QuirkError("homing.describe.%s needs text (and needs, moves)" % n)
+        out["describe"][int(n)] = dict(v)
+    for n, items in (data.get("extras") or {}).items():
+        lst = []
+        for v in items or []:
+            if not isinstance(v, dict) or "object" not in v or "type" not in v or "value" not in v:
+                raise QuirkError("homing.extras.%s: settings need object, type and value" % n)
+            index, sub = _obj(v["object"])
+            st = {"object": "0x%04X:%02X" % (index, sub or 0), "type": str(v["type"]),
+                  "value": v["value"]}
+            if v.get("name"):
+                st["name"] = str(v["name"])
+            lst.append(st)
+        out["extras"][int(n)] = lst
+    return out
 
 
 _cache = None

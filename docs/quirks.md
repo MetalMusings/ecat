@@ -97,6 +97,24 @@ has no pin in the configuration, when a placeholder cannot be filled, or
 when your HAL files load the same component (HAL loads a component only
 once: add the instance names there and connect them by hand).
 
+### Homing
+
+```yaml
+homing:
+  methods: [17, 18, 35, 36]          # the CiA 402 homing methods (0x6098) the drive supports
+  describe:                          # the drive's own text for a method (default: the standard's)
+    36: {text: "Torque homing ...", needs: [mechanical stop], moves: true}
+  extras:                            # settings the drive needs besides 0x6098, 0x6099, 0x609A, 0x607C
+    36:
+      - {object: '0x2030:01', type: UINT, value: 70, name: Max torque output}
+```
+
+Without `methods`, EtherCAT Setup reads the drive's 0x60E3 (supported homing
+methods); if the drive has neither, every method of the standard is offered.
+The ECT60 has no 0x60E3 (read from a drive, 2026-11-10), so its file lists
+the methods from the manual. The extras are for the axis of the slave's
+first axis; for later axes their indexes move by 0x800 as the other objects do.
+
 ## The files that come with the program
 
 - `rtelligent-ect60.yaml`: `0x2010` is a command (Zero Position); the
