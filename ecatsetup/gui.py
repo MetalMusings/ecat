@@ -24,7 +24,7 @@ import re
 import sys
 import time
 
-from PyQt5.QtCore import QThread, QTimer, Qt, pyqtSignal
+from PyQt5.QtCore import QSize, QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence, QPainter, QPen
 from PyQt5.QtWidgets import (
     QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -423,15 +423,32 @@ class BusList(Card):
             it = QListWidgetItem()
             it.setData(Qt.UserRole, key)
             w.setFixedWidth(width)
-            w.adjustSize()
-            it.setSizeHint(w.sizeHint())
+            # wrapped labels: the height depends on the width, which sizeHint() ignores
+            for child in [w] + w.findChildren(QWidget):     # fonts come from the style sheet
+                child.ensurePolished()
+            w.layout().activate()
+            height = w.layout().totalHeightForWidth(width)
+            w.setFixedHeight(height)
+            it.setSizeHint(QSize(width, height))
             self.list.addItem(it)
             self.list.setItemWidget(it, w)
         self.list.blockSignals(False)
+        QTimer.singleShot(0, self.fit_rows)     # again when the rows are laid out and styled
         self.select(win.current)
         self.summary.setText(win.bus_summary())
         self.update_button.setEnabled(bool(s.bus) and not win.busy)
         self.rescan.setEnabled(not win.busy)
+
+    def fit_rows(self):
+        """Give each row the height its wrapped text needs at its real width."""
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            w = self.list.itemWidget(it)
+            if w is not None:
+                h = w.layout().totalHeightForWidth(w.width())
+                if h > 0 and h != it.sizeHint().height():
+                    it.setSizeHint(QSize(w.width(), h))
+                    w.setFixedHeight(h)
 
     def select(self, key):
         self.list.blockSignals(True)
@@ -711,15 +728,28 @@ class SlaveView(QWidget):
             self.mode.addItem(text, m)
         self.mode.activated.connect(self.general_edited)
         cform.addRow("Mode of operation", self.mode)
+        # modes the drive may switch to while it runs (opmode-cmd), and homing by the
+        # drive's own method; both are cia402.modes in the file
         modes = QHBoxLayout()
         self.other_modes = {}
-        for m in ("hm", "csp", "csv", "pv", "pp"):
+        for m in ("csp", "csv", "pv", "pp"):
             cb = QCheckBox(m.upper())
+            cb.setToolTip("Lets the drive switch between the mode above and %s while it runs, "
+                          "with the pin opmode-cmd. The mode above is the one it starts in."
+                          % m.upper())
             cb.toggled.connect(self.general_edited)
             self.other_modes[m] = cb
             modes.addWidget(cb)
         modes.addStretch(1)
-        cform.addRow("Other modes", modes)
+        cform.addRow("Can also switch to", modes)
+        self.opmode_hint = label("", "hint", wrap=True)
+        cform.addRow("", self.opmode_hint)
+        hm = QCheckBox("Homing by the drive's own method")
+        hm.setToolTip("Adds the homing card below. Homing is not an opmode-cmd value: it has its "
+                      "own pins.")
+        hm.toggled.connect(self.general_edited)
+        self.other_modes["hm"] = hm
+        cform.addRow("Homing", hm)
         self.zero_at_start = QCheckBox("Position counts from 0 at start")
         self.zero_at_start.setToolTip(
             "For a drive that keeps its position from an earlier run. The position the drive "
@@ -957,6 +987,7 @@ class SlaveView(QWidget):
             for m, cb in self.other_modes.items():
                 cb.setChecked(m in (c.get("modes") or []))
                 cb.setEnabled(m != c.get("mode"))
+            self.show_opmode_hint(c)
             self.zero_at_start.setChecked(bool(c.get("zero-at-start")))
             while self.supported.count() > 1:
                 w = self.supported.takeAt(0).widget()
@@ -989,6 +1020,19 @@ class SlaveView(QWidget):
         self.show_process_data(s)
         self.show_settings(s)
         self.show_homing(s)
+
+    OPMODE_NUMBER = {"pp": 1, "pv": 3, "csp": 8, "csv": 9}
+
+    def show_opmode_hint(self, c):
+        """What opmode-cmd takes, for the modes chosen (the same numbers as the profile)."""
+        others = [m for m in (c.get("modes") or []) if m in self.OPMODE_NUMBER]
+        if not others:
+            self.opmode_hint.setText("")
+            return
+        nums = ["0 = %s (the mode above)" % (c.get("mode") or "").upper()]
+        nums += ["%d = %s" % (self.OPMODE_NUMBER[m], m.upper()) for m in others]
+        self.opmode_hint.setText("The drive gets the pin opmode-cmd: %s. Try it at the machine "
+                                 "first: it is not yet tried on a drive." % ", ".join(nums))
 
     HOME_DEFAULTS = {"fast": 3000, "slow": 1000, "accel": 5000, "offset": 0}
 
@@ -1180,6 +1224,7 @@ class SlaveView(QWidget):
             others = [m for m, cb in self.other_modes.items() if cb.isChecked() and m != c["mode"]]
             for m, cb in self.other_modes.items():
                 cb.setEnabled(m != c["mode"])
+            self.show_opmode_hint({"mode": c["mode"], "modes": others})
             if others:
                 c["modes"] = others
             else:
@@ -2876,6 +2921,10 @@ class HalPage(QWidget):
                                             "entry removed), pins on two signals, two writers.")
         self.check_text = self.check_card.add(label("", wrap=True))
         self.check_table = table(["", "Where", "What"], 2)
+        self.check_table.setWordWrap(True)      # a long message is read whole, not cut off
+        self.check_table.setTextElideMode(Qt.ElideNone)
+        self.check_table.horizontalHeader().sectionResized.connect(
+            lambda *_: QTimer.singleShot(0, self.fit_check_table))
         self.check_card.add(self.check_table)
         left.addWidget(self.check_card)
         yaml_card = Card("File contents", "ethercat.yaml as it will be written.")
@@ -2975,7 +3024,13 @@ class HalPage(QWidget):
             colour = QColor("#c62828") if f.severity == "error" else QColor("#b26a00")
             t.setItem(r, 0, item("ERROR" if f.severity == "error" else "WARN", colour=colour))
             t.setItem(r, 1, item("%s:%d" % (f.file, f.line) if f.line else f.file, font=mono()))
-            t.setItem(r, 2, item(f.text, colour=colour))
+            t.setItem(r, 2, item(f.text, colour=colour, tip=f.text))
+        self.fit_check_table()
+
+    def fit_check_table(self):
+        """Rows as tall as their wrapped text, at the column's present width."""
+        t = self.check_table
+        t.resizeRowsToContents()
         fit_table(t, minimum=1)
 
     def show_pins(self):

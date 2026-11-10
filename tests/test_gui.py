@@ -379,6 +379,59 @@ class TestWindow(BusTest):
         self.assertIs(s["cia402"]["zero-at-start"], True)
         self.assertIn("zero-at-start: true", w.hal_page.yaml.toPlainText())
 
+    def test_bus_rows_fit_their_text(self):
+        w = self.window()
+        w.session.slave(0)["name"] = "x-axis-drive-with-a-long-name"   # a subtitle that wraps
+        w.refresh()
+        w.show()
+        self.addCleanup(w.hide)
+        gui.QApplication.processEvents()
+        lst = w.bus_page.list.list
+        for i in range(lst.count()):
+            row = lst.itemWidget(lst.item(i))
+            need = row.layout().totalHeightForWidth(row.width())
+            self.assertGreaterEqual(lst.item(i).sizeHint().height(), need, "row %d" % i)
+
+    def test_hal_check_shows_a_long_message_whole(self):
+        from ecatsetup import halcheck
+        w = self.window()
+        ini = os.path.join(self.dir.name, "m.ini")
+        open(ini, "w").write("[EMC]\n")
+        w.session.ini_path = ini
+        long_text = "pin io-0.some-pin-that-does-not-exist is used by a net " + "and so on " * 40
+        found = [halcheck.Finding("error", "ethercat.hal", 12, long_text)]
+        w.show()
+        self.addCleanup(w.hide)
+        w.tabs.setCurrentWidget(w.hal_page)
+        with mock.patch.object(halcheck, "check", lambda *a, **k: found):
+            w.hal_page.show_check()
+        gui.QApplication.processEvents()
+        t = w.hal_page.check_table
+        self.assertTrue(t.wordWrap())
+        self.assertEqual(t.item(0, 2).toolTip(), long_text)
+        one_line = t.fontMetrics().height()
+        self.assertGreater(t.rowHeight(0), 3 * one_line)       # wrapped, not cut off
+        self.assertGreaterEqual(t.height(), t.rowHeight(0))
+
+    def test_mode_switching(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp"}
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
+        w.select_slave(0)
+        page = w.slave_page
+        self.assertEqual(page.opmode_hint.text(), "")
+        self.assertFalse(page.other_modes["csp"].isEnabled())    # the mode it starts in
+        self.assertTrue(page.other_modes["hm"].isEnabled())
+        page.other_modes["pp"].setChecked(True)
+        self.assertEqual(s["cia402"]["modes"], ["pp"])
+        self.assertIn("0 = CSP", page.opmode_hint.text())
+        self.assertIn("1 = PP", page.opmode_hint.text())
+        page.other_modes["hm"].setChecked(True)                  # homing has no number
+        self.assertEqual(s["cia402"]["modes"], ["pp", "hm"])
+        self.assertNotIn("HM", page.opmode_hint.text())
+
     def test_homing_card(self):
         w = self.window()
         s = w.session.slave(0)
