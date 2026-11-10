@@ -336,6 +336,17 @@ class TestWindow(BusTest):
         self.assertIn("did not start", warn.call_args[0][2])
         self.assertIn("kernel EtherCAT master", warn.call_args[0][2])
 
+    def test_sdo_card_is_off_while_watching(self):
+        w = self.window()
+        run = mock.Mock(running=True, watching=True)
+        w.test = run
+        try:
+            w.test_page.show_slave()
+            self.assertFalse(w.test_page.sdo_card.isEnabled())
+            self.assertIn("Not while watching", w.test_page.sdo_card.hint.text())
+        finally:
+            w.test = None
+
     def test_progress_shows_while_a_test_starts(self):
         w = self.window()
         page = w.test_page

@@ -147,6 +147,18 @@ the one LinuxCNC runs (`[ETHERCAT]CONFIG` in its INI file). The
 *Troubleshoot* page has a *Symptoms* guide: what is seen in LinuxCNC,
 what it usually comes from, and where to look.
 
+Tried against a running LinuxCNC (the plasma cutter's QtPlasmaC with
+ecat, machine off, 2026-11-10): starting the watching takes 10 ms, a read
+of the ecat pins about 3 ms; the *Synchronisation* card and a drive's
+state, status word, live values and pins show and change live (the PLL
+error moves between reads); every attempt to set a pin is refused and the
+HAL had the same 1661 pins before and after. When LinuxCNC is closed the
+watching ends by itself. Two findings, both fixed: the SDO card could
+still be used while watching (it is now off), and a watching started
+from the Start page showed no slave (the first one is shown now). LinuxCNC
+must be started from a login session or with `setsid`; started from a
+tool shell without a controlling terminal, its `rtapi_app` exited at once.
+
 ### PP, PV and homing at the machine
 
 Tried on the plasma cutter's three ECT60 drives on 2026-11-10, with the

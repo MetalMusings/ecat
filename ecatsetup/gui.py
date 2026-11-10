@@ -2380,8 +2380,8 @@ class TestPage(QWidget):
         lay.addWidget(self.all_card)
 
         # SDOs
-        sdo = Card("SDO (CoE object)", "Read and write whenever a master runs: the test, or the "
-                                       "free-running master.")
+        sdo = self.sdo_card = Card("SDO (CoE object)", "Read and write whenever a master runs: "
+                                   "the test, or the free-running master.")
         form = QHBoxLayout()
         self.sdo_obj = QLineEdit()
         self.sdo_obj.setPlaceholderText("0x2000:01")
@@ -2460,6 +2460,12 @@ class TestPage(QWidget):
         running = run is not None and run.running
         self.banner.setVisible(running)
         self.start_card.setVisible(not running)
+        # while watching, LinuxCNC's master owns the bus: nothing is read or written from here
+        watching = running and run.watching
+        self.sdo_card.setEnabled(not watching)
+        self.sdo_card.hint.setText("Not while watching: LinuxCNC's master owns the bus."
+                                   if watching else "Read and write whenever a master runs: "
+                                   "the test, or the free-running master.")
         if running and run.watching:
             self.banner_text.setText(
                 "<b>Watching LinuxCNC</b> &nbsp; The pins are read live from its HAL, every "
@@ -3784,6 +3790,11 @@ class MainWindow(QMainWindow):
             self.test = run
             self.test_timer.start()
             self.set_messages([(GREEN, "", ["Watching LinuxCNC: read only."])])
+            if not isinstance(self.current, int) or self.current < 0:
+                # watching is often started from the Start page: show a slave, not an empty page
+                first = self.positions()[:1]
+                if first:
+                    self.current = first[0]
             if self.tabs.currentWidget() is not self.test_page:
                 self.tabs.setCurrentWidget(self.test_page)
             self.refresh()
