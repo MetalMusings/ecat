@@ -30,8 +30,10 @@ they stop without an error.
 
 ## Moving a drive
 
-A CiA 402 drive in CSP can be moved in small steps. Safety comes in
-layers, so that no single one has to be perfect:
+A CiA 402 drive can be moved in small steps: in CSP and PP by jogging, in
+PV by running it while a button is held, and a drive with `hm` in its
+`modes` can home by its own method (see [PP, PV and homing](#pp-pv-and-homing)).
+Safety comes in layers, so that no single one has to be perfect:
 
 1. **Nothing moves without a deliberate act.** The drive is enabled only
    while a button is held, with the mouse or the space bar, one at a
@@ -69,6 +71,36 @@ What the ECT60 has: `0x607D` and `0x2022`, no `0x6080`, `0x6072` or
 `0x6065`. It ignores `0x607D` in CSP (tried: it moved 4.6 mm past a
 limit of 1 mm, without an error or a status bit), so the test writes only
 `0x2022` to it, and its travel, velocity and torque are limited in HAL.
+
+### PP, PV and homing
+
+In PP and PV the drive plans the motion itself; there is no `limit3` in
+front of it. The layers 1 to 3 are the same, and instead of layer 4:
+
+- **PP** (*Jog −*, *Jog +*): each step is a move to the drive's present
+  position ± the step, never past the travel around the start;
+  `pp-velocity` is the test's maximum velocity, and the maximum profile
+  velocity `0x607F` is written to the drive where it has it. The drive
+  ramps with its own acceleration (`0x6083`, `0x6084`). The move starts
+  once the drive is in "Operation enabled" (the profile ignores
+  `pp-start` before that); releasing the button stops it.
+- **PV** (*Run −*, *Run +*): the drive runs at the test's maximum
+  velocity while the button is held, and ramps down with its own
+  deceleration when it is released. There is no travel limit in PV:
+  keep the button short, or use PV for what turns (a spindle, a
+  conveyor). `0x607F` is written where the drive has it.
+- **Homing** (*Home (hold)*, for a drive with `modes: [..., hm]`): the
+  drive homes by the method and speeds in its settings (`0x6098`,
+  `0x6099`, `0x609A`); the card shows *in progress*, *homed* or *error*.
+  Releasing the button stops the homing. Try the method first with the
+  drive away from its end stops.
+
+The scale (counts per mm) is also used as `velo-scale`: the drive's
+velocity units are taken as counts per second, the CiA 402 default. For
+a drive with other velocity units, the mm/s shown are off by that
+factor; check with a short run first.
+
+PP, PV and homing are built and unit-tested, not yet tried on a machine.
 
 ## First test at the machine
 

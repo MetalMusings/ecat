@@ -16,8 +16,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 from ecatsetup import drivetest, testmode, tool  # noqa: E402
 from test_testmode import PINS, TestTestMode, cfg  # noqa: E402
 
-ECT60 = {"name": "x", "position": 0, "profile": "cia402",
+ECT60 = {"name": "x", "position": 0, "profile": "cia402", "cia402": {"mode": "csp"},
          "identity": {"vendor": "0x00000A88", "product": "0x0A880002"}}
+OTHER = dict(ECT60, identity={"vendor": "0x00000002", "product": "0x00001234"})
 
 
 class FakeDrive:
@@ -173,10 +174,126 @@ class TestDriveTest(TestTestMode):
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
         self.assertFalse(os.path.exists(drivetest.RESTORE_FILE))
 
-    def test_only_csp_drives(self):
+    def test_only_cia402_drives_in_a_mode_it_can_move(self):
         run = self.started()
         with self.assertRaises(testmode.TestError):
-            drivetest.DriveTest(run, dict(ECT60, name="io"))
+            drivetest.DriveTest(run, dict(ECT60, name="io", profile="generic"))
+        with self.assertRaises(testmode.TestError):
+            drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csv"}))
+        # CSV with homing can be homed, not moved
+        dt = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csv", "modes": ["hm"]}))
+        self.assertFalse(dt.moves)
+        self.assertTrue(dt.homes)
+
+    def test_pp_moves_once_enabled(self):
+        run = self.started()
+        pp = dict(OTHER, cia402={"mode": "pp"})
+        c = self.coe()
+        c.entries = dict(c.entries); c.entries[(0x607F, 0)] = 1
+        self.drive.sdos[(0x607F, 0)] = 900000
+        dt = drivetest.DriveTest(run, pp, c, {"scale": 100.0})
+        dt.prepare()
+        # travel and the maximum profile velocity in the drive
+        self.assertEqual(self.drive.sdos[(0x607D, 1)], 5000 - 2000)
+        self.assertEqual(self.drive.sdos[(0x607F, 0)], 500)
+        log = self.setp_log()
+        for line in ("x.velo-scale 100.0", "x.pp-start FALSE", "x.pp-velocity 5.0",
+                     "x.pp-relative FALSE"):
+            self.assertIn(line, log)
+        self.assertFalse(any(x.startswith("ecatjog") for x in log))
+        dt.enable(True)
+        self.assertEqual(dt.jog(1.0), 51.0)
+        # not yet enabled: the edge would be lost, so it waits
+        self.assertIsNone(dt.tick(False))
+        self.assertNotIn("x.pp-start TRUE", self.setp_log())
+        self.assertEqual(dt.tick(True), "move")
+        self.assertEqual(self.setp_log()[-2:], ["x.pp-target 51.0", "x.pp-start TRUE"])
+        self.assertIsNone(dt.tick(True))         # once
+        # from where the drive is, never past the travel
+        self.set_fake_pin("x.pos-fb", "69.5")
+        self.assertEqual(dt.jog(5.0), 70.0)
+        dt.enable(False)
+        self.assertEqual(self.setp_log()[-2:], ["x.pp-start FALSE", "x.enable FALSE"])
+        self.assertIsNone(dt.tick(True))         # released before enabled: nothing pending
+        with self.assertRaises(testmode.TestError):
+            dt.run_velocity(1)
+        self.assertEqual(dt.restore(), [])
+        self.assertEqual(self.drive.sdos[(0x607F, 0)], 900000)
+
+    def test_pv_runs_while_held(self):
+        run = self.started()
+        pv = dict(OTHER, cia402={"mode": "pv"})
+        dt = drivetest.DriveTest(run, pv, self.coe(), {"scale": 10.0, "max-velocity": 2.0})
+        dt.prepare()
+        self.assertNotIn((0x607D, 1), [w[:2] for w in self.drive.writes])   # no travel in PV
+        self.assertIn("x.velocity-cmd 0", self.setp_log())
+        dt.enable(True)
+        dt.run_velocity(-1)
+        self.assertEqual(dt.tick(True), "run")
+        self.assertEqual(self.setp_log()[-1], "x.velocity-cmd -2.0")
+        dt.enable(False)
+        self.assertEqual(self.setp_log()[-2:], ["x.velocity-cmd 0", "x.enable FALSE"])
+        with self.assertRaises(testmode.TestError):
+            dt.jog(1.0)
+
+    def test_home(self):
+        run = self.started()
+        dt = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]}),
+                                 self.coe(), {"scale": 100.0})
+        dt.prepare()
+        self.assertIn("x.home FALSE", self.setp_log())
+        dt.enable(True)
+        dt.home()
+        self.assertEqual(dt.tick(True), "home")
+        self.assertEqual(self.setp_log()[-1], "x.home TRUE")
+        dt.enable(False)
+        self.assertEqual(self.setp_log()[-2:], ["x.home FALSE", "x.enable FALSE"])
+        no_hm = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
+        no_hm.prepare()
+        with self.assertRaises(testmode.TestError):
+            no_hm.home()
+
+
+try:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt5.QtWidgets import QApplication
+    from ecatsetup import gui, session
+except ImportError:     # pragma: no cover
+    gui = None
+
+
+@unittest.skipIf(gui is None, "no PyQt5")
+class TestMoveCard(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        # the fake HAL of TestTestMode, without running its tests again
+        self.helper = TestTestMode("test_says_so_when_ecat_does_not_load")
+        self.helper.setUp()
+        self.addCleanup(self.helper.doCleanups)
+        self.started = self.helper.started
+
+    def test_buttons_by_mode(self):
+        s = session.Session()
+        w = gui.MainWindow(s)
+        self.addCleanup(w.close)
+        w.test = self.started()
+        card = w.test_page.move
+        shown = lambda b: not b.isHidden()  # noqa: E731
+        card.show_drive(dict(OTHER, cia402={"mode": "pp", "modes": ["hm"]}))
+        self.assertTrue(shown(card.setup))
+        self.assertEqual((shown(card.jog_row), shown(card.run_row), shown(card.home_button)),
+                         (True, False, True))
+        self.assertIn("plans the step itself", card.jog_plus.toolTip())
+        card.show_drive(dict(OTHER, cia402={"mode": "pv"}))
+        self.assertEqual((shown(card.jog_row), shown(card.run_row), shown(card.home_button)),
+                         (False, True, False))
+        card.show_drive(dict(OTHER, cia402={"mode": "csv"}))
+        self.assertFalse(shown(card.setup))
+        self.assertIn("Only cia402 drives", card.unsupported.text())
+        w.test = None
 
 
 class TestHalScale(unittest.TestCase):

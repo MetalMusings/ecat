@@ -1,6 +1,9 @@
-"""The CiA 402 drive test: enable one drive in CSP and jog it in small
-steps, within limits written to the drive itself, while the I/O test
-(testmode.TestRun) runs.
+"""The CiA 402 drive test: enable one drive and move it in small steps,
+within limits written to the drive itself, while the I/O test
+(testmode.TestRun) runs. A drive in CSP is jogged through a limit3 in
+HAL; a drive in PP moves by steps to a target the drive plans itself; a
+drive in PV runs at a low velocity while a button is held; a drive with
+`hm` in its modes homes by its own method.
 
 Safety, in layers:
 
@@ -17,9 +20,14 @@ Safety, in layers:
   they are also kept in a file (RESTORE_FILE), so that they can be put
   back after a crash.
 - Limits in HAL, in the servo thread: the limit3 in front of pos-cmd
-  keeps velocity, acceleration and travel low, whatever the drive has.
-
-Only CSP drives can be moved here; the drive's other modes come later.
+  keeps velocity, acceleration and travel low, whatever the drive has
+  (CSP). In PP and PV the drive plans the motion itself: this program
+  keeps the target within the travel and the velocity within the
+  maximum, and writes the maximum profile velocity (0x607F) to the drive
+  where it has it.
+- The profile only acts on a rising edge of pp-start or home once the
+  drive is in "Operation enabled": a move or homing asked for while the
+  drive is still enabling waits (pending) until tick() sees it enabled.
 """
 
 import json
@@ -51,7 +59,25 @@ LIMIT_QUIRKS = {
 STANDARD_LIMITS = {
     "following-error": (0x6065, 0, "uint32"),
     "max-torque": (0x6072, 0, "uint16"),
+    "max-velocity": (0x607F, 0, "uint32"),
 }
+
+# the modes a drive can be moved in here
+MOVABLE = ("csp", "pp", "pv")
+
+
+def mode_of(slave):
+    return ((slave or {}).get("cia402") or {}).get("mode")
+
+
+def can_home(slave):
+    return "hm" in (((slave or {}).get("cia402") or {}).get("modes") or [])
+
+
+def testable(slave):
+    """Whether the drive test can move or home this slave."""
+    return (slave or {}).get("profile") == "cia402" and (mode_of(slave) in MOVABLE
+                                                         or can_home(slave))
 
 
 @dataclass
@@ -79,9 +105,12 @@ def plan_limits(slave, has_object, scale, start_counts, settings):
     has_object(index, subindex): whether the drive's dictionary has it;
     scale: counts per machine unit; start_counts: the drive's position."""
     limits, notes = [], []
+    mode = mode_of(slave) or "csp"
     travel = int(round(abs(settings["travel"] * scale)))
     quirks = LIMIT_QUIRKS.get(identity(slave), {})
-    if isinstance(quirks.get("travel"), str):
+    if mode == "pv":
+        notes.append("PV runs while a button is held: there is no travel limit")
+    elif isinstance(quirks.get("travel"), str) and mode == "csp":
         notes.append("%s: travel is limited in HAL only" % quirks["travel"])
     elif has_object(0x607D, 1) and has_object(0x607D, 2):
         limits += [Limit("travel-min", 0x607D, 1, "int32", start_counts - travel,
@@ -90,7 +119,17 @@ def plan_limits(slave, has_object, scale, start_counts, settings):
                          "travel %+g mm from start (0x607D:02)" % settings["travel"])]
     else:
         notes.append("no software position limits (0x607D) in the drive: travel is limited "
-                     "in HAL only")
+                     "in %s only" % ("HAL" if mode == "csp" else "this program's targets"))
+    if mode in ("pp", "pv"):
+        where = quirks.get("max-velocity") or STANDARD_LIMITS["max-velocity"]
+        if has_object(where[0], where[1]):
+            limits.append(Limit("max-velocity", where[0], where[1], where[2],
+                                int(round(abs(settings["max-velocity"] * scale))),
+                                "max profile velocity %g mm/s (0x%04X:%02X)"
+                                % (settings["max-velocity"], where[0], where[1])))
+        else:
+            notes.append("no max profile velocity (0x607F) in the drive: the velocity is "
+                         "limited by this program's commands only")
     for name, value, text in (
             ("following-error", int(round(abs(settings["following-error"] * scale))),
              "following error %g mm" % settings["following-error"]),
@@ -105,8 +144,11 @@ def plan_limits(slave, has_object, scale, start_counts, settings):
                 name.replace("-", " "),
                 "limited in HAL by the velocity and acceleration only" if name == "max-torque"
                 else "the drive keeps its own window"))
-    notes.append("velocity %g mm/s and acceleration %g mm/s2 are limited in HAL (limit3)"
-                 % (settings["max-velocity"], settings["max-acceleration"]))
+    if mode == "csp":
+        notes.append("velocity %g mm/s and acceleration %g mm/s2 are limited in HAL (limit3)"
+                     % (settings["max-velocity"], settings["max-acceleration"]))
+    else:
+        notes.append("the drive ramps with its own acceleration (0x6083/0x6084)")
     return limits, notes
 
 
@@ -150,18 +192,29 @@ class DriveTest:
     """One drive, prepared for moving: limits written, HAL set up."""
 
     def __init__(self, run, slave, coe=None, settings=None):
-        if slave["name"] not in run.drives:
-            raise testmode.TestError("%s is not a CSP drive: only CSP drives can be moved in the "
-                                     "test" % slave["name"])
+        if not testable(slave):
+            raise testmode.TestError("%s cannot be moved in the test: only cia402 drives in "
+                                     "CSP, PP or PV, or with hm in their modes" % slave["name"])
         self.run, self.slave, self.coe = run, slave, coe
         self.settings = dict(DEFAULTS, **(settings or {}))
         self.name = slave["name"]
         self.position = slave["position"]
-        self.limit3, self.sel, _ = testmode.jog_names(run.drives.index(self.name))
+        self.mode = mode_of(slave)
+        self.homes = can_home(slave)
+        if self.mode == "csp":
+            self.limit3, self.sel, _ = testmode.jog_names(run.drives.index(self.name))
+        else:
+            self.limit3 = self.sel = None
         self.limits, self.notes = [], []
         self.start = None       # machine units, at prepare()
         self.target = None
+        self.pending = None     # ("move", target), ("run", velocity) or ("home",)
         self.prepared = False
+
+    @property
+    def moves(self):
+        """Whether the drive can be moved (not only homed)."""
+        return self.mode in MOVABLE
 
     def _has(self, index, subindex):
         if self.coe is not None and self.coe.objects:
@@ -179,8 +232,18 @@ class DriveTest:
         s = self.settings
         if s["scale"] == 0:
             raise testmode.TestError("the scale (counts per mm) cannot be 0")
-        self.run.setp_many({"%s.enable" % self.name: "FALSE",
-                            "%s.pos-scale" % self.name: repr(float(s["scale"]))})
+        first = {"%s.enable" % self.name: "FALSE",
+                 "%s.pos-scale" % self.name: repr(float(s["scale"]))}
+        if self.mode in ("pp", "pv"):
+            # the drive's velocity units taken as counts per second
+            first["%s.velo-scale" % self.name] = repr(float(s["scale"]))
+        if self.mode == "pv":
+            first["%s.velocity-cmd" % self.name] = "0"
+        if self.mode == "pp":
+            first["%s.pp-start" % self.name] = "FALSE"
+        if self.homes:
+            first["%s.home" % self.name] = "FALSE"
+        self.run.setp_many(first)
         counts = int(self.pin("drv-actual-position"))
         self.limits, self.notes = plan_limits(self.slave, self._has, s["scale"], counts, s)
         # the drive's own values first, kept in a file until put back
@@ -206,32 +269,91 @@ class DriveTest:
         self.start = float(self.pin("pos-fb"))
         self.target = self.start
         travel = abs(s["travel"])
-        self.run.setp_many({
-            "%s.maxv" % self.limit3: repr(float(abs(s["max-velocity"]))),
-            "%s.maxa" % self.limit3: repr(float(abs(s["max-acceleration"]))),
-            "%s.min" % self.limit3: repr(self.start - travel),
-            "%s.max" % self.limit3: repr(self.start + travel),
-            "%s.in1" % self.sel: repr(self.start)})
+        if self.mode == "csp":
+            self.run.setp_many({
+                "%s.maxv" % self.limit3: repr(float(abs(s["max-velocity"]))),
+                "%s.maxa" % self.limit3: repr(float(abs(s["max-acceleration"]))),
+                "%s.min" % self.limit3: repr(self.start - travel),
+                "%s.max" % self.limit3: repr(self.start + travel),
+                "%s.in1" % self.sel: repr(self.start)})
+        elif self.mode == "pp":
+            self.run.setp_many({"%s.pp-velocity" % self.name: repr(float(abs(s["max-velocity"]))),
+                                "%s.pp-relative" % self.name: "FALSE"})
         self.prepared = True
 
     def enable(self, on):
         """Hold-to-enable: on while the button is held. The target starts
-        where the drive is, so that enabling does not move it."""
+        where the drive is, so that enabling does not move it. Off also
+        drops a pending move, a PV velocity and the start edges."""
         if not self.prepared:
             raise testmode.TestError("prepare the drive first")
+        values = {}
         if on:
-            self.target = float(self.pin("pos-fb"))
-            self.run.setp_many({"%s.in1" % self.sel: repr(self.target)})
-        self.run.setp_many({"%s.enable" % self.name: "TRUE" if on else "FALSE"})
+            if self.mode == "csp":
+                self.target = float(self.pin("pos-fb"))
+                values["%s.in1" % self.sel] = repr(self.target)
+        else:
+            self.pending = None
+            if self.mode == "pv":
+                values["%s.velocity-cmd" % self.name] = "0"
+            if self.mode == "pp":
+                values["%s.pp-start" % self.name] = "FALSE"
+            if self.homes:
+                values["%s.home" % self.name] = "FALSE"
+        values["%s.enable" % self.name] = "TRUE" if on else "FALSE"
+        self.run.setp_many(values)
+
+    def _clamp(self, target):
+        travel = abs(self.settings["travel"])
+        return min(max(target, self.start - travel), self.start + travel)
 
     def jog(self, delta):
-        """Move the target by delta (machine units), within the travel."""
+        """Move the target by delta (machine units), within the travel. In
+        CSP the limit3 follows at once; in PP the move starts once the
+        drive is enabled (tick)."""
         if not self.prepared or self.target is None:
             raise testmode.TestError("prepare the drive first")
-        travel = abs(self.settings["travel"])
-        self.target = min(max(self.target + delta, self.start - travel), self.start + travel)
-        self.run.setp_many({"%s.in1" % self.sel: repr(self.target)})
+        if self.mode == "csp":
+            self.target = self._clamp(self.target + delta)
+            self.run.setp_many({"%s.in1" % self.sel: repr(self.target)})
+        elif self.mode == "pp":
+            # from where the drive is: a step never adds up beyond the travel
+            self.target = self._clamp(float(self.pin("pos-fb")) + delta)
+            self.pending = ("move", self.target)
+        else:
+            raise testmode.TestError("%s is in %s: it is run, not jogged" % (self.name, self.mode))
         return self.target
+
+    def run_velocity(self, sign):
+        """PV: run at the maximum velocity, sign +1 or -1, while held."""
+        if not self.prepared:
+            raise testmode.TestError("prepare the drive first")
+        if self.mode != "pv":
+            raise testmode.TestError("%s is not in PV" % self.name)
+        self.pending = ("run", sign * abs(self.settings["max-velocity"]))
+
+    def home(self):
+        """Home by the drive's method, once it is enabled (tick)."""
+        if not self.prepared:
+            raise testmode.TestError("prepare the drive first")
+        if not self.homes:
+            raise testmode.TestError("%s has no hm in its modes" % self.name)
+        self.pending = ("home",)
+
+    def tick(self, enabled):
+        """Called with the drive's stat-op-enabled: starts a pending move,
+        run or homing once the drive is enabled. Returns what it started."""
+        if self.pending is None or not enabled:
+            return None
+        what, self.pending = self.pending, None
+        if what[0] == "move":
+            self.run.setp_many({"%s.pp-target" % self.name: repr(what[1]),
+                                "%s.pp-start" % self.name: "TRUE"})
+        elif what[0] == "run":
+            self.run.setp_many({"%s.velocity-cmd" % self.name: repr(what[1])})
+        elif what[0] == "home":
+            self.run.setp_many({"%s.home" % self.name: "TRUE"})
+        return what[0]
 
     def fault_reset(self, on):
         self.run.setp_many({"%s.fault-reset" % self.name: "TRUE" if on else "FALSE"})
@@ -241,7 +363,13 @@ class DriveTest:
         failures as readable strings."""
         failed = []
         try:
-            self.run.setp_many({"%s.enable" % self.name: "FALSE", "%s.maxv" % self.limit3: "0"})
+            values = {"%s.enable" % self.name: "FALSE"}
+            if self.limit3:
+                values["%s.maxv" % self.limit3] = "0"
+            if self.mode == "pv":
+                values["%s.velocity-cmd" % self.name] = "0"
+            self.pending = None
+            self.run.setp_many(values)
         except (testmode.TestError, OSError):
             pass
         entries = pending_restores()

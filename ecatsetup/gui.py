@@ -1455,7 +1455,8 @@ class PinTable(QTableWidget):
 
 
 class MoveCard(Card):
-    """Moving one CSP drive: limits written to it, hold-to-enable, jog."""
+    """Moving one drive: limits written to it, hold-to-enable, and by its
+    mode: jog (CSP), steps (PP) or run (PV); home if it has hm."""
 
     SETTINGS = [("scale", "Scale (counts per mm)", 0.000001, 1e9, 6),
                 ("max-velocity", "Max velocity (mm/s)", 0.01, 100, 2),
@@ -1504,12 +1505,12 @@ class MoveCard(Card):
         ml.addWidget(label("Every button here enables the drive only while it is held; release "
                            "to stop. Use one at a time: the jog buttons enable the drive by "
                            "themselves.", "hint", wrap=True))
-        jog = QHBoxLayout()
+        self.jog_row = QWidget()
+        jog = QHBoxLayout(self.jog_row)
+        jog.setContentsMargins(0, 0, 0, 0)
         self.jog_minus = QPushButton("– Jog")
         self.jog_plus = QPushButton("Jog +")
         for b, sign in ((self.jog_minus, -1), (self.jog_plus, 1)):
-            b.setToolTip("Hold alone (not with Hold to enable): enables the drive and moves one "
-                         "step; hold until the step is done, release to stop")
             b.pressed.connect(lambda s=sign: self.jog(s))
             b.released.connect(lambda: self.enable(False))
             jog.addWidget(b)
@@ -1519,7 +1520,26 @@ class MoveCard(Card):
             self.step.addItem("%s mm" % st, float(st))
         self.step.setCurrentIndex(1)
         jog.addWidget(self.step)
-        ml.addLayout(jog)
+        ml.addWidget(self.jog_row)
+        self.run_row = QWidget()
+        rr = QHBoxLayout(self.run_row)
+        rr.setContentsMargins(0, 0, 0, 0)
+        self.run_minus = QPushButton("– Run")
+        self.run_plus = QPushButton("Run +")
+        for b, sign in ((self.run_minus, -1), (self.run_plus, 1)):
+            b.setToolTip("Hold alone: enables the drive and runs it at the max velocity; release "
+                         "to stop (it ramps down with its own deceleration)")
+            b.pressed.connect(lambda s=sign: self.run_velocity(s))
+            b.released.connect(lambda: self.enable(False))
+            rr.addWidget(b)
+        rr.addStretch(1)
+        ml.addWidget(self.run_row)
+        self.home_button = QPushButton("Home (hold)")
+        self.home_button.setToolTip("Hold alone: enables the drive and homes it by its own "
+                                    "method (0x6098); releasing stops the homing")
+        self.home_button.pressed.connect(self.home)
+        self.home_button.released.connect(lambda: self.enable(False))
+        ml.addWidget(self.home_button)
         row = QHBoxLayout()
         self.reset = QPushButton("Reset fault")
         self.reset.pressed.connect(lambda: self.fault_reset(True))
@@ -1541,12 +1561,23 @@ class MoveCard(Card):
     def show_drive(self, slave):
         self.slave = slave
         run = self.win.test
-        csp = run is not None and slave["name"] in run.drives
+        ok = run is not None and drivetest.testable(slave)
         dt = self.test()
-        self.setup.setVisible(csp and (dt is None or not dt.prepared))
+        mode = drivetest.mode_of(slave)
+        self.setup.setVisible(ok and (dt is None or not dt.prepared))
         self.moving.setVisible(dt is not None and dt.prepared)
-        if not csp:
-            self.unsupported.setText("Only drives in CSP can be moved in the test for now.")
+        self.jog_row.setVisible(mode in ("csp", "pp"))
+        self.run_row.setVisible(mode == "pv")
+        self.home_button.setVisible(drivetest.can_home(slave))
+        tip = ("Hold alone (not with Hold to enable): enables the drive and moves one step; "
+               "hold until the step is done, release to stop")
+        if mode == "pp":
+            tip += ". In PP the drive plans the step itself, from where it stands"
+        for b in (self.jog_minus, self.jog_plus):
+            b.setToolTip(tip)
+        if not ok:
+            self.unsupported.setText("Only cia402 drives in CSP, PP or PV, or with hm in their "
+                                     "modes, can be moved in the test.")
         else:
             self.unsupported.setText("")
             if dt is None:
@@ -1610,6 +1641,26 @@ class MoveCard(Card):
         except testmode.TestError as e:
             self.win.status(str(e))
 
+    def run_velocity(self, sign):
+        dt = self.test()
+        if dt is None:
+            return
+        try:
+            dt.enable(True)
+            dt.run_velocity(sign)
+        except testmode.TestError as e:
+            self.win.status(str(e))
+
+    def home(self):
+        dt = self.test()
+        if dt is None:
+            return
+        try:
+            dt.enable(True)
+            dt.home()
+        except testmode.TestError as e:
+            self.win.status(str(e))
+
     def fault_reset(self, on):
         dt = self.test()
         if dt is not None:
@@ -1626,8 +1677,19 @@ class MoveCard(Card):
             fb = float(v("pos-fb"))
         except (TypeError, ValueError):
             return
-        self.where.setText("position %+.3f mm from start, target %+.3f mm"
-                           % (fb - dt.start, dt.target - dt.start))
+        if dt.mode == "pv":
+            text = "position %+.3f mm from start, velocity %s mm/s" % (
+                fb - dt.start, v("velocity-fb") or "?")
+        else:
+            text = "position %+.3f mm from start, target %+.3f mm" % (
+                fb - dt.start, dt.target - dt.start)
+            if dt.mode == "pp":
+                text += ", done" if v("pp-done") == "TRUE" else ""
+        if dt.homes:
+            text += "\nhoming: %s" % ("in progress" if v("stat-homing") == "TRUE" else
+                                       "error" if v("home-error") == "TRUE" else
+                                       "homed" if v("stat-homed") == "TRUE" else "not homed")
+        self.where.setText(text)
 
 
 class TestPage(QWidget):
@@ -2956,6 +3018,15 @@ class MainWindow(QMainWindow):
             m = run.pins("ecat.0.")
         except testmode.TestError:
             return
+        # a PP move, PV run or homing asked for while the drive was enabling
+        for dt in list(self.drive_tests.values()):
+            if dt.pending is not None:
+                try:
+                    on = dt.pin("stat-op-enabled") == "TRUE"
+                    if dt.tick(on):
+                        self.tested_drives.add(dt.name)
+                except testmode.TestError as e:
+                    self.status(str(e))
 
         def get(n):
             return m["ecat.0." + n].value if "ecat.0." + n in m else "?"

@@ -5,9 +5,9 @@ EtherCAT for LinuxCNC, configured without hand-written XML.
 **Status: early development.** The HAL component runs a plasma cutter
 (three CiA 402 drives in CSP, one I/O slave). EtherCAT Setup reads,
 proposes, checks, updates and diagnoses a configuration from the command
-line and in its window, and tests it: I/O, SDOs, and moving a CSP drive
-in small steps, and writes it into a LinuxCNC configuration, with the
-joints connected to their drives. Everything is built in steps, following
+line and in its window, and tests it: I/O, SDOs, moving a drive in small
+steps (CSP, PP, PV) and homing it, and writes it into a LinuxCNC configuration, with the
+joints connected to their drives and I/O pins to LinuxCNC. Everything is built in steps, following
 the design draft.
 
 `ecat` is planned as:
