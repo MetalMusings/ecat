@@ -8,7 +8,8 @@
 #   these apart from the v* tags of lcec's history.
 #
 # The package is built against the userspace master package
-# linuxcnc-ethercat-uspace from a release of MetalMusings/linuxcnc-ethercat,
+# linuxcnc-ethercat-uspace from a uspace-v* release of MetalMusings/ethercat
+# (1.1 and later) or, for older ones, of MetalMusings/linuxcnc-ethercat,
 # and LinuxCNC 2.9.4: from linuxcnc.org on Debian 12, Debian's own on 13.
 
 name: Package
@@ -17,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       master_release:
-        description: Release of MetalMusings/linuxcnc-ethercat with the master package
+        description: uspace-v* release with the master package (MetalMusings/ethercat, or linuxcnc-ethercat up to 1.0)
         default: uspace-v0.7
   push:
     tags: ['ecat-v*']
@@ -67,8 +68,12 @@ jobs:
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
-          url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/linuxcnc-ethercat/releases/tags/$MASTER_RELEASE" \
-            | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p')
+          # from the master's own repository since 1.1, before that from linuxcnc-ethercat
+          for repo in ethercat linuxcnc-ethercat; do
+            url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/$repo/releases/tags/$MASTER_RELEASE" 2>/dev/null \
+              | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p' || true)
+            [ -n "$url" ] && break
+          done
           test -n "$url" || { echo "no ${{ matrix.id }} package in $MASTER_RELEASE"; exit 1; }
           curl -fsSL -o /tmp/master.deb "$url"
           apt-get install -y --no-install-recommends /tmp/master.deb
@@ -107,4 +112,4 @@ jobs:
           gh release create "${{ github.ref_name }}" out/*.deb \
             --repo "${{ github.repository }}" --prerelease \
             --title "ecat ${{ github.ref_name }}" \
-            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.9.4 or newer: debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). The window, ecatsetup --gui, needs python3-pyqt5. They need linuxcnc-ethercat-uspace ${{ env.MASTER_RELEASE }} or newer from [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."
+            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.9.4 or newer: debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). The window, ecatsetup --gui, needs python3-pyqt5. They need linuxcnc-ethercat-uspace ${{ env.MASTER_RELEASE }} or newer from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases) (1.1 and later; older ones are in [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)); the start check's comparison of the bus needs 1.1. See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."

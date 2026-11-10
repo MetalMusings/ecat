@@ -26,9 +26,13 @@ Read the design draft:
 
 Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer:
 
-1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 0.7 or newer,
-   from the `uspace-v*` releases of
-   [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases);
+1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace` 0.7 or newer
+   (1.1 or newer recommended: the start check compares the bus with the
+   file only with it), from the `uspace-v*` releases of
+   [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases).
+   Up to 1.0 the package was built in
+   [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)
+   and also held the frozen `lcec_uspace`; 1.1 has the master only;
 2. `linuxcnc-ecat` from this repository's `ecat-v*`
    [releases](https://github.com/MetalMusings/ecat/releases): the `ecat`
    HAL component and the `ecatsetup` command.
@@ -191,9 +195,9 @@ with the drives as `cia402` slaves instead of the cia402 HAL component.
 against a userspace build of the IgH EtherCAT master
 ([MetalMusings/ethercat](https://github.com/MetalMusings/ethercat), based on
 [stratuMAK/ethercat](https://github.com/stratuMAK/ethercat)). `lcec_uspace`
-can be tried today from
+is frozen; it stays in
 [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat)
-(see its `INSTALL-USPACE.md`). Unlike linuxcnc-ethercat, `ecat` will not
+(see its `INSTALL-USPACE.md`) with master packages up to 1.0. Unlike linuxcnc-ethercat, `ecat` will not
 read lcec's XML files; they can be imported instead. ecat is a project
 of its own: it keeps no backward compatibility with linuxcnc-ethercat
 and does not take in its future changes. The userspace master is
