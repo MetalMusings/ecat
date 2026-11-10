@@ -98,6 +98,15 @@ def uses(ini_path):
                 p, sig = (t[1], t[2]) if t[0] == "linkps" else (t[2], t[1])
                 pins.setdefault(p, []).append(Use(name, a + 1, sig))
                 sigs.setdefault(sig, []).append(p)
+            elif t[0] == "unlinkp" and len(t) >= 2:
+                # the pin leaves its signal; what came before no longer counts
+                for u in pins.get(t[1], []):
+                    if u.signal and t[1] in sigs.get(u.signal, []):
+                        sigs[u.signal] = [x for x in sigs[u.signal] if x != t[1]]
+                pins[t[1]] = [u for u in pins.get(t[1], []) if u.signal is None]
+            elif t[0] == "delsig" and len(t) >= 2:
+                for p in sigs.pop(t[1], []):
+                    pins[p] = [u for u in pins.get(p, []) if u.signal != t[1]]
             elif t[0] == "setp" and len(t) >= 3:
                 pins.setdefault(t[1], []).append(Use(name, a + 1))
             elif len(t) == 3 and t[1] == "=" and "." in t[0]:
@@ -136,6 +145,8 @@ def check(ini_path, cfg):
         return have.get(p) or integrate.known_pin(p)
 
     for pin, us in sorted(pins.items()):
+        if not us:
+            continue        # unlinked, and not used again
         first = us[0]
         if pin.startswith(prefixes) and pin not in have:
             close = difflib.get_close_matches(pin, list(have), n=1, cutoff=0.75)

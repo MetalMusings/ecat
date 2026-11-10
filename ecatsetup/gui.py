@@ -2247,6 +2247,11 @@ class JointRow(QWidget):
         self.scale.setToolTip("The drive's pos-scale: counts per machine unit (mm or degree)")
         self.scale.valueChanged.connect(self.edited)
         lay.addWidget(self.scale)
+        self.calc = QPushButton("Calculate...")
+        self.calc.setToolTip("The scale from the drive's counts per motor revolution and the "
+                             "screw's or pulley's lead")
+        self.calc.clicked.connect(self.calculate)
+        lay.addWidget(self.calc)
         self.tested = pill("", "green")
         lay.addWidget(self.tested)
         lay.addStretch(1)
@@ -2264,10 +2269,59 @@ class JointRow(QWidget):
         self.drive.setCurrentIndex(max(i, 0))
         self.scale.setValue(float(j.get("scale", 1.0)) if j else 1.0)
         self.scale.setEnabled(j is not None)
+        self.calc.setEnabled(j is not None)
         name = j["slave"] if j else None
         set_pill(self.tested, "moved in the test" if name in tested else "", "green")
         self.drive.blockSignals(False)
         self.scale.blockSignals(False)
+
+    def calculate(self):
+        """Counts per unit from counts per revolution, lead and gear."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Scale of joint.%d - %s" % (self.joint, TITLE))
+        form = QFormLayout(dlg)
+        boxes = {}
+        for key, text, value, dec, tip in (
+                ("counts", "Counts per motor revolution", 10000, 0,
+                 "What the drive counts per revolution in its position units: for a stepper "
+                 "drive its pulses per revolution setting, for a servo its encoder resolution "
+                 "(0x608F) through its gear (0x6091)"),
+                ("lead", "Units per screw revolution", 5, 4,
+                 "The lead of the screw, or the travel per pulley revolution, in machine units "
+                 "(mm or inch; degrees for a rotary axis)"),
+                ("gear", "Motor revolutions per screw revolution", 1, 4,
+                 "The belt or gear reduction; 1 for a motor on the screw")):
+            b = QDoubleSpinBox()
+            b.setRange(0, 1e9)
+            b.setDecimals(dec)
+            b.setValue(value)
+            b.setToolTip(tip)
+            form.addRow(text, b)
+            boxes[key] = b
+        result = label("", "mono")
+        form.addRow("Counts per unit", result)
+
+        def show():
+            try:
+                result.setText("%.6g" % integrate.scale_from(
+                    boxes["counts"].value(), boxes["lead"].value(), boxes["gear"].value()))
+            except ValueError as e:
+                result.setText(str(e))
+        for b in boxes.values():
+            b.valueChanged.connect(show)
+        show()
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        try:
+            value = integrate.scale_from(boxes["counts"].value(), boxes["lead"].value(),
+                                         boxes["gear"].value())
+        except ValueError:
+            return
+        self.scale.setValue(value)
 
     def edited(self, *_):
         cfg = self.page.win.session.cfg
@@ -2624,7 +2678,7 @@ class HalPage(QWidget):
             return
         d = os.path.dirname(os.path.abspath(ini))
         try:
-            self.plan = p = integrate.plan(ini, s.cfg, self.yaml_name())
+            self.plan = p = integrate.plan(ini, s.cfg, self.yaml_name(), s.drive_max_counts())
         except OSError as e:
             self.problems.setText(str(e))
             self.write_button.setEnabled(False)

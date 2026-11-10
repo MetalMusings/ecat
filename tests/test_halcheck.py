@@ -101,6 +101,18 @@ class TestCheck(Folder):
         self.assertIn(("error", "machine.hal", 1, texts[texts.index(
             "io.out1 is not a pin of the configuration; did you mean io.out-1?")]), found)
 
+    def test_unlinkp_and_delsig(self):
+        # as LinuxCNC's axis_manualtoolchange.hal: unlink, then connect anew
+        self.write("machine.hal", "net loop io.in-x x.enable\n"
+                                  "net a motion.digital-out-00 => io.out-1\n"
+                                  "unlinkp io.out-1\n"
+                                  "net b motion.digital-out-01 => io.out-1\n"
+                                  "net c motion.digital-out-02 => x.fault-reset\n"
+                                  "delsig c\n"
+                                  "net d motion.digital-out-03 => x.fault-reset\n")
+        texts = [t for _, _, _, t in self.check()]
+        self.assertFalse(any("two signals" in t for t in texts), texts)
+
     def test_nothing_writes(self):
         self.write("machine.hal", "net g joint.0.home-sw-in io.out-1\n"
                                   "net h => io.out-1-not-there\n"

@@ -100,6 +100,7 @@ class Proposal:
     axes: int = 1        # a CiA 402 drive's axes: the status word at 0x6041 + n * 0x800
     pp_limits: dict = field(default_factory=dict)  # PP: (index, subindex) -> the drive's value
     modules: list = None  # a modular device's detected modules (0xF050), or None
+    max_velocity: dict = field(default_factory=dict)  # CiA 402: axis -> 0x607F (+ 0x800 n), counts/s
     notes: list = field(default_factory=list)
 
 

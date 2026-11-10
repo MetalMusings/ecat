@@ -59,6 +59,54 @@ Joints the program does not connect stay as your HAL files have them.
 CSV drives and gantries with their own components are connected in your
 HAL files for now.
 
+## From a simulated configuration
+
+A new machine often starts in LinuxCNC's simulator: pick one of its
+configurations (`configs/sim/` in LinuxCNC), copy it into
+`~/linuxcnc/configs/<machine>/`, try it, then open its INI file in
+EtherCAT Setup and replace the simulation with the bus:
+
+- **Joints.** The simulation loops each joint's `motor-pos-cmd` back to
+  its `motor-pos-fb` (`core_sim.hal`). Connecting a joint to a drive
+  takes the loop out: the command goes to the drive, and the feedback
+  comes from the drive on a signal of its own. Other pins on the
+  command's signal (the `ddt` blocks behind the velocity display) keep
+  it.
+- **Home and limit switches, E-stop.** Connect an input to
+  `joint.N.home-sw-in`, `iocontrol.0.emc-enable-in` and so on
+  (*Inputs and outputs*). The simulation's writer on that signal (a
+  `sim_home_switch`, a `comp`, the E-stop loop-back
+  `iocontrol.0.user-enable-out`) is taken off it. A simulated switch the
+  simulation shared between joints (X and Z on one `or2`) is not given to
+  the other joint: connect its own input.
+- **Library files.** Most of the simulation is in LinuxCNC's `hallib`
+  (`core_sim.hal`, `simulated_home.hal` ...). A file that must change is
+  copied into the configuration folder and changed there; LinuxCNC finds
+  the folder's first, and a `LIB:` line in the INI file is changed to the
+  copy. LinuxCNC's own files are never changed.
+- **`LIB:basic_sim.tcl`.** Most simulated configurations build their HAL
+  in Tcl when LinuxCNC starts, and save it as `<ini name>_cmds.hal` in the
+  folder. Start the copy once in the simulator, so that the file exists;
+  writing then puts it in place of `LIB:basic_sim.tcl` (as that file's
+  own header suggests), and changes it like any HAL file.
+- **What is still simulated** is noted when writing: `simulated_home.hal`
+  for switches not connected yet, `sim_spindle_encoder.hal` for the
+  spindle. Take them out of the INI file once the real ones are
+  connected.
+- **The scale.** *Calculate...* beside a joint's counts per unit: the
+  drive's counts per motor revolution, the screw's lead (units per
+  revolution) and the gear between motor and screw.
+- **The INI file is checked** against the drives: `SERVO_PERIOD` (the
+  EtherCAT cycle), each connected joint's `FERROR` and `MIN_FERROR`, and
+  its `MAX_VELOCITY` against the drive's maximum profile velocity
+  (`0x607F`, read with the bus).
+
+Tried on a copy of `configs/sim/axis/axis_mm.ini` with the plasma
+cutter's configuration (three drives, one input for X's home switch):
+the loops and the E-stop loop-back replaced, Z's shared simulated switch
+left for its own input, `core_sim.hal` and `simulated_home.hal` copied
+in, and the HAL check found nothing.
+
 ## Inputs and outputs
 
 A slave's pin can be connected to LinuxCNC pins in the program: the

@@ -207,13 +207,25 @@ class TestPlan(Folder):
         with self.assertRaises(ValueError):
             integrate.apply(p)
 
-    def test_library_file_is_not_changed(self):
-        with open(os.path.join(self.lib.name, "basic.hal"), "w") as f:
+    def test_library_file_is_copied_not_changed(self):
+        lib = os.path.join(self.lib.name, "basic.hal")
+        with open(lib, "w") as f:
             f.write("net x-fault x.drv-fault => joint.0.amp-fault-in\n")
         c = cfg()
         integrate.set_joint(c, 0, "x", 1.0)
         p = integrate.plan(self.ini, c)
-        self.assertTrue(any("outside the configuration folder" in e for e in p.errors))
+        self.assertEqual(p.errors, [])
+        copy = next(ch for ch in p.changes if ch.name == "basic.hal")
+        self.assertEqual((copy.kind, os.path.dirname(copy.path)), ("new", self.dir.name))
+        self.assertIn(integrate.COMMENT + "net x-fault", copy.new)
+        integrate.apply(p)
+        # LIB:basic.hal now names the copy; LinuxCNC's file is as it was
+        self.assertIn("HALFILE = basic.hal\n", self.read("machine.ini"))
+        self.assertNotIn("LIB:basic.hal", self.read("machine.ini"))
+        with open(lib) as f:
+            self.assertEqual(f.read(), "net x-fault x.drv-fault => joint.0.amp-fault-in\n")
+        again = integrate.plan(self.ini, c)
+        self.assertEqual((again.changes, again.errors), ([], []))
 
     def test_missing_hal_file(self):
         self.write("machine.ini", INI.replace("HALFILE = machine.hal", "HALFILE = gone.hal"))
@@ -290,6 +302,20 @@ class TestHalPage(Folder):
         self.assertFalse(s.dirty)
         # written: nothing more to change
         self.assertEqual(page.plan.changes, [])
+
+    def test_scale_calculator(self):
+        s = session.Session(ini_path=self.ini)
+        s.cfg, s.path = cfg(), os.path.join(self.dir.name, "ethercat.yaml")
+        integrate.set_joint(s.cfg, 0, "x", 1.0)
+        w = gui.MainWindow(s)
+        self.addCleanup(lambda: (s.__setattr__("saved", s.cfg), w.close()))
+        w.tabs.setCurrentWidget(w.hal_page)
+        w.hal_page.refresh()
+        row = w.hal_page.rows[0]
+        # the defaults: 10000 counts per revolution, 5 units per revolution
+        with mock.patch.object(gui.QDialog, "exec_", return_value=gui.QDialog.Accepted):
+            row.calculate()
+        self.assertEqual(integrate.joints(s.cfg)[0]["scale"], 2000.0)
 
     def test_connect_pins(self):
         s = session.Session(ini_path=self.ini)
@@ -449,3 +475,111 @@ class TestAxes(Folder):
         self.assertEqual(c["slaves"][0]["cia402"]["axes"], ["gantry-1", "gantry-2"])
         self.assertEqual([j["slave"] for j in integrate.joints(c)], ["gantry-1", "gantry-2"])
         self.assertEqual(config.check(c), [])
+
+
+CORE_SIM = """\
+loadrt [KINS]KINEMATICS
+loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS
+addf motion-command-handler servo-thread
+addf motion-controller servo-thread
+net Xpos joint.0.motor-pos-cmd => joint.0.motor-pos-fb ddt_x.in
+net estop-loop iocontrol.0.user-enable-out iocontrol.0.emc-enable-in
+"""
+SIM_HOME = """\
+loadrt or2 names=or2_0
+net Xhomesw => or2_0.in0
+net Zhomesw => or2_0.in1
+net XZhomesw or2_0.out => joint.0.home-sw-in joint.2.home-sw-in
+"""
+
+
+class TestFromSimulation(Folder):
+    def setUp(self):
+        super().setUp()
+        for name, text in (("core_sim.hal", CORE_SIM), ("simulated_home.hal", SIM_HOME)):
+            with open(os.path.join(self.lib.name, name), "w") as f:
+                f.write(text)
+        self.write("machine.ini", INI.replace("HALFILE = machine.hal\n", "HALFILE = core_sim.hal\n"
+                                              "HALFILE = simulated_home.hal\n")
+                   .replace("HALFILE = LIB:basic.hal\n", "").replace("POSTGUI_HALFILE = postgui.hal\n", ""))
+
+    def cfg(self):
+        c = cfg()
+        c["slaves"][1]["process-data"]["inputs"] = [{"pdo": "0x1A00", "sm": 3, "entries": [
+            {"object": "0x6000:01", "bits": 1, "type": "BOOL", "pin": "in-1", "hal-type": "bit"},
+            {"object": "0x6000:02", "bits": 1, "type": "BOOL", "pin": "in-2", "hal-type": "bit"}]}]
+        integrate.set_joint(c, 0, "x", 100.0)
+        integrate.set_net(c, "io.in-1", ["joint.0.home-sw-in"])
+        integrate.set_net(c, "io.in-2", ["iocontrol.0.emc-enable-in"])
+        self.assertEqual(config.check(c), [])
+        return c
+
+    def test_simulation_replaced(self):
+        p = integrate.plan(self.ini, self.cfg())
+        self.assertEqual(p.errors, [])
+        integrate.apply(p)
+        main = self.read("ethercat.hal")
+        # the loop-back's command signal keeps ddt; the feedback is the drive's
+        self.assertIn("net Xpos joint.0.motor-pos-cmd => x.pos-cmd\n", main)
+        self.assertIn("net x-pos-fb x.pos-fb => joint.0.motor-pos-fb\n", main)
+        self.assertIn("net Xpos ddt_x.in\n", main)
+        # real inputs instead of the simulation's writers, and Z's switch left alone
+        self.assertIn("net estop-loop io.in-2 => iocontrol.0.emc-enable-in\n", main)
+        self.assertIn("net XZhomesw io.in-1 => joint.0.home-sw-in\n", main)
+        self.assertNotIn("user-enable-out", main)
+        self.assertNotIn("or2_0.out", main)
+        self.assertNotIn("joint.2.home-sw-in", main)
+        notes = "\n".join(p.notes)
+        self.assertIn("joint 0: the simulation looped motor-pos-cmd back", notes)
+        self.assertIn("joint.2.home-sw-in left unconnected", notes)
+        self.assertIn("simulated_home.hal still simulates home switches", notes)
+        # copies in the folder; LinuxCNC's files unchanged
+        self.assertIn(integrate.COMMENT + "net Xpos", self.read("core_sim.hal"))
+        with open(os.path.join(self.lib.name, "core_sim.hal")) as f:
+            self.assertEqual(f.read(), CORE_SIM)
+        again = integrate.plan(self.ini, self.cfg())
+        self.assertEqual((again.changes, again.errors), ([], []))
+
+    def test_basic_sim(self):
+        self.write("machine.ini", INI.replace("HALFILE = machine.hal\n",
+                                              "HALFILE = LIB:basic_sim.tcl -no_sim_spindle\n"))
+        p = integrate.plan(self.ini, self.cfg())
+        self.assertTrue(any("start this configuration once in the simulator" in e
+                            and "machine_cmds.hal" in e for e in p.errors), p.errors)
+        # what basic_sim.tcl saved when it ran
+        self.write("machine_cmds.hal", "net J0:pos-fb joint.0.motor-pos-cmd => joint.0.motor-pos-fb "
+                                       "J0_switch.cur-pos\nnet J0:homesw J0_switch.home-sw => "
+                                       "joint.0.home-sw-in\n")
+        p = integrate.plan(self.ini, self.cfg())
+        self.assertEqual(p.errors, [])
+        integrate.apply(p)
+        self.assertIn("HALFILE = machine_cmds.hal\n", self.read("machine.ini"))
+        main = self.read("ethercat.hal")
+        self.assertIn("net J0:pos-fb joint.0.motor-pos-cmd => x.pos-cmd\n", main)
+        self.assertIn("net J0:homesw io.in-1 => joint.0.home-sw-in\n", main)
+        self.assertNotIn("J0_switch.home-sw", main)
+        self.assertIn("net J0:pos-fb J0_switch.cur-pos\n", main)
+
+
+class TestJointChecks(Folder):
+    def test_scale_from(self):
+        self.assertAlmostEqual(integrate.scale_from(10000, 5), 2000.0)
+        self.assertAlmostEqual(integrate.scale_from(10000, 10, gear=3), 3000.0)
+        with self.assertRaises(ValueError):
+            integrate.scale_from(10000, 0)
+
+    def test_joint_checks(self):
+        c = cfg()
+        integrate.set_joint(c, 0, "x", 100.0)
+        self.write("machine.ini", INI + "MAX_VELOCITY = 50\nFERROR = 1\n")
+        notes = integrate.joint_checks(self.ini, c)
+        self.assertEqual(notes, ["[JOINT_0]MIN_FERROR is not set: LinuxCNC's default is used; set "
+                                 "it for the machine (in machine units)"])
+        # 50 mm/s at 100 counts/mm is 5000 counts/s
+        notes = integrate.joint_checks(self.ini, c, {"x": 4000})
+        self.assertIn("[JOINT_0]MAX_VELOCITY 50 units/s is 5000 counts/s, more than x's maximum "
+                      "profile velocity (0x607F) of 4000 counts/s", notes)
+        self.assertEqual(len(integrate.joint_checks(self.ini, c, {"x": 6000})), 1)
+        self.write("machine.ini", INI.replace("SERVO_PERIOD = 1000000\n", ""))
+        self.assertTrue(any("SERVO_PERIOD is not set" in n
+                            for n in integrate.joint_checks(self.ini, c)))

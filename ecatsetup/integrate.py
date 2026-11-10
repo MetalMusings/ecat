@@ -121,11 +121,53 @@ def user_hal_files(ini_path, postgui=None):
     return files
 
 
-def ini_text(ini_path, yaml_name):
-    """The INI file's text with [ETHERCAT]CONFIG and the two HALFILEs."""
+def hal_entries(ini_path):
+    """[(INI value, path, postgui)] of the INI's HAL files other than ecat's."""
+    d = os.path.dirname(os.path.abspath(ini_path))
+    out = []
+    for key in ("HALFILE", "POSTGUI_HALFILE"):
+        for v in ini_all(read_ini(ini_path), "HAL", key):
+            name = v.split()[0] if v.split() else ""
+            if name in (LOAD_FILE, MAIN_FILE) or not name:
+                continue
+            out.append((v, find_hal_file(d, name), key == "POSTGUI_HALFILE"))
+    return out
+
+
+# LinuxCNC's simulated configurations (configs/sim): files that simulate
+SIM_FILES = {
+    "simulated_home.hal": "home switches", "simulated_home_lathe.hal": "home switches",
+    "simulated-gantry-home.hal": "home switches", "simulated-xyyz-home.hal": "home switches",
+    "simulated_limits.hal": "limit switches", "sim_spindle_encoder.hal": "the spindle",
+    "spindle_sim.hal": "the spindle", "gantrysim.hal": "a gantry's joints",
+}
+_SWITCH = re.compile(r"joint\.\d+\.(home-sw-in|pos-lim-sw-in|neg-lim-sw-in)$")
+BASIC_SIM = "basic_sim.tcl"
+
+# outputs of components, by HAL's naming: a pin that writes its signal
+_WRITER = re.compile(r"\.(out|out-not|out-invert|home-sw|position-fb|velocity-fb)$")
+
+
+def basic_sim_file(ini_path):
+    """The HAL file LIB:basic_sim.tcl saved when the configuration last ran
+    (<ini name>_cmds.hal in its folder), or None."""
+    d = os.path.dirname(os.path.abspath(ini_path))
+    path = os.path.join(d, os.path.splitext(os.path.basename(ini_path))[0] + "_cmds.hal")
+    return path if os.path.exists(path) else None
+
+
+def ini_text(ini_path, yaml_name, replace=None):
+    """The INI file's text with [ETHERCAT]CONFIG and the two HALFILEs;
+    replace: {HALFILE value: new value} (a file copied into the folder)."""
     with open(ini_path, errors="replace") as f:
         lines = f.read().splitlines(keepends=True)
     nl = "\n"
+    for i, line in enumerate(lines):
+        t = line.strip()
+        if replace and "=" in t and t.split("=", 1)[0].strip() in ("HALFILE", "POSTGUI_HALFILE"):
+            v = t.split("=", 1)[1].split("#")[0].strip()
+            if v in replace:
+                lines[i] = "%s = %s%s" % (t.split("=", 1)[0].strip(), replace[v], nl)
 
     def section_of(i):
         s = None
@@ -265,6 +307,44 @@ def drives(cfg):
         if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp":
             for a in config.axes(s):
                 out[a] = s
+    return out
+
+
+def scale_from(counts_per_rev, units_per_rev, gear=1.0):
+    """A joint's pos-scale (counts per machine unit) from the drive's counts
+    per motor revolution, the machine units per revolution of the screw or
+    pulley (its lead), and the gear between motor and screw (motor turns
+    per screw turn)."""
+    if not counts_per_rev or not units_per_rev or not gear:
+        raise ValueError("counts per revolution, units per revolution and the gear must not be 0")
+    return float(counts_per_rev) * float(gear) / float(units_per_rev)
+
+
+def joint_checks(ini_path, cfg, max_counts=None):
+    """Notes on the INI file's joints against their drives: limits that
+    are missing or more than a drive can do. max_counts: {drive: its
+    maximum velocity in counts per second (0x607F)}, where read."""
+    out = []
+    e = read_ini(ini_path)
+    if ini_get(e, "EMCMOT", "SERVO_PERIOD") is None:
+        out.append("[EMCMOT]SERVO_PERIOD is not set: the servo thread runs at LinuxCNC's "
+                   "default, 1 ms, which is also the EtherCAT cycle")
+    for j in joints(cfg):
+        sec = "JOINT_%d" % j["joint"]
+        for key in ("FERROR", "MIN_FERROR"):
+            if ini_get(e, sec, key) is None:
+                out.append("[%s]%s is not set: LinuxCNC's default is used; set it for the "
+                           "machine (in machine units)" % (sec, key))
+        try:
+            v = float(resolve(ini_get(e, sec, "MAX_VELOCITY"), e))
+        except (TypeError, ValueError):
+            continue
+        limit = (max_counts or {}).get(j.get("slave"))
+        counts = abs(v * float(j.get("scale") or 1.0))
+        if limit and counts > limit:
+            out.append("[%s]MAX_VELOCITY %g units/s is %d counts/s, more than %s's maximum "
+                       "profile velocity (0x607F) of %d counts/s" % (sec, v, counts,
+                                                                     j.get("slave"), limit))
     return out
 
 
@@ -679,9 +759,9 @@ def _is_ecat_line(t):
     return False
 
 
-def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
+def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
     """What writing the configuration into the INI file's configuration
-    would change. Nothing is written."""
+    would change. Nothing is written. max_counts: see joint_checks()."""
     p = Plan()
     d = os.path.dirname(os.path.abspath(ini_path))
     if not os.path.exists(ini_path):
@@ -708,7 +788,25 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
     postgui = set(user_hal_files(ini_path, postgui=True))
     scale_pins = {"%s.pos-scale" % name for _, name, _, _ in managed}
 
-    files = user_hal_files(ini_path)
+    # LIB:basic_sim.tcl builds the simulation when LinuxCNC starts; the file it
+    # saved then is static HAL, and takes its place
+    ini_replace = {}
+    files = []
+    for value, path, _ in hal_entries(ini_path):
+        if os.path.basename(path) == BASIC_SIM:
+            saved = basic_sim_file(ini_path)
+            if saved is None:
+                p.errors.append("%s builds the simulation when LinuxCNC starts, and saves it as "
+                                "%s_cmds.hal: start this configuration once in the simulator, "
+                                "then write again" % (value, os.path.splitext(
+                                    os.path.basename(ini_path))[0]))
+                continue
+            ini_replace[value] = os.path.basename(saved)
+            p.notes.append("%s is replaced by %s, the HAL it built when the configuration ran in "
+                           "the simulator" % (value, os.path.basename(saved)))
+            files.append(saved)
+        else:
+            files.append(path)
     for path in files:
         if not path.endswith(".hal"):
             p.notes.append("%s is not a HAL file; it is not checked for lcec or ecat lines"
@@ -755,11 +853,18 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
                                 "connect the signal there, not the pin, or connect it by hand"
                                 % (os.path.basename(path), ", ".join(moved)))
                 continue
+        copy_to = None
         if hit and os.path.dirname(os.path.abspath(path)) != d and text == current:
-            p.errors.append("%s, outside the configuration folder, loads or connects what "
-                            "ethercat.hal would; it is not changed here: copy it into the "
-                            "configuration folder" % path)
-            continue
+            # LinuxCNC's own file (hallib) is never changed: a copy in the folder
+            # takes its place (HALLIB_PATH finds the folder's first)
+            copy_to = os.path.join(d, os.path.basename(path))
+            if os.path.exists(copy_to):
+                p.errors.append("%s is in the folder and in %s: rename one" % (
+                    os.path.basename(path), os.path.dirname(path)))
+                continue
+            for value, epath, _ in hal_entries(ini_path):
+                if epath == path and value.startswith("LIB:"):
+                    ini_replace[value] = value[4:]
         new = []
         for i, line in enumerate(lines):
             if i in hit:
@@ -768,6 +873,14 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
             else:
                 new.append(line)
         new = "".join(new)
+        if copy_to is not None:
+            p.changes.append(FileChange(copy_to, "new", "", new, "copied from LinuxCNC's %s, "
+                                        "%d line%s commented out" % (
+                                            os.path.dirname(path), len(hit),
+                                            "" if len(hit) == 1 else "s")))
+            p.notes.append("%s is copied into the configuration folder and changed there; "
+                           "LinuxCNC's own file is not" % os.path.basename(path))
+            continue
         if new != current:
             before = {i for i, x in enumerate(current.splitlines()) if x.startswith(COMMENT)}
             back = len(before - hit)
@@ -784,6 +897,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
     for letter in letters.values():
         count[letter] = count.get(letter, 0) + 1
     used = set(old_sig)
+    driven = set()           # signals ethercat.hal gives a writer
     body = ["addf ecat.read-all  servo-thread 1", "addf ecat.write-all servo-thread", ""]
     for n, name, scale, conns in managed:
         letter = letters.get(n, "")
@@ -793,6 +907,14 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
         body.append("setp %s.pos-scale %r" % (name, float(scale)))
         for jpin, dpin, arrow, suffix in conns:
             a, b = sig_of_pin.get(jpin), sig_of_pin.get(dpin)
+            cmd_sig = sig_of_pin.get("joint.%d.motor-pos-cmd" % n)
+            if suffix == "pos-fb" and a is not None and a == cmd_sig:
+                # a simulation looped the command back as feedback (core_sim.hal):
+                # the feedback is the drive's now, on a signal of its own
+                p.notes.append("joint %d: the simulation looped motor-pos-cmd back to "
+                               "motor-pos-fb (signal %s); the feedback comes from %s now"
+                               % (n, a, name))
+                a = None
             if a and b and a != b:
                 p.errors.append("%s and %s are on different signals in your HAL files (%s, %s): "
                                 "something sits between the joint and the drive; connect them "
@@ -803,6 +925,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
                 if sig in used:
                     sig = "ecat-" + sig
             used.add(sig)
+            driven.add(sig)
             if arrow == "<=":
                 body.append("net %s %s => %s" % (sig, dpin, jpin))
             elif arrow == "<=>":
@@ -834,6 +957,8 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
         def way(x):
             return (own.get(x) or known_pin(x) or (None, None))[1]
         writers = [x for x in pins if way(x) == "out"]
+        if writers:
+            driven.add(sig)
         if len(writers) == 1:
             rest = [x for x in pins if x != writers[0]]
             body.append("net %s %s => %s" % (sig, writers[0], " ".join(rest)))
@@ -841,6 +966,24 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
             body.append("net %s %s" % (sig, " ".join(pins)))
     if io:
         body.append("")
+    # a signal ethercat.hal drives now loses the writers of the lines commented
+    # out: a simulated home switch, the simulation's E-stop loop-back
+    for s_name in list(kept):
+        if s_name in driven:
+            gone = [x for x in kept[s_name] if (known_pin(x) or (None, None))[1] == "out"
+                    or _WRITER.search(x)]
+            if gone:
+                kept[s_name] = [x for x in kept[s_name] if x not in gone]
+                p.notes.append("signal %s: %s no longer writes it (a real input does now)"
+                               % (s_name, ", ".join(dict.fromkeys(gone))))
+                # a simulated switch shared by joints (X and Z on one or2) is
+                # not the other joint's real switch: each is connected on its own
+                shared = [x for x in kept[s_name] if _SWITCH.match(x)]
+                if shared:
+                    kept[s_name] = [x for x in kept[s_name] if x not in shared]
+                    p.notes.append("signal %s: %s left unconnected; the simulation shared the "
+                                   "switch, a machine has one each: connect its own input"
+                                   % (s_name, ", ".join(shared)))
     extra = [(s, pins) for s, pins in kept.items() if pins]
     if extra:
         body.append("# other pins of lines commented out in your HAL files")
@@ -893,10 +1036,17 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml"):
         if old != text:
             p.changes.append(FileChange(path, "change" if old else "new", old, text, what))
     old_ini = read_text(ini_path)
-    new_ini = ini_text(ini_path, yaml_name)
+    new_ini = ini_text(ini_path, yaml_name, ini_replace)
     if new_ini != old_ini:
         p.changes.append(FileChange(ini_path, "change", old_ini, new_ini,
                                     "[ETHERCAT]CONFIG and the HAL files"))
+    p.notes += joint_checks(ini_path, cfg, max_counts)
+    for path in hal_files:
+        what = SIM_FILES.get(os.path.basename(path))
+        if what:
+            p.notes.append("%s still simulates %s: connect the real ones (Joints, Inputs and "
+                           "outputs), then take it out of the INI file" % (
+                               os.path.basename(path), what))
     if not managed and not io:
         p.notes.append("no joint or pin is connected here: ethercat.hal only adds the "
                        "component's functions; your HAL files keep their connections")

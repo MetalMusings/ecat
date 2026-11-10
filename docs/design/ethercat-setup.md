@@ -733,7 +733,8 @@ in this order:
    what depends on missing slaves first; connections of missing slaves
    are removed; modules recorded and compared ([modules.md](../modules.md)).
 4. **From a simulated configuration** (a): recognising and replacing the
-   simulation, copying library files, the scale, the INI check.
+   simulation, copying library files, the scale, the INI check. Built
+   2026-11-10 ([linuxcnc.md](../linuxcnc.md#from-a-simulated-configuration)).
 5. **Bringing up a slave** (c): the sync card, where proposals come
    from, ESI file handling, Save as quirk file.
 6. **Watching while LinuxCNC runs and the plot** (d, e).

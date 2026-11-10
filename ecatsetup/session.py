@@ -67,6 +67,14 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
         modes = tool.upload(pos, 0x6502, 0, "uint32")
     dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
+    if p.profile == 402:
+        # each axis's maximum profile velocity, for checking the INI file's joints
+        for n in range(getattr(p, "axes", 1)):
+            index = 0x607F + n * 0x800
+            if index in coe.objects:
+                v = tool.upload(pos, index, 0, "uint32")
+                if v:
+                    p.max_velocity[n] = int(v)
     if coe:
         detected = read_modules(pos, coe, 0xF050)
         configured = read_modules(pos, coe, 0xF030)
@@ -190,6 +198,19 @@ class Session:
         """A configuration proposed from the bus as it is."""
         return config.from_proposals([b.proposal for _, b in sorted(self.bus.items())],
                                      interface, transport, self.period)
+
+    def drive_max_counts(self):
+        """{axis name: maximum profile velocity in counts/s} of the drives
+        read from the bus, by the configuration's names."""
+        out = {}
+        for s in (self.cfg or {}).get("slaves") or []:
+            b = self.bus.get(s.get("position"))
+            mv = getattr(b.proposal, "max_velocity", None) if b is not None else None
+            if mv:
+                for n, axis in enumerate(config.axes(s)):
+                    if n in mv:
+                        out[axis] = mv[n]
+        return out
 
     def bus_changes(self):
         """How the bus differs from the configuration (update.Changes), or
