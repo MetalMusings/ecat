@@ -32,7 +32,12 @@ ecat has two parts:
 
 ## Install
 
-Packages for Debian 12 and 13 with LinuxCNC 2.9.4 or newer:
+Packages for Debian 12 and 13 with **LinuxCNC 2.10 or newer**. 2.10 is not
+released yet and has no Debian packages: build it from source
+(run-in-place, or with `dpkg-buildpackage`; see
+[Developing ecat](docs/development.md#linuxcnc-210)). With LinuxCNC 2.9, use
+ecat 0.11 (tag `ecat-v0.11`), which is the last for 2.9.
+
 
 1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace`, from the
    `uspace-v*` releases of

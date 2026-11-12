@@ -16,13 +16,15 @@
 # release and LinuxCNC that this machine has.
 #
 # Build dependencies: build-essential git dpkg-dev libyaml-dev
-#   linuxcnc-uspace-dev, and linuxcnc-ethercat-uspace 1.1 or newer (its
-#   headers in /opt/linuxcnc-ethercat-uspace/include).
+#   LinuxCNC 2.10 (linuxcnc-uspace-dev, or a run-in-place build: source its
+#   scripts/rip-environment first; halcompile must be on the PATH), and
+#   linuxcnc-ethercat-uspace 1.1 or newer (its headers in
+#   /opt/linuxcnc-ethercat-uspace/include).
 
 set -euo pipefail
 
 PKG=linuxcnc-ecat
-BASE_VERSION=0.11
+BASE_VERSION=0.12
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
 MASTER_MIN=1.1
@@ -72,7 +74,9 @@ step "Tests"
 make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER check 2>&1 | grep -v -e '^Compiling' -e '^Linking' -e 'warning:' -e 'varning:'
 
 step "Component"
-make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER \
+# LinuxCNC's libraries are in /usr/lib where the package is installed, also
+# when it was built against a run-in-place tree.
+make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER LINUXCNC_LIBDIR=/usr/lib \
     >"$WORK/component.log" 2>&1 || { tail -30 "$WORK/component.log"; exit 1; }
 
 step "Package tree"
@@ -119,13 +123,11 @@ SHLIBS=$(cd "$WORK/shlibs" && dpkg-shlibdeps -O --ignore-missing-info \
     | sed -n 's/^shlibs:Depends=//p')
 # The master's library comes from its package, not from a shlibs file.
 SHLIBS=$(echo "$SHLIBS" | sed -E 's/(^|, )[^,]*ethercat[^,]*//g; s/^, //')
-# Only the upstream version of LinuxCNC counts (see build-uspace-deb.sh in
-# linuxcnc-ethercat).
-SHLIBS=$(echo "$SHLIBS" | sed -E 's/(linuxcnc-uspace \(>= [^)-]*)-[^)]*\)/\1)/')
-case "$SHLIBS" in
-    *linuxcnc-uspace*) ;;
-    *) SHLIBS="linuxcnc-uspace (>= 1:2.9), $SHLIBS" ;;
-esac
+# ecat needs LinuxCNC 2.10's HAL API: whatever dpkg-shlibdeps found for
+# linuxcnc-uspace (it may be an older package installed beside a run-in-place
+# build) is replaced by this.
+SHLIBS=$(echo "$SHLIBS" | sed -E 's/(^|, )linuxcnc-uspace [^,]*//g; s/^, //')
+SHLIBS="linuxcnc-uspace (>= 1:2.10~)${SHLIBS:+, $SHLIBS}"
 
 cat >"$ROOT/DEBIAN/control" <<EOF
 Package: $PKG

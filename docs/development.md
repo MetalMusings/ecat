@@ -13,7 +13,9 @@ make -C component check                    # C unit tests
 scripts/build-deb.sh -w -o <dir>           # package from the working tree
 ```
 
-- The component needs `linuxcnc-uspace-dev`, `libyaml-dev` and the master
+- The component needs LinuxCNC 2.10 (`linuxcnc-uspace-dev`, or a run-in-place
+  build: `. <linuxcnc>/scripts/rip-environment` in the shell first, so that
+  `halcompile` is on the PATH), `libyaml-dev` and the master
   package's headers in `/opt/linuxcnc-ethercat-uspace/include`. Set
   `USPACE_ETHERCAT=` to use another master install. To install it from
   the checkout: `make -C component install`.
@@ -1154,13 +1156,19 @@ EtherCAT Setup (`ecatsetup/`):
 
 Packaging and docs:
 
-12. `scripts/build-deb.sh`: `Depends: linuxcnc-uspace (>= 1:2.10~)`; a
-    clear version step that marks the break.
-13. `.github/workflows/deb.yml`: build against 2.10's
-    `linuxcnc-uspace-dev` (own build of the pinned commit, or linuxcnc.org's
-    buildbot: not checked whether it has trixie packages).
-14. README, getting-started.md and the release text: 2.10 or newer; 2.9
-    users take 0.11.
+12. DONE: `scripts/build-deb.sh`: `Depends: linuxcnc-uspace (>= 1:2.10~)`,
+    version 0.12 (the break), and `LINUXCNC_LIBDIR=/usr/lib` so that
+    `ecat.so`'s run path is not the run-in-place tree's (tried here against
+    the run-in-place build).
+13. `.github/workflows/deb.yml`: there are no 2.10 packages for Debian 12 or
+    13 (buildbot.linuxcnc.org is gone), so the job builds LinuxCNC from
+    source at the pinned commit without GUIs and manual pages (cached) and
+    runs `build-deb.sh` with its `rip-environment`. Not yet run on GitHub:
+    try it with "Run workflow" before tagging.
+14. DONE: README, getting-started.md and the release text: 2.10 or newer;
+    2.9 users take 0.11. Nobody can `apt install linuxcnc-uspace` 2.10 yet:
+    the package's `Depends` cannot be met until 2.10 is released, or built
+    as packages from source (`dpkg-buildpackage`).
 
 ### Moving this machine
 

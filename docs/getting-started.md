@@ -42,8 +42,9 @@ gone at the next boot).
 
 ## Install
 
-For Debian 12 or 13 with LinuxCNC 2.9.4 or newer, download the two
-packages from the releases ([README](../README.md#install)) and:
+For Debian 12 or 13 with LinuxCNC 2.10 or newer (2.9: use ecat 0.11),
+download the two packages from the releases ([README](../README.md#install))
+and:
 
 ```
 sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb ./linuxcnc-ecat_*_amd64.deb

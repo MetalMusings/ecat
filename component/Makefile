@@ -5,9 +5,10 @@
 #   sudo make install    install it in LinuxCNC's module directory
 #   make check           build and run the unit tests in tests/
 #
-# Needs LinuxCNC's halcompile and headers (linuxcnc-uspace-dev), libyaml-dev,
-# and the userspace master installed in USPACE_ETHERCAT: the package
-# linuxcnc-ethercat-uspace 0.3 or newer, or a master built from source.
+# Needs LinuxCNC 2.10's halcompile and headers (linuxcnc-uspace-dev, or a
+# run-in-place build: ". scripts/rip-environment" first), libyaml-dev, and the
+# userspace master installed in USPACE_ETHERCAT: the package
+# linuxcnc-ethercat-uspace 1.1 or newer, or a master built from source.
 
 .DEFAULT_GOAL := all
 
@@ -16,6 +17,9 @@ USPACE_ETHERCAT ?= /opt/linuxcnc-ethercat-uspace
 # directory, while the run-time path (rpath) stays USPACE_ETHERCAT.
 USPACE_SYSROOT ?=
 USPACE_BUILD := $(USPACE_SYSROOT)$(USPACE_ETHERCAT)
+# Where LinuxCNC's libraries are at run time (rpath). Not the build's own
+# directory when ecat is built against a run-in-place LinuxCNC for a package.
+LINUXCNC_LIBDIR ?=
 
 COMP ?= $(shell which halcompile)
 ifeq (, $(COMP))
@@ -48,7 +52,7 @@ ecat.so: $(objs)
 	@objcopy -j .rtapi_export -O binary $@.tmp $@.sym
 	@(echo '{ global : '; tr -s '\0' < $@.sym | xargs -r0 printf '%s;\n' | grep .; echo 'local : * ; };') > $@.ver
 	@$(CC) -shared -Bsymbolic -Wl,--version-script,$@.ver -o $@ $(objs) -lm \
-	  -L$(LIBDIR) -Wl,-rpath,$(LIBDIR) -llinuxcnchal \
+	  -L$(LIBDIR) -Wl,-rpath,$(or $(LINUXCNC_LIBDIR),$(LIBDIR)) -llinuxcnchal \
 	  -L$(USPACE_BUILD)/lib -Wl,-rpath,$(USPACE_ETHERCAT)/lib -l:libethercat.so.2 \
 	  -lyaml -lpthread -lrt
 	@chmod -x $@

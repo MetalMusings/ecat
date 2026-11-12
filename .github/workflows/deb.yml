@@ -9,7 +9,11 @@
 #
 # The package is built against the userspace master package
 # linuxcnc-ethercat-uspace from a uspace-v* release of MetalMusings/ethercat
-# (1.1 or later) and LinuxCNC 2.9.4: from linuxcnc.org on Debian 12, Debian's own on 13.
+# (1.1 or later) and LinuxCNC 2.10. There are no 2.10 packages for Debian 12
+# or 13 yet (buildbot.linuxcnc.org is gone), so LinuxCNC is built from source
+# at a pinned commit (LINUXCNC_COMMIT, moved on purpose only: the HAL API
+# changed as late as October 2026), without its GUIs and manual pages: ecat
+# needs only halcompile, the headers and the HAL library. The build is cached.
 
 name: Package
 
@@ -27,6 +31,7 @@ permissions:
 
 env:
   MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.1' }}
+  LINUXCNC_COMMIT: b0e7b191b92066c771f2063714dc00736899ec95  # 2.10.0~pre2-436, 2026-11-12
 
 jobs:
   deb:
@@ -37,10 +42,8 @@ jobs:
         include:
           - debian: bookworm
             id: debian12
-            linuxcnc: '=1:2.9.4'
           - debian: trixie
             id: debian13
-            linuxcnc: ''  # Debian's own 2.9.4 with its updates
     container: debian:${{ matrix.debian }}
     steps:
       - name: Build tools
@@ -48,22 +51,30 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential git dpkg-dev libyaml-dev python3 python3-yaml \
-            ca-certificates curl gnupg dirmngr
+            ca-certificates curl gnupg dirmngr \
+            autoconf automake pkg-config python3-dev python3-pybind11 \
+            libboost-python-dev libfmt-dev libtirpc-dev libcap-dev libgpiod-dev \
+            libusb-1.0-0-dev libmodbus-dev libudev-dev libedit-dev \
+            tcl8.6-dev tk8.6-dev tclx bwidget python3-tk libxmu-dev libgl-dev \
+            libglu1-mesa-dev libepoxy-dev intltool
 
-      - name: LinuxCNC 2.9 (linuxcnc.org on Debian 12)
-        if: matrix.debian == 'bookworm'
-        run: |
-          export GNUPGHOME=$(mktemp -d)
-          gpg --keyserver hkp://keyserver.ubuntu.com --recv-key 3cb9fd148f374fef
-          gpg --export 'EMC Archive Signing Key' > /usr/share/keyrings/linuxcnc-old.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/linuxcnc-old.gpg] https://www.linuxcnc.org/ bookworm base 2.9-uspace" \
-            > /etc/apt/sources.list.d/linuxcnc.list
-          apt-get update
+      - uses: actions/cache@v4
+        id: linuxcnc
+        with:
+          path: /opt/linuxcnc-src
+          key: linuxcnc-${{ matrix.id }}-${{ env.LINUXCNC_COMMIT }}
 
-      - name: linuxcnc-uspace-dev ${{ matrix.linuxcnc }}
+      - name: LinuxCNC 2.10 from source (run-in-place, only what ecat needs)
+        if: steps.linuxcnc.outputs.cache-hit != 'true'
         run: |
-          apt-get install -y --no-install-recommends \
-            linuxcnc-uspace${{ matrix.linuxcnc }} linuxcnc-uspace-dev${{ matrix.linuxcnc }}
+          git clone -q https://github.com/LinuxCNC/linuxcnc /opt/linuxcnc-src
+          cd /opt/linuxcnc-src
+          git checkout -q "$LINUXCNC_COMMIT"
+          cd src
+          ./autogen.sh
+          ./configure --with-realtime=uspace --disable-nls --disable-manpages \
+            --disable-gui --disable-gtk
+          make -j"$(nproc)"
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
@@ -79,6 +90,8 @@ jobs:
         run: |
           # The checkout belongs to another user than the container's root.
           git config --global --add safe.directory '*'
+          # halcompile and the headers of the run-in-place LinuxCNC
+          . /opt/linuxcnc-src/scripts/rip-environment
           scripts/build-deb.sh -o out
 
       - uses: actions/upload-artifact@v4
@@ -107,4 +120,4 @@ jobs:
           gh release create "${{ github.ref_name }}" out/*.deb \
             --repo "${{ github.repository }}" --prerelease \
             --title "ecat ${{ github.ref_name }}" \
-            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.9.4 or newer: debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). The window, ecatsetup --gui, needs python3-pyqt5. Built against linuxcnc-ethercat-uspace ${{ env.MASTER_RELEASE }}; 0.7 or newer works, 1.1 or newer is recommended. Get it from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases) (1.1 and later; older ones are in [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)); the start check's comparison of the bus needs 1.1. To try it without disturbing your setup: [docs/try-it.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/try-it.md). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."
+            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.10 (not released yet: build it from source, see the README; 2.9 users take ecat 0.11): debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). The window, ecatsetup --gui, needs python3-pyqt5. Built against linuxcnc-ethercat-uspace ${{ env.MASTER_RELEASE }}; 0.7 or newer works, 1.1 or newer is recommended. Get it from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases) (1.1 and later; older ones are in [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat/releases)); the start check's comparison of the bus needs 1.1. To try it without disturbing your setup: [docs/try-it.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/try-it.md). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."
