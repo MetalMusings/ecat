@@ -3205,6 +3205,10 @@ class HalPage(QWidget):
         nl.addWidget(choose)
         nl.addStretch(1)
         self.axes.add(self.no_ini)
+        # LinuxCNC writes the .expanded file again at every start
+        self.expanded_warning = self.axes.add(label(wrap=True))
+        self.expanded_warning.setStyleSheet("color: #b26a00;")
+        self.expanded_warning.hide()
         self.rows_box = QVBoxLayout()
         self.axes.lay.addLayout(self.rows_box)
         row = QHBoxLayout()
@@ -3545,6 +3549,15 @@ class HalPage(QWidget):
     def show_joints(self):
         s, ini = self.win.session, self.ini()
         self.no_ini.setVisible(ini is None)
+        expanded = bool(ini and ini.endswith(integrate.EXPANDED))
+        self.expanded_warning.setVisible(expanded)
+        if expanded:
+            src = integrate.expanded_source(ini)
+            name = os.path.basename(src) if src else "the INI file"
+            self.expanded_warning.setText(
+                "%s is the file LinuxCNC writes from %s at every start. It may be out of date "
+                "(joints that were removed since), and nothing can be written into it: choose "
+                "%s with INI file..." % (os.path.basename(ini), name, name))
         joints = []
         if ini:
             try:

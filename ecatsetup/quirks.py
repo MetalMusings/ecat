@@ -81,8 +81,14 @@ def parse(data, path="<quirk>"):
     pins = {}
     for k, v in (data.get("pins") or {}).items():
         index, sub = _obj(k)
-        if not isinstance(v, dict) or not v.get("pin"):
-            raise QuirkError("pins.%s needs a pin" % k)
+        if not isinstance(v, dict) or not (v.get("pin") or v.get("split")):
+            raise QuirkError("pins.%s needs a pin (or split, a list of bit pins)" % k)
+        if "split" in v:
+            # one name per bit, from bit 0; null for a bit that has no pin
+            sp = v["split"]
+            if not isinstance(sp, list) or any(x is not None and not isinstance(x, str) for x in sp):
+                raise QuirkError("pins.%s: split must be a list of names (null for unused bits)" % k)
+            v = dict(v, split=[x or None for x in sp])
         pins[(index, sub or 0)] = dict(v)
     q["pins"] = pins
     settings = []
@@ -282,6 +288,9 @@ def from_slave(slave):
     for kind in ("outputs", "inputs"):
         for pdo in (slave.get("process-data") or {}).get(kind) or []:
             for e in pdo.get("entries") or []:
+                if e.get("split"):
+                    pins[str(e.get("object"))] = {"split": list(e["split"])}
+                    continue
                 if not e.get("pin"):
                     continue
                 d = {"pin": e["pin"]}

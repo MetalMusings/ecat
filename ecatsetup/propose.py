@@ -64,6 +64,7 @@ class Entry:
     hal_type: str = ""
     scale: float = None  # float pins of integer entries: read raw * scale + offset,
     offset: float = None  # written as (value + offset) * scale
+    split: list = None    # a bit field: one pin name per bit (None: no pin), instead of pin
 
 
 @dataclass
@@ -380,7 +381,10 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     for pd in pdos:
         for e in pd.entries:
             qp = qpins.get((e.index, e.subindex))
-            if qp and e.role == "pin":
+            if qp and e.role == "pin" and qp.get("split"):
+                e.split, e.pin, e.hal_type = list(qp["split"]), "", "bit"
+                used.extend(x for x in e.split if x)
+            elif qp and e.role == "pin":
                 e.pin = str(qp["pin"])
                 e.hal_type = str(qp.get("hal-type") or e.hal_type)
                 e.scale, e.offset = qp.get("scale"), qp.get("offset")

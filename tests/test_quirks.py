@@ -48,7 +48,7 @@ class TestFiles(unittest.TestCase):
     def test_shipped_files_read(self):
         qs = quirks.load(reload=True)
         self.assertEqual(quirks.problems, [])
-        self.assertEqual(len(qs), 3)
+        self.assertEqual(len(qs), 4)
         ect = quirks.of((0xA88, 0xA880002))
         self.assertEqual(ect["commands"], {0x2010: "Zero Position on the ECT60, a command, not a setting"})
         self.assertEqual(ect["limits"]["following-error"], (0x2022, 0, "uint32"))
@@ -88,6 +88,25 @@ class TestFiles(unittest.TestCase):
                            "settings need object, type and value")):
             with self.assertRaisesRegex(quirks.QuirkError, msg):
                 quirks.parse(data)
+
+
+class TestSplitPins(unittest.TestCase):
+    def test_a_bit_field_is_read_and_checked(self):
+        q = quirks.parse({"name": "t", "pins": {"0x6000:00": {"split": ["a", None, "c"]}}})
+        self.assertEqual(q["pins"][(0x6000, 0)]["split"], ["a", None, "c"])
+        for bad in ({"split": "abc"}, {"split": [1]}, {}):
+            with self.assertRaises(quirks.QuirkError):
+                quirks.parse({"pins": {"0x6000:00": bad}})
+
+    def test_the_shipped_easercat_file_names_the_bits(self):
+        pins = quirks.pins((0xD0BED1D0, 0x7000))
+        self.assertEqual(pins[(0x6000, 0)]["split"][:4], ["in-1", "in-2", "in-3", "in-4"])
+        self.assertEqual(pins[(0x7000, 0)]["split"][2], "activate-relay")
+
+    def test_saving_a_slave_keeps_its_bit_pins(self):
+        slave = {"identity": dict(EL7041), "name": "n", "process-data": {"inputs": [
+            {"entries": [{"object": "0x6000:00", "bits": 32, "split": ["x", None, "z"]}]}]}}
+        self.assertEqual(quirks.from_slave(slave)["pins"]["0x6000:00"], {"split": ["x", None, "z"]})
 
 
 class TestSaved(unittest.TestCase):

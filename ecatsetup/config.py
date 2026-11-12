@@ -77,6 +77,8 @@ def _entry(e):
     d["type"] = e.data_type
     if e.role in ("profile", "encoder"):
         d["use"] = "profile"
+    elif getattr(e, "split", None):
+        d["split"] = list(e.split)
     elif e.pin:
         d["pin"] = e.pin
         d["hal-type"] = e.hal_type

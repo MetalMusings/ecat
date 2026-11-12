@@ -1,0 +1,27 @@
+# MetalMusings EaserCAT 7000: THC (two arc voltage / ohmic sensing units)
+# and digital I/O. A quirk file: what EtherCAT Setup knows about a device
+# beyond its ESI file, SII and dictionary. See docs/ecatsetup.md.
+#
+# The device's own data does not say how many bits its I/O words use. The
+# names are those of the hand-written lcec file of the plasma cutter that
+# ran with this device (in-1..in-12 and out-1.. are the terminals):
+#   0x6000 Input12: bits 0-11 are the 12 inputs, 20 bits are unused;
+#   0x7000 Output4: bits 0-3, bit 3 switches the ohmic-sensing relay;
+#   the ohmic-sensing flags are bit 0 of an 8-bit word.
+# What an input is wired to is the machine's own business (linuxcnc.nets):
+# the plasma cutter has X, Y, Z home switches on in-1..in-3, the E-stop on
+# in-4 (normally closed: it needs a `not`), float and breakaway on in-5 and
+# in-6 (also normally closed), arc ok on in-7, torch on out-1 and laser on
+# out-2.
+name: MetalMusings EaserCAT 7000
+match: {vendor: '0xD0BED1D0', product: '0x00007000'}
+
+pins:
+  '0x6000:00':
+    split: [in-1, in-2, in-3, in-4, in-5, in-6, in-7, in-8, in-9, in-10, in-11, in-12]
+  '0x7000:00':
+    split: [out-1, out-2, activate-relay, out-4]
+  '0x7001:04': {split: [in-unit1.enable-ohmic-sensing]}
+  '0x7002:04': {split: [in-unit2.enable-ohmic-sensing]}
+  '0x6001:05': {split: [out-unit1.ohmic-sensing-sensed]}
+  '0x6002:05': {split: [out-unit2.ohmic-sensing-sensed]}

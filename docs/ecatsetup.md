@@ -942,7 +942,7 @@ them, so the written files say everything that happens.
 | Folder | |
 |---|---|
 | `~/.config/ecatsetup/devices/*.yaml` (or `$ECATSETUP_DEVICES`) | Your own. A file here for a vendor and product replaces the one that comes with the program. |
-| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `beckhoff-el7041.yaml`, `beckhoff-el70x1-position.yaml`. |
+| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `beckhoff-el7041.yaml`, `beckhoff-el70x1-position.yaml`, `metalmusings-easercat-7000.yaml`. |
 
 *Save as quirk file...* on a slave's page writes one from a slave as you
 have configured it: its identity, the pin names, HAL types, scales and
@@ -963,6 +963,7 @@ match: {vendor: '0x00000002', product: '0x1B813052'}
 
 pins:                      # when the slave is proposed
   '0x7010:21': {pin: velocity, hal-type: float, scale: 32767}
+  '0x6000:00': {split: [in-1, in-2, in-3, null, in-5]}   # one pin per bit
 
 settings:                  # added to the slave when it is proposed
 - {object: '0x8010:01', name: Maximal current, type: UINT, value: 1500}
@@ -1002,7 +1003,7 @@ serves the import alone.
 | Key | |
 |---|---|
 | `match` | `vendor` and `product` of the device. |
-| `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [file format](component.md#the-configuration-file). Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. |
+| `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [file format](component.md#the-configuration-file); or `split`, a list of bit pin names from bit 0 (`null` for a bit without a pin) for an object that holds several bits. Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. *Save as quirk file* keeps bit pins too. |
 | `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [file format](component.md#the-configuration-file). |
 | `commands` | Per object index: why it is a command. The test mode does not write it. |
 | `limits` | For the drive test: `following-error`, `max-torque`, `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), or `travel` and the others as a text saying why the drive's own object is not used. |
@@ -1056,6 +1057,10 @@ first axis; for later axes their indexes move by 0x800 as the other objects do.
   lcec's modParams. See [stepper terminals](component.md#stepper-and-dc-motor-terminals).
 - `beckhoff-el70x1-position.yaml`: lcec's el70x1 modParams and the
   position interface it always set.
+- `metalmusings-easercat-7000.yaml`: the bit pins of the THC and I/O device
+  (`in-1`..`in-12`, `out-1`, `out-2`, `activate-relay`, `out-4`, the ohmic
+  sensing flags). Which terminal is wired to what is the machine's: see
+  the comments in the file for the plasma cutter it ran on.
 
 ## Command line
 

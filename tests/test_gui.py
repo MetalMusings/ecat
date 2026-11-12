@@ -348,7 +348,7 @@ class TestWindow(BusTest):
         self.assertEqual(w.session.slave(1)["name"], "thc")
         self.assertIn("thc · Modular device", self.rows(w)[2][1])
         self.assertIs(w.bus_page.stack.currentWidget(), w.slave_page)
-        self.assertTrue(any(r[2] == "thc.output4" for r in gui.config_pins(w.session.cfg)))
+        self.assertTrue(any(r[2] == "thc.out-1" for r in gui.config_pins(w.session.cfg)))
 
     def test_update_from_bus_shows_the_changes_first(self):
         w = self.window()
@@ -451,6 +451,20 @@ class TestWindow(BusTest):
         one_line = t.fontMetrics().height()
         self.assertGreater(t.rowHeight(0), 3 * one_line)       # wrapped, not cut off
         self.assertGreaterEqual(t.height(), t.rowHeight(0))
+
+    def test_the_expanded_ini_is_warned_about_on_the_hal_page(self):
+        w = self.window()
+        src = os.path.join(self.dir.name, "m.ini")
+        open(src, "w").write("[EMC]\n")
+        open(src + ".expanded", "w").write("[EMC]\n")
+        w.session.ini_path = src
+        w.hal_page.show_joints()
+        self.assertTrue(w.hal_page.expanded_warning.isHidden())
+        w.session.ini_path = src + ".expanded"
+        w.hal_page.show_joints()
+        self.assertFalse(w.hal_page.expanded_warning.isHidden())
+        self.assertIn("m.ini", w.hal_page.expanded_warning.text())
+        self.assertIn("writes from", w.hal_page.expanded_warning.text())
 
     def test_mode_switching(self):
         w = self.window()

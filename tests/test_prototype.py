@@ -68,7 +68,14 @@ class TestPropose(unittest.TestCase):
         self.assertIn((0x6001, 2), entries)
         self.assertEqual(entries[(0x6001, 2)].pin, "out-unit1.calculated-voltage")
         self.assertEqual(entries[(0x6001, 2)].hal_type, "float")
-        self.assertEqual(entries[(0x7000, 0)].pin, "output4")
+        # bit names from the shipped quirk file for the EaserCAT 7000
+        self.assertEqual(entries[(0x7000, 0)].split, ["out-1", "out-2", "activate-relay", "out-4"])
+        self.assertEqual(entries[(0x7000, 0)].pin, "")
+        self.assertEqual(len(entries[(0x6000, 0)].split), 12)
+        self.assertTrue(any("from the quirk file metalmusings-easercat-7000.yaml" in n for n in p.notes))
+        cfg_entry = config._entry(entries[(0x7000, 0)])
+        self.assertEqual(cfg_entry["split"][2], "activate-relay")
+        self.assertNotIn("pin", cfg_entry)
         self.assertTrue(any("subindexes taken from the CoE dictionary" in n for n in p.notes))
         self.assertIsNone(p.dc_assign)
 
@@ -518,7 +525,7 @@ class TestConfig(unittest.TestCase):
         cfg["slaves"].append(dict(s))
         entries = s["process-data"]["inputs"][0]["entries"]
         entries[0]["split"] = ["a"] * 40
-        entries[0]["scale"] = 2.0
+        s["process-data"]["inputs"][1]["entries"][0]["scale"] = 2.0
         s["settings"] = [{"object": "0x2000:01"}]
         errors = "\n".join(config.check(cfg))
         self.assertIn("position used twice", errors)
