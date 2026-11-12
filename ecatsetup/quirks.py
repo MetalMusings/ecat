@@ -55,7 +55,19 @@ def parse(data, path="<quirk>"):
         if not isinstance(m, dict) or "vendor" not in m or "product" not in m:
             raise QuirkError("match needs vendor and product")
         q["match"] = (_hex(m["vendor"], "vendor"), _hex(m["product"], "product"))
-    q["commands"] = {_obj(k)[0]: str(v) for k, v in (data.get("commands") or {}).items()}
+    q["commands"], q["command-runs"] = {}, {}
+    for k, v in (data.get("commands") or {}).items():
+        index, sub = _obj(k)
+        if isinstance(v, dict):
+            # note, and optionally what "Run command" writes: value, type, confirm
+            if "note" not in v:
+                raise QuirkError("commands.%s needs a note" % k)
+            q["commands"][index] = str(v["note"])
+            q["command-runs"][(index, sub or 0)] = {
+                "value": v.get("value"), "type": v.get("type"),
+                "confirm": str(v["confirm"]) if v.get("confirm") else None}
+        else:
+            q["commands"][index] = str(v)
     limits = {}
     for k, v in (data.get("limits") or {}).items():
         if isinstance(v, str):
@@ -181,6 +193,12 @@ def of(key):
 def command(slave, index):
     """Why an object of this slave is a command, not a setting; or None."""
     return of(slave).get("commands", {}).get(index)
+
+
+def command_run(slave, index, subindex):
+    """What "Run command" writes for a quirk file's command: {"value", "type",
+    "confirm"} (each may be None), or None if the file does not say."""
+    return of(slave).get("command-runs", {}).get((index, subindex))
 
 
 def limits(slave):

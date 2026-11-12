@@ -187,6 +187,23 @@ def sdo_write_refused(slave, index, subindex):
     return None
 
 
+def drives_enabled(cfg, upload):
+    """Names of the CiA 402 drives that are in "Operation enabled" (statusword
+    0x6041 bit 2), read with upload(position, index, subindex, type) -> int or
+    None. A command (zero position, store parameters) is not run while a drive
+    can move."""
+    out = []
+    for s in (cfg or {}).get("slaves") or []:
+        if s.get("profile") != "cia402":
+            continue
+        for n in range(len(config.axes(s))):
+            v = upload(s["position"], 0x6041 + n * config.AXIS_OFFSET, 0, "uint16")
+            if v is not None and int(v) & 4:
+                out.append(s.get("name"))
+                break
+    return out
+
+
 def halcmd(*args, check=True):
     proc = subprocess.run([HALCMD] + [str(a) for a in args], capture_output=True, text=True)
     if check and proc.returncode != 0:

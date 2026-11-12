@@ -20,6 +20,7 @@ from dataclasses import asdict
 import yaml
 
 from . import config, diagnose, esi, events, importxml, integrate, lcecxml, netif, propose, tool, update
+from . import session
 from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F401
 
 
@@ -193,7 +194,7 @@ def main(argv=None):
     if args.report is not None:
         sys.exit(write_report(args))
     if args.check:
-        sys.exit(check_file(args.check))
+        sys.exit(check_file(args.check, args.esi))
     if args.events:
         sys.exit(show_events(args))
     if args.diagnose:
@@ -440,7 +441,7 @@ def import_file(args):
     return 1 if errors else 0
 
 
-def check_file(path):
+def check_file(path, esi_paths=()):
     """Check a configuration file, then the bus against it. Returns an exit code."""
     try:
         cfg = config.load(path)
@@ -457,6 +458,12 @@ def check_file(path):
     if errors:
         return 1
     print("%s: %d slaves, no errors in the file" % (path, len(cfg["slaves"])))
+    if esi_paths:
+        # settings against the ESI files' object dictionaries
+        sess = session.Session(esi_paths)
+        sess.cfg = cfg
+        for level, text in sess.setting_problems():
+            print("%s: %s" % (level.capitalize(), text))
     try:
         positions = set(tool.slave_positions())
     except tool.ToolError:

@@ -21,7 +21,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
         __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from ecatsetup import config, session, tool  # noqa: E402
+from ecatsetup import config, guidance, session, tool  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
@@ -515,6 +515,93 @@ class TestWindow(BusTest):
         page.st.selectRow(row)
         page.remove_setting()
         self.assertEqual(len(w.session.slave(0)["settings"]), n)
+
+    def test_settings_picker_and_guidance(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        s = w.session.slave(0)
+        n = len(s.get("settings") or [])
+        dlg = gui.SettingPicker(page, s, w.session.dictionary(0), set())
+        objects = [dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount())]
+        self.assertIn("0x2000:02", objects)
+        self.assertNotIn("0x1000:00", objects)          # read-only: not offered
+        self.assertFalse([o for o in objects if o.startswith(("0x16", "0x1A"))])   # PDO mapping
+        dlg.filter.setText("i2c_address")
+        self.assertEqual([dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount())],
+                         ["0x2000:02", "0x2001:02"])
+        dlg.table.selectRow(0)
+        e, = dlg.chosen()
+        self.assertEqual((e.index, e.subindex), (0x2000, 2))
+        dlg.only_writable.setChecked(False)
+        dlg.filter.setText("0x1000")
+        self.assertEqual(dlg.table.rowCount(), 1)
+        # added with the slave's present value, else 0
+        with mock.patch.object(tool, "upload", lambda pos, i, sub, t: 0x48 if i == 0x2000 else None):
+            page.add_entries(s, [e], True)
+            page.add_entries(s, [w.session.dictionary(0).entries[(0x2001, 2)]], True)
+        a, b = s["settings"][n:]
+        self.assertEqual((a["object"], a["type"], a["value"]), ("0x2000:02", "USINT", 0x48))
+        self.assertEqual((b["object"], b["value"]), ("0x2001:02", 0))
+        self.assertEqual(page.st.rowCount(), n + 2)
+        # a value that does not fit the type is marked and explained
+        page.st.item(n, 3).setText("300")
+        self.assertIn("does not fit USINT", page.st_problems.text())
+        self.assertIn("does not fit", page.st.item(n, 3).toolTip())
+        page.st.item(n, 3).setText("5")
+        self.assertEqual(page.st_problems.text(), "")
+        # an object that is not in the dictionary is a warning
+        page.st.item(n, 0).setText("0x2FFF:01")
+        self.assertIn("not in the object dictionary", page.st_problems.text())
+        # completion text is accepted
+        page.st.item(n, 0).setText("0x2000:03  LowpassFilterPoleFrequency")
+        self.assertEqual(s["settings"][n]["object"], "0x2000:03")
+        self.assertEqual(s["settings"][n]["type"], "UDINT")
+        # present values
+        with mock.patch.object(tool, "upload", lambda pos, i, sub, t: 7):
+            page.read_present_values()
+        self.assertEqual(page.st.item(n, 4).text(), "7")
+
+    def test_commands_are_not_offered_as_settings(self):
+        w = self.window()
+        w.select_slave(0)
+        s = w.session.slave(0)
+        with mock.patch.object(guidance, "command_reason",
+                               lambda slave, index, entry=None: ("error", "a command")
+                               if index == 0x2000 else None):
+            dlg = gui.SettingPicker(w.slave_page, s, w.session.dictionary(0), set())
+            row = [dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount())].index("0x2000:02")
+            self.assertFalse(dlg.table.item(row, 0).flags() & gui.Qt.ItemIsSelectable)
+            n = len(s.get("settings") or [])
+            w.slave_page.add_entries(s, [w.session.dictionary(0).entries[(0x2000, 2)]])
+            self.assertEqual(len(s.get("settings") or []), n)       # refused
+
+    def test_run_command_is_confirmed_and_not_with_a_drive_enabled(self):
+        from ecatsetup import testmode
+        w = self.window()
+        w.select_slave(0)
+        page = w.test_page
+        page.sdo_obj.setText("0x2000:02")
+        page.sdo_value.setText("1")
+        QMB = gui.QMessageBox
+        calls = []
+        with mock.patch.object(tool, "download", lambda *a, **k: calls.append(a)), \
+                mock.patch.object(QMB, "information", lambda *a, **k: calls.append("info")), \
+                mock.patch.object(QMB, "warning", lambda *a, **k: calls.append("warning")), \
+                mock.patch.object(QMB, "question", lambda *a, **k: QMB.Yes):
+            page.sdo_run_command()                  # an ordinary object: not a command
+            self.assertEqual(calls, ["info"])
+            del calls[:]
+            reason = ("warning", "Zero position: a command")
+            with mock.patch.object(guidance, "command_reason", lambda *a, **k: reason), \
+                    mock.patch.object(testmode, "drives_enabled", lambda cfg, up: ["x"]):
+                page.sdo_run_command()
+            self.assertEqual(calls, ["warning"])    # a drive is enabled: not run
+            del calls[:]
+            with mock.patch.object(guidance, "command_reason", lambda *a, **k: reason), \
+                    mock.patch.object(testmode, "drives_enabled", lambda cfg, up: []):
+                page.sdo_run_command()
+            self.assertEqual(calls, [(0, 0x2000, 2, "1", None)])
 
     def test_master_page(self):
         w = self.window()

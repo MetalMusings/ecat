@@ -11,8 +11,8 @@ import shutil
 
 import yaml
 
-from . import coe as coe_mod, config, esi, importxml, integrate, lcecxml, netif, propose, sii as sii_mod, \
-    tool, update
+from . import coe as coe_mod, config, esi, guidance, importxml, integrate, lcecxml, netif, propose, \
+    quirks, sii as sii_mod, tool, update
 
 
 def ini_value(ini_path, section, key):
@@ -305,6 +305,40 @@ class Session:
             self.cfg["slaves"].append(new)
             self.cfg["slaves"].sort(key=lambda s: s["position"])
         return list(p.notes)
+
+    def dictionary(self, position):
+        """The object dictionary to guide a slave's settings: the slave's own,
+        with the ESI file's ranges and defaults added; the ESI's alone when
+        the slave was not read (coe.Dictionary, empty if there is neither)."""
+        b = self.bus.get(position)
+        s = self.slave(position)
+        ident = quirks.identity(s) if s else None
+        revision = None
+        if b is not None and b.info.get("vendor_id") is not None:
+            ident = (b.info["vendor_id"], b.info["product_code"])
+            revision = b.info.get("revision")
+        elif s:
+            try:
+                revision = int(str((s.get("identity") or {}).get("revision")), 16)
+            except ValueError:
+                pass
+        mine = b.coe if b is not None and b.coe else coe_mod.Dictionary()
+        if not ident:
+            return mine
+        dev, _exact = esi.find(self.esi_devices, ident[0], ident[1], revision or 0)
+        return mine.enriched(esi.dictionary(dev)) if dev else mine
+
+    def setting_problems(self):
+        """[(level, text)] about the settings of all slaves, from the
+        dictionaries: "error" or "warning"."""
+        out = []
+        for s in (self.cfg or {}).get("slaves") or []:
+            for row, found in guidance.check_slave(s, self.dictionary(s["position"])).items():
+                st = s["settings"][row]
+                for level, text in found:
+                    out.append((level, "slave %s (%s): setting %s: %s"
+                                % (s["position"], s.get("name"), st.get("object"), text)))
+        return out
 
     def object_name(self, position, index, subindex):
         b = self.bus.get(position)

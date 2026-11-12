@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id></Vendor>
+  <Descriptions><Devices><Device>
+    <Type ProductCode="#x00001234" RevisionNo="#x00010000">DICT-TEST</Type>
+    <Name>Dictionary test</Name>
+    <Profile><Dictionary>
+      <DataTypes>
+        <DataType><Name>UINT</Name><BitSize>16</BitSize></DataType>
+        <DataType>
+          <Name>DT8000</Name><BitSize>64</BitSize>
+          <SubItem><SubIdx>0</SubIdx><Name>SubIndex 000</Name><Type>USINT</Type><BitSize>8</BitSize>
+            <Flags><Access>ro</Access></Flags></SubItem>
+          <SubItem><SubIdx>1</SubIdx><Name>Current</Name><Type>UINT</Type><BitSize>16</BitSize>
+            <Flags><Access>rw</Access></Flags></SubItem>
+          <SubItem><SubIdx>2</SubIdx><Name>Zero position</Name><Type>DINT</Type><BitSize>32</BitSize>
+            <Flags><Access WriteRestrictions="PreOP">rw</Access></Flags></SubItem>
+          <SubItem><SubIdx>3</SubIdx><Name>Counter</Name><Type>UDINT</Type><BitSize>32</BitSize>
+            <Flags><Access>ro</Access></Flags></SubItem>
+        </DataType>
+        <DataType>
+          <Name>DT_ARR</Name><BitSize>32</BitSize><BaseType>UINT</BaseType>
+          <ArrayInfo><LBound>1</LBound><Elements>2</Elements></ArrayInfo>
+        </DataType>
+      </DataTypes>
+      <Objects>
+        <Object>
+          <Index>#x8000</Index><Name>Motor settings</Name><Type>DT8000</Type><BitSize>64</BitSize>
+          <Info>
+            <SubItem><Name>SubIndex 000</Name><Info><DefaultData>03</DefaultData></Info></SubItem>
+            <SubItem><Name>Current</Name>
+              <Info><MinValue>#x0</MinValue><MaxValue>#x1f40</MaxValue><DefaultValue>#x1388</DefaultValue></Info></SubItem>
+            <SubItem><Name>Zero position</Name><Info><DefaultData>ffffffff</DefaultData></Info></SubItem>
+            <SubItem><Name>Counter</Name></SubItem>
+          </Info>
+          <Flags><Access>rw</Access></Flags>
+        </Object>
+        <Object>
+          <Index>#x8001</Index><Name>Gains</Name><Type>DT_ARR</Type><BitSize>32</BitSize>
+          <Flags><Access>rw</Access></Flags>
+        </Object>
+        <Object>
+          <Index>#x9000</Index><Name>Mode</Name><Type>USINT</Type><BitSize>8</BitSize>
+          <Info><DefaultValue>#x2</DefaultValue></Info>
+          <Flags><Access WriteRestrictions="PreOP">rw</Access></Flags>
+        </Object>
+        <Object>
+          <Index>#x9001</Index><Name>Device name</Name><Type>STRING(8)</Type><BitSize>64</BitSize>
+          <Flags><Access>ro</Access></Flags>
+        </Object>
+      </Objects>
+    </Dictionary></Profile>
+  </Device></Devices></Descriptions>
+</EtherCATInfo>

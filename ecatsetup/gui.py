@@ -32,11 +32,11 @@ from PyQt5.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea,
-    QSizePolicy, QSpinBox, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
-    QToolButton, QVBoxLayout, QWidget)
+    QSizePolicy, QSpinBox, QStackedWidget, QStyledItemDelegate, QTabBar, QTableWidget,
+    QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, diagnose, drivetest, esi, events, halcheck, homing, integrate, netif, propose,
-               quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
+from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, homing, integrate, netif,
+               propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -624,13 +624,136 @@ def source_rows(p, b):
     return rows
 
 
+
+class SettingPicker(QDialog):
+    """Choose settings from a slave's object dictionary: the objects that can
+    be written in PREOP, filterable, with what is known about them."""
+
+    MANUFACTURER = range(0x2000, 0x6000)
+    COLUMNS = ["Object", "Name", "Type", "Bits", "Access", "Range / default"]
+    # objects that are process data mapping and assignment, not settings
+    NOT_SETTINGS = (range(0x1600, 0x1800), range(0x1A00, 0x1C80))
+
+    def __init__(self, parent, slave, dictionary, have=()):
+        super().__init__(parent)
+        self.setWindowTitle("Add settings - %s" % TITLE)
+        self.resize(820, 560)
+        self.slave, self.dictionary, self.have = slave, dictionary, set(have)
+        lay = QVBoxLayout(self)
+        lay.addWidget(label("Objects of the slave's dictionary (%s). Bold: manufacturer-specific "
+                            "(0x2000-0x5FFF). Commands, which do something when written, cannot "
+                            "be settings." % dictionary.source, "hint", wrap=True))
+        top = QHBoxLayout()
+        self.filter = QLineEdit()
+        self.filter.setPlaceholderText("Filter by object or name")
+        self.filter.textChanged.connect(self.refill)
+        self.only_writable = QCheckBox("Writable in PREOP only")
+        self.only_writable.setChecked(True)
+        self.only_writable.toggled.connect(self.refill)
+        top.addWidget(self.filter, 1)
+        top.addWidget(self.only_writable)
+        lay.addLayout(top)
+        self.table = table(self.COLUMNS, 1)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self.show_detail)
+        self.table.itemDoubleClicked.connect(lambda *_: self.accept())
+        lay.addWidget(self.table, 1)
+        self.detail = label("", "hint", wrap=True)
+        lay.addWidget(self.detail)
+        self.read_now = QCheckBox("Take each value from the slave as it is now")
+        self.read_now.setChecked(True)
+        self.read_now.setToolTip("Otherwise the ESI file's default, or 0")
+        lay.addWidget(self.read_now)
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.button(QDialogButtonBox.Ok).setText("Add")
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        lay.addWidget(box)
+        self.rows = []
+        self.refill()
+
+    def candidates(self):
+        """The entries that may be offered, with why one cannot be chosen."""
+        out = []
+        text = self.filter.text().strip().lower()
+        for (index, sub), e in sorted(self.dictionary.entries.items()):
+            if any(index in r for r in self.NOT_SETTINGS) or e.name.startswith(("SubIndex", "Max SubIndex")):
+                continue
+            if (index, sub) in self.have:
+                continue
+            if self.only_writable.isChecked() and not e.writable_preop:
+                continue
+            name = self.dictionary.name(index, sub)
+            if text and text not in ("0x%04x:%02x %s" % (index, sub, name)).lower():
+                continue
+            out.append((e, name, guidance.command_reason(self.slave, index, e)))
+        return out
+
+    def refill(self, *_):
+        t = self.table
+        t.setRowCount(0)
+        self.rows = []
+        for e, name, cmd in self.candidates():
+            r = t.rowCount()
+            t.insertRow(r)
+            self.rows.append(e)
+            grey = GREY if cmd else None
+            tip = cmd[1] if cmd else None
+            cells = ["0x%04X:%02X" % (e.index, e.subindex), name, e.data_type, e.bitlen, e.access,
+                     guidance.describe_range(e)]
+            for c, v in enumerate(cells):
+                it = item(v, colour=grey, tip=tip,
+                          font=mono() if c == 0 else None)
+                if c == 0 and e.index in self.MANUFACTURER:
+                    f = it.font()
+                    f.setBold(True)
+                    it.setFont(f)
+                if cmd and cmd[0] == "error":
+                    it.setFlags(it.flags() & ~(Qt.ItemIsSelectable | Qt.ItemIsEnabled))
+                t.setItem(r, c, it)
+        t.resizeColumnsToContents()
+        t.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.show_detail()
+
+    def show_detail(self):
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        if not rows:
+            self.detail.setText("%d objects. Select the ones to add; double-click adds one." %
+                                len(self.rows))
+            return
+        e = self.rows[rows[0]]
+        cmd = guidance.command_reason(self.slave, e.index, e)
+        self.detail.setText("%s%s" % (guidance.describe(e), "\n" + cmd[1] if cmd else ""))
+
+    def chosen(self):
+        """The selected entries, commands left out."""
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        return [self.rows[r] for r in rows]
+
+class ObjectDelegate(QStyledItemDelegate):
+    """Settings' Object cell: completes from the dictionary."""
+
+    def __init__(self, parent, entries):
+        super().__init__(parent)
+        self.entries = entries      # a function giving ["0x8010:01  Maximal current", ...]
+
+    def createEditor(self, parent, option, index):
+        e = QLineEdit(parent)
+        c = QCompleter(self.entries(), e)
+        c.setCaseSensitivity(Qt.CaseInsensitive)
+        c.setFilterMode(Qt.MatchContains)
+        e.setCompleter(c)
+        return e
+
+
 class SlaveView(QWidget):
     """One slave on the Bus page."""
 
     PD_COLUMNS = ["Dir", "PDO", "Object", "Name", "Type", "Use", "HAL pin", "HAL type",
                   "Scale", "Offset", "Bit pins"]
     PIN, HALTYPE, SCALE, OFFSET, SPLIT = 6, 7, 8, 9, 10
-    SET_COLUMNS = ["Object", "Name", "Type", "Value"]
+    SET_COLUMNS = ["Object", "Name", "Type", "Value", "Now"]
 
     def __init__(self, win):
         super().__init__()
@@ -638,6 +761,7 @@ class SlaveView(QWidget):
         self.position = None
         self.loading = False
         self.pd_rows = []
+        self.present = {}       # (position, object) -> the slave's present value, as text
         self.home_support = (None, None)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -859,18 +983,26 @@ class SlaveView(QWidget):
         lay.addWidget(pd)
 
         # settings
-        st = Card("Settings", "SDOs written at every start, in PREOP. Type an object such as "
-                              "0x2000:01; name and type come from the slave's dictionary.")
+        st = Card("Settings", "SDOs written at every start, in PREOP. Add them from the slave's "
+                              "dictionary, or type an object such as 0x2000:01 (it completes); "
+                              "name and type come from the dictionary.")
         self.st = table(self.SET_COLUMNS, 1)
         self.st.itemChanged.connect(self.st_edited)
+        self.st.setItemDelegateForColumn(0, ObjectDelegate(self.st, self.dictionary_lines))
         st.add(self.st)
+        self.st_problems = st.add(label(wrap=True))
         buttons = QHBoxLayout()
-        add = QPushButton("Add setting")
-        add.clicked.connect(self.add_setting)
+        add = QPushButton("Add setting...")
+        add.setToolTip("Choose from the objects the slave's dictionary (or its ESI file) lists")
+        add.clicked.connect(self.choose_settings)
         remove = QPushButton("Remove setting")
         remove.clicked.connect(self.remove_setting)
+        self.read_now_button = QPushButton("Read present values")
+        self.read_now_button.setToolTip("Read each setting's object from the slave, to compare")
+        self.read_now_button.clicked.connect(self.read_present_values)
         buttons.addWidget(add)
         buttons.addWidget(remove)
+        buttons.addWidget(self.read_now_button)
         buttons.addStretch(1)
         st.add(buttons)
         lay.addWidget(st)
@@ -1211,10 +1343,35 @@ class SlaveView(QWidget):
                 value = "data %s" % st["data"]
             for c, v in enumerate((st.get("object"), st.get("name", ""), st.get("type", ""), value)):
                 self.st.setItem(r, c, item(v, editable=True, font=mono() if c == 0 else None))
+            self.st.setItem(r, 4, item(self.present.get((self.position, st.get("object")), ""),
+                                       font=mono(), colour=GREY))
         self.st.resizeColumnsToContents()
         self.st.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         fit_table(self.st, minimum=1)
+        self.show_setting_problems(s)
         self.loading = False
+
+    def dictionary_lines(self):
+        """"0x8010:01  Maximal current" for each writable object of the dictionary."""
+        d = self.win.session.dictionary(self.position)
+        return ["0x%04X:%02X  %s" % (i, sub, d.name(i, sub)) for (i, sub), e in sorted(d.entries.items())
+                if e.writable_preop and not e.name.startswith(("SubIndex", "Max SubIndex"))]
+
+    def show_setting_problems(self, s):
+        """Colour the rows that have a problem and list the problems under the table."""
+        found = guidance.check_slave(s, self.win.session.dictionary(self.position))
+        lines = []
+        for row, probs in found.items():
+            level = "error" if any(lv == "error" for lv, _ in probs) else "warning"
+            tip = "\n".join(t for _, t in probs)
+            for c in range(self.st.columnCount()):
+                it = self.st.item(row, c)
+                if it is not None:
+                    it.setForeground(QBrush(RED if level == "error" else AMBER))
+                    it.setToolTip(tip)
+            lines.extend("%s: %s" % (s["settings"][row].get("object"), t) for _, t in probs)
+        self.st_problems.setText("\n".join(lines))
+        self.st_problems.setVisible(bool(lines))
 
     # -- editing
 
@@ -1383,18 +1540,21 @@ class SlaveView(QWidget):
         text = it.text().strip()
         col = it.column()
         if col == 0:
+            text = text.split()[0] if text else text     # a completion: "0x8010:01  Name"
             st["object"] = text
             try:
                 index, sub = config.parse_obj(text)
             except ValueError:
                 self.win.changed()
                 return
-            b = self.win.session.bus.get(self.position)
-            entry = b.coe.entries.get((index, sub)) if b and b.coe else None
+            d = self.win.session.dictionary(self.position)
+            entry = d.entries.get((index, sub))
             if entry:
-                st["name"] = self.win.session.object_name(self.position, index, sub)
+                st["name"] = d.name(index, sub)
                 st["type"] = propose.COE_TYPES.get(entry.data_type, st.get("type", ""))
-                self.show_settings(s)
+                if "value" in st and st["value"] in (0, "") and entry.default is not None:
+                    st["value"] = entry.default
+            self.show_settings(s)
         elif col == 1:
             if text:
                 st["name"] = text
@@ -1412,6 +1572,9 @@ class SlaveView(QWidget):
                     st["value"] = float(text) if st.get("type") in ("REAL", "LREAL") else parse_int(text)
                 except ValueError:
                     st["value"] = text
+        self.loading = True
+        self.show_setting_problems(s)
+        self.loading = False
         self.win.changed()
 
     def add_setting(self):
@@ -1423,6 +1586,73 @@ class SlaveView(QWidget):
         self.st.setCurrentCell(self.st.rowCount() - 1, 0)
         self.st.editItem(self.st.item(self.st.rowCount() - 1, 0))
         self.win.changed()
+
+    def choose_settings(self):
+        """Add settings chosen from the slave's dictionary."""
+        s = self.win.session.slave(self.position)
+        if s is None:
+            return
+        d = self.win.session.dictionary(self.position)
+        if not d.entries:
+            self.win.status("No object dictionary (the slave was not read and no ESI file matches): "
+                            "type the object")
+            self.add_setting()
+            return
+        have = set()
+        for st in s.get("settings") or []:
+            try:
+                have.add(config.parse_obj(st.get("object")))
+            except ValueError:
+                pass
+        dlg = SettingPicker(self, s, d, have)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        self.add_entries(s, dlg.chosen(), dlg.read_now.isChecked())
+
+    def add_entries(self, s, entries, from_slave=True):
+        """Add dictionary entries as settings, valued as the slave has them now,
+        else the ESI default, else 0."""
+        d = self.win.session.dictionary(self.position)
+        present = self.win.session.bus.get(self.position) is not None
+        for e in entries:
+            if guidance.command_reason(s, e.index, e) and guidance.command_reason(s, e.index, e)[0] == "error":
+                continue
+            ctype = guidance.config_type(e) or "UDINT"
+            value = None
+            if from_slave and present and e.data_type != "string":
+                try:
+                    value = tool.upload(self.position, e.index, e.subindex, e.data_type)
+                except (tool.ToolError, OSError):
+                    value = None
+            if value is None:
+                value = e.default if e.default is not None else 0
+            st = {"object": config.obj(e.index, e.subindex), "name": d.name(e.index, e.subindex),
+                  "type": ctype, "value": float(value) if ctype in ("REAL", "LREAL") else value}
+            s.setdefault("settings", []).append(st)
+        self.show_settings(s)
+        self.win.changed()
+
+    def read_present_values(self):
+        """Fill the Now column from the slave."""
+        s = self.win.session.slave(self.position)
+        if s is None:
+            return
+        for st in s.get("settings") or []:
+            try:
+                index, sub = config.parse_obj(st.get("object"))
+            except ValueError:
+                continue
+            ttype = guidance.tool_type(st.get("type"))
+            text = ""
+            if ttype:
+                try:
+                    v = tool.upload(self.position, index, sub, ttype)
+                except (tool.ToolError, OSError):
+                    v = None
+                text = "" if v is None else str(v)
+            self.present[(self.position, st.get("object"))] = text or "?"
+        self.show_settings(s)
+        self.win.status("Read the settings' present values from slave %s" % self.position)
 
     def remove_setting(self):
         s = self.win.session.slave(self.position)
@@ -2506,6 +2736,11 @@ class TestPage(QWidget):
         write = QPushButton("Write...")
         write.clicked.connect(self.sdo_write)
         form.addWidget(write)
+        run_cmd = QPushButton("Run command...")
+        run_cmd.setToolTip("For an object that does something when written (zero position, "
+                           "store parameters): once, on request, never at start")
+        run_cmd.clicked.connect(self.sdo_run_command)
+        form.addWidget(run_cmd)
         sdo.add(form)
         self.sdo_name = sdo.add(label("", "hint"))
         lay.addWidget(sdo)
@@ -2715,6 +2950,51 @@ class TestPage(QWidget):
         self.sdo_value.setText(text)
         self.win.status("0x%04X:%02X = %s" % (t[0], t[1], text))
 
+    def sdo_run_command(self):
+        """Run a command object once: confirmed, and not while a drive is enabled."""
+        t = self._sdo_target()
+        pos = self.position
+        s = self.win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
+        if not t or s is None:
+            return
+        entry = self.win.session.dictionary(pos).entries.get(t)
+        known = quirks.command_run(s, *t) or {}
+        reason = guidance.command_reason(s, t[0], entry)
+        if reason is None:
+            QMessageBox.information(
+                self, TITLE, "0x%04X:%02X is not known as a command. Use Write for an ordinary "
+                "object; to make this one a command, list it under commands: in a quirk file "
+                "(docs/ecatsetup.md)." % t)
+            return
+        value = str(known["value"]) if known.get("value") is not None else \
+            self.sdo_value.text().strip()
+        if not value:
+            self.win.status("Type the value the command takes")
+            return
+        dtype = known.get("type") or self.sdo_type.currentData()
+        try:
+            enabled = testmode.drives_enabled(self.win.session.cfg, tool.upload)
+        except (tool.ToolError, OSError) as e:
+            QMessageBox.warning(self, TITLE, "Could not tell whether a drive is enabled (%s): "
+                                "not run." % e)
+            return
+        if enabled:
+            QMessageBox.warning(self, TITLE, "Not run: %s %s enabled. Disable the drive first."
+                                % (", ".join(enabled), "is" if len(enabled) == 1 else "are"))
+            return
+        if QMessageBox.question(
+                self, TITLE, "Run the command 0x%04X:%02X on slave %d, writing %s?\n\n%s\n%s\n\n"
+                "It runs once, now; it is not written at start." % (
+                    t[0], t[1], pos, value, reason[1], known.get("confirm") or ""),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        try:
+            tool.download(pos, t[0], t[1], value, dtype)
+        except tool.ToolError as e:
+            QMessageBox.warning(self, TITLE, "The slave refused:\n%s" % e)
+            return
+        self.win.status("Ran command 0x%04X:%02X = %s on slave %d" % (t[0], t[1], value, pos))
+
     def sdo_write(self):
         t = self._sdo_target()
         value = self.sdo_value.text().strip()
@@ -2724,7 +3004,8 @@ class TestPage(QWidget):
             return
         why = testmode.sdo_write_refused(s, *t)
         if why:
-            QMessageBox.warning(self, TITLE, "Not written: %s" % why)
+            QMessageBox.warning(self, TITLE, "Not written: %s%s" % (
+                why, "\n\nUse Run command for a command." if quirks.command(s, t[0]) else ""))
             return
         if QMessageBox.question(
                 self, TITLE, "Write %s to 0x%04X:%02X of slave %d?\n\nThe slave keeps it until "

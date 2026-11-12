@@ -129,8 +129,24 @@ Choosing a slave shows:
   `<pin>-0`, `<pin>-1`...; rename them, or leave a name empty to give a
   bit no pin, in the *Split* column. Choosing a type again gives back one
   pin;
-- **Settings**: SDOs written at every start, in PREOP (*Add setting*,
-  *Remove setting*);
+- **Settings**: SDOs written at every start, in PREOP. *Add setting...*
+  opens the slave's object dictionary: filter by object or name, objects
+  writable in PREOP only (untick to see all), manufacturer objects
+  (0x2000-0x5FFF) in bold, with type, size, access and, from the ESI file,
+  range and default. Select one or more and *Add*: each gets its name and
+  type and the value the slave has now (else the ESI default, else 0).
+  PDO mapping objects and commands are not offered. You can also type an
+  object; it completes from the dictionary. A row with a problem is
+  coloured and explained under the table: not in the dictionary, not
+  writable in PREOP, a value that does not fit the type or the ESI's
+  range, another type than the dictionary's, or a command (a quirk file's
+  command is an error and `--check` refuses it; one that only looks like a
+  command, by its name, write-only access or 0x1010/0x1011, is a
+  warning). *Read present values* fills the *Now* column from the slave.
+  The dictionary is the slave's own with the ESI file's ranges added; with
+  no slave read, the ESI file's alone. `ecatsetup --check FILE --esi DIR`
+  prints the same problems from the ESI files;
+- **Settings** (continued): *Remove setting* removes the selected rows;
 - **Notes from the proposal**.
 
 The buttons *Status* and *Test this slave* in the slave's header jump to
@@ -288,7 +304,12 @@ Each slave's inputs show live; the outputs of I/O slaves can be set.
 Pins set during the test go back to 0 before it stops. SDOs can be read
 and written from the same page whenever a master runs; objects that are
 commands rather than settings (such as `0x2010` on the ECT60), objects in
-the process data, and a drive's CiA 402 objects are refused.
+the process data, and a drive's CiA 402 objects are refused by *Write*.
+*Run command...* runs a command object once: it asks first, showing what
+the quirk file says it does, and is refused while a CiA 402 drive is in
+"Operation enabled" (read from its statusword). Only objects known as
+commands (a quirk file's `commands:`, or suspected from the dictionary)
+can be run this way; the value is the quirk's, else the one typed.
 
 When the test stops, every drive is disabled, the outputs go to zero, and
 the slaves are taken to PREOP while process data still flows
@@ -948,6 +969,11 @@ settings:                  # added to the slave when it is proposed
 
 commands:                  # objects that are commands, not settings
   '0x2010': Zero Position, a command
+  '0x1010:01':             # the longer form tells "Run command" what to write
+    note: Store parameters
+    value: 1702257011      # "save" as ASCII
+    type: uint32
+    confirm: Keeps every setting through a power cycle
 
 limits:                    # where the drive test finds a limit
   following-error: {object: '0x2022:00', type: uint32}

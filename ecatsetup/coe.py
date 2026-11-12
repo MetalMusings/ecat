@@ -15,16 +15,25 @@ class CoeEntry:
     data_type: str   # as the tool names it: uint16, int32, float, string, ...
     bitlen: int
     name: str
+    minimum: int = None   # from an ESI file, when it gives them
+    maximum: int = None
+    default: int = None
 
     @property
     def writable(self):
         return "w" in self.access
+
+    @property
+    def writable_preop(self):
+        """Whether the slave accepts a write in PREOP, where settings are written."""
+        return len(self.access) > 1 and self.access[1] == "w"
 
 
 class Dictionary:
     def __init__(self, text=""):
         self.objects = {}   # index -> object name
         self.entries = {}   # (index, subindex) -> CoeEntry
+        self.source = "slave"   # "slave", "ESI" or "slave and ESI"
         for line in text.splitlines():
             m = _OBJ.match(line)
             if m:
@@ -50,3 +59,21 @@ class Dictionary:
     def subentries(self, index):
         """Entries of an object above subindex 0, in order."""
         return [e for (i, s), e in sorted(self.entries.items()) if i == index and s > 0]
+
+    def enriched(self, esi_dict):
+        """This dictionary (read from the slave) with the ESI's minimum,
+        maximum and default values added to the entries both have. Without
+        entries of its own (no bus, or a slave that lists none) the ESI's
+        dictionary is used as it is."""
+        if not self.entries:
+            return esi_dict
+        out = Dictionary()
+        out.objects = dict(self.objects)
+        for key, e in self.entries.items():
+            x = esi_dict.entries.get(key)
+            if x and (x.minimum, x.maximum, x.default) != (None, None, None):
+                e = CoeEntry(e.index, e.subindex, e.access, e.data_type, e.bitlen, e.name,
+                             x.minimum, x.maximum, x.default)
+            out.entries[key] = e
+        out.source = "slave and ESI" if esi_dict.entries else "slave"
+        return out

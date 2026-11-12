@@ -411,6 +411,10 @@ def check(cfg):
         for st in s.get("settings") or []:
             try:
                 set_objects.add(parse_obj(st.get("object")))
+                why = quirks.command(s, parse_obj(st.get("object"))[0])
+                if why:
+                    err("%s: setting %s is a command, not a setting: %s"
+                        % (where, st.get("object"), why))
             except ValueError as x:
                 err("%s: setting: %s" % (where, x))
             if "value" in st:
