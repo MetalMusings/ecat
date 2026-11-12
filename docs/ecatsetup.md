@@ -601,6 +601,17 @@ EtherCAT Setup and replace the simulation with the bus:
   folder. Start the copy once in the simulator, so that the file exists;
   writing then puts it in place of `LIB:basic_sim.tcl` (as that file's
   own header suggests), and changes it like any HAL file.
+- **A configuration's own `.tcl` HAL files** (QtPlasmaC's
+  `sim_no_stepgen.tcl`, `machine.tcl`) are read as the HAL they give: the
+  file runs in `tclsh` as `haltcl` runs it, with the INI file's values
+  (`$::KINS(JOINTS)`), but the HAL commands only note the line they would
+  give, so nothing is loaded. Joints, pins, the take-over and the HAL
+  check see their connections, with the Tcl file's line numbers. A query
+  (`getp`, `show` ...) cannot be answered this way and is noted. A `.tcl`
+  file is never changed: when it connects a pin `ethercat.hal` connects
+  (the simulated joints of `sim_no_stepgen.tcl`, once a joint is
+  connected to a drive), writing is refused and the message names the
+  lines. Take them out of the file, or the file out of the INI file.
 - **What is still simulated** is noted when writing: `simulated_home.hal`
   for switches not connected yet, `sim_spindle_encoder.hal` for the
   spindle. Take them out of the INI file once the real ones are

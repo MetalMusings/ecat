@@ -290,6 +290,19 @@ def read_text(path):
         return f.read()
 
 
+def is_tcl(path):
+    return path.endswith(".tcl")
+
+
+def read_hal(path, ini_path=None):
+    """A HAL file's text; a .tcl one as the plain HAL it gives with the INI
+    file's values (haltcl.py). Raises OSError."""
+    if is_tcl(path):
+        from . import haltcl
+        return haltcl.expand(path, ini_path).text
+    return read_text(path)
+
+
 def original(text):
     """A HAL file's text as the user wrote it: lines commented out by an
     earlier plan are back, so that every plan starts from the same text."""
@@ -325,12 +338,13 @@ def net_pins(tokens):
     return tokens[1], rest
 
 
-def signals(paths):
-    """signal -> set of pins, over HAL files."""
+def signals(paths, ini_path=None):
+    """signal -> set of pins, over HAL files (.tcl ones with ini_path's
+    values)."""
     sig = {}
     for path in paths:
         try:
-            text = original(read_text(path))
+            text = original(read_hal(path, ini_path))
         except OSError:
             continue
         for _, _, t in statements(text):
@@ -340,12 +354,12 @@ def signals(paths):
     return sig
 
 
-def setp_values(paths):
+def setp_values(paths, ini_path=None):
     """pin or parameter -> the value it is set to, over HAL files."""
     out = {}
     for path in paths:
         try:
-            text = original(read_text(path))
+            text = original(read_hal(path, ini_path))
         except OSError:
             continue
         for _, _, t in statements(text):
@@ -653,7 +667,7 @@ def propose_nets(ini_path, cfg):
     # the pins from files in the configuration folder, which can change;
     # lines elsewhere (LinuxCNC's hallib) keep using the signal's name
     d = os.path.dirname(os.path.abspath(ini_path))
-    sig = signals([f for f in files if os.path.dirname(os.path.abspath(f)) == d])
+    sig = signals([f for f in files if os.path.dirname(os.path.abspath(f)) == d], ini_path)
     found = {name: pins for name, pins in sig.items() if any(is_own(cfg, x) for x in pins)}
     out = {}
     for name, pins in found.items():
@@ -671,8 +685,8 @@ def propose_joints(ini_path, cfg):
     """{joint: (slave name, scale)} as the user's HAL files connect them,
     for joints the configuration does not connect yet."""
     files = user_hal_files(ini_path)
-    sig = signals(files)
-    setp = setp_values(files)
+    sig = signals(files, ini_path)
+    setp = setp_values(files, ini_path)
     e = read_ini(ini_path)
     have = {j["joint"] for j in joints(cfg)}
     out = {}
@@ -881,16 +895,48 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         else:
             files.append(path)
     for path in files:
-        if not path.endswith(".hal"):
+        if not path.endswith(".hal") and not is_tcl(path):
             p.notes.append("%s is not a HAL file; it is not checked for lcec or ecat lines"
                            % os.path.basename(path))
     hal_files = [f for f in files if f.endswith(".hal") and os.path.exists(f)]
+    tcl_files = [f for f in files if is_tcl(f) and os.path.exists(f)]
     for f in files:
-        if f.endswith(".hal") and not os.path.exists(f):
+        if (f.endswith(".hal") or is_tcl(f)) and not os.path.exists(f):
             p.errors.append("%s is in the INI file but does not exist" % os.path.basename(f))
 
+    # a .tcl file is read as the HAL it gives, but never changed: a line
+    # that would be commented out in a .hal file is an error there
+    for path in tcl_files:
+        from . import haltcl
+        try:
+            x = haltcl.expand(path, ini_path)
+        except OSError as e:
+            p.notes.append("%s could not be read as HAL (%s); it is not checked" % (
+                os.path.basename(path), e))
+            continue
+        p.notes += x.problems
+        clash = []          # (Tcl line, what)
+        for a, _, t in statements(x.text):
+            pins = []
+            if _is_ecat_line(t):
+                pins = [" ".join(t)]
+            elif t[0] == "setp" and len(t) == 3 and t[1] in scale_pins:
+                pins = [t[1]]
+            elif t[0] == "net" and len(t) > 1:
+                pins = [pin for pin in net_pins(t)[1] if pin in managed_pins]
+            if pins:
+                clash.append((x.lines[a] if a < len(x.lines) else 0, pins))
+        if clash:
+            lines = sorted({n for n, _ in clash})
+            what = sorted({pin for _, ps in clash for pin in ps})
+            p.errors.append("%s (line%s %s) connects %s, which ethercat.hal connects now. EtherCAT "
+                            "Setup does not change .tcl files: take those lines out there, or the "
+                            "file out of the INI file" % (
+                                os.path.basename(path), "" if len(lines) == 1 else "s",
+                                ", ".join(str(n) for n in lines), ", ".join(what)))
+
     # what the user's files connect, before any change
-    old_sig = signals(hal_files)
+    old_sig = signals(hal_files + tcl_files, ini_path)
     # lines to comment out, and the signals they used
     sig_of_pin = {}          # managed pin -> the signal the user's file put it on
     kept = {}                # signal -> pins of commented lines that are not managed

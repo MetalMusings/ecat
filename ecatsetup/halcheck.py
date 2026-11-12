@@ -80,14 +80,24 @@ def uses(ini_path):
     """{pin: [Use]} over all HAL files, and {signal: [pins]}."""
     pins, sigs = {}, {}
     for path, _ in hal_files(ini_path):
-        if not path.endswith(".hal"):
-            continue
-        try:
-            text = integrate.read_text(path)
-        except OSError:
+        lineno = None       # a .tcl file: the HAL it gives, with the Tcl file's lines
+        if integrate.is_tcl(path):
+            from . import haltcl
+            try:
+                x = haltcl.expand(path, ini_path)
+            except OSError:
+                continue
+            text, lineno = x.text, x.lines
+        elif path.endswith(".hal"):
+            try:
+                text = integrate.read_text(path)
+            except OSError:
+                continue
+        else:
             continue
         name = os.path.basename(path)
-        for a, _, t in integrate.statements(text):
+        for i, _, t in integrate.statements(text):
+            a = (lineno[i] - 1 if i < len(lineno) else -1) if lineno is not None else i
             if t[0] == "net" and len(t) > 1:
                 sig, ps = integrate.net_pins(t)
                 sigs.setdefault(sig, [])
@@ -128,7 +138,7 @@ def check(ini_path, cfg):
     pins, sigs = uses(ini_path)
 
     for path, _ in hal_files(ini_path):
-        if path.endswith(".hal") and not os.path.exists(path):
+        if (path.endswith(".hal") or integrate.is_tcl(path)) and not os.path.exists(path):
             out.append(Finding("error", os.path.basename(path), 0,
                                "is in the INI file but does not exist"))
 

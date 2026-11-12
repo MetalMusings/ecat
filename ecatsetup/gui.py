@@ -3096,7 +3096,7 @@ class HalPage(QWidget):
         self.hal_signals, self.io_proposal, self.hal_uses = {}, {}, {}
         if ini and s.cfg is not None:
             try:
-                self.hal_signals = integrate.signals(integrate.user_hal_files(ini))
+                self.hal_signals = integrate.signals(integrate.user_hal_files(ini), ini)
                 self.io_proposal = integrate.propose_nets(ini, s.cfg)
                 self.hal_uses = halcheck.uses(ini)[0]
             except OSError:
@@ -3202,7 +3202,7 @@ class HalPage(QWidget):
                 try:
                     self.proposal = integrate.propose_joints(ini, s.cfg)
                     files = integrate.user_hal_files(ini)
-                    setp = integrate.setp_values(files)
+                    setp = integrate.setp_values(files, ini)
                     e = integrate.read_ini(ini)
                     for name in integrate.drives(s.cfg):
                         v = integrate.resolve(setp.get("%s.pos-scale" % name), e)
