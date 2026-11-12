@@ -91,6 +91,11 @@ QPushButton:disabled { color: #a0a7b2; }
 QPushButton#primary { background: #1f6feb; color: white; border: 1px solid #1f6feb; font-weight: 600;
               padding: 7px 16px; }
 QPushButton#primary:disabled { background: #8fb2ee; border-color: #8fb2ee; }
+QPushButton#savedirty { background: #d29922; color: #1b1f24; border: 1px solid #d29922;
+              font-weight: 700; padding: 7px 16px; }
+QPushButton#savedirty:disabled { background: #6e5a2a; border-color: #6e5a2a; color: #c9d1d9; }
+QPushButton#saveclean { background: transparent; color: #8b949e; border: 1px solid #30363d;
+              padding: 7px 16px; }
 QPushButton#danger { background: #b42318; color: white; border: 2px solid white; font-weight: 700;
               padding: 6px 18px; }
 QPushButton#big { padding: 14px; font-size: 15px; font-weight: 600; }
@@ -340,6 +345,18 @@ class Worker(QThread):
 # -- the header
 
 class Header(QFrame):
+    def mark_dirty(self, dirty):
+        """The Save button shows whether there is something to save."""
+        self.save.setText("Save changes \u25cf" if dirty else "Saved")
+        self.save.setToolTip("There are changes not written to the file yet: press to write "
+                             "ethercat.yaml (the old file is kept as .bak)" if dirty else
+                             "Everything is written to the file")
+        name = "savedirty" if dirty else "saveclean"
+        if self.save.objectName() != name:
+            self.save.setObjectName(name)
+            self.save.style().unpolish(self.save)
+            self.save.style().polish(self.save)
+
     def __init__(self, win):
         super().__init__()
         self.setObjectName("header")
@@ -362,7 +379,7 @@ class Header(QFrame):
         self.menu_button.setPopupMode(QToolButton.InstantPopup)
         lay.addWidget(self.menu_button)
         self.save = QPushButton("Save")
-        self.save.setObjectName("primary")
+        self.save.setObjectName("saveclean")
         self.save.setToolTip("Write ethercat.yaml; the old file is kept as .bak")
         self.save.clicked.connect(win.save)
         lay.addWidget(self.save)
@@ -4189,6 +4206,7 @@ class MainWindow(QMainWindow):
         else:
             set_pill(self.header.status, "● Bus not read", "grey")
         has_cfg = s.cfg is not None
+        self.header.mark_dirty(has_cfg and s.dirty)
         self.header.save.setEnabled(has_cfg and not self.busy)
         self.header.save.setVisible(not testing)
         self.header.stop.setVisible(testing)
@@ -4785,6 +4803,18 @@ class MainWindow(QMainWindow):
 
     def _save(self, path):
         existed = os.path.exists(path)
+        folder = os.path.dirname(os.path.abspath(path))
+        if not os.path.isdir(folder):
+            if QMessageBox.question(
+                    self, TITLE, "The folder does not exist:\n%s\n\nCreate it and save %s there?"
+                    % (folder, os.path.basename(path)),
+                    QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+                return False
+            try:
+                os.makedirs(folder)
+            except OSError as e:
+                QMessageBox.warning(self, TITLE, "Cannot create %s:\n%s" % (folder, e))
+                return False
         try:
             self.session.save(path)
         except (OSError, ValueError) as e:

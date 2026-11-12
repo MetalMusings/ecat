@@ -413,6 +413,29 @@ class TestWindow(BusTest):
         self.assertEqual(page.st.item(0, 3).text(), "16")
         self.assertFalse(page.hex_box.isChecked())
 
+    def test_the_save_button_shows_unsaved_changes(self):
+        w = self.window()
+        w.select_slave(0)
+        w.session.cfg["slaves"][0]["name"] = "changed"
+        w.changed()
+        self.assertIn("Save changes", w.header.save.text())
+        self.assertEqual(w.header.save.objectName(), "savedirty")
+        w.session.save(os.path.join(self.dir.name, "x.yaml"))
+        w.refresh()
+        self.assertEqual(w.header.save.text(), "Saved")
+        self.assertEqual(w.header.save.objectName(), "saveclean")
+
+    def test_save_offers_to_create_a_missing_folder(self):
+        from unittest import mock
+        w = self.window()
+        path = os.path.join(self.dir.name, "new", "deeper", "ethercat.yaml")
+        with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Cancel):
+            self.assertFalse(w._save(path))
+        self.assertFalse(os.path.exists(os.path.dirname(path)))
+        with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+            self.assertTrue(w._save(path))
+        self.assertTrue(os.path.exists(path))
+
     def test_bit_pins_can_be_inverted(self):
         w = self.window()
         w.select_slave(0)

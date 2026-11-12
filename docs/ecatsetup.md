@@ -51,7 +51,10 @@ button. Reading the bus needs a running master: see
 
 The dark strip on top shows the open configuration (`new`, or the file
 name; `*` means unsaved changes), the transport, the cycle time, and
-whether the bus was read. To the right: the **File** menu and **Save**.
+whether the bus was read. To the right: the **File** menu and **Save**,
+which is amber and reads *Save changes ●* while there is something not
+written to the file, and grey and reads *Saved* when there is nothing.
+Saving into a folder that does not exist asks whether to create it.
 While a test or a watch runs, a red **STOP** button appears there too.
 
 The **File** menu holds Open, Import lcec XML, Save, Save as, Rescan the
