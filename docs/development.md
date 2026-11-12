@@ -1108,7 +1108,7 @@ from LinuxCNC and needs no change.
 
 C component (`component/`, about 200 pin reads and writes, most in
 `devices/ecat_cia402.c`, then `lcec_main.c`, `devices/ecat_encoder.c`,
-`devices/lcec_class_cia402.c`, `devices/lcec_generic.c`):
+`devices/lcec_generic.c`; the unused lcec class `lcec_class_cia402*` was removed):
 
 1. Every `*d->pin = x` and `x = *d->pin` becomes `hal_set_*()`/
    `hal_get_*()`; struct members become `hal_bool_t` etc.
