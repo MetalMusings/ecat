@@ -3872,7 +3872,8 @@ class HalPage(QWidget):
         errors = list(p.errors) + config.check(s.cfg)
         self.problems.setText("\n".join("✗ " + e for e in errors))
         self.problems.setVisible(bool(errors))
-        self.notes.setText("\n".join("· " + n for n in p.notes))
+        self.notes.setText("\n".join(["\u26a0 " + w for w in p.warnings] +
+                                    ["· " + n for n in p.notes]))
         self.write_button.setText("Write to %s" % os.path.basename(d))
         self.write_button.setEnabled(not errors and not self.win.busy and self.win.test is None)
         self.show_button.setEnabled(True)
@@ -3911,6 +3912,10 @@ class HalPage(QWidget):
         if QMessageBox.question(
                 self, TITLE, "Write these files in %s?\n\n%s\n\nEvery existing file is kept as "
                 ".bak. LinuxCNC must not run with this configuration now." % (d, "\n".join(names)),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        if self.plan.warnings and QMessageBox.warning(
+                self, TITLE, "%s\n\nWrite here anyway?" % "\n\n".join(self.plan.warnings),
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
         if self.plan.edited and QMessageBox.warning(

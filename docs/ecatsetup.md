@@ -231,7 +231,12 @@ One column, top to bottom in the order of the work:
   out with `#ecatsetup: `), *Show all changes...* and *Write* on the left,
   the selected file's new text on the right. Work on a copy of the
   configuration first. A checkbox runs the HAL check each time LinuxCNC
-  starts.
+  starts. A configuration inside LinuxCNC's own files (the source tree of a
+  run-in-place build, or the installed sample configurations) is flagged
+  with a warning, and *Write* asks again before it writes there: copy the
+  folder to `~/linuxcnc/configs` first. A run-in-place LinuxCNC runs a
+  sample configuration where it is and does not offer to copy it; start it
+  with `debug_pickconfig=1 linuxcnc` to be asked.
 
 ![HAL check, file contents and Apply to LinuxCNC](images/gui-hal-apply.png)
 

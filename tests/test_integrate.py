@@ -724,6 +724,36 @@ class TestTclConverted(Folder):
         self.assertIn("sim.tcl", self.read("machine.ini"))
 
 
+class TestLinuxcncTree(Folder):
+    """A configuration inside LinuxCNC's own files is written only after a warning."""
+
+    def test_a_run_in_place_source_tree(self):
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        os.makedirs(os.path.join(root.name, "scripts"))
+        open(os.path.join(root.name, "scripts", "rip-environment"), "w").close()
+        folder = os.path.join(root.name, "configs", "sim", "lathe")
+        os.makedirs(folder)
+        ini = os.path.join(folder, "lathe.ini")
+        open(ini, "w").write(INI)
+        self.assertIn("run-in-place source tree", integrate.linuxcnc_tree(ini))
+        p = integrate.plan(ini, cfg())
+        self.assertEqual(len(p.warnings), 1, p.warnings)
+        self.assertIn("Copy the folder to ~/linuxcnc/configs", p.warnings[0])
+        out = []
+        integrate.describe(p, out.append)
+        self.assertTrue(any(x.startswith("warning: lathe.ini is in LinuxCNC's own files")
+                            for x in out))
+
+    def test_the_users_own_folder_has_no_warning(self):
+        self.assertIsNone(integrate.linuxcnc_tree(self.ini))
+        self.assertEqual(integrate.plan(self.ini, cfg()).warnings, [])
+
+    def test_installed_sample_configurations(self):
+        self.assertIn("installed sample", integrate.linuxcnc_tree(
+            "/usr/share/doc/linuxcnc/examples/sample-configs/sim/axis/axis.ini"))
+
+
 class TestJointChecks(Folder):
     def test_scale_from(self):
         self.assertAlmostEqual(integrate.scale_from(10000, 5), 2000.0)

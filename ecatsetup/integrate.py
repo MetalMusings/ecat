@@ -864,11 +864,28 @@ class FileChange:
         return os.path.basename(self.path)
 
 
+def linuxcnc_tree(path):
+    """What LinuxCNC's own files this path is in: its source tree of a run-in-place build
+    ("run-in-place source tree") or a package's sample configurations; else None. A
+    configuration to change belongs in the user's own folder (~/linuxcnc/configs)."""
+    real = os.path.realpath(path)
+    parent = os.path.dirname(real)
+    while parent and parent != os.path.dirname(parent):
+        if os.path.exists(os.path.join(parent, "scripts", "rip-environment")):
+            return "run-in-place source tree %s" % parent
+        parent = os.path.dirname(parent)
+    for prefix in ("/usr/share/doc/linuxcnc/examples", "/usr/share/linuxcnc"):
+        if real.startswith(prefix + os.sep):
+            return "installed sample configurations (%s)" % prefix
+    return None
+
+
 @dataclass
 class Plan:
     changes: list = field(default_factory=list)     # [FileChange]
     commented: list = field(default_factory=list)   # [(file name, line number, text)]
     errors: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)    # written anyway, after the user confirms
     notes: list = field(default_factory=list)
     edited: list = field(default_factory=list)      # ecatsetup's files changed by hand
 
@@ -935,6 +952,14 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                            os.path.basename(src) if src else "the INI file",
                            os.path.basename(src) if src else "that INI file"))
         return p
+    tree = linuxcnc_tree(ini_path)
+    if tree:
+        p.warnings.append(
+            "%s is in LinuxCNC's own files, the %s: writing here changes LinuxCNC's sample "
+            "configuration, not a copy of your own. Copy the folder to ~/linuxcnc/configs first "
+            "(start LinuxCNC with debug_pickconfig=1 to be asked to copy a sample configuration, "
+            "which a run-in-place build otherwise runs where it is), and write there" % (
+                os.path.basename(ini_path), tree))
     ini_e = read_ini(ini_path)
     ds = drives(cfg)
     njoints = len(ini_joints(ini_path))
@@ -1389,6 +1414,8 @@ def describe(p, out=print):
                                              c.name + ".bak", c.name, n=1)).rstrip())
     for n in p.notes:
         out("note: %s" % n)
+    for w in p.warnings:
+        out("warning: %s" % w)
     for f in p.edited:
         out("warning: %s was changed by hand since EtherCAT Setup wrote it; writing replaces "
             "the change (the diff above shows it as removed)" % f)

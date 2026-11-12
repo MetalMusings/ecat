@@ -436,6 +436,31 @@ class TestWindow(BusTest):
             self.assertTrue(w._save(path))
         self.assertTrue(os.path.exists(path))
 
+    def test_write_into_linuxcnc_own_files_asks_first(self):
+        from unittest import mock
+        w = self.window()
+        page = w.hal_page
+        page.plan = mock.Mock(changes=[], edited=[], warnings=["lathe.ini is in LinuxCNC's own files"])
+        ini = os.path.join(self.dir.name, "m.ini")
+        open(ini, "w").write("[EMC]\n")
+        w.session.ini_path = ini
+        answers = []
+
+        def question(*a, **k):
+            return gui.QMessageBox.Yes
+        asked = []
+
+        def warning(parent, title, text, *rest):
+            asked.append(text)
+            return gui.QMessageBox.Cancel
+        with mock.patch.object(gui.QMessageBox, "question", question), \
+                mock.patch.object(gui.QMessageBox, "warning", warning):
+            page.write()
+        self.assertEqual(len(asked), 1)
+        self.assertIn("Write here anyway?", asked[0])
+        self.assertIn("LinuxCNC's own files", asked[0])
+        self.assertFalse(os.path.exists(os.path.join(self.dir.name, "ethercat.yaml")))   # nothing written
+
     def test_bit_pins_can_be_inverted(self):
         w = self.window()
         w.select_slave(0)
