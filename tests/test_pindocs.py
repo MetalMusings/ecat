@@ -22,6 +22,11 @@ class TestPinDocs(unittest.TestCase):
         self.assertIn("M66", pindocs.info("motion.digital-in-03").text)
         self.assertIn("home switch", pindocs.info("joint.2.home-sw-in").text)
 
+    def test_the_spindle_encoder_pins(self):
+        self.assertIn("index-enable pin of the spindle encoder", pindocs.info("spindle.0.index-enable").text)
+        self.assertIn("revolutions", pindocs.info("spindle.1.revs").text)
+        self.assertIn("handshake", pindocs.info("joint.2.index-enable").text)
+
     def test_own_component_has_none(self):
         self.assertIsNone(pindocs.info("mycomp.0.in"))
         self.assertIsNone(pindocs.info("plasmac.breakaway-extra"))

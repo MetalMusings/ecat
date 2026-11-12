@@ -19,7 +19,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
         __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ecatsetup import integrate, wiring  # noqa: E402
+from ecatsetup import config, integrate, wiring  # noqa: E402
 from test_integrate import cfg as base_cfg  # noqa: E402
 
 INI = """\
@@ -192,3 +192,105 @@ class TestWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+SPINDLE_INI = """\
+[EMCMOT]
+SERVO_PERIOD = 1000000
+
+[KINS]
+JOINTS = 1
+KINEMATICS = trivkins coordinates=X
+
+[HAL]
+HALFILE = spindle_sim.hal
+
+[JOINT_0]
+TYPE = LINEAR
+"""
+
+# as LinuxCNC's spindle_sim.hal: a simulated spindle encoder on the spindle's pins
+SPINDLE_SIM = """\
+loadrt sim_spindle names=spindle_sim
+net spindle-index-enable spindle.0.index-enable <=> spindle_sim.index-enable
+net spindle-revs spindle_sim.position-fb => spindle.0.revs
+net spindle-speed spindle.0.speed-out => spindle_sim.velocity-cmd
+"""
+
+
+def encoder_cfg():
+    """A terminal with an encoder channel (MDP 511), latch C mapped."""
+    c = base_cfg()
+    io = c["slaves"][1]
+    io["profile"] = "mdp"
+    io["encoders"] = [{"name": "enc", "index": "0x6010"}]
+    io["process-data"] = {
+        "outputs": [{"pdo": "0x1603", "sm": 2, "entries": [
+            {"object": "0x7010:01", "bits": 1, "type": "BOOL", "use": "profile"},
+            {"object": "0x7010:11", "bits": 32, "type": "UDINT", "use": "profile"}]}],
+        "inputs": [{"pdo": "0x1A04", "sm": 3, "entries": [
+            {"object": "0x6010:01", "bits": 1, "type": "BOOL", "use": "profile"},
+            {"object": "0x6010:11", "bits": 32, "type": "UDINT", "use": "profile"},
+            {"object": "0x6010:12", "bits": 32, "type": "UDINT", "use": "profile"}]}]}
+    return c
+
+
+class TestEncoderChannelPins(unittest.TestCase):
+    """The encoder channel's pins can be connected, the handshake pin (index-enable, both
+    ways) too, and a simulated spindle encoder gives way."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        lib = tempfile.TemporaryDirectory()
+        self.addCleanup(lib.cleanup)
+        p = mock.patch.object(integrate, "HALLIB", lib.name)
+        p.start()
+        self.addCleanup(p.stop)
+        for name, text in (("machine.ini", SPINDLE_INI), ("spindle_sim.hal", SPINDLE_SIM)):
+            with open(os.path.join(self.dir.name, name), "w") as f:
+                f.write(text)
+        self.ini = os.path.join(self.dir.name, "machine.ini")
+
+    def rows(self, c):
+        return {r.pin: r for r in wiring.rows(self.ini, c)}
+
+    def test_the_channels_pins_are_pins_to_connect(self):
+        own = integrate.slave_pins(encoder_cfg())
+        self.assertEqual(own["io.enc.pos"], ("real", "out"))
+        self.assertEqual(own["io.enc.index-enable"], ("bool", "io"))
+        self.assertEqual(own["io.enc.reset"], ("bool", "in"))
+        self.assertNotIn("io.enc.pos-scale", own)                 # a parameter
+        self.assertEqual(integrate.known_pin("spindle.0.index-enable"), ("bool", "io"))
+        self.assertEqual(integrate.known_pin("spindle.0.revs"), ("real", "in"))
+
+    def test_the_spindle_rows(self):
+        rows = self.rows(encoder_cfg())
+        r = rows["spindle.0.index-enable"]
+        self.assertEqual((r.way, r.status), ("io", "simulated"))
+        self.assertIn("spindle_sim.index-enable", r.now)
+        r = rows["spindle.0.revs"]
+        self.assertEqual((r.way, r.status), ("in", "simulated"))
+
+    def test_connect_and_write(self):
+        c = encoder_cfg()
+        rows = self.rows(c)
+        wiring.connect(c, rows["spindle.0.index-enable"], "io.enc.index-enable")
+        wiring.connect(c, rows["spindle.0.revs"], "io.enc.pos")
+        self.assertEqual(config.check(c), [])
+        rows = self.rows(c)
+        self.assertEqual((rows["spindle.0.index-enable"].status, rows["spindle.0.index-enable"].slave),
+                         ("connected", "io.enc.index-enable"))
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        main = next(ch.new for ch in p.changes if ch.path.endswith(integrate.MAIN_FILE))
+        self.assertIn("net spindle-index-enable io.enc.index-enable <=> spindle.0.index-enable\n", main)
+        self.assertIn("net spindle-revs io.enc.pos => spindle.0.revs\n", main)
+        # nothing of the simulated encoder is left on the signals
+        self.assertNotIn("spindle_sim.index-enable", main)
+        self.assertNotIn("spindle_sim.position-fb", main)
+        self.assertTrue(any("signal spindle-index-enable: spindle_sim.index-enable no longer on it"
+                            in n for n in p.notes), p.notes)
+        sim = next(ch.new for ch in p.changes if ch.name == "spindle_sim.hal")
+        self.assertIn(integrate.COMMENT + "net spindle-index-enable", sim)
+        self.assertIn("net spindle-speed spindle.0.speed-out => spindle_sim.velocity-cmd\n", sim)

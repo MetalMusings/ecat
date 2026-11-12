@@ -17,7 +17,9 @@ an E-stop is never inverted by a guess. What is found at the end is:
 - "yours": anything else (your own logic), left alone and not listed.
 
 For an output (LinuxCNC writes it): "simulated" when only simulation
-components read it, "connected" when a slave's pin does.
+components read it, "connected" when a slave's pin does. For a pin both
+sides drive (index-enable): "simulated" when only simulation components
+are on its signal, "connected" when a slave's pin is.
 
 Each row names the pin to connect a slave's pin to (target): the one that
 read the simulation, so that a debounce stays in the chain.
@@ -41,7 +43,7 @@ JOINT_OWN = re.compile(r"joint\.\d+\.(motor-pos-cmd|motor-pos-fb|amp-enable-out|
 class Row:
     pin: str            # the LinuxCNC pin
     htype: str          # its HAL type
-    way: str            # "in": LinuxCNC reads it; "out": LinuxCNC writes it
+    way: str            # "in": LinuxCNC reads it; "out": LinuxCNC writes it; "io": both
     status: str         # "simulated", "open", "connected"
     now: str = ""       # what feeds it (in) or reads it (out) now
     target: str = ""    # the pin a slave's pin is connected to
@@ -228,6 +230,8 @@ def rows(ini_path, cfg):
         slave = next((x for x in (net or {}).get("pins") or [] if x in own), "")
         if way == "in":
             row = _trace_in(g, own, pin, htype)
+        elif way == "io":
+            row = _trace_io(g, own, pin, htype)
         else:
             row = _trace_out(g, own, pin, htype)
         if row is None:
@@ -330,6 +334,25 @@ def _trace_out(g, own, pin, htype):
         return Row(pin, htype, "out", "simulated", now=", ".join(r), target=pin,
                    where="%s:%d" % (f, line) if f else "", tcl=tcl)
     return None
+
+
+def _trace_io(g, own, pin, htype):
+    """A pin both sides read and write (index-enable): what else is on its signal."""
+    sig = g.signal.get(pin)
+    if sig is None:
+        return Row(pin, htype, "io", "open", target=pin)
+    others = list(dict.fromkeys(x for k in (g.writers, g.readers, g.unknown)
+                                for x in k.get(sig, []) if x != pin))
+    if any(x in own for x in others):
+        return Row(pin, htype, "io", "connected", now=", ".join(others), target=pin,
+                   slave=next(x for x in others if x in own))
+    if not others:
+        return Row(pin, htype, "io", "open", now="signal %s, nothing else on it" % sig, target=pin)
+    if all(is_sim(g, x) for x in others):
+        f, line, tcl = g.where.get((sig, others[0])) or ("", 0, False)
+        return Row(pin, htype, "io", "simulated", now=", ".join(others), target=pin,
+                   where="%s:%d" % (f, line) if f else "", tcl=tcl)
+    return None                 # your own logic
 
 
 def connect(cfg, row, slave_pin):

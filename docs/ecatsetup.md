@@ -223,7 +223,12 @@ One column, top to bottom in the order of the work:
   for a normally closed switch such as an E-stop; it is the same setting as
   the *Invert* column of Process data, so every net the pin is in gets it;
 - **Inputs and outputs**: the pins the configuration gives, and a column
-  where you connect each to LinuxCNC pins;
+  where you connect each to LinuxCNC pins. An encoder channel's pins
+  (`pos`, `velocity`, `counts`, `index-enable` ...) are rows too. A pin both
+  sides read and write (a handshake such as `index-enable`) is connected
+  to such a pin (`spindle.0.index-enable`, `joint.N.index-enable`) and
+  written with `<=>`; of a simulated spindle encoder on the same signal
+  only the simulation's pins give way, never your own logic;
 - **HAL check** and **File contents**, side by side: your HAL files
   against the configuration, and `ethercat.yaml` as it will be written;
 - **Apply to LinuxCNC**, last: what will be written (`ethercat-load.hal`,

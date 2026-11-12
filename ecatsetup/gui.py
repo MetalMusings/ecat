@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, homing, integrate, masterstart,
+from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, halpins, homing, integrate, masterstart,
                netif, pindocs, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
@@ -3204,8 +3204,16 @@ def config_pins(cfg):
             rows.append((s["position"], "CiA 402 axis %d" % n if len(names) > 1 else "CiA 402 profile",
                          "%s.*" % a, "", "see docs/component.md"))
         for ch in s.get("encoders") or []:
-            rows.append((s["position"], "encoder %s" % ch.get("index"),
-                         "%s.%s.*" % (name, ch.get("name")), "", "see docs/component.md"))
+            prefix = "%s.%s." % (name, ch.get("name"))
+            pins = sorted((p, t, d) for p, (t, d) in halpins.pins(cfg).items()
+                          if p.startswith(prefix) and d in ("in", "out", "io"))
+            for p, t, d in pins:
+                rows.append((s["position"], "encoder %s" % ch.get("index"), p, t,
+                             {"in": "to the slave", "out": "from the slave",
+                              "io": "both ways"}[d]))
+            if not pins:
+                rows.append((s["position"], "encoder %s" % ch.get("index"), prefix + "*", "",
+                             "see docs/component.md"))
     return rows
 
 
@@ -3588,7 +3596,7 @@ class HalPage(QWidget):
             box.addItem("")
             for x in offered:
                 k = integrate.known_pin(x)
-                if k and k[0] == htype and k[1] != way:
+                if k and k[0] == htype and (k[1] == "io" if way == "io" else k[1] not in (way, "io")):
                     box.addItem(x)
             box.setEditText(" ".join(others))
             box.lineEdit().setCursorPosition(0)
@@ -3649,7 +3657,7 @@ class HalPage(QWidget):
         for i, r in enumerate(self.wiring_rows):
             colour = (QColor("#2e7d32") if r.status == "connected" else
                       QColor("#b26a00") if r.status == "simulated" else QColor("#c62828"))
-            arrow = "\u2192 LinuxCNC" if r.way == "in" else "LinuxCNC \u2192"
+            arrow = {"in": "\u2192 LinuxCNC", "out": "LinuxCNC \u2192", "io": "\u2194"}[r.way]
             doc = pindocs.info(r.pin)
             t.setItem(i, 0, item(r.pin, font=mono(), tip="%s (%s)%s" % (
                 r.pin, arrow, "\n" + doc.text if doc else "")))
@@ -3664,7 +3672,7 @@ class HalPage(QWidget):
             t.setItem(i, 3, item(st, colour=colour, tip=where or None))
             box = QuietCombo()
             box.addItem("")
-            want = "out" if r.way == "in" else "in"
+            want = {"in": "out", "out": "in", "io": "io"}[r.way]
             for pin, (ht, w) in sorted(own.items()):
                 if w == want and ht == r.htype:
                     box.addItem(pin)
@@ -3675,9 +3683,12 @@ class HalPage(QWidget):
             box.setMinimumWidth(220)
             box.setEnabled(box.count() > 1)
             box.setToolTip("The slave's %s pin to connect to %s" % (
-                "input" if r.way == "in" else "output", r.target) if box.count() > 1 else
+                {"in": "input", "out": "output", "io": "handshake pin (both ways)"}[r.way],
+                r.target) if box.count() > 1 else
                 "No slave pin of type %s %s: make one on the Bus page" % (
-                    r.htype, "from the machine" if r.way == "in" else "to the machine"))
+                    r.htype, {"in": "from the machine", "out": "to the machine",
+                              "io": "that both sides drive (such as an encoder channel's "
+                                    "index-enable)"}[r.way]))
             box.currentTextChanged.connect(lambda text, row=r: self.wiring_edited(row, text))
             t.setCellWidget(i, 4, box)
             inv = QCheckBox()

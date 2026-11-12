@@ -86,6 +86,17 @@ PATTERNS = [
      "(in CSS mode) at each rapid to feed transition."),
     (r"spindle\.\d+\.is-oriented", "motion",
      "Acknowledges spindle-orient: completes the orient cycle."),
+    (r"spindle\.\d+\.index-enable", "motion",
+     "A handshake pin (it is read and written by both sides). For spindle-synchronised moves "
+     "(threading, G33, G95) it must be connected to the index-enable pin of the spindle "
+     "encoder: with an encoder channel of the slave, `<slave>.<channel>.index-enable`."),
+    (r"spindle\.\d+\.revs", "motion",
+     "The spindle position in revolutions. For spindle-synchronised moves it must be connected "
+     "to the position pin of the spindle encoder: with an encoder channel of the slave, "
+     "`<slave>.<channel>.pos` (with pos-scale in counts per revolution)."),
+    (r"joint\.\d+\.index-enable", "motion",
+     "A handshake pin (it is read and written by both sides). Connect it to the index-enable "
+     "pin of the joint's encoder to home to the index pulse."),
     (r"spindle\.\d+\.speed-in", "motion",
      "The actual spindle speed in revolutions per second; used by G96 (constant surface "
      "speed) and G95 (feed per revolution)."),

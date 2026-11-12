@@ -514,7 +514,8 @@ def rename_in_hal(ini_path, renamed):
 # -- inputs and outputs: nets between the slaves' pins and LinuxCNC's
 
 # LinuxCNC pins a slave's pin is often connected to: (pattern, HAL type,
-# direction seen from HAL: "in" is read by LinuxCNC, "out" written by it)
+# direction seen from HAL: "in" is read by LinuxCNC, "out" written by it,
+# "io" both: a handshake such as index-enable)
 KNOWN_PINS = [
     (r"iocontrol\.0\.emc-enable-in", "bool", "in"),
     (r"iocontrol\.0\.user-enable-out", "bool", "out"),
@@ -536,7 +537,8 @@ KNOWN_PINS = [
     (r"spindle\.\d+\.(speed-out|speed-out-abs|speed-out-rps|speed-out-rps-abs)",
      "real", "out"),
     (r"spindle\.\d+\.(at-speed|is-oriented|orient-fault-in)", "bool", "in"),
-    (r"spindle\.\d+\.(speed-in)", "real", "in"),
+    (r"spindle\.\d+\.(speed-in|revs)", "real", "in"),
+    (r"(joint|spindle)\.\d+\.index-enable", "bool", "io"),
     (r"halui\.(machine|estop|program|mist|flood|lube)\.(on|off|activate|reset|run|pause|"
      r"resume|step|stop)", "bool", "in"),
     (r"halui\.machine\.is-on", "bool", "out"),
@@ -591,20 +593,18 @@ def suggestions(ini_path=None):
 
 
 def slave_pins(cfg):
-    """{pin: (HAL type, direction)} of the slaves' process data pins;
-    direction as seen from HAL: an input of the slave is an "out" pin."""
+    """{pin: (HAL type, direction)} of the pins of the slaves that can be connected:
+    the process data pins, and those the component makes beyond them (an encoder
+    channel's pos, index-enable ..., a drive's status pins, the slave's state). Not
+    parameters, the master's pins, or those a joint's connection takes. Direction as
+    seen from HAL: an input of the slave is an "out" pin; "io" is a handshake pin
+    (index-enable) that both sides read and write."""
+    from . import halpins
     out = {}
-    for s in (cfg or {}).get("slaves") or []:
-        name = s.get("name")
-        for kind in ("outputs", "inputs"):
-            way = "in" if kind == "outputs" else "out"
-            for pdo in (s.get("process-data") or {}).get(kind) or []:
-                for e in pdo.get("entries") or []:
-                    if "pin" in e:
-                        out["%s.%s" % (name, e["pin"])] = (e.get("hal-type"), way)
-                    for p in e.get("split") or []:
-                        if p:
-                            out["%s.%s" % (name, p)] = ("bool", way)
+    taken = joint_pins(cfg)
+    for pin, (htype, d) in halpins.pins(cfg).items():
+        if d in ("in", "out", "io") and not pin.startswith("ecat.") and pin not in taken:
+            out[pin] = (htype, d)
     return out
 
 
@@ -1203,6 +1203,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         count[letter] = count.get(letter, 0) + 1
     used = set(old_sig)
     driven = set()           # signals ethercat.hal gives a writer
+    io_signals = set()       # signals ethercat.hal gives a handshake pin (index-enable)
     body = ["addf ecat.read-all  servo-thread 1", "addf ecat.write-all servo-thread", ""]
     for n, name, scale, conns in managed:
         letter = letters.get(n, "")
@@ -1264,7 +1265,11 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         writers = [x for x in pins if way(x) == "out"]
         if writers:
             driven.add(sig)
-        if len(writers) == 1:
+        if any(way(x) == "io" for x in pins):
+            io_signals.add(sig)
+        if not writers and len(pins) == 2 and all(way(x) == "io" for x in pins):
+            body.append("net %s %s <=> %s" % (sig, pins[0], pins[1]))
+        elif len(writers) == 1:
             rest = [x for x in pins if x != writers[0]]
             body.append("net %s %s => %s" % (sig, writers[0], " ".join(rest)))
         else:
@@ -1289,6 +1294,17 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                     p.notes.append("signal %s: %s left unconnected; the simulation shared the "
                                    "switch, a machine has one each: connect its own input"
                                    % (s_name, ", ".join(shared)))
+    # a handshake pin (index-enable) of a real encoder replaces the simulated one: two
+    # encoders on one index-enable would answer each other
+    if io_signals and any(kept.get(x) for x in io_signals):
+        from . import wiring
+        g = wiring.graph(ini_path, cfg)
+        for s_name in sorted(io_signals):
+            gone = [x for x in kept.get(s_name, []) if wiring.is_sim(g, x)]
+            if gone:
+                kept[s_name] = [x for x in kept[s_name] if x not in gone]
+                p.notes.append("signal %s: %s no longer on it (a real pin takes its place)"
+                               % (s_name, ", ".join(dict.fromkeys(gone))))
     extra = [(s, pins) for s, pins in kept.items() if pins]
     if extra:
         body.append("# other pins of lines commented out in your HAL files")

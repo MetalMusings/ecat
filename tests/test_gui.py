@@ -461,6 +461,48 @@ class TestWindow(BusTest):
         self.assertIn("LinuxCNC's own files", asked[0])
         self.assertFalse(os.path.exists(os.path.join(self.dir.name, "ethercat.yaml")))   # nothing written
 
+    def test_a_handshake_row_offers_the_handshake_pins(self):
+        from unittest import mock
+        from ecatsetup import integrate, wiring
+        w = self.window()
+        page = w.hal_page
+        ini = os.path.join(self.dir.name, "m.ini")
+        open(ini, "w").write("[EMC]\n")
+        w.session.ini_path = ini
+        rows = [wiring.Row("spindle.0.index-enable", "bool", "io", "simulated",
+                           target="spindle.0.index-enable"),
+                wiring.Row("spindle.0.revs", "real", "in", "simulated", target="spindle.0.revs")]
+        own = {"io.enc.index-enable": ("bool", "io"), "io.enc.pos": ("real", "out"),
+               "io.enc.reset": ("bool", "in"), "io.in-1": ("bool", "out")}
+        with mock.patch.object(wiring, "rows", return_value=rows), \
+                mock.patch.object(integrate, "slave_pins", return_value=own):
+            page.show_wiring()
+        items = lambda r: [page.wiring.cellWidget(r, 4).itemText(i)
+                           for i in range(page.wiring.cellWidget(r, 4).count())]
+        self.assertEqual(items(0), ["", "io.enc.index-enable"])    # both ways, a bool
+        self.assertEqual(items(1), ["", "io.enc.pos"])             # written by the slave, a real
+        self.assertIn("\u2194", page.wiring.item(0, 0).toolTip())
+
+    def test_an_encoder_channels_pins_are_rows_to_connect(self):
+        from ecatsetup import integrate
+        w = self.window()
+        cfg = w.session.cfg
+        io = cfg["slaves"][0]
+        io["encoders"] = [{"name": "enc", "index": "0x6010"}]
+        io["process-data"] = {
+            "outputs": [{"pdo": "0x1603", "sm": 2, "entries": [
+                {"object": "0x7010:01", "bits": 1, "type": "BOOL", "use": "profile"},
+                {"object": "0x7010:11", "bits": 32, "type": "UDINT", "use": "profile"}]}],
+            "inputs": [{"pdo": "0x1A04", "sm": 3, "entries": [
+                {"object": "0x6010:01", "bits": 1, "type": "BOOL", "use": "profile"},
+                {"object": "0x6010:11", "bits": 32, "type": "UDINT", "use": "profile"},
+                {"object": "0x6010:12", "bits": 32, "type": "UDINT", "use": "profile"}]}]}
+        name = io["name"]
+        rows = {r[2]: r for r in gui.config_pins(cfg)}
+        self.assertEqual(rows["%s.enc.pos" % name][3:], ("real", "from the slave"))
+        self.assertEqual(rows["%s.enc.index-enable" % name][3:], ("bool", "both ways"))
+        self.assertIn("%s.enc.index-enable" % name, integrate.slave_pins(cfg))
+
     def test_bit_pins_can_be_inverted(self):
         w = self.window()
         w.select_slave(0)
