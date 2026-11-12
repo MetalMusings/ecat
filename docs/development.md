@@ -996,3 +996,188 @@ running: the bus recovers by itself, without a restart.
 - The port counters of the master side and of a slave that lost power
   start again from zero, so those show nothing: the event log is the
   record for them.
+
+
+## LinuxCNC 2.10
+
+Investigated 2026-11-11 against LinuxCNC master 64fab5d412 (2026-11-10,
+2.10.0~pre; tag v2.10.0-pre2 is from 2026-09-28). Nothing is built yet.
+ecat 0.11 builds and runs on 2.9 only; on 2.10 it does not compile.
+
+### Decision: ecat moves to 2.10 only
+
+Decided with the user 2026-11-11:
+
+- ecat is written for 2.10's HAL API only: `hal_get_*()`/`hal_set_*()`,
+  `hal_pin_new_*()`, the types `bool`, `real`, `sint`, `uint`. No
+  `#ifdef HAL_API_VERSION`, no layer that gives 2.9 the getters and
+  setters.
+- ecat-v0.11 is the last release for 2.9. A branch `0.11.x` takes bug
+  fixes for 2.9 if they are needed. Whether a feature is backported from
+  the 2.10 line to 2.9 while 2.9 is still in use is decided when the need
+  comes up, not now.
+- This machine (the plasma cutter) moves to 2.10; turner stays on 2.9 for
+  now, as the reference for 0.11, and follows later.
+
+Why:
+
+- 2.9 is the old series; development is on 2.10, which is to be released
+  soon, and then come 2.11 and later. A clean 2.10 code base is the better
+  starting point for those than 2.10 built on fixes for 2.9.
+- Supporting both costs the same in either direction (whichever is the
+  "clean" one, the other needs a layer): two builds, two test runs, two
+  packages, and pins that are 32 bits on one and 64 bits on the other, so
+  the same code behaves differently (wrapping counters, clamping, LINT
+  pins). That cost buys support for a series nobody develops further.
+- The only 2.9 installations we run are our own machines.
+
+Alternative considered: 2.10 as the main code with a header
+(`hal29.h`) that implements 2.10's getters, setters and `hal_pin_new_*()`
+on 2.9's pointers (the names are free in 2.9's `hal.h`; `hal_port_t`
+clashes; params would need a `hal_malloc`ed slot). Workable, but rejected
+for the reasons above. It is the way to go if a backport to 2.9 is ever
+needed.
+
+What still holds for 2.9 users: `ethercat.yaml` files keep working (the
+old `hal-type` spellings are read), and the master package
+(MetalMusings/ethercat) is the same for both series.
+
+### What changed in LinuxCNC
+
+- **The HAL API was broken on purpose** (ff27543c25, "hal: Break the HAL
+  API - Move to 64-bit exclusively"). `include/hal.h` defines
+  `HAL_API_VERSION 1`.
+  - Types are `HAL_BOOL`, `HAL_REAL`, `HAL_SINT`, `HAL_UINT`, `HAL_PORT`.
+    All integers are 64-bit. `HAL_BIT`/`HAL_FLOAT`/`HAL_S64`/`HAL_U64`
+    remain as deprecated aliases; `HAL_S32`/`HAL_U32` are "no longer
+    supported" (same value as `HAL_SINT`/`HAL_UINT`, with a warning).
+  - Pins and params are opaque pointers (`hal_bool_t`, `hal_sint_t`,
+    `hal_uint_t`, `hal_real_t`, `hal_port_t`). `hal_bit_t`, `hal_float_t`,
+    `hal_s32_t`, `hal_u32_t` are gone. Values are read and written only
+    with `hal_get_bool()`/`hal_set_bool()`, `hal_get_real()`,
+    `hal_get_sint()`, `hal_get_uint()`, and the 32-bit helpers
+    `hal_get_si32()` (truncating), `hal_get_si32_clamped()`,
+    `hal_set_si32()`, `hal_get_ui32*()`, `hal_set_ui32()`. They are
+    relaxed atomic loads and stores: no cost on x86.
+  - Pins are made with `hal_pin_new_bool/sint/uint/real/si32/ui32/port(
+    comp_id, dir, &ref, default, fmt, ...)`. The generic `hal_pin_new()`
+    and `hal_param_new()` and all `hal_pin_*_newf()` are gone. Params are
+    references too (`hal_param_new_*()`), no longer plain values.
+  - `hal_pin_dir_t`/`hal_param_dir_t` are deprecated for `hal_pdir_t`.
+  - `hal_extend_counter(old, newlow, nbits)` is in `hal.h`.
+  - `src/hal/utils/halcompupdate.py` migrates `.comp` files, and
+    `halfileupdate.py` HAL files (components whose names spell a type, such
+    as `conv_s32_float` -> `conv_sint_real`).
+- **RTAPI**: `rtapi_task_new()` lost its last argument (`uses_fp`) and
+  `RTAPI_USES_FP` is gone. The other RTAPI calls ecat uses are unchanged
+  (`rtapi_task_start/pause/delete`, `rtapi_task_pll_*`, `rtapi_prio_*`,
+  `rtapi_mutex_*`, `rtapi_shmem_getptr(id, ptr)`, `rtapi_get_time`). The
+  headers moved to `include/` in the source tree (the installed layout is
+  to be checked). uspace refuses a component without `rtapi_app_exit`
+  (ecat has one), and rtapi_app picks the highest CPU when no CPU is
+  isolated (455b63cdcb).
+- **halcmd**: `show pin` prints the types `bool`, `real`, `sint`, `uint`.
+  `bit`, `float`, `s32`, `u32`, `s64`, `u64` are still accepted as input.
+  The column layout ("Owner Type Dir Value Name") is the same. `unloadrt`
+  is refused while a function of the component is in a running thread
+  (32a602d1a3).
+- **Module build**: `Makefile.modinc` compiles with `-O2 -Wall -Wextra`
+  and links with `-Wl,-Bsymbolic $(EXTRA_LDFLAGS)`. Expect new warnings.
+- **Homing** (ee80cc1330, 7c7e46ef3e): new `[JOINT_n]HOME_SEARCH_DIST` and
+  `HOME_LATCH_DIST` (default 0, the old unbounded behaviour), and every leg
+  of a synchronized home sequence runs together. Homing by the drive
+  (`index-enable`, method 35) is likely unaffected, but must be tried.
+- **Python `hal` module**: `hal.HAL_BIT` etc. still work with a
+  FutureWarning; new names are `hal.Type.BOOL/REAL/SINT/UINT`. ecatsetup
+  uses halcmd, not `hal`.
+
+The master fork (MetalMusings/ethercat) does not include or link anything
+from LinuxCNC and needs no change.
+
+### What ecat needs
+
+C component (`component/`, about 200 pin reads and writes, most in
+`devices/ecat_cia402.c`, then `lcec_main.c`, `devices/ecat_encoder.c`,
+`devices/lcec_class_cia402.c`, `devices/lcec_generic.c`):
+
+1. Every `*d->pin = x` and `x = *d->pin` becomes `hal_set_*()`/
+   `hal_get_*()`; struct members become `hal_bool_t` etc.
+2. `lcec_pins.c`: `lcec_pin_newfv()` (now `hal_pin_new()` with a type and
+   a `void **`) dispatches on the type to `hal_pin_new_bool/sint/uint/
+   real()`, default 0 (which replaces the zeroing that follows).
+   `lcec_pindesc_t` lists keep working with a pointer-sized ref.
+3. Params (`lcec_ethercat.c:519` `hal_param_new()`; in `lcec.h`
+   `pll_step`, `pll_max_err`, `dc_phase_max_err`, `send_offset_max`, the
+   auto-shift margins) become refs, read with getters in the realtime
+   code too.
+4. `lcec_main.c:693`: `rtapi_task_new()` without `RTAPI_USES_FP`.
+5. `HAL_BIT/FLOAT/S32/U32` -> `HAL_BOOL/REAL/SINT/UINT` (about 200 uses,
+   incl. `ecat_config.c`'s `LCEC_CONF_*` records); `hal_pin_dir_t` ->
+   `hal_pdir_t`.
+6. `component/tests/fake.c`/`fake.h`: a fake of 2.10's API.
+7. Behaviour, decided on 2.10's terms:
+   - Integer pins are 64-bit. A value written to a narrower PDO entry is
+     clamped to the entry's range by ecat, explicitly (commands); raw bit
+     patterns (`digital-outputs`) are masked. Mutation-check both.
+   - Counters that wrap at 32 bits (`propose.py`'s `WRAPPING`) are
+     extended to 64 bits in the component (`hal_extend_counter`), as the
+     encoder function already does with its own code.
+   - LINT/ULINT entries become `sint`/`uint` pins (not float any more,
+     `lcec_generic_int64.h`); the encoder's 64-bit count and the cia402
+     positions can be integer pins without loss.
+   - Pin names that spell a type: none found.
+
+EtherCAT Setup (`ecatsetup/`):
+
+8. Use the 2.10 names internally: `halpins.py`'s tables, `testmode.py`
+   (`pin.type == "bit"`/`"float"` at lines 281 and 387 would treat `bool`
+   pins as numbers), `halcheck.py`, `integrate.py`'s table of LinuxCNC pins
+   (lines 435-460).
+9. `ethercat.yaml`'s `hal-type`: `bool/real/sint/uint` are written; the old
+   `bit/float/s32/u32` are still read (files must keep working);
+   LINT/ULINT get integer pins. `config.py` (`HAL_TYPES`, the LINT rule at
+   line 362), `propose.py` (`HAL_TYPES`) and `ecat_config.c` (lines
+   393-404) in step.
+10. `testmode.py` stops with `stop` then `exit`, so the `unloadrt` rule is
+    met; check halrun's own `unload all` at exit.
+11. `integrate.py` writes `limit3`, `mux2`, `not` (names unchanged). Check
+    its INI keys against 2.10; `HOME_SEARCH_DIST`/`HOME_LATCH_DIST` may be
+    worth proposing for a drive that homes.
+
+Packaging and docs:
+
+12. `scripts/build-deb.sh`: `Depends: linuxcnc-uspace (>= 1:2.10~)`; a
+    clear version step that marks the break.
+13. `.github/workflows/deb.yml`: build against 2.10's
+    `linuxcnc-uspace-dev` (own build of the pinned commit, or linuxcnc.org's
+    buildbot: not checked whether it has trixie packages).
+14. README, getting-started.md and the release text: 2.10 or newer; 2.9
+    users take 0.11.
+
+### Moving this machine
+
+- It runs the plasma cutter, and the installed ecat 0.11 does not load on
+  2.10. So 2.10 is first built run-in-place in `~/src/linuxcnc`, on a
+  pinned commit, beside the installed 2.9. ecat is ported and tried in
+  halrun against the bus (no motion) with that build. Only then is the
+  installation switched.
+- 2.10 is a pre-release and its HAL API changed as late as October 2026:
+  move the pinned commit on purpose only. Way back: 2.9.4 comes from
+  Debian trixie (`apt install linuxcnc-uspace=1:2.9.4-2`).
+- Configurations: run `halfileupdate.py` on copies (a migrated
+  configuration does not run on 2.9). `skewkins.comp` (all QtPlasma*
+  configs) has an `s32` pin: `halcompupdate.py`, then compile again.
+  `sum2` in `custom_postgui.hal` keeps its name; QtPlasmaC comes with
+  LinuxCNC. `python3-qtpyvcp`/`monokrom` are built for 2.9 and may break;
+  QtPlasma-ecat402 does not use them.
+
+### Order of work
+
+1. LinuxCNC 2.10 run-in-place on a pinned commit.
+2. Port the component (1-7) and EtherCAT Setup (8-11); `make check` and
+   the Python tests green, with halcmd output in the 2.10 spelling.
+3. halrun against the bus without motion, with the run-in-place build.
+4. 2.10 packages installed here; copies of the plasma configurations
+   migrated; tried at the machine with the user.
+5. Branch `0.11.x` from ecat-v0.11; packaging and docs (12-14); release.
+6. turner to 2.10 when the above is stable.
