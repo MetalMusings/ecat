@@ -24,8 +24,15 @@ go back to 0, and the slaves are taken to PREOP (ecat.take-down).
 
 The free-running master (ethercat-uspace start) hands the bus over to the
 component by itself; it does not come back when the test stops.
+
+Only one test runs at a time, also with several windows open: a test
+holds TEST_LOCK (flock, let go by the system when the process ends), and
+another window that tries to start one is told which process holds it.
+Limits a drive test wrote into a drive belong to the test that holds the
+lock, so another window must not write them back meanwhile.
 """
 
+import fcntl
 import os
 import subprocess
 import tempfile
@@ -36,6 +43,62 @@ from . import config, netif, quirks
 HALRUN = os.environ.get("ECAT_HALRUN", "halrun")
 HALCMD = os.environ.get("ECAT_HALCMD", "halcmd")
 KERNEL_MASTER = "/dev/EtherCAT0"
+TEST_LOCK = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                         "ecatsetup", "test.lock")
+
+
+def _lock_file():
+    os.makedirs(os.path.dirname(TEST_LOCK), exist_ok=True)
+    return open(TEST_LOCK, "a+")
+
+
+def lock_test():
+    """Take the test lock; the open file holds it until unlock_test(). Raises
+    TestError naming the process that holds it."""
+    f = _lock_file()
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.seek(0)
+        pid = f.read().strip()
+        f.close()
+        raise TestError("Another EtherCAT Setup%s is running a test or moving a drive: stop it "
+                        "there first" % (" (process %s)" % pid if pid else ""))
+    f.seek(0)
+    f.truncate()
+    f.write("%d\n" % os.getpid())
+    f.flush()
+    return f
+
+
+def unlock_test(f):
+    if f is not None:
+        try:
+            f.seek(0)
+            f.truncate()
+            fcntl.flock(f, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        f.close()
+
+
+def test_holder():
+    """The process id of another process that runs a test now, else None."""
+    try:
+        f = _lock_file()
+    except OSError:
+        return None
+    with f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_UN)
+            return None
+        except OSError:
+            f.seek(0)
+            pid = f.read().strip()
+    if pid == str(os.getpid()):
+        return None
+    return int(pid) if pid.isdigit() else -1
 
 # how long a drive keeps running without a new heartbeat
 WATCHDOG_MS = 500
@@ -195,11 +258,22 @@ class TestRun:
         self.dir = None
         self.log_path = None
         self.written = {}       # pin -> type, of pins set during the test
+        self.lock = None        # the test lock's file, while the test runs
 
     # -- start and stop
 
     def start(self, progress=lambda text: None, timeout=40.0):
         progress("1/5 Checking that nothing else uses the network card")
+        self.lock = lock_test()
+        try:
+            self._start(progress, timeout)
+        except BaseException:
+            if self.proc is None:
+                unlock_test(self.lock)
+                self.lock = None
+            raise
+
+    def _start(self, progress, timeout):
         if os.path.exists(KERNEL_MASTER):
             raise TestError("The kernel EtherCAT master is loaded and may use the network card.\n"
                             "Stop it first: sudo systemctl stop ethercat")
@@ -348,6 +422,8 @@ class TestRun:
         self.log.close()
         self.proc = None
         self.written = {}
+        unlock_test(self.lock)
+        self.lock = None
 
     # what ecat says when it gives up, which says nothing on its own
     NOISE = ("requesting master", "failure, clearing config", "exiting", "returning -")
@@ -414,6 +490,7 @@ class WatchRun(TestRun):
         self.dir = None
         self.log_path = None
         self.written = {}
+        self.lock = None
         self.gone = False
 
     def start(self, progress=lambda text: None, timeout=40.0):

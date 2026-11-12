@@ -271,6 +271,12 @@ that cannot do it (such as `r8169`): the Master page says why. If the
 component does not load, the test stops at once with the end of the
 `halrun` log.
 
+One test runs at a time, also with several EtherCAT Setup windows open:
+editing in several windows is fine, but a second window that starts a
+test is told which process runs one already. The lock
+(`~/.local/state/ecatsetup/test.lock`) goes with the process, so a
+crashed window does not keep it.
+
 ### I/O
 
 Each slave's inputs show live; the outputs of I/O slaves can be set.
@@ -312,7 +318,8 @@ Safety comes in layers, so that no single one has to be perfect:
    `~/.local/state/ecatsetup/drive-limits.json` before each limit is
    written, and written back by *Done* or when the test stops; if the
    program dies in between, it offers to write them back at its next
-   start.
+   start. While another window runs a test, the values in that file are
+   its own: no other window offers to write them back.
 4. **Limits in HAL.** The drive's `pos-cmd` comes from a `limit3` with the
    test's velocity, acceleration and travel, in the servo thread. Until
    the drive is in "Operation enabled", the `limit3` follows `pos-fb`, so

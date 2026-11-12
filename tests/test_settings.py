@@ -18,6 +18,10 @@ class TestSettings(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.old = os.environ.get("ECATSETUP_SETTINGS")
         os.environ["ECATSETUP_SETTINGS"] = os.path.join(self.dir.name, "sub", "settings.yaml")
+# state (test lock, drive limits): never the user's own
+if "ECATSETUP_TEST_STATE" not in os.environ:
+    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = \
+        __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
 
     def tearDown(self):
         if self.old is None:

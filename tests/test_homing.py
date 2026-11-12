@@ -10,6 +10,10 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
+# state (test lock, drive limits): never the user's own
+if "ECATSETUP_TEST_STATE" not in os.environ:
+    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = \
+        __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
 
 from ecatsetup import homing, quirks  # noqa: E402
 

@@ -199,7 +199,13 @@ def _save_restores(entries):
 
 def restore_pending():
     """Put back limits a crashed test left in drives. Returns (done, failed)
-    as readable strings; failed entries stay in the file."""
+    as readable strings; failed entries stay in the file. While another
+    window runs a test the entries are its own: nothing is written."""
+    holder = testmode.test_holder()
+    if holder:
+        raise testmode.TestError("Another EtherCAT Setup (process %s) is running a test: the drive "
+                                 "values in %s are that test's; it writes them back itself"
+                                 % (holder, RESTORE_FILE))
     done, failed, keep = [], [], []
     for e in pending_restores():
         try:

@@ -6,6 +6,7 @@ Run with: python3 -m unittest discover -s tests
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -16,6 +17,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # quirk files: only those that come with the program
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
+# state (test lock, drive limits): never the user's own
+if "ECATSETUP_TEST_STATE" not in os.environ:
+    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = \
+        __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
 
 from ecatsetup import testmode  # noqa: E402
 
@@ -207,6 +212,44 @@ class TestTestMode(unittest.TestCase):
             json.dump({"io.in-1": ["bit", "OUT", "TRUE"]}, f)
         with self.assertRaisesRegex(testmode.TestError, "ecat component is not loaded"):
             testmode.WatchRun(cfg()).start()
+
+    def hold_lock_elsewhere(self):
+        """The test lock held by another process, as by a second window."""
+        code = ("import fcntl,os,sys,time\n"
+                "f=open(sys.argv[1],'a+')\n"
+                "try: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\n"
+                "except OSError: print('busy', flush=True); sys.exit()\n"
+                "f.seek(0); f.truncate(); f.write('%d\\n' % os.getpid()); f.flush()\n"
+                "print('held', flush=True); time.sleep(60)\n")
+        os.makedirs(os.path.dirname(testmode.TEST_LOCK), exist_ok=True)
+        p = subprocess.Popen([sys.executable, "-c", code, testmode.TEST_LOCK],
+                             stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        self.assertEqual(p.stdout.readline().strip(), "held")
+        return p.pid
+
+    def test_one_test_at_a_time(self):
+        pid = self.hold_lock_elsewhere()
+        self.assertEqual(testmode.test_holder(), pid)
+        with self.assertRaisesRegex(testmode.TestError, r"Another EtherCAT Setup \(process %d\)" % pid):
+            testmode.TestRun(cfg()).start(timeout=1)
+
+    def test_the_lock_is_held_while_the_test_runs_and_let_go_after(self):
+        run = self.started()
+        self.assertIsNotNone(run.lock)
+        with self.assertRaises(testmode.TestError):
+            testmode.lock_test()
+        run.stop()
+        testmode.unlock_test(testmode.lock_test())
+
+    def test_a_test_that_cannot_start_lets_go_of_the_lock(self):
+        with open(self.state, "w") as f:
+            json.dump(PINS, f)
+        run = testmode.TestRun(cfg())     # kept: its open file would hold the lock
+        with self.assertRaisesRegex(testmode.TestError, "HAL runs already"):
+            run.start(timeout=1)
+        self.assertIsNone(run.lock)
+        testmode.unlock_test(testmode.lock_test())
 
     def test_refuses_with_hal_running(self):
         with open(self.state, "w") as f:

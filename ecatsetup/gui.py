@@ -3996,7 +3996,8 @@ class MainWindow(QMainWindow):
     def offer_restore(self):
         """Limits a crashed drive test left in drives: offer to put them back."""
         pending = drivetest.pending_restores()
-        if not pending:
+        if not pending or testmode.test_holder():
+            # while another window runs a test, the values are its own
             return
         text = "\n".join("slave %s (%s): 0x%04X:%02X back to %s" % (
             e.get("position"), e.get("slave"), e["index"], e["subindex"], e["original"])
@@ -4006,7 +4007,11 @@ class MainWindow(QMainWindow):
                 "\n\nWrite them back now? (A master must run.)" % text,
                 QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
             return
-        done, failed = drivetest.restore_pending()
+        try:
+            done, failed = drivetest.restore_pending()
+        except testmode.TestError as e:
+            QMessageBox.warning(self, TITLE, str(e))
+            return
         if failed:
             QMessageBox.warning(self, TITLE, "Not written back (kept in %s):\n%s"
                                 % (drivetest.RESTORE_FILE, "\n".join(failed)))

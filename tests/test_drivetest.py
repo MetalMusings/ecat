@@ -14,6 +14,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # quirk files: only those that come with the program
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
+# state (test lock, drive limits): never the user's own
+if "ECATSETUP_TEST_STATE" not in os.environ:
+    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = \
+        __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
 sys.path.insert(0, os.path.dirname(__file__))
 
 from ecatsetup import drivetest, testmode, tool  # noqa: E402
@@ -193,6 +197,18 @@ class TestDriveTest(TestTestMode):
         self.assertEqual((len(done), failed), (1, []))
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
         self.assertFalse(os.path.exists(drivetest.RESTORE_FILE))
+
+    def test_no_restore_while_another_window_runs_a_test(self):
+        run = self.started()
+        dt = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
+        dt.prepare()
+        written = dict(self.drive.sdos)
+        with mock.patch.object(drivetest.testmode, "test_holder", lambda: 4242):
+            with self.assertRaisesRegex(drivetest.testmode.TestError, "process 4242"):
+                drivetest.restore_pending()
+        # the drive keeps the test's values, and the file its entries
+        self.assertEqual(self.drive.sdos, written)
+        self.assertTrue(drivetest.pending_restores())
 
     def test_only_cia402_drives_in_a_mode_it_can_move(self):
         run = self.started()
