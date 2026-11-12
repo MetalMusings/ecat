@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget)
 
 from . import (config, diagnose, drivetest, esi, events, halcheck, homing, integrate, netif, propose,
-               quirks, settings, symptoms, tasks, testmode, tool, update)
+               quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -2937,6 +2937,19 @@ class HalPage(QWidget):
         self.axes.lay.addLayout(row)
         lay.addWidget(self.axes)
 
+        # what the machine still gets from the simulation, or from nothing
+        self.wiring_card = Card("Still to connect",
+                                "LinuxCNC's inputs and outputs to the machine that the "
+                                "simulation still drives or reads, or that nothing does. "
+                                "Choose the slave's pin for each.")
+        self.wiring_text = self.wiring_card.add(label("", "hint", wrap=True))
+        self.wiring = table(["LinuxCNC pin", "Type", "Now", "Status", "Slave pin"], 2)
+        self.wiring.setWordWrap(True)
+        self.wiring.setTextElideMode(Qt.ElideNone)
+        self.wiring_card.add(self.wiring)
+        self.wiring_rows = []
+        lay.addWidget(self.wiring_card)
+
         pins = Card("Inputs and outputs",
                     "The pins this configuration gives. Connect a slave's pin to LinuxCNC pins "
                     "here (several separated by spaces), or in your own HAL files.")
@@ -3036,6 +3049,7 @@ class HalPage(QWidget):
         self.show_pins()
         if self.win.tabs.currentWidget() is self:
             self.show_joints()
+            self.show_wiring()
             self.show_plan()
             self.show_check()
         self.check_at_start.blockSignals(True)
@@ -3155,6 +3169,74 @@ class HalPage(QWidget):
         self.take_over_io_text.setText("Your HAL files connect " + ", ".join(
             "%s (%s)" % (sig, " ".join(p for p in pins if integrate.is_own(s.cfg, p)))
             for sig, pins in sorted(self.io_proposal.items())) + ".")
+
+    STATUS_TEXT = {"simulated": "simulated", "open": "not connected", "connected": "connected"}
+
+    def show_wiring(self):
+        s, ini = self.win.session, self.ini()
+        t = self.wiring
+        t.setRowCount(0)
+        self.wiring_rows = []
+        if ini is None or s.cfg is None:
+            self.wiring_card.setVisible(False)
+            return
+        try:
+            self.wiring_rows = wiring.rows(ini, s.cfg)
+        except OSError as e:
+            self.wiring_text.setText("The HAL files could not be read: %s" % e)
+            self.wiring_rows = []
+        self.wiring_card.setVisible(bool(self.wiring_rows))
+        own = integrate.slave_pins(s.cfg)
+        todo = [r for r in self.wiring_rows if r.todo]
+        has_bits = any(ht == "bit" for ht, _ in own.values())
+        text = ("%d still simulated or not connected." % len(todo) if todo else
+                "Everything here is connected to the machine.")
+        if todo and not has_bits:
+            text += (" The slaves give no bit pins yet: on the Bus page, choose \"bit field\" "
+                     "as the HAL type of a digital input or output entry to get one pin per bit.")
+        self.wiring_text.setText(text)
+        t.setRowCount(len(self.wiring_rows))
+        for i, r in enumerate(self.wiring_rows):
+            colour = (QColor("#2e7d32") if r.status == "connected" else
+                      QColor("#b26a00") if r.status == "simulated" else QColor("#c62828"))
+            arrow = "\u2192 LinuxCNC" if r.way == "in" else "LinuxCNC \u2192"
+            t.setItem(i, 0, item(r.pin, font=mono(), tip="%s (%s)" % (r.pin, arrow)))
+            t.setItem(i, 1, item(r.htype))
+            now = r.now if r.status != "connected" else ("replaces " + r.now if r.now else "")
+            where = r.where + (": a .tcl file, change it by hand" if r.tcl and r.status != "open"
+                               else "")
+            t.setItem(i, 2, item(now, tip="\n".join(x for x in (now, where) if x)))
+            st = self.STATUS_TEXT.get(r.status, r.status)
+            if r.target != r.pin:
+                st += " (at %s)" % r.target
+            t.setItem(i, 3, item(st, colour=colour, tip=where or None))
+            box = QComboBox()
+            box.addItem("")
+            want = "out" if r.way == "in" else "in"
+            for pin, (ht, w) in sorted(own.items()):
+                if w == want and ht == r.htype:
+                    box.addItem(pin)
+            if r.slave and box.findText(r.slave) < 0:
+                box.addItem(r.slave)
+            box.setCurrentText(r.slave)
+            box.setFont(mono())
+            box.setMinimumWidth(220)
+            box.setEnabled(box.count() > 1)
+            box.setToolTip("The slave's %s pin to connect to %s" % (
+                "input" if r.way == "in" else "output", r.target) if box.count() > 1 else
+                "No slave pin of type %s %s: make one on the Bus page" % (
+                    r.htype, "from the machine" if r.way == "in" else "to the machine"))
+            box.currentTextChanged.connect(lambda text, row=r: self.wiring_edited(row, text))
+            t.setCellWidget(i, 4, box)
+        t.resizeRowsToContents()
+        fit_table(t, minimum=1)
+
+    def wiring_edited(self, row, slave_pin):
+        cfg = self.win.session.cfg
+        if cfg is None or slave_pin == row.slave:
+            return
+        wiring.connect(cfg, row, slave_pin)
+        QTimer.singleShot(0, self.win.changed)
 
     def pin_edited(self, pin, box):
         cfg = self.win.session.cfg

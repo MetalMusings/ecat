@@ -495,10 +495,31 @@ class TestNets(Folder):
         self.assertIn("signal x-enable is used in your HAL files already: choose another name "
                       "or connect it there", p.errors)
 
-    def test_postgui_pin_is_refused(self):
+    def test_a_postgui_reader_stays_on_the_signal(self):
+        # the slave's pin exists before the GUI: ethercat.hal connects it, and
+        # the GUI's LED goes on reading the signal after the GUI is up
+        self.write("machine.hal", MACHINE.replace("net io-out       io.out-1 <= motion.digital-out-00\n", ""))
         self.write("postgui.hal", "net led io.out-1 => pyvcp.led\n")
         c = cfg()
         integrate.set_net(c, "io.out-1", ["motion.digital-out-01"], "led")
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        new = next(ch.new for ch in p.changes if ch.path.endswith("postgui.hal"))
+        self.assertEqual(new, integrate.COMMENT + "net led io.out-1 => pyvcp.led\n"
+                         "net led => pyvcp.led" + integrate.ADDED + "\n")
+        main = next(ch.new for ch in p.changes if ch.path.endswith(integrate.MAIN_FILE))
+        self.assertIn("net led motion.digital-out-01 => io.out-1", main)
+        self.assertNotIn("pyvcp", main)
+        # once is enough
+        integrate.apply(p)
+        self.assertNotIn(os.path.join(self.dir.name, "postgui.hal"),
+                         [ch.path for ch in integrate.plan(self.ini, c).changes])
+
+    def test_postgui_pin_is_refused(self):
+        # a pin only the GUI has cannot be connected before it
+        c = cfg()
+        integrate.set_net(c, "io.out-1", ["pyvcp.led"])
+        self.write("postgui.hal", "net led pyvcp.led => pyvcp.other\n")
         p = integrate.plan(self.ini, c)
         self.assertTrue(any("postgui.hal (a POSTGUI file" in e for e in p.errors), p.errors)
 

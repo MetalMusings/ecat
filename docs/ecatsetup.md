@@ -183,6 +183,11 @@ One column, top to bottom in the order of the work:
 
 - **Joints**: choose the INI file, then the drive for each joint.
   *Take over from the HAL files* reads what your HAL files already use;
+- **Still to connect**: LinuxCNC's inputs and outputs to the machine
+  (E-stop, home switches, probe, spindle, plasmac's torch and sensors ...)
+  that the simulation still drives or reads, or that nothing does, with
+  a choice of the slaves' pins of the right type for each (see
+  [what is still simulated](#what-is-still-simulated));
 - **Inputs and outputs**: the pins the configuration gives, and a column
   where you connect each to LinuxCNC pins;
 - **HAL check** and **File contents**, side by side: your HAL files
@@ -612,6 +617,25 @@ EtherCAT Setup and replace the simulation with the bus:
   (the simulated joints of `sim_no_stepgen.tcl`, once a joint is
   connected to a drive), writing is refused and the message names the
   lines. Take them out of the file, or the file out of the INI file.
+- <a id="what-is-still-simulated"></a>**Still to connect.** Each of
+  LinuxCNC's pins to the machine is followed back through the HAL files
+  (POSTGUI and `.tcl` ones too). A debounce (`dbounce`, `debounce`) is
+  followed through, so the slave's pin takes the simulation's place in
+  front of it (`db_arc-ok.in`, not `plasmac.arc-ok-in`); logic that
+  changes the value (`not`, `or2` ...) is not, and the slave's pin is then
+  connected to LinuxCNC's pin itself: an E-stop is never inverted by a
+  guess. A source counts as simulated when its component is named so
+  (`sim-torch`, `qtplasmac_sim`, `sim-joint.0...`) or comes from
+  LinuxCNC's simulation files. Home switches are listed for joints that
+  home to a switch (`HOME_SEARCH_VEL` not 0).
+- **POSTGUI files.** A line there that connects a pin `ethercat.hal` now
+  connects is commented out when that pin exists before the GUI (a
+  slave's, or a component a HALFILE loads). The simulation's writer on it
+  (the GUI's `qtplasmac_sim.arc_ok`) is left unconnected, with a note; the
+  GUI's readers (an LED) get a line of their own that puts them back on
+  the signal (`net sim:arc-ok => qtplasmac_sim.led  #ecatsetup: added`).
+  A pin only the GUI has cannot be connected in `ethercat.hal`, which
+  runs before the GUI: that is refused.
 - **What is still simulated** is noted when writing: `simulated_home.hal`
   for switches not connected yet, `sim_spindle_encoder.hal` for the
   spindle. Take them out of the INI file once the real ones are

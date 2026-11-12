@@ -303,11 +303,16 @@ def read_hal(path, ini_path=None):
     return read_text(path)
 
 
+ADDED = "  " + COMMENT + "added"    # the end of a line an earlier plan put in
+
+
 def original(text):
     """A HAL file's text as the user wrote it: lines commented out by an
-    earlier plan are back, so that every plan starts from the same text."""
+    earlier plan are back, and lines it added are gone, so that every plan
+    starts from the same text."""
     return "".join(line[len(COMMENT):] if line.startswith(COMMENT) else line
-                   for line in text.splitlines(keepends=True))
+                   for line in text.splitlines(keepends=True)
+                   if not line.rstrip("\n").endswith(ADDED))
 
 def statements(text):
     """(first line index, last line index, tokens) of each HAL statement,
@@ -537,6 +542,10 @@ KNOWN_PINS = [
     (r"halui\.machine\.is-on", "bit", "out"),
     (r"halui\.estop\.is-activated", "bit", "out"),
     (r"halui\.program\.is-(running|paused|idle)", "bit", "out"),
+    # plasmac (QtPlasmaC's component): the torch and its sensors
+    (r"plasmac\.(arc-ok-in|float-switch|ohmic-probe|breakaway|move-up|move-down)", "bit", "in"),
+    (r"plasmac\.arc-voltage-in", "float", "in"),
+    (r"plasmac\.(torch-on|ohmic-enable|scribe-arm|scribe-on)", "bit", "out"),
 ]
 
 # suggestions offered in the window, by HAL type and direction there
@@ -827,6 +836,26 @@ def _managed(cfg):
     return out
 
 
+# LinuxCNC's own pins, there before any HAL file's components
+CORE_PREFIXES = {"motion", "iocontrol", "joint", "axis", "spindle"}
+
+
+def _arrow_writers(t):
+    """The pins a net statement writes its signal with, by its arrows."""
+    rest = t[2:]
+    for i, x in enumerate(rest):
+        if x == "=>":
+            return rest[:i]
+        if x == "<=":
+            return [y for y in rest[i + 1:] if y not in ARROWS]
+    return []
+
+
+def _loaded_names(t):
+    from . import wiring
+    return wiring._loaded(t)
+
+
 def _is_ecat_line(t):
     """A statement that loads lcec or ecat, or adds their functions."""
     if t[0] == "loadusr" and any("lcec_conf" in x for x in t[1:]):
@@ -940,11 +969,31 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
     # lines to comment out, and the signals they used
     sig_of_pin = {}          # managed pin -> the signal the user's file put it on
     kept = {}                # signal -> pins of commented lines that are not managed
+    line_writers = set()     # pins that wrote their signal in a commented line (arrows)
+    # what exists before the GUI: what the HALFILEs load, LinuxCNC's own pins
+    early = set()
+    for path in hal_files + tcl_files:
+        if path in postgui:
+            continue
+        try:
+            text = read_hal(path, ini_path)
+        except OSError:
+            continue
+        for _, _, t in statements(original(text)):
+            early.update(inst for inst, _ in _loaded_names(t))
+
+    def exists_early(pin):
+        return (is_own(cfg, pin) or pin.split(".", 1)[0] in CORE_PREFIXES
+                or any(pin.startswith(inst + ".") for inst in early))
+
     for path in hal_files:
         current = read_text(path)
         text = original(current)
         lines = text.splitlines(keepends=True)
         hit = set()
+        mine = {}            # this file's kept pins
+        after = {}           # last line of a statement -> the line that replaces it
+        dropped = []         # writers of a POSTGUI line that a real pin replaces
         for a, b, t in statements(text):
             why = None
             if _is_ecat_line(t):
@@ -957,21 +1006,39 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                 name, pins = net_pins(t)
                 if managed_pins & set(pins):
                     why = True
+                    wrote = _arrow_writers(t)
+                    line_writers.update(wrote)
                     for pin in pins:
                         if pin in managed_pins:
                             sig_of_pin.setdefault(pin, name)
-                        else:
-                            kept.setdefault(name, []).append(pin)
+                        elif path not in postgui:
+                            mine.setdefault(name, []).append(pin)
+                    if path in postgui:
+                        # the GUI's own readers stay on the signal, after the GUI
+                        # is up; a writer gives way to the real pin
+                        rest = [x for x in pins if x not in managed_pins and x not in wrote]
+                        dropped += [x for x in wrote if x not in managed_pins]
+                        if rest:
+                            # the signal ethercat.hal connects the pin to
+                            ours = [x for x in pins if x in managed_pins]
+                            sig = sig_of_pin.get(ours[0], name) if ours else name
+                            after[b] = "net %s => %s%s\n" % (sig, " ".join(rest), ADDED)
             if why:
                 hit.update(range(a, b + 1))
         if hit and path in postgui:
             moved = sorted({pin for a, b, t in statements(text) if a in hit and t[0] == "net"
                             for pin in net_pins(t)[1] if pin in managed_pins})
-            if moved:
+            late = [x for x in moved if not exists_early(x)]
+            if late:
                 p.errors.append("%s (a POSTGUI file, read after ethercat.hal) connects %s: "
                                 "connect the signal there, not the pin, or connect it by hand"
-                                % (os.path.basename(path), ", ".join(moved)))
+                                % (os.path.basename(path), ", ".join(late)))
                 continue
+            if dropped:
+                p.notes.append("%s: %s no longer connected (a real input or output takes "
+                               "its place)" % (os.path.basename(path), ", ".join(dropped)))
+        for name, pins in mine.items():
+            kept.setdefault(name, []).extend(pins)
         copy_to = None
         if hit and os.path.dirname(os.path.abspath(path)) != d and text == current:
             # LinuxCNC's own file (hallib) is never changed: a copy in the folder
@@ -989,6 +1056,8 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             if i in hit:
                 p.commented.append((os.path.basename(path), i + 1, line.rstrip("\n")))
                 new.append(COMMENT + line)
+                if i in after:
+                    new.append(after[i])
             else:
                 new.append(line)
         new = "".join(new)
@@ -1090,7 +1159,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
     for s_name in list(kept):
         if s_name in driven:
             gone = [x for x in kept[s_name] if (known_pin(x) or (None, None))[1] == "out"
-                    or _WRITER.search(x)]
+                    or _WRITER.search(x) or x in line_writers]
             if gone:
                 kept[s_name] = [x for x in kept[s_name] if x not in gone]
                 p.notes.append("signal %s: %s no longer writes it (a real input does now)"
