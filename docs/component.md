@@ -278,6 +278,7 @@ entry has:
 | `pin`, `hal-type` | One pin for the whole entry; `hal-type` is `bit`, `s32`, `u32` or `float`. A `float` pin of a `REAL`/`LREAL` entry carries the value as it is; of an integer entry it is scaled. A `LINT`/`ULINT` entry must be `float` (LinuxCNC 2.9 has no 64-bit pins): the whole 64 bits are read and written, exact up to 2^53, and written values are held within the type's range. |
 | `scale`, `offset` | For a `float` pin of an integer entry: pin = value × scale + offset. |
 | `split` | One `bit` pin per bit, from bit 0; `null` for a bit without a pin. Instead of `pin`. |
+| `invert` | For a `bit` pin: `true` makes the pin the opposite of the bit (read and write), as for a normally closed switch, so that no `not` is needed in HAL. For a `split`: a list of the names of its pins to invert. |
 
 An entry with neither `pin` nor `split` is mapped but has no pin.
 

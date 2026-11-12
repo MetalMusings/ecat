@@ -1527,6 +1527,7 @@ int lcec_parse_config(void) {
           generic_hal_data->floatOffset = pe_conf->floatOffset;
           generic_hal_data->bitOffset = 0;
           generic_hal_data->bitLength = pe_conf->bitLength;
+          generic_hal_data->invert = pe_conf->invert;
           generic_hal_data->dir = generic_hal_dir;
           generic_hal_data->pdo_idx = pe_conf->index;
           generic_hal_data->pdo_sidx = pe_conf->subindex;
@@ -1564,6 +1565,7 @@ int lcec_parse_config(void) {
           generic_hal_data->floatOffset = ce_conf->floatOffset;
           generic_hal_data->bitOffset = ce_conf->bitOffset;
           generic_hal_data->bitLength = ce_conf->bitLength;
+          generic_hal_data->invert = ce_conf->invert;
           generic_hal_data->dir = generic_hal_dir;
           generic_hal_data->pdo_idx = pe_conf->index;
           generic_hal_data->pdo_sidx = pe_conf->subindex;

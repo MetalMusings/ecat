@@ -289,6 +289,21 @@ static void test_split(void) {
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:01', bits: 8, type: USINT, pin: p, hal-type: u32, split: [a]}"), "give pin or split, not both");
 }
 
+static void test_invert(void) {
+  // a bit pin: true or false
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:01', bits: 1, type: BOOL, pin: p, hal-type: bit, invert: true}")), 0);
+  CHECK_EQ(ENTRY(0)->invert, 1);
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:01', bits: 1, type: BOOL, pin: p, hal-type: bit}")), 0);
+  CHECK_EQ(ENTRY(0)->invert, 0);
+  // a split: the names to invert
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:01', bits: 8, type: USINT, split: [a, ~, c], invert: [c]}")), 0);
+  CHECK_EQ(COMPLEX(0)->invert, 0);
+  CHECK_EQ(COMPLEX(1)->invert, 1);
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:01', bits: 8, type: USINT, split: [a, b], invert: [z]}"), "invert lists z, which is not in split");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:01', bits: 8, type: USINT, split: [a, b], invert: true}"), "a list of names for a split");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:01', bits: 8, type: USINT, pin: p, hal-type: u32, invert: true}"), "invert is for bit pins");
+}
+
 static void test_file_errors(void) {
   size_t l;
   fake_msgs[0] = 0;
@@ -681,6 +696,6 @@ static void test_too_many_encoders(void) {
 }
 
 RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
-    test_hal_types, test_entry_errors, test_split, test_file_errors, test_slave_errors, test_dc, test_settings,
+    test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders)

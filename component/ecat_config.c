@@ -179,6 +179,18 @@ static int seq_len(yaml_node_t *n) {
 
 static yaml_node_t *seq_item(ctx_t *c, yaml_node_t *n, int i) { return node(c, n->data.sequence.items.start[i]); }
 
+static int is_seq(yaml_node_t *n) { return n != NULL && n->type == YAML_SEQUENCE_NODE; }
+
+/// Whether `name` is in the list `invert` (a sequence of names, or NULL).
+static int inverted(ctx_t *c, yaml_node_t *invert, const char *name) {
+  int i;
+  for (i = 0; name != NULL && i < seq_len(invert); i++) {
+    const char *n = scalar(seq_item(c, invert, i));
+    if (n != NULL && !strcmp(n, name)) return 1;
+  }
+  return 0;
+}
+
 static const char *get_str(ctx_t *c, yaml_node_t *map, const char *key) { return scalar(get(c, map, key)); }
 
 /// An integer ("12", "0x0300"); def if missing, an error if not a number.
@@ -305,7 +317,8 @@ static const dtype_t *find_dtype(const char *name) {
 /// Fill one PDO entry record (and complex records for "split"); count pins.
 static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned int *pins) {
   LCEC_CONF_PDOENTRY_T *pe;
-  yaml_node_t *split;
+  yaml_node_t *split, *invert;
+  const char *hal = get_str(c, e, "hal-type");
   const char *use = get_str(c, e, "use");
   const char *pin = get_str(c, e, "pin");
   const char *object = get_str(c, e, "object");
@@ -388,7 +401,6 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   }
 
   if (pin != NULL) {
-    const char *hal = get_str(c, e, "hal-type");
     copy_str(pe->halPin, pin);
     if (dt->bytes == 8 && !dt->is_float && (hal == NULL || strcmp(hal, "float"))) {
       // LinuxCNC 2.9 has no 64-bit pins: a float carries it, exact up to 2^53
@@ -397,6 +409,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
     }
     if (hal != NULL && !strcmp(hal, "bit")) {
       pe->halType = HAL_BIT;
+      pe->invert = get_bool(c, e, "invert", 0);
     } else if (hal != NULL && !strcmp(hal, "s32")) {
       pe->halType = HAL_S32;
     } else if (hal != NULL && !strcmp(hal, "u32")) {
@@ -418,6 +431,25 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   }
 
   split = get(c, e, "split");
+  invert = get(c, e, "invert");
+  if (pin == NULL && invert != NULL) {
+    // a list of the split's pin names to invert
+    if (split == NULL || !is_seq(invert)) {
+      error(c, "%s: invert is true or false for a bit pin, a list of names for a split", object);
+      return;
+    }
+    for (i = 0; i < seq_len(invert); i++) {
+      const char *name = scalar(seq_item(c, invert, i));
+      int found = 0, j;
+      for (j = 0; name != NULL && j < seq_len(split); j++) {
+        const char *sn = scalar(seq_item(c, split, j));
+        if (sn != NULL && !strcmp(sn, name)) found = 1;
+      }
+      if (!found) error(c, "%s: invert lists %s, which is not in split", object, name ? name : "");
+    }
+  } else if (pin != NULL && invert != NULL && (hal == NULL || strcmp(hal, "bit"))) {
+    error(c, "%s: invert is for bit pins", object);
+  }
   if (split != NULL) {
     if (pin != NULL) {
       error(c, "%s: give pin or split, not both", object);
@@ -443,6 +475,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
       ce->halType = HAL_BIT;
       ce->floatScale = 1.0;
       copy_str(ce->halPin, scalar(bit));
+      ce->invert = inverted(c, invert, scalar(bit));
       (*pins)++;
     }
   }

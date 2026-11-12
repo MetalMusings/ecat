@@ -751,8 +751,8 @@ class SlaveView(QWidget):
     """One slave on the Bus page."""
 
     PD_COLUMNS = ["Dir", "PDO", "Object", "Name", "Type", "Use", "HAL pin", "HAL type",
-                  "Scale", "Offset", "Bit pins"]
-    PIN, HALTYPE, SCALE, OFFSET, SPLIT = 6, 7, 8, 9, 10
+                  "Scale", "Offset", "Bit pins", "Invert"]
+    PIN, HALTYPE, SCALE, OFFSET, SPLIT, INVERT = 6, 7, 8, 9, 10, 11
     SET_COLUMNS = ["Object", "Name", "Type", "Value", "Now"]
 
     def __init__(self, win):
@@ -1306,6 +1306,11 @@ class SlaveView(QWidget):
                                             editable=not fixed and "pin" not in e,
                                             tip="One pin per bit, from bit 0, comma separated; "
                                                 "leave a bit empty to give it no pin"))
+        self.pd.setItem(r, self.INVERT, item(self._invert_text(e), editable=not fixed,
+                                             tip="A normally closed switch reads 1 when it is "
+                                                 "open: invert the pin so that it reads 0 then. "
+                                                 "A bit pin: yes. A bit field: the names of "
+                                                 "the bit pins to invert, comma separated"))
         if fixed:
             self.pd.setItem(r, self.HALTYPE, item(""))
             return
@@ -1414,6 +1419,13 @@ class SlaveView(QWidget):
         self.show_homing(s)
         self.win.changed()
 
+    @staticmethod
+    def _invert_text(e):
+        inv = e.get("invert")
+        if isinstance(inv, list):
+            return ", ".join(inv)
+        return "yes" if inv else ""
+
     def pd_edited(self, it):
         if self.loading:
             return
@@ -1445,10 +1457,44 @@ class SlaveView(QWidget):
                 e["split"] = pins
             else:
                 e.pop("split", None)
+            self._keep_inverted_names(e)
+        elif col == self.INVERT:
+            if "pin" in e:
+                if text.lower() in ("yes", "y", "true", "1") and e.get("hal-type") == "bit":
+                    e["invert"] = True
+                else:
+                    if text and e.get("hal-type") != "bit":
+                        self.win.status("Only bit pins can be inverted")
+                    e.pop("invert", None)
+            elif "split" in e:
+                names = [n.strip() for n in text.split(",") if n.strip()]
+                bad = [n for n in names if n not in e["split"]]
+                if bad:
+                    self.win.status("Not a bit pin of this entry: %s" % ", ".join(bad))
+                names = [n for n in names if n in e["split"]]
+                if names:
+                    e["invert"] = names
+                else:
+                    e.pop("invert", None)
+            else:
+                e.pop("invert", None)
+            self.loading = True
+            it.setText(self._invert_text(e))
+            self.loading = False
         else:
             return
         self._refresh_row(row, e)
         self.win.changed()
+
+    @staticmethod
+    def _keep_inverted_names(e):
+        """After the bit pins changed: invert only names that are still there."""
+        if isinstance(e.get("invert"), list):
+            keep = [n for n in e["invert"] if n in (e.get("split") or [])]
+            if keep:
+                e["invert"] = keep
+            else:
+                e.pop("invert", None)
 
     def _refresh_row(self, row, e):
         self.loading = True
@@ -1507,7 +1553,7 @@ class SlaveView(QWidget):
                 self._refresh_row(row, e)
                 return
             base = e.pop("pin")
-            for k in ("hal-type", "scale", "offset"):
+            for k in ("hal-type", "scale", "offset", "invert"):
                 e.pop(k, None)
             e["split"] = ["%s-%d" % (base, i) for i in range(n)]
             self.loading = True
@@ -1521,6 +1567,7 @@ class SlaveView(QWidget):
             first = (next((p for p in e["split"] if p), None) or "pin-0")
             base = first[:-2] if first.endswith("-0") else first
             e.pop("split")
+            e.pop("invert", None)
             e["pin"] = base
             e["hal-type"] = text or propose.HAL_TYPES.get(e.get("type"), "s32")
             self.loading = True
@@ -1529,6 +1576,11 @@ class SlaveView(QWidget):
             self.loading = False
         else:
             e["hal-type"] = text
+            if text != "bit":
+                e.pop("invert", None)
+        self.loading = True
+        self.pd.item(row, self.INVERT).setText(self._invert_text(e))
+        self.loading = False
         self._refresh_row(row, e)
         self.win.changed()
 

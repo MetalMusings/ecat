@@ -534,6 +534,24 @@ class TestConfig(unittest.TestCase):
         self.assertIn("scale and offset need", errors)
         self.assertIn("neither value nor data", errors)
 
+    def test_invert_is_checked(self):
+        cfg = self.easercat_config()
+        entries = cfg["slaves"][0]["process-data"]["inputs"][0]["entries"]
+        entries[0]["invert"] = ["in-4", "in-7"]
+        self.assertFalse(config.check(cfg))
+        entries[0]["invert"] = ["in-4", "nope"]
+        self.assertTrue(any("invert lists nope, which is not in split" in x
+                            for x in config.check(cfg)))
+        entries[0]["invert"] = True
+        self.assertTrue(any("a list of names for a split" in x for x in config.check(cfg)))
+        del entries[0]["invert"]
+        other = cfg["slaves"][0]["process-data"]["inputs"][1]["entries"][0]   # a s32 pin
+        other["invert"] = True
+        self.assertTrue(any("invert is true or false, for a bit pin" in x for x in config.check(cfg)))
+        other.update({"hal-type": "bit", "invert": True})
+        self.assertFalse(any("invert" in x for x in config.check(cfg)))
+        self.assertIn("invert: true", config.dumps(cfg))
+
     def test_64_bit_entries_are_float_pins(self):
         self.assertEqual(propose.HAL_TYPES["LINT"], "float")
         self.assertEqual(propose.HAL_TYPES["ULINT"], "float")

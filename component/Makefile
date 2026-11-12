@@ -56,13 +56,14 @@ ecat.so: $(objs)
 
 # Unit tests: a device's code with a fake of HAL, the master and lcec
 # (tests/fake.c), so that its read and write functions run without a bus.
-tests := tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events
+tests := tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits
 tests/test_cia402: tests/test_cia402.o tests/fake.o devices/ecat_cia402.o
 tests/test_encoder: tests/test_encoder.o tests/fake.o devices/ecat_encoder.o
 tests/test_config: tests/test_config.o tests/fake.o ecat_config.o
 tests/test_autoshift: tests/test_autoshift.o tests/fake.o lcec_autoshift.o
 tests/test_startcheck: tests/test_startcheck.o tests/fake.o ecat_startcheck.o
 tests/test_int64: tests/test_int64.o tests/fake.o
+tests/test_bits: tests/test_bits.o tests/fake.o
 tests/test_events: tests/test_events.o tests/fake.o ecat_events.o
 -include tests/*.d
 

@@ -148,7 +148,7 @@ class _Dumper(yaml.SafeDumper):
 def _flow_entries(dumper, data):
     # One line per PDO entry or setting: short dicts in flow style.
     flow = set(data) <= {"object", "bits", "type", "use", "pin", "hal-type", "split",
-                         "scale", "offset", "name", "value", "data",
+                         "invert", "scale", "offset", "name", "value", "data",
                          "vendor", "product", "revision", "joint", "slave"}
     return dumper.represent_mapping("tag:yaml.org,2002:map", data, flow_style=flow)
 
@@ -368,6 +368,20 @@ def check(cfg):
                                 e.get("hal-type") == "float" and e.get("type") in INTEGER_TYPES):
                             err("%s: %s: scale and offset need an integer type and hal-type float"
                                 % (where, e["object"]))
+                    if "invert" in e:
+                        inv = e["invert"]
+                        if "pin" in e:
+                            if not isinstance(inv, bool) or e.get("hal-type") != "bit":
+                                err("%s: %s: invert is true or false, for a bit pin"
+                                    % (where, e["object"]))
+                        elif not isinstance(inv, list) or "split" not in e:
+                            err("%s: %s: invert is true or false for a bit pin, a list of "
+                                "names for a split" % (where, e["object"]))
+                        else:
+                            for n in inv:
+                                if n not in (e.get("split") or []):
+                                    err("%s: %s: invert lists %s, which is not in split"
+                                        % (where, e["object"], n))
                     if "split" in e:
                         split = e["split"]
                         if not isinstance(split, list) or len(split) > (bits or 0):

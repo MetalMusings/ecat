@@ -128,7 +128,9 @@ Choosing a slave shows:
   choose *bit field* in the HAL type list. The pins are named
   `<pin>-0`, `<pin>-1`...; rename them, or leave a name empty to give a
   bit no pin, in the *Split* column. Choosing a type again gives back one
-  pin;
+  pin. The *Invert* column makes a bit pin the opposite of the bit (`yes`
+  for a bit pin, the names of the bit pins for a bit field), for normally
+  closed switches such as an E-stop: no `not` is needed in HAL;
 - **Settings**: SDOs written at every start, in PREOP. *Add setting...*
   opens the slave's object dictionary: filter by object or name, objects
   writable in PREOP only (untick to see all), manufacturer objects

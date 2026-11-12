@@ -33,6 +33,7 @@ typedef struct {
   hal_float_t floatOffset;
   uint8_t bitOffset;
   uint8_t bitLength;
+  uint8_t invert;  // bit pins: the pin is the opposite of the bit
   hal_pin_dir_t dir;
   void *pin[LCEC_CONF_GENERIC_MAX_SUBPINS];
   uint16_t pdo_idx;

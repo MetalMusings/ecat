@@ -325,6 +325,34 @@ class TestWindow(BusTest):
         self.assertEqual(e["hal-type"], "u32")
         self.assertNotIn("split", e)
 
+    def test_bit_pins_can_be_inverted(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        row = next(r for r in range(page.pd.rowCount()) if "split" in page._entry(r)
+                   and "in-4" in page._entry(r)["split"])
+        e = page._entry(row)
+        page.pd.item(row, page.INVERT).setText("in-4, in-7, nonsense")
+        self.assertEqual(e["invert"], ["in-4", "in-7"])         # only names that are there
+        self.assertEqual(page.pd.item(row, page.INVERT).text(), "in-4, in-7")
+        page.pd.item(row, page.SPLIT).setText(", ".join(
+            n for n in e["split"] if n != "in-4"))
+        self.assertEqual(e["invert"], ["in-7"])                  # a removed pin is not inverted
+        page.pd.item(row, page.INVERT).setText("")
+        self.assertNotIn("invert", e)
+        # a single bit pin: yes, and only with the type bit
+        row = next(r for r in range(page.pd.rowCount()) if "pin" in page._entry(r)
+                   and not page._entry(r).get("use"))
+        e = page._entry(row)
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText("u32")
+        page.pd.item(row, page.INVERT).setText("yes")
+        self.assertNotIn("invert", e)
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText("bit")
+        page.pd.item(row, page.INVERT).setText("yes")
+        self.assertIs(e["invert"], True)
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText("u32")
+        self.assertNotIn("invert", e)
+
     def test_a_one_bit_entry_cannot_become_a_bit_field(self):
         w = self.window()
         w.select_slave(0)

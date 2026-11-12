@@ -138,6 +138,7 @@ typedef struct {
   hal_type_t halType;
   hal_float_t floatScale;
   hal_float_t floatOffset;
+  uint8_t invert;  // bit pins: the pin is the opposite of the bit
   char halPin[LCEC_CONF_STR_MAXLEN];
 } LCEC_CONF_PDOENTRY_T;
 
@@ -149,6 +150,7 @@ typedef struct {
   hal_type_t halType;
   hal_float_t floatScale;
   hal_float_t floatOffset;
+  uint8_t invert;  // the pin is the opposite of the bit
   char halPin[LCEC_CONF_STR_MAXLEN];
 } LCEC_CONF_COMPLEXENTRY_T;
 

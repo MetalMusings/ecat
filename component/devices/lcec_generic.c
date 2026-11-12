@@ -20,6 +20,7 @@
 /// @brief Driver for Generic devices, controlled by XML
 
 #include "lcec_generic.h"
+#include "lcec_generic_bits.h"
 #include "lcec_generic_int64.h"
 
 #include "../lcec.h"
@@ -138,7 +139,7 @@ void lcec_generic_read(lcec_slave_t *slave, long period) {
       case HAL_BIT:
         offset = ((hal_data->pdo_os << 3) | (hal_data->pdo_bp & 0x07)) + hal_data->bitOffset;
         for (j = 0; j < LCEC_CONF_GENERIC_MAX_SUBPINS && hal_data->pin[j] != NULL; j++, offset++) {
-          *((hal_bit_t *)hal_data->pin[j]) = EC_READ_BIT(&pd[offset >> 3], offset & 0x07);
+          *((hal_bit_t *)hal_data->pin[j]) = lcec_generic_read_bit(pd, offset, hal_data->invert);
         }
         break;
 
@@ -194,7 +195,7 @@ void lcec_generic_write(lcec_slave_t *slave, long period) {
       case HAL_BIT:
         offset = ((hal_data->pdo_os << 3) | (hal_data->pdo_bp & 0x07)) + hal_data->bitOffset;
         for (j = 0; j < LCEC_CONF_GENERIC_MAX_SUBPINS && hal_data->pin[j] != NULL; j++, offset++) {
-          EC_WRITE_BIT(&pd[offset >> 3], offset & 0x07, *((hal_bit_t *)hal_data->pin[j]));
+          lcec_generic_write_bit(pd, offset, hal_data->invert, *((hal_bit_t *)hal_data->pin[j]));
         }
         break;
 
