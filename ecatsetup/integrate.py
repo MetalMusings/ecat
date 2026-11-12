@@ -608,6 +608,58 @@ def slave_pins(cfg):
     return out
 
 
+def _bit_entry(cfg, pin):
+    """(entry, bit name or None) of a slave's bool or bit pin "<slave>.<pin>", or None."""
+    for s in (cfg or {}).get("slaves") or []:
+        for kind in ("outputs", "inputs"):
+            for pdo in (s.get("process-data") or {}).get(kind) or []:
+                for e in pdo.get("entries") or []:
+                    if "pin" in e and e.get("hal-type") == "bool" and \
+                            pin == "%s.%s" % (s.get("name"), e["pin"]):
+                        return e, None
+                    for p in e.get("split") or []:
+                        if p and pin == "%s.%s" % (s.get("name"), p):
+                            return e, p
+    return None
+
+
+def pin_inverted(cfg, pin):
+    """True or False for a slave's bit pin (a bool pin, or one bit of a bit field):
+    is it the opposite of the bit? None for any other pin."""
+    found = _bit_entry(cfg, pin)
+    if found is None:
+        return None
+    e, bit = found
+    inv = e.get("invert")
+    if bit is None:
+        return bool(inv)
+    return isinstance(inv, list) and bit in inv
+
+
+def set_pin_inverted(cfg, pin, on):
+    """Make a slave's bit pin the opposite of its bit (or not): `invert` in the entry.
+    Returns False when the pin is not a bit pin."""
+    found = _bit_entry(cfg, pin)
+    if found is None:
+        return False
+    e, bit = found
+    if bit is None:
+        if on:
+            e["invert"] = True
+        else:
+            e.pop("invert", None)
+        return True
+    names = [n for n in e.get("invert") or [] if n != bit] if isinstance(e.get("invert"), list) \
+        else []
+    if on:
+        names = [p for p in e["split"] if p and (p in names or p == bit)]   # in bit order
+    if names:
+        e["invert"] = names
+    else:
+        e.pop("invert", None)
+    return True
+
+
 def own_prefixes(cfg):
     """The pin prefixes of the configuration's slaves and axes: "<name>."."""
     out = []

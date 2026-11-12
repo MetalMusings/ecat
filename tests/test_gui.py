@@ -366,6 +366,23 @@ class TestWindow(BusTest):
         split.setText("lamp, valve, torch, spare")
         self.assertEqual(page._entry(row)["split"], ["lamp", "valve", "torch", "spare"])
 
+    def test_still_to_connect_can_invert_a_bit_pin(self):
+        from PyQt5.QtWidgets import QCheckBox
+        from ecatsetup import integrate, wiring
+        w = self.window()
+        page = w.hal_page
+        s = w.session
+        pin = next(p for p, (ht, way) in sorted(integrate.slave_pins(s.cfg).items())
+                   if ht == "bool" and way == "out" and integrate.pin_inverted(s.cfg, p) is False)
+        page.wiring_rows = [wiring.Row("motion.digital-in-00", "bool", "in", "connected",
+                                       target="motion.digital-in-00", slave=pin)]
+        page.wiring.setRowCount(1)
+        page.wiring.setCellWidget(0, 5, QCheckBox())
+        page.wiring_inverted(pin, True)
+        self.assertIs(integrate.pin_inverted(s.cfg, pin), True)
+        page.wiring_inverted(pin, False)
+        self.assertIs(integrate.pin_inverted(s.cfg, pin), False)
+
     def test_bit_pins_can_be_inverted(self):
         w = self.window()
         w.select_slave(0)

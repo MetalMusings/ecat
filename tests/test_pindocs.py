@@ -41,3 +41,42 @@ class TestPinDocs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInvertPin(unittest.TestCase):
+    def cfg(self):
+        return {"slaves": [{"name": "io", "process-data": {"inputs": [{"pdo": "0x1A00", "entries": [
+            {"object": "0x6000:00", "type": "UINT8", "bits": 8,
+             "split": ["a", "b", None, "d"]},
+            {"object": "0x6001:00", "type": "BOOL", "bits": 1, "pin": "single",
+             "hal-type": "bool"},
+            {"object": "0x6002:00", "type": "UINT32", "bits": 32, "pin": "n",
+             "hal-type": "uint"}]}]}}]}
+
+    def test_a_bit_of_a_field(self):
+        c = self.cfg()
+        self.assertIs(integrate.pin_inverted(c, "io.b"), False)
+        self.assertTrue(integrate.set_pin_inverted(c, "io.d", True))
+        self.assertTrue(integrate.set_pin_inverted(c, "io.b", True))
+        e = c["slaves"][0]["process-data"]["inputs"][0]["entries"][0]
+        self.assertEqual(e["invert"], ["b", "d"])               # in bit order
+        self.assertIs(integrate.pin_inverted(c, "io.b"), True)
+        self.assertIs(integrate.pin_inverted(c, "io.a"), False)
+        integrate.set_pin_inverted(c, "io.b", False)
+        integrate.set_pin_inverted(c, "io.d", False)
+        self.assertNotIn("invert", e)
+
+    def test_a_single_bool_pin(self):
+        c = self.cfg()
+        integrate.set_pin_inverted(c, "io.single", True)
+        e = c["slaves"][0]["process-data"]["inputs"][0]["entries"][1]
+        self.assertIs(e["invert"], True)
+        self.assertIs(integrate.pin_inverted(c, "io.single"), True)
+        integrate.set_pin_inverted(c, "io.single", False)
+        self.assertNotIn("invert", e)
+
+    def test_not_a_bit_pin(self):
+        c = self.cfg()
+        self.assertIsNone(integrate.pin_inverted(c, "io.n"))
+        self.assertFalse(integrate.set_pin_inverted(c, "io.n", True))
+        self.assertIsNone(integrate.pin_inverted(c, "io.nothing"))

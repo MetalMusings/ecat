@@ -3333,7 +3333,7 @@ class HalPage(QWidget):
                                 "simulation still drives or reads, or that nothing does. "
                                 "Choose the slave's pin for each.")
         self.wiring_text = self.wiring_card.add(label("", "hint", wrap=True))
-        self.wiring = table(["LinuxCNC pin", "Type", "Now", "Status", "Slave pin"], 2)
+        self.wiring = table(["LinuxCNC pin", "Type", "Now", "Status", "Slave pin", "Invert"], 2)
         self.wiring.setWordWrap(True)
         self.wiring.setTextElideMode(Qt.ElideNone)
         self.wiring_card.add(self.wiring)
@@ -3626,6 +3626,18 @@ class HalPage(QWidget):
                     r.htype, "from the machine" if r.way == "in" else "to the machine"))
             box.currentTextChanged.connect(lambda text, row=r: self.wiring_edited(row, text))
             t.setCellWidget(i, 4, box)
+            inv = QCheckBox()
+            state = integrate.pin_inverted(s.cfg, r.slave) if r.slave else None
+            inv.setEnabled(state is not None)
+            inv.setChecked(bool(state))
+            inv.setToolTip(
+                "Make the slave's pin the opposite of its bit (for a normally closed switch such "
+                "as an E-stop). It is a property of the pin: every net it is in gets it, and "
+                "the Process data page shows it in the Invert column" if state is not None else
+                "Only a bit pin (a bool pin or a bit of a bit field) can be inverted: connect one "
+                "first" if not r.slave else "Only a bit pin can be inverted")
+            inv.toggled.connect(lambda on, pin=r.slave: self.wiring_inverted(pin, on))
+            t.setCellWidget(i, 5, inv)
         t.resizeRowsToContents()
         fit_table(t, minimum=1)
         self.show_pin_info()
@@ -3656,6 +3668,13 @@ class HalPage(QWidget):
             return
         wiring.connect(cfg, row, slave_pin)
         QTimer.singleShot(0, self.win.changed)
+
+    def wiring_inverted(self, pin, on):
+        cfg = self.win.session.cfg
+        if cfg is None or not pin or integrate.pin_inverted(cfg, pin) == on:
+            return
+        if integrate.set_pin_inverted(cfg, pin, on):
+            QTimer.singleShot(0, self.win.changed)
 
     def pin_edited(self, pin, box):
         cfg = self.win.session.cfg

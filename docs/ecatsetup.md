@@ -212,7 +212,10 @@ One column, top to bottom in the order of the work:
   halui ...) in LinuxCNC's documentation on linuxcnc.org. The text comes
   from LinuxCNC's documentation and is kept in `ecatsetup/pindocs.py`;
   nothing is fetched, the links open in your browser. Pins of your own
-  components have no text;
+  components have no text. The *Invert* box of a row makes the connected
+  slave pin the opposite of its bit (a bit pin or one bit of a bit field),
+  for a normally closed switch such as an E-stop; it is the same setting as
+  the *Invert* column of Process data, so every net the pin is in gets it;
 - **Inputs and outputs**: the pins the configuration gives, and a column
   where you connect each to LinuxCNC pins;
 - **HAL check** and **File contents**, side by side: your HAL files
