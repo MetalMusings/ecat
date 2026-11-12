@@ -270,7 +270,6 @@ again at the next start; a folder that no longer exists is skipped.
 
 While a test runs (*Test* page), the *Synchronisation* card shows, from
 the master's pins (`ecat.0.*`):
-
 - whether all slaves are in OP;
 - distributed clocks: how many slaves use them, and whether the
   master's DC sync check failed for one (`dc-sync-failed`);
@@ -688,10 +687,18 @@ EtherCAT Setup and replace the simulation with the bus:
   give, so nothing is loaded. Joints, pins, the take-over and the HAL
   check see their connections, with the Tcl file's line numbers. A query
   (`getp`, `show` ...) cannot be answered this way and is noted. A `.tcl`
-  file is never changed: when it connects a pin `ethercat.hal` connects
-  (the simulated joints of `sim_no_stepgen.tcl`, once a joint is
-  connected to a drive), writing is refused and the message names the
-  lines. Take them out of the file, or the file out of the INI file.
+  file is never changed. When it connects a pin `ethercat.hal` connects
+  (the simulated joints and E-stop of `sim_no_stepgen.tcl`, once a joint
+  or the E-stop is connected to a drive or an input), *Apply* turns it
+  into a plain HAL file next to it, `sim_no_stepgen.hal`: the Tcl run once
+  with the INI file's values (a loop over the joints becomes one set of
+  lines per joint), with the clashing lines commented out with
+  `#ecatsetup: `. The INI file then reads the `.hal` file; the `.tcl` file
+  stays in the folder. Select the new file in the Apply card to see the
+  complete HAL, and edit it as any HAL file: writing again keeps your
+  changes. It is not done when the Tcl cannot be turned into HAL (a query
+  such as `getp`, named in the message) or when the `.hal` file exists:
+  then writing is refused and the message names the lines.
 - <a id="what-is-still-simulated"></a>**Still to connect.** Each of
   LinuxCNC's pins to the machine is followed back through the HAL files
   (POSTGUI and `.tcl` ones too). A debounce (`dbounce`, `debounce`) is

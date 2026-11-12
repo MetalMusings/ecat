@@ -107,17 +107,33 @@ class TestHalTcl(unittest.TestCase):
         pins, _ = halcheck.uses(self.ini)
         self.assertEqual(pins["joint.2.motor-pos-cmd"], [halcheck.Use("sim.tcl", 8, "sim:joint2.pos-cmd")])
 
-    def test_the_plan_refuses_a_tcl_line_it_cannot_comment_out(self):
+    def test_the_plan_turns_a_tcl_file_with_a_clash_into_hal(self):
+        c = cfg()
+        c.setdefault("linuxcnc", {})["joints"] = [{"joint": 0, "slave": "x", "scale": 100.0}]
+        p = integrate.plan(self.ini, c)
+        self.assertEqual([x for x in p.errors if x.startswith("sim.tcl")], [])
+        self.assertNotIn(self.tcl, [ch.path for ch in p.changes])         # never changed
+        hal = next(ch for ch in p.changes if ch.name == "sim.hal")
+        self.assertEqual(hal.kind, "new")
+        self.assertIn(integrate.COMMENT + "net sim:joint0.pos-cmd joint.0.motor-pos-cmd => "
+                      "sim-joint.0.pid.command\n", hal.new)
+        self.assertTrue(any("(.tcl line 8)" in n for n in p.notes), p.notes)
+        # nothing connected here: nothing to convert
+        c["linuxcnc"]["joints"] = []
+        q = integrate.plan(self.ini, c)
+        self.assertFalse([x for x in q.errors if x.startswith("sim.tcl")])
+        self.assertFalse([ch for ch in q.changes if ch.name == "sim.hal"])
+
+    def test_a_tcl_file_with_a_query_is_not_converted(self):
+        self.write("sim.tcl", "set v [getp motion.enable]\n"
+                              "net sim:joint0.pos-cmd joint.0.motor-pos-cmd => sim-joint.0.pid.command\n")
         c = cfg()
         c.setdefault("linuxcnc", {})["joints"] = [{"joint": 0, "slave": "x", "scale": 100.0}]
         p = integrate.plan(self.ini, c)
         e = [x for x in p.errors if x.startswith("sim.tcl")]
         self.assertEqual(len(e), 1, p.errors)
-        self.assertIn("(line 8) connects joint.0.motor-pos-cmd", e[0])
-        self.assertNotIn(self.tcl, [ch.path for ch in p.changes])
-        # nothing connected here: nothing to refuse
-        c["linuxcnc"]["joints"] = []
-        self.assertFalse([x for x in integrate.plan(self.ini, c).errors if x.startswith("sim.tcl")])
+        self.assertIn("cannot turn this one into HAL", e[0])
+        self.assertFalse([ch for ch in p.changes if ch.name == "sim.hal"])
 
 
 if __name__ == "__main__":

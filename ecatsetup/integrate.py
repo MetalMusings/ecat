@@ -985,8 +985,12 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         if (f.endswith(".hal") or is_tcl(f)) and not os.path.exists(f):
             p.errors.append("%s is in the INI file but does not exist" % os.path.basename(f))
 
-    # a .tcl file is read as the HAL it gives, but never changed: a line
-    # that would be commented out in a .hal file is an error there
+    # a .tcl file is read as the HAL it gives, but never changed. One with a
+    # line that would be commented out is converted: the HAL it gives is
+    # written as a .hal file of its own (the INI points to it), and the
+    # lines are commented out there
+    virtual = {}             # new .hal path -> its text, for a converted .tcl file
+    virtual_from = {}        # new .hal path -> (the .tcl path, its line of each text line)
     for path in tcl_files:
         from . import haltcl
         try:
@@ -1010,14 +1014,45 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         if clash:
             lines = sorted({n for n, _ in clash})
             what = sorted({pin for _, ps in clash for pin in ps})
-            p.errors.append("%s (line%s %s) connects %s, which ethercat.hal connects now. EtherCAT "
-                            "Setup does not change .tcl files: take those lines out there, or the "
-                            "file out of the INI file" % (
-                                os.path.basename(path), "" if len(lines) == 1 else "s",
-                                ", ".join(str(n) for n in lines), ", ".join(what)))
+            target = os.path.join(d, os.path.splitext(os.path.basename(path))[0] + ".hal")
+            entry = next((v for v, pth, _ in hal_entries(ini_path) if pth == path), None)
+            if x.problems or entry is None:
+                p.errors.append("%s (line%s %s) connects %s, which ethercat.hal connects now. "
+                                "EtherCAT Setup does not change .tcl files and cannot turn this "
+                                "one into HAL (%s): take those lines out there, or the file out "
+                                "of the INI file" % (
+                                    os.path.basename(path), "" if len(lines) == 1 else "s",
+                                    ", ".join(str(n) for n in lines), ", ".join(what),
+                                    "; ".join(x.problems) or "it is not a HALFILE"))
+                continue
+            if os.path.exists(target):
+                p.errors.append("%s has lines that ethercat.hal replaces, and would be turned into "
+                                "%s, which exists: rename one" % (
+                                    os.path.basename(path), os.path.basename(target)))
+                continue
+            header = ("# Made by EtherCAT Setup from %s: the Tcl file run once with the INI "
+                      "file's values\n# (%d joint%s), as plain HAL. The INI file reads this file "
+                      "now, not the .tcl one.\n# Lines that ethercat.hal replaces are commented "
+                      "out with %s\n\n" % (
+                          os.path.basename(path), njoints, "" if njoints == 1 else "s",
+                          COMMENT.strip()))
+            virtual[target] = header + x.text
+            virtual_from[target] = (path, x.lines)
+            ini_replace[entry] = os.path.basename(target)
+            if path in postgui:
+                postgui.add(target)
+            p.notes.append("%s is turned into %s: the Tcl run once with the INI file's values, "
+                           "as HAL (the .tcl file stays as it is); the lines that clashed "
+                           "(.tcl line%s %s) are commented out there" % (
+                               os.path.basename(path), os.path.basename(target),
+                               "" if len(lines) == 1 else "s", ", ".join(str(n) for n in lines)))
 
-    # what the user's files connect, before any change
+    # what the user's files connect, before any change (a converted .tcl file by its .tcl)
     old_sig = signals(hal_files + tcl_files, ini_path)
+    hal_files = hal_files + list(virtual)
+
+    def text_of(path):
+        return virtual[path] if path in virtual else read_text(path)
     # lines to comment out, and the signals they used
     sig_of_pin = {}          # managed pin -> the signal the user's file put it on
     kept = {}                # signal -> pins of commented lines that are not managed
@@ -1039,7 +1074,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                 or any(pin.startswith(inst + ".") for inst in early))
 
     for path in hal_files:
-        current = read_text(path)
+        current = text_of(path)
         text = original(current)
         lines = text.splitlines(keepends=True)
         hit = set()
@@ -1121,7 +1156,12 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             p.notes.append("%s is copied into the configuration folder and changed there; "
                            "LinuxCNC's own file is not" % os.path.basename(path))
             continue
-        if new != current:
+        if path in virtual:
+            tcl, tcl_lines = virtual_from[path]
+            n = len(hit)
+            p.changes.append(FileChange(path, "new", "", new, "%s as HAL, %d line%s commented out" % (
+                os.path.basename(tcl), n, "" if n == 1 else "s")))
+        elif new != current:
             before = {i for i, x in enumerate(current.splitlines()) if x.startswith(COMMENT)}
             back = len(before - hit)
             parts = []
@@ -1243,7 +1283,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                 pin_sig[pin] = t[1]
     user_loaded = set()
     for path in hal_files:
-        for _, _, t in statements(original(read_text(path))):
+        for _, _, t in statements(original(text_of(path))):
             if t[0] == "loadrt" and len(t) > 1:
                 user_loaded.add(t[1])
     q_loads, q_addf, q_lines = quirk_hal(cfg, pin_sig, user_loaded, p)

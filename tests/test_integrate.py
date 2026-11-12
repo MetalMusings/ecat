@@ -6,6 +6,7 @@ Run with: python3 -m unittest discover -s tests
 
 import copy
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -21,7 +22,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
         __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ecatsetup import config, integrate  # noqa: E402
+from ecatsetup import config, haltcl, integrate  # noqa: E402
 from test_testmode import cfg as base_cfg  # noqa: E402
 
 INI = """\
@@ -665,6 +666,62 @@ class TestFromSimulation(Folder):
         self.assertIn("net J0:homesw io.in-1 => joint.0.home-sw-in\n", main)
         self.assertNotIn("J0_switch.home-sw", main)
         self.assertIn("net J0:pos-fb J0_switch.cur-pos\n", main)
+
+
+@unittest.skipIf(shutil.which(haltcl.TCLSH) is None, "tclsh is not installed")
+class TestTclConverted(Folder):
+    """A .tcl HALFILE that connects pins ethercat.hal connects now is turned into a
+    .hal file (the Tcl run once), and the lines are commented out there."""
+
+    SIM = ("loadrt trivkins\n"
+           "for {set j 0} {$j < $::KINS(JOINTS)} {incr j} {\n"
+           "    net sim:j${j}.homesw sim-j.${j}.switch.home-sw => joint.${j}.home-sw-in\n"
+           "    net sim:j${j}.other sim-j.${j}.pid.out => sim-j.${j}.mux.in\n"
+           "}\n")
+
+    def setUp(self):
+        super().setUp()
+        self.write("machine.ini", INI.replace("HALFILE = machine.hal\n", "HALFILE = sim.tcl\n")
+                   .replace("HALFILE = LIB:basic.hal\n", "")
+                   .replace("POSTGUI_HALFILE = postgui.hal\n", ""))
+        self.write("sim.tcl", self.SIM)
+
+    def cfg(self):
+        c = cfg()
+        c["slaves"][1]["process-data"]["inputs"] = [{"pdo": "0x1A00", "sm": 3, "entries": [
+            {"object": "0x6000:01", "bits": 1, "type": "BOOL", "pin": "in-1", "hal-type": "bool"}]}]
+        integrate.set_net(c, "io.in-1", ["joint.0.home-sw-in"])
+        return c
+
+    def test_converted_and_stable(self):
+        p = integrate.plan(self.ini, self.cfg())
+        self.assertEqual(p.errors, [])
+        change = next(c for c in p.changes if c.name == "sim.hal")
+        self.assertEqual(change.kind, "new")
+        self.assertIn(integrate.COMMENT + "net sim:j0.homesw sim-j.0.switch.home-sw => "
+                      "joint.0.home-sw-in\n", change.new)
+        self.assertIn("net sim:j0.other sim-j.0.pid.out => sim-j.0.mux.in\n", change.new)
+        self.assertIn("net sim:j1.homesw sim-j.1.switch.home-sw => joint.1.home-sw-in\n",
+                      change.new)                       # joint 1 is not connected here: kept
+        self.assertTrue(any("sim.tcl is turned into sim.hal" in n for n in p.notes), p.notes)
+        integrate.apply(p)
+        self.assertIn("HALFILE = sim.hal\n", self.read("machine.ini"))
+        self.assertNotIn("HALFILE = sim.tcl", self.read("machine.ini"))
+        self.assertEqual(self.read("sim.tcl"), self.SIM)        # the .tcl file is never changed
+        again = integrate.plan(self.ini, self.cfg())
+        self.assertEqual((again.changes, again.errors), ([], []))
+
+    def test_not_over_an_existing_file(self):
+        self.write("sim.hal", "# mine\n")
+        p = integrate.plan(self.ini, self.cfg())
+        self.assertTrue(any("sim.hal, which exists" in e for e in p.errors), p.errors)
+
+    def test_not_when_nothing_clashes(self):
+        c = self.cfg()
+        integrate.set_net(c, "io.in-1", [])
+        p = integrate.plan(self.ini, c)
+        self.assertFalse(any(x.name == "sim.hal" for x in p.changes))
+        self.assertIn("sim.tcl", self.read("machine.ini"))
 
 
 class TestJointChecks(Folder):
