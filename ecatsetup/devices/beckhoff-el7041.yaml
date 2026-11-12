@@ -11,7 +11,7 @@ pins:
   '0x7010:02': {pin: reset}
   '0x7010:03': {pin: reduce-torque}
   # -1..1 of the speed range (0x8012:05: 0 = 1000 ... 5 = 32000 full steps/s)
-  '0x7010:21': {pin: velocity, hal-type: float, scale: 32767}
+  '0x7010:21': {pin: velocity, hal-type: real, scale: 32767}
   '0x6010:04': {pin: error}
 
 # HAL lines written into ethercat.hal for each slave this file matches,

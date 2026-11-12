@@ -15,6 +15,8 @@ import os
 
 import yaml
 
+from . import config
+
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
 KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec", "homing"}
 
@@ -297,6 +299,8 @@ def from_slave(slave):
                 for k in ("hal-type", "scale", "offset"):
                     if e.get(k) is not None:
                         d[k] = e[k]
+                if "hal-type" in d:
+                    d["hal-type"] = config.HAL_ALIASES.get(d["hal-type"], d["hal-type"])
                 pins[str(e.get("object"))] = d
     if pins:
         out["pins"] = pins

@@ -1442,7 +1442,7 @@ class SlaveView(QWidget):
         if col == self.PIN:
             if text:
                 e["pin"] = text
-                e.setdefault("hal-type", propose.HAL_TYPES.get(e.get("type"), "s32"))
+                e.setdefault("hal-type", propose.HAL_TYPES.get(e.get("type"), "sint"))
             else:
                 e.pop("pin", None)
                 e.pop("hal-type", None)
@@ -1467,10 +1467,10 @@ class SlaveView(QWidget):
             self._keep_inverted_names(e)
         elif col == self.INVERT:
             if "pin" in e:
-                if text.lower() in ("yes", "y", "true", "1") and e.get("hal-type") == "bit":
+                if text.lower() in ("yes", "y", "true", "1") and e.get("hal-type") == "bool":
                     e["invert"] = True
                 else:
-                    if text and e.get("hal-type") != "bit":
+                    if text and e.get("hal-type") != "bool":
                         self.win.status("Only bit pins can be inverted")
                     e.pop("invert", None)
             elif "split" in e:
@@ -1576,14 +1576,14 @@ class SlaveView(QWidget):
             e.pop("split")
             e.pop("invert", None)
             e["pin"] = base
-            e["hal-type"] = text or propose.HAL_TYPES.get(e.get("type"), "s32")
+            e["hal-type"] = text or propose.HAL_TYPES.get(e.get("type"), "sint")
             self.loading = True
             self.pd.item(row, self.SPLIT).setText("")
             self.pd.item(row, self.PIN).setText(base)
             self.loading = False
         else:
             e["hal-type"] = text
-            if text != "bit":
+            if text != "bool":
                 e.pop("invert", None)
         self.loading = True
         self.pd.item(row, self.INVERT).setText(self._invert_text(e))
@@ -2123,7 +2123,7 @@ class PinTable(QTableWidget):
         fit_table(self)
 
     def _setter(self, pin):
-        if pin.type == "bit":
+        if pin.type == "bool":
             w = QCheckBox()
             w.setChecked(pin.value == "TRUE")
             w.toggled.connect(lambda on, p=pin: self.win.set_pin(p, on))
@@ -3098,7 +3098,7 @@ def config_pins(cfg):
                     for i, p in enumerate(e.get("split") or []):
                         if p:
                             rows.append((s["position"], "%s bit %d" % (e.get("object"), i),
-                                         "%s.%s" % (name, p), "bit", way))
+                                         "%s.%s" % (name, p), "bool", way))
         names = config.axes(s)
         for n, a in enumerate(names):
             rows.append((s["position"], "CiA 402 axis %d" % n if len(names) > 1 else "CiA 402 profile",
@@ -3532,7 +3532,7 @@ class HalPage(QWidget):
         self.wiring_card.setVisible(bool(self.wiring_rows))
         own = integrate.slave_pins(s.cfg)
         todo = [r for r in self.wiring_rows if r.todo]
-        has_bits = any(ht == "bit" for ht, _ in own.values())
+        has_bits = any(ht == "bool" for ht, _ in own.values())
         text = ("%d still simulated or not connected." % len(todo) if todo else
                 "Everything here is connected to the machine.")
         if todo and not has_bits:

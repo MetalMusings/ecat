@@ -65,8 +65,8 @@ def cfg():
     c = base_cfg()
     io = c["slaves"][1]["process-data"]
     io["inputs"] = [{"pdo": "0x1A00", "sm": 3, "entries": [
-        {"object": "0x6000:01", "bits": 1, "type": "BOOL", "pin": "in-1", "hal-type": "bit"},
-        {"object": "0x6000:02", "bits": 1, "type": "BOOL", "pin": "in-2", "hal-type": "bit"}]}]
+        {"object": "0x6000:01", "bits": 1, "type": "BOOL", "pin": "in-1", "hal-type": "bool"},
+        {"object": "0x6000:02", "bits": 1, "type": "BOOL", "pin": "in-2", "hal-type": "bool"}]}]
     return c
 
 

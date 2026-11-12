@@ -95,8 +95,8 @@ class TestDriveTest(TestTestMode):
 
     def setUp(self):
         super().setUp()
-        pins = dict(PINS, **{"x.pos-fb": ["float", "OUT", "50"],
-                             "x.drv-actual-position": ["s32", "OUT", "5000"]})
+        pins = dict(PINS, **{"x.pos-fb": ["real", "OUT", "50"],
+                             "x.drv-actual-position": ["sint", "OUT", "5000"]})
         p = mock.patch.dict(os.environ, {"FAKE_HAL_PINS": json.dumps(pins)})
         p.start()
         self.addCleanup(p.stop)
@@ -122,7 +122,7 @@ class TestDriveTest(TestTestMode):
         with open(self.state, "w") as f:
             json.dump(pins, f)
 
-    def add_fake_pin(self, name, type_="float", dir_="IN", value="0"):
+    def add_fake_pin(self, name, type_="real", dir_="IN", value="0"):
         with open(self.state) as f:
             pins = json.load(f)
         pins[name] = [type_, dir_, value]
@@ -331,7 +331,7 @@ class TestDriveTest(TestTestMode):
         run = self.started()
         self.drive.sdos[(0x6098, 0)] = 35
         for pin in ("stat-homed", "stat-homing", "home-error"):
-            self.add_fake_pin("x." + pin, "bit", "OUT", "FALSE")
+            self.add_fake_pin("x." + pin, "bool", "OUT", "FALSE")
         dt = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]}),
                                  self.coe(), {"scale": 100.0})
         dt.prepare()

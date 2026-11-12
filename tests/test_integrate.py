@@ -536,7 +536,7 @@ class TestNets(Folder):
         self.assertEqual(config.check(c), ["linuxcnc.nets: a: none of its pins is a slave's pin"])
         lc["nets"] = [{"signal": "a", "pins": ["io.out-1", "motion.analog-out-00"]}]
         self.assertEqual(config.check(c), ["linuxcnc.nets: a: pins of different HAL types "
-                                           "(bit, float)"])
+                                           "(bool, real)"])
         lc["nets"] = [{"signal": "a", "pins": ["io.out-1", "motion.digital-out-00",
                                                "halui.machine.is-on"]}]
         self.assertEqual(config.check(c), ["linuxcnc.nets: a: more than one pin writes it "
@@ -612,8 +612,8 @@ class TestFromSimulation(Folder):
     def cfg(self):
         c = cfg()
         c["slaves"][1]["process-data"]["inputs"] = [{"pdo": "0x1A00", "sm": 3, "entries": [
-            {"object": "0x6000:01", "bits": 1, "type": "BOOL", "pin": "in-1", "hal-type": "bit"},
-            {"object": "0x6000:02", "bits": 1, "type": "BOOL", "pin": "in-2", "hal-type": "bit"}]}]
+            {"object": "0x6000:01", "bits": 1, "type": "BOOL", "pin": "in-1", "hal-type": "bool"},
+            {"object": "0x6000:02", "bits": 1, "type": "BOOL", "pin": "in-2", "hal-type": "bool"}]}]
         integrate.set_joint(c, 0, "x", 100.0)
         integrate.set_net(c, "io.in-1", ["joint.0.home-sw-in"])
         integrate.set_net(c, "io.in-2", ["iocontrol.0.emc-enable-in"])

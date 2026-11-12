@@ -67,7 +67,7 @@ class TestPropose(unittest.TestCase):
         # Subindexes corrected from the CoE dictionary.
         self.assertIn((0x6001, 2), entries)
         self.assertEqual(entries[(0x6001, 2)].pin, "out-unit1.calculated-voltage")
-        self.assertEqual(entries[(0x6001, 2)].hal_type, "float")
+        self.assertEqual(entries[(0x6001, 2)].hal_type, "real")
         # bit names from the shipped quirk file for the EaserCAT 7000
         self.assertEqual(entries[(0x7000, 0)].split, ["out-1", "out-2", "activate-relay", "out-4"])
         self.assertEqual(entries[(0x7000, 0)].pin, "")
@@ -129,9 +129,9 @@ class TestPropose(unittest.TestCase):
         p = propose.propose({"position": 1, "dc": False}, s, coe.Dictionary(), device_type=5001)
         e = {(x.index, x.subindex): x for pd in p.pdos for x in pd.entries}
         self.assertEqual([(e[(0x7010, i)].pin, e[(0x7010, i)].hal_type) for i in (1, 2, 3)],
-                         [("enable", "bit"), ("reset", "bit"), ("reduce-torque", "bit")])
+                         [("enable", "bool"), ("reset", "bool"), ("reduce-torque", "bool")])
         v = e[(0x7010, 0x21)]
-        self.assertEqual((v.pin, v.hal_type, v.scale), ("velocity", "float", 32767.0))
+        self.assertEqual((v.pin, v.hal_type, v.scale), ("velocity", "real", 32767.0))
         self.assertEqual(e[(0x6010, 4)].pin, "error")
         self.assertTrue(any("from the quirk file beckhoff-el7041.yaml" in n for n in p.notes), p.notes)
         slave = config.slave_from_proposal(p)
@@ -186,15 +186,15 @@ class TestPropose(unittest.TestCase):
                             coe.Dictionary(), device_type=5001)
         e = {(x.index, x.subindex): x for pd in p.pdos for x in pd.entries}
         v, out = e[(0x6000, 0x11)], e[(0x7000, 0x11)]
-        self.assertEqual((v.pin, v.hal_type), ("value", "float"))
+        self.assertEqual((v.pin, v.hal_type), ("value", "real"))
         self.assertAlmostEqual(v.scale, 10.0 / 0x7FFF)
-        self.assertEqual(out.hal_type, "float")
+        self.assertEqual(out.hal_type, "real")
         self.assertAlmostEqual(out.scale, 0x7FFF / 10.0)
         self.assertEqual(e[(0x6000, 7)].pin, "error")
         self.assertTrue(any("value: analog input, -10..10 V" in n for n in p.notes))
         s = config.slave_from_proposal(p)
         entry = s["process-data"]["inputs"][0]["entries"][2]
-        self.assertEqual((entry["hal-type"], round(entry["scale"], 9)), ("float", round(10 / 0x7FFF, 9)))
+        self.assertEqual((entry["hal-type"], round(entry["scale"], 9)), ("real", round(10 / 0x7FFF, 9)))
         self.assertNotIn("offset", entry)
         cfg = {"ecat": 1, "master": {"interface": "x", "transport": "raw"}, "slaves": [s]}
         self.assertEqual(config.check(cfg), [])
@@ -202,7 +202,7 @@ class TestPropose(unittest.TestCase):
         p = propose.propose({"position": 2, "dc": False}, self.analog_sii("Analog box"),
                             coe.Dictionary(), device_type=5001)
         v = next(x for pd in p.pdos for x in pd.entries if x.subindex == 0x11)
-        self.assertEqual(v.hal_type, "s32")
+        self.assertEqual(v.hal_type, "sint")
         self.assertTrue(any("raw counts" in n for n in p.notes))
 
     def test_cia402_drive(self):
@@ -218,6 +218,27 @@ class TestPropose(unittest.TestCase):
         self.assertEqual(roles[0x6064], ("profile", ""))
         self.assertEqual((p.dc_assign, p.dc_sync0_factor), (0x300, 1))
         self.assertEqual(p.notes, [])
+
+    def test_digital_outputs_are_a_bit_pattern(self):
+        # the digital outputs are bits, not a number: a value too wide is cut, not held at the top
+        s = sii.Sii(0xA88, 0xA880010, 1, 0, 0x04, name="DRV")
+        s.pdos = [
+            sii.Pdo(0x1600, "rx", 2, "RxPDO", False, False, [
+                sii.PdoEntry(0x6040, 0, "Control Word", "UINT", 16),
+                sii.PdoEntry(0x607A, 0, "Target Position", "DINT", 32),
+                sii.PdoEntry(0x60FE, 1, "Digital Outputs", "UDINT", 32)]),
+            sii.Pdo(0x1A00, "tx", 3, "TxPDO", False, False, [
+                sii.PdoEntry(0x6041, 0, "Status Word", "UINT", 16),
+                sii.PdoEntry(0x6064, 0, "Position Actual Value", "DINT", 32),
+                sii.PdoEntry(0x60FD, 0, "Digital Inputs", "UDINT", 32)])]
+        p = propose.propose({"position": 0, "dc": True}, s, coe.Dictionary(), device_type=0x192)
+        slave = config.slave_from_proposal(p, "d")
+        entries = {e["object"]: e for k in ("outputs", "inputs")
+                   for pdo in slave["process-data"][k] for e in pdo["entries"]}
+        out = entries["0x60FE:01"]
+        self.assertEqual((out["pin"], out["hal-type"], out.get("raw")), ("digital-outputs", "uint", True))
+        self.assertNotIn("raw", entries["0x60FD:00"])
+        self.assertEqual(config.check({"ecat": 1, "master": {}, "slaves": [slave]}), [])
 
     def test_two_axes(self):
         s = sii.Sii(0xA88, 0xA880010, 1, 0, 0x04, name="ECT60x2")
@@ -367,6 +388,13 @@ class TestEsi(unittest.TestCase):
         p = propose.propose(info, s, coe.Dictionary(), esi_dev=dev, esi_exact=True)
         self.assertEqual([pd.index for pd in p.pdos], [0x1A03])          # the ESI's default
         self.assertEqual(len([n for n in p.notes if "16-bit counter" in n]), 1)
+        # a counter that wraps at its width goes on counting in 64 bits
+        counters = [e for pd in p.pdos for e in pd.entries if e.role == "pin" and e.extend]
+        self.assertEqual([(e.bitlen, e.hal_type) for e in counters], [(16, "sint")])
+        slave16 = config.slave_from_proposal(p)
+        ext = [e for pdo in slave16["process-data"]["inputs"] for e in pdo["entries"] if e.get("extend")]
+        self.assertEqual(len(ext), 1)
+        self.assertEqual(config.check({"ecat": 1, "master": {}, "slaves": [slave16]}), [])
         p = propose.propose(info, s, coe.Dictionary(), esi_dev=dev, esi_exact=True,
                             pdo_set="standard 32 bit")
         self.assertEqual([(pd.sm, pd.index) for pd in p.pdos], [(3, 0x1A04)])
@@ -385,7 +413,7 @@ class TestEsi(unittest.TestCase):
                 "process-data": {"inputs": [{"pdo": "0x1A04", "sm": 3, "entries": entries}]}}]}
         counter = {"object": "0x6000:11", "bits": 32, "type": "UDINT", "use": "profile"}
         self.assertEqual(config.check(slave([counter])), [])
-        pinned = dict(counter, pin="count", **{"hal-type": "s32"})
+        pinned = dict(counter, pin="count", **{"hal-type": "sint"})
         del pinned["use"]
         self.assertTrue(any("handled by encoder enc" in e for e in config.check(slave([pinned]))))
         valid = {"object": "0x6000:01", "bits": 1, "type": "BOOL", "use": "profile"}
@@ -398,7 +426,7 @@ class TestEsi(unittest.TestCase):
         def slave(out_sm, in_sm):
             def pdo(index, sm, obj, pin):
                 return {"pdo": index, "sm": sm, "entries": [
-                    {"object": obj, "bits": 16, "type": "UINT", "pin": pin, "hal-type": "u32"}]}
+                    {"object": obj, "bits": 16, "type": "UINT", "pin": pin, "hal-type": "uint"}]}
             return {"ecat": 1, "master": {}, "slaves": [{
                 "position": 0, "name": "s", "identity": {"vendor": "0x2", "product": "0x1"},
                 "profile": "generic", "process-data": {
@@ -411,6 +439,52 @@ class TestEsi(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertTrue(any("sm must be 0 to 255" in e for e in config.check(slave(2, 256))))
         self.assertTrue(any("sm must be 0 to 255" in e for e in config.check(slave(None, 3))))
+
+    def test_hal_types_in_2_10_names_and_the_old_ones_read(self):
+        # a file written for 2.9 spells the types bit, s32, u32, float: read as the same types
+        text = ("ecat: 1\nmaster: {}\nslaves:\n- position: 0\n  name: s\n"
+                "  identity: {vendor: '0x2', product: '0x1'}\n  profile: generic\n"
+                "  process-data:\n    inputs:\n    - pdo: '0x1A00'\n      sm: 3\n      entries:\n"
+                "      - {object: '0x6000:01', bits: 1, type: BOOL, pin: a, hal-type: bit}\n"
+                "      - {object: '0x6000:02', bits: 16, type: INT, pin: b, hal-type: s32}\n"
+                "      - {object: '0x6000:03', bits: 16, type: UINT, pin: c, hal-type: u32}\n"
+                "      - {object: '0x6000:04', bits: 16, type: INT, pin: d, hal-type: float, scale: 2}\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "e.yaml")
+            with open(path, "w") as f:
+                f.write(text)
+            cfg = config.load(path)
+        types = [e["hal-type"] for e in cfg["slaves"][0]["process-data"]["inputs"][0]["entries"]]
+        self.assertEqual(types, ["bool", "sint", "uint", "real"])
+        self.assertEqual(config.check(cfg), [])
+        # written with the new names
+        self.assertIn("hal-type: sint", config.dumps(cfg))
+        self.assertNotIn("s32", config.dumps(cfg))
+
+    def test_extend_and_raw_rules(self):
+        def check(entry, kind="inputs"):
+            return config.check({"ecat": 1, "master": {}, "slaves": [{
+                "position": 0, "name": "s", "identity": {"vendor": "0x2", "product": "0x1"},
+                "profile": "generic",
+                "process-data": {kind: [{"pdo": "0x1A00", "sm": 3, "entries": [dict(
+                    {"object": "0x6000:01", "bits": 32, "type": "UDINT", "pin": "c",
+                     "hal-type": "sint"}, **entry)]}]}}]})
+        self.assertEqual(check({"extend": True}), [])
+        self.assertEqual(check({"bits": 16, "type": "UINT", "extend": True}), [])
+        self.assertEqual(check({"extend": False}), [])
+        self.assertTrue(any("extend is for an input entry of 8 to 32 bits with hal-type sint" in e
+                            for e in check({"extend": True}, "outputs")))
+        self.assertTrue(any("extend is for an input" in e for e in check({"hal-type": "uint", "extend": True})))
+        self.assertTrue(any("extend is for an input" in e for e in check(
+            {"bits": 64, "type": "LINT", "extend": True})))
+        self.assertTrue(any("extend is true or false" in e for e in check({"extend": "yes"})))
+        # raw: a bit pattern, an unsigned pin of up to 32 bits
+        self.assertEqual(check({"hal-type": "uint", "raw": True}, "outputs"), [])
+        self.assertTrue(any("raw is for an entry of up to 32 bits with hal-type uint" in e
+                            for e in check({"raw": True})))
+        self.assertTrue(any("raw is for an entry of up to 32 bits" in e for e in check(
+            {"hal-type": "uint", "bits": 64, "type": "ULINT", "raw": True})))
+        self.assertTrue(any("raw is true or false" in e for e in check({"raw": 1})))
 
     def test_a_pulse_counter_is_not_an_encoder(self):
         # EL2521: a "Counter value" without "Latch C valid"
@@ -548,21 +622,28 @@ class TestConfig(unittest.TestCase):
         other = cfg["slaves"][0]["process-data"]["inputs"][1]["entries"][0]   # a s32 pin
         other["invert"] = True
         self.assertTrue(any("invert is true or false, for a bit pin" in x for x in config.check(cfg)))
-        other.update({"hal-type": "bit", "invert": True})
+        other.update({"hal-type": "bool", "invert": True})
         self.assertFalse(any("invert" in x for x in config.check(cfg)))
         self.assertIn("invert: true", config.dumps(cfg))
 
-    def test_64_bit_entries_are_float_pins(self):
-        self.assertEqual(propose.HAL_TYPES["LINT"], "float")
-        self.assertEqual(propose.HAL_TYPES["ULINT"], "float")
+    def test_64_bit_entries_are_integer_pins(self):
+        # LinuxCNC 2.10 has 64-bit integer pins; real (a float) still carries them to 2^53
+        self.assertEqual(propose.HAL_TYPES["LINT"], "sint")
+        self.assertEqual(propose.HAL_TYPES["ULINT"], "uint")
         cfg = self.easercat_config()
         e = cfg["slaves"][0]["process-data"]["inputs"][0]["entries"][0]
         e.pop("split", None)
-        e.update(bits=64, type="LINT", pin="big", **{"hal-type": "s32"})
-        self.assertTrue(any("a LINT entry needs hal-type float" in x for x in config.check(cfg)))
+        e.update(bits=64, type="LINT", pin="big", **{"hal-type": "sint"})
+        self.assertFalse(any("LINT" in x or "hal-type" in x for x in config.check(cfg)))
+        e["hal-type"] = "uint"
+        self.assertTrue(any("a LINT entry takes hal-type sint" in x for x in config.check(cfg)))
+        e["type"] = "ULINT"
+        self.assertFalse(any("LINT" in x or "hal-type" in x for x in config.check(cfg)))
+        e["hal-type"] = "sint"
+        self.assertTrue(any("a ULINT entry takes hal-type uint" in x for x in config.check(cfg)))
         e["hal-type"] = "s64"
         self.assertTrue(any("unknown hal-type 's64'" in x for x in config.check(cfg)))
-        e["hal-type"] = "float"
+        e["hal-type"] = "real"
         self.assertFalse(any("LINT" in x or "hal-type" in x for x in config.check(cfg)))
         cfg["master"]["start-check"] = "yes"
         self.assertIn("master.start-check: must be true or false", config.check(cfg))
@@ -658,7 +739,7 @@ class TestImport(unittest.TestCase):
         inputs = s["process-data"]["inputs"][0]["entries"]
         self.assertEqual(inputs[0]["split"], ["in-1", None, "in-3"])
         self.assertEqual((inputs[1]["type"], inputs[1]["hal-type"], inputs[1]["scale"]),
-                         ("INT", "float", 0.5))
+                         ("INT", "real", 0.5))
         self.assertTrue(any("<initCmds> not imported" in n for n in notes))
         self.assertTrue(any("no transport" in n for n in notes))
 

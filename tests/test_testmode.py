@@ -86,16 +86,16 @@ elif a[0] == "setp":
 """
 
 PINS = {
-    "ecat.0.all-op": ["bit", "OUT", "TRUE"],
-    "ecat.0.slaves-responding": ["u32", "OUT", "0x00000002"],
-    "ecat.take-down": ["bit", "IN", "FALSE"],
-    "ecat.state-op": ["bit", "OUT", "TRUE"],
-    "ecat.state-safeop": ["bit", "OUT", "FALSE"],
-    "ecat.state-preop": ["bit", "OUT", "FALSE"],
-    "io.out-1": ["bit", "IN", "FALSE"],
-    "io.level": ["float", "IN", "0"],
-    "io.in-1": ["bit", "OUT", "TRUE"],
-    "x.enable": ["bit", "IN", "FALSE"],
+    "ecat.0.all-op": ["bool", "OUT", "TRUE"],
+    "ecat.0.slaves-responding": ["uint", "OUT", "0x00000002"],
+    "ecat.take-down": ["bool", "IN", "FALSE"],
+    "ecat.state-op": ["bool", "OUT", "TRUE"],
+    "ecat.state-safeop": ["bool", "OUT", "FALSE"],
+    "ecat.state-preop": ["bool", "OUT", "FALSE"],
+    "io.out-1": ["bool", "IN", "FALSE"],
+    "io.level": ["real", "IN", "0"],
+    "io.in-1": ["bool", "OUT", "TRUE"],
+    "x.enable": ["bool", "IN", "FALSE"],
 }
 
 
@@ -106,7 +106,7 @@ def cfg():
              "configure-pdos": False, "process-data": {"outputs": [
                  {"pdo": "0x1600", "sm": 2, "entries": [
                      {"object": "0x7000:01", "bits": 1, "type": "BOOL", "pin": "out-1",
-                      "hal-type": "bit"}]}]}}
+                      "hal-type": "bool"}]}]}}
         if profile == "cia402":
             s["cia402"] = {"mode": "csp"}
             s["process-data"] = {"outputs": [{"pdo": "0x1600", "sm": 2, "entries": [
@@ -209,7 +209,7 @@ class TestTestMode(unittest.TestCase):
         with self.assertRaisesRegex(testmode.TestError, "does not run"):
             testmode.WatchRun(cfg()).start()
         with open(self.state, "w") as f:
-            json.dump({"io.in-1": ["bit", "OUT", "TRUE"]}, f)
+            json.dump({"io.in-1": ["bool", "OUT", "TRUE"]}, f)
         with self.assertRaisesRegex(testmode.TestError, "ecat component is not loaded"):
             testmode.WatchRun(cfg()).start()
 
@@ -331,9 +331,9 @@ class TestTestMode(unittest.TestCase):
             self.assertEqual(f.read().splitlines(), ["x.watchdog 1", "x.watchdog 2"])
 
     def test_parse_pins(self):
-        pins = testmode.parse_pins("ecat float IN 0 lcec.0.E7000.Level-1\n\n")
+        pins = testmode.parse_pins("ecat real IN 0 lcec.0.E7000.Level-1\n\n")
         p = pins["lcec.0.E7000.Level-1"]
-        self.assertEqual((p.type, p.dir, p.value), ("float", "IN", "0"))
+        self.assertEqual((p.type, p.dir, p.value), ("real", "IN", "0"))
 
 
 if __name__ == "__main__":

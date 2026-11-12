@@ -30,14 +30,14 @@ EL7041 = {"vendor": "0x00000002", "product": "0x1B813052"}
 def stepper(name="x-stm"):
     def e(obj, pin, bits=1, t="BOOL", **kw):
         return dict({"object": obj, "bits": bits, "type": t, "pin": pin,
-                     "hal-type": "bit"}, **kw)
+                     "hal-type": "bool"}, **kw)
     return {"position": 4, "name": name, "device": "EL7041", "identity": dict(EL7041),
             "profile": "generic", "configure-pdos": True, "process-data": {
                 "outputs": [{"pdo": "0x1602", "sm": 2, "entries": [
                     e("0x7010:01", "enable"), e("0x7010:02", "reset")]},
                     {"pdo": "0x1604", "sm": 2, "entries": [
                         e("0x7010:21", "velocity", 16, "INT", scale=32767.0,
-                          **{"hal-type": "float"})]}],
+                          **{"hal-type": "real"})]}],
                 "inputs": [{"pdo": "0x1A03", "sm": 3, "entries": [e("0x6010:04", "error")]}]}}
 
 
@@ -138,7 +138,7 @@ class TestSaved(unittest.TestCase):
         data = quirks.from_slave(s)
         self.assertEqual(data["match"], {"vendor": s["identity"]["vendor"],
                                          "product": s["identity"]["product"]})
-        self.assertEqual(data["pins"]["0x6001:02"], {"pin": "voltage", "hal-type": "float",
+        self.assertEqual(data["pins"]["0x6001:02"], {"pin": "voltage", "hal-type": "real",
                                                      "scale": 2.0})
         path = quirks.save(s)
         self.assertEqual(os.path.dirname(path), self.dir.name)

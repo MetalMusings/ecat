@@ -10,68 +10,68 @@ from . import config
 
 # (name, HAL type, direction): "in", "out", "io" (pins), "rw", "ro" (parameters)
 MASTER_GLOBAL = [
-    ("slaves-responding", "u32", "out"), ("state-init", "bit", "out"),
-    ("state-preop", "bit", "out"), ("state-safeop", "bit", "out"), ("state-op", "bit", "out"),
-    ("link-up", "bit", "out"), ("all-op", "bit", "out"), ("dc-sync-failed", "bit", "out"),
-    ("take-down", "bit", "in"),
+    ("slaves-responding", "uint", "out"), ("state-init", "bool", "out"),
+    ("state-preop", "bool", "out"), ("state-safeop", "bool", "out"), ("state-op", "bool", "out"),
+    ("link-up", "bool", "out"), ("all-op", "bool", "out"), ("dc-sync-failed", "bool", "out"),
+    ("take-down", "bool", "in"),
 ]
 MASTER = [
-    ("pll-err", "s32", "out"), ("pll-out", "s32", "out"), ("pll-reset-count", "u32", "out"),
-    ("dc-phased", "bit", "out"), ("send-offset", "s32", "out"), ("shift-time", "u32", "out"),
-    ("turnaround-cycles", "s32", "out"), ("guard-state", "s32", "out"),
-    ("guard-cycles", "u32", "out"),
-    ("pll-step", "u32", "rw"), ("pll-max-err", "u32", "rw"), ("dc-phase-max-err", "u32", "rw"),
-    ("send-offset-max", "s32", "rw"), ("auto-shift-margin", "u32", "rw"),
-    ("auto-shift-input-margin", "u32", "rw"),
+    ("pll-err", "sint", "out"), ("pll-out", "sint", "out"), ("pll-reset-count", "uint", "out"),
+    ("dc-phased", "bool", "out"), ("send-offset", "sint", "out"), ("shift-time", "uint", "out"),
+    ("turnaround-cycles", "sint", "out"), ("guard-state", "sint", "out"),
+    ("guard-cycles", "uint", "out"),
+    ("pll-step", "uint", "rw"), ("pll-max-err", "uint", "rw"), ("dc-phase-max-err", "uint", "rw"),
+    ("send-offset-max", "sint", "rw"), ("auto-shift-margin", "uint", "rw"),
+    ("auto-shift-input-margin", "uint", "rw"),
 ]
 SLAVE = [
-    ("slave-online", "bit", "out"), ("slave-oper", "bit", "out"),
-    ("slave-state-init", "bit", "out"), ("slave-state-preop", "bit", "out"),
-    ("slave-state-safeop", "bit", "out"), ("slave-state-op", "bit", "out"),
-    ("slave-dc-sync-failed", "bit", "out"),
+    ("slave-online", "bool", "out"), ("slave-oper", "bool", "out"),
+    ("slave-state-init", "bool", "out"), ("slave-state-preop", "bool", "out"),
+    ("slave-state-safeop", "bool", "out"), ("slave-state-op", "bool", "out"),
+    ("slave-dc-sync-failed", "bool", "out"),
 ]
 CIA402 = [
-    ("enable", "bit", "in"), ("pos-cmd", "float", "in"), ("velocity-cmd", "float", "in"),
-    ("fault-reset", "bit", "in"), ("watchdog", "u32", "in"),
-    ("pos-fb", "float", "out"), ("velocity-fb", "float", "out"), ("drv-fault", "bit", "out"),
-    ("fault-reason", "s32", "out"), ("cia-state", "s32", "out"), ("statusword", "u32", "out"),
-    ("controlword", "u32", "out"), ("opmode", "s32", "out"), ("opmode-display", "s32", "out"),
-    ("error-code", "u32", "out"), ("drv-actual-position", "s32", "out"),
-    ("drv-actual-velocity", "s32", "out"), ("drv-target-position", "s32", "out"),
-    ("drv-target-velocity", "s32", "out"), ("stat-switchon-ready", "bit", "out"),
-    ("stat-switched-on", "bit", "out"), ("stat-op-enabled", "bit", "out"),
-    ("stat-fault", "bit", "out"), ("stat-voltage-enabled", "bit", "out"),
-    ("stat-quick-stop", "bit", "out"), ("stat-switchon-disabled", "bit", "out"),
-    ("stat-warning", "bit", "out"), ("stat-remote", "bit", "out"),
-    ("stat-target-reached", "bit", "out"), ("opmode-no-mode", "bit", "out"),
-    ("opmode-homing", "bit", "out"), ("opmode-cyclic-position", "bit", "out"),
-    ("opmode-cyclic-velocity", "bit", "out"),
-    ("pos-scale", "float", "rw"), ("velo-scale", "float", "rw"),
-    ("auto-fault-reset", "bit", "rw"), ("enable-timeout-ms", "u32", "rw"),
-    ("watchdog-ms", "u32", "rw"), ("mode", "s32", "ro"),
+    ("enable", "bool", "in"), ("pos-cmd", "real", "in"), ("velocity-cmd", "real", "in"),
+    ("fault-reset", "bool", "in"), ("watchdog", "uint", "in"),
+    ("pos-fb", "real", "out"), ("velocity-fb", "real", "out"), ("drv-fault", "bool", "out"),
+    ("fault-reason", "sint", "out"), ("cia-state", "sint", "out"), ("statusword", "uint", "out"),
+    ("controlword", "uint", "out"), ("opmode", "sint", "out"), ("opmode-display", "sint", "out"),
+    ("error-code", "uint", "out"), ("drv-actual-position", "sint", "out"),
+    ("drv-actual-velocity", "sint", "out"), ("drv-target-position", "sint", "out"),
+    ("drv-target-velocity", "sint", "out"), ("stat-switchon-ready", "bool", "out"),
+    ("stat-switched-on", "bool", "out"), ("stat-op-enabled", "bool", "out"),
+    ("stat-fault", "bool", "out"), ("stat-voltage-enabled", "bool", "out"),
+    ("stat-quick-stop", "bool", "out"), ("stat-switchon-disabled", "bool", "out"),
+    ("stat-warning", "bool", "out"), ("stat-remote", "bool", "out"),
+    ("stat-target-reached", "bool", "out"), ("opmode-no-mode", "bool", "out"),
+    ("opmode-homing", "bool", "out"), ("opmode-cyclic-position", "bool", "out"),
+    ("opmode-cyclic-velocity", "bool", "out"),
+    ("pos-scale", "real", "rw"), ("velo-scale", "real", "rw"),
+    ("auto-fault-reset", "bool", "rw"), ("enable-timeout-ms", "uint", "rw"),
+    ("watchdog-ms", "uint", "rw"), ("mode", "sint", "ro"),
 ]
 CIA402_HOMING = [
-    ("index-enable", "bit", "io"), ("home", "bit", "in"), ("stat-homing", "bit", "out"),
-    ("stat-homed", "bit", "out"), ("home-error", "bit", "out"), ("home-timeout-ms", "u32", "rw"),
+    ("index-enable", "bool", "io"), ("home", "bool", "in"), ("stat-homing", "bool", "out"),
+    ("stat-homed", "bool", "out"), ("home-error", "bool", "out"), ("home-timeout-ms", "uint", "rw"),
 ]
-CIA402_PV = [("at-speed", "bit", "out"), ("zero-speed", "bit", "out")]
+CIA402_PV = [("at-speed", "bool", "out"), ("zero-speed", "bool", "out")]
 CIA402_PP = [
-    ("pp-target", "float", "in"), ("pp-start", "bit", "in"), ("pp-relative", "bit", "in"),
-    ("pp-halt", "bit", "in"), ("pp-done", "bit", "out"), ("pp-timeout-ms", "u32", "rw"),
-    ("pp-immediate", "bit", "rw"),
+    ("pp-target", "real", "in"), ("pp-start", "bool", "in"), ("pp-relative", "bool", "in"),
+    ("pp-halt", "bool", "in"), ("pp-done", "bool", "out"), ("pp-timeout-ms", "uint", "rw"),
+    ("pp-immediate", "bool", "rw"),
 ]
-CIA402_PP_VELOCITY = [("pp-velocity", "float", "in")]
-CIA402_STOP = [("stop-timeout-ms", "u32", "rw")]
-CIA402_ZERO = [("pos-zero", "s32", "out")]
-CIA402_MODE = [("opmode-cmd", "s32", "in")]
+CIA402_PP_VELOCITY = [("pp-velocity", "real", "in")]
+CIA402_STOP = [("stop-timeout-ms", "uint", "rw")]
+CIA402_ZERO = [("pos-zero", "sint", "out")]
+CIA402_MODE = [("opmode-cmd", "sint", "in")]
 ENCODER = [
-    ("reset", "bit", "in"), ("counts", "s32", "out"), ("raw-count", "s32", "out"),
-    ("pos", "float", "out"), ("velocity", "float", "out"), ("ok", "bit", "out"),
-    ("pos-scale", "float", "rw"), ("velocity-window-ms", "u32", "rw"),
+    ("reset", "bool", "in"), ("counts", "sint", "out"), ("raw-count", "sint", "out"),
+    ("pos", "real", "out"), ("velocity", "real", "out"), ("ok", "bool", "out"),
+    ("pos-scale", "real", "rw"), ("velocity-window-ms", "uint", "rw"),
 ]
-ENCODER_INDEX = [("index-enable", "bit", "io")]
-ENCODER_LATCH = [("latch-enable-pos", "bit", "io"), ("latch-enable-neg", "bit", "io"),
-                 ("latch-pos", "float", "out")]
+ENCODER_INDEX = [("index-enable", "bool", "io")]
+ENCODER_LATCH = [("latch-enable-pos", "bool", "io"), ("latch-enable-neg", "bool", "io"),
+                 ("latch-pos", "real", "out")]
 FUNCTIONS = ["ecat.read-all", "ecat.write-all"]
 
 
@@ -109,7 +109,7 @@ def pins(cfg):
                         out["%s.%s" % (name, e["pin"])] = (e.get("hal-type"), way)
                     for p in e.get("split") or []:
                         if p:
-                            out["%s.%s" % (name, p)] = ("bit", way)
+                            out["%s.%s" % (name, p)] = ("bool", way)
         if s.get("profile") == "cia402":
             c = s.get("cia402") or {}
             mode, modes = c.get("mode"), list(c.get("modes") or [])

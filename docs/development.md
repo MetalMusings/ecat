@@ -1001,8 +1001,16 @@ running: the bus recovers by itself, without a restart.
 ## LinuxCNC 2.10
 
 Investigated 2026-11-11 against LinuxCNC master 64fab5d412 (2026-11-10,
-2.10.0~pre; tag v2.10.0-pre2 is from 2026-09-28). Nothing is built yet.
-ecat 0.11 builds and runs on 2.9 only; on 2.10 it does not compile.
+2.10.0~pre; tag v2.10.0-pre2 is from 2026-09-28). ecat 0.11 builds and runs on 2.9 only; on 2.10 it does not compile.
+
+Status (2026-11-12, branch `linuxcnc-2.10`, not released): LinuxCNC 2.10 is
+built run-in-place in `~/src/linuxcnc-2.10` (worktree of `~/src/linuxcnc`,
+commit b0e7b191b9, 2.10.0~pre2-436; `. scripts/rip-environment`, `sudo make
+setuid` done). The component (points 1-7) and EtherCAT Setup (8-9) are ported
+and unit-tested (C and Python); the new keys `extend` and `raw`, the 64-bit
+integer pins for LINT/ULINT and the hal-type names are in
+[component.md](component.md). Not done: 10 and 11 (need halrun against the
+bus), steps 3-6 of the order of work below.
 
 ### Decision: ecat moves to 2.10 only
 

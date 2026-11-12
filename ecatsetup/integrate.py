@@ -516,36 +516,36 @@ def rename_in_hal(ini_path, renamed):
 # LinuxCNC pins a slave's pin is often connected to: (pattern, HAL type,
 # direction seen from HAL: "in" is read by LinuxCNC, "out" written by it)
 KNOWN_PINS = [
-    (r"iocontrol\.0\.emc-enable-in", "bit", "in"),
-    (r"iocontrol\.0\.user-enable-out", "bit", "out"),
-    (r"iocontrol\.0\.user-request-enable", "bit", "out"),
-    (r"iocontrol\.0\.(coolant-flood|coolant-mist|lube)", "bit", "out"),
-    (r"iocontrol\.0\.lube_level", "bit", "in"),
-    (r"motion\.digital-in-\d\d", "bit", "in"),
-    (r"motion\.digital-out-\d\d", "bit", "out"),
-    (r"motion\.analog-in-\d\d", "float", "in"),
-    (r"motion\.analog-out-\d\d", "float", "out"),
-    (r"motion\.probe-input", "bit", "in"),
-    (r"motion\.feed-hold", "bit", "in"),
-    (r"motion\.enable", "bit", "in"),
-    (r"joint\.\d+\.(home-sw-in|pos-lim-sw-in|neg-lim-sw-in|amp-fault-in)", "bit", "in"),
-    (r"joint\.\d+\.amp-enable-out", "bit", "out"),
-    (r"joint\.\d+\.motor-pos-cmd", "float", "out"),
-    (r"joint\.\d+\.motor-pos-fb", "float", "in"),
-    (r"spindle\.\d+\.(on|forward|reverse|brake)", "bit", "out"),
+    (r"iocontrol\.0\.emc-enable-in", "bool", "in"),
+    (r"iocontrol\.0\.user-enable-out", "bool", "out"),
+    (r"iocontrol\.0\.user-request-enable", "bool", "out"),
+    (r"iocontrol\.0\.(coolant-flood|coolant-mist|lube)", "bool", "out"),
+    (r"iocontrol\.0\.lube_level", "bool", "in"),
+    (r"motion\.digital-in-\d\d", "bool", "in"),
+    (r"motion\.digital-out-\d\d", "bool", "out"),
+    (r"motion\.analog-in-\d\d", "real", "in"),
+    (r"motion\.analog-out-\d\d", "real", "out"),
+    (r"motion\.probe-input", "bool", "in"),
+    (r"motion\.feed-hold", "bool", "in"),
+    (r"motion\.enable", "bool", "in"),
+    (r"joint\.\d+\.(home-sw-in|pos-lim-sw-in|neg-lim-sw-in|amp-fault-in)", "bool", "in"),
+    (r"joint\.\d+\.amp-enable-out", "bool", "out"),
+    (r"joint\.\d+\.motor-pos-cmd", "real", "out"),
+    (r"joint\.\d+\.motor-pos-fb", "real", "in"),
+    (r"spindle\.\d+\.(on|forward|reverse|brake)", "bool", "out"),
     (r"spindle\.\d+\.(speed-out|speed-out-abs|speed-out-rps|speed-out-rps-abs)",
-     "float", "out"),
-    (r"spindle\.\d+\.(at-speed|is-oriented|orient-fault-in)", "bit", "in"),
-    (r"spindle\.\d+\.(speed-in)", "float", "in"),
+     "real", "out"),
+    (r"spindle\.\d+\.(at-speed|is-oriented|orient-fault-in)", "bool", "in"),
+    (r"spindle\.\d+\.(speed-in)", "real", "in"),
     (r"halui\.(machine|estop|program|mist|flood|lube)\.(on|off|activate|reset|run|pause|"
-     r"resume|step|stop)", "bit", "in"),
-    (r"halui\.machine\.is-on", "bit", "out"),
-    (r"halui\.estop\.is-activated", "bit", "out"),
-    (r"halui\.program\.is-(running|paused|idle)", "bit", "out"),
+     r"resume|step|stop)", "bool", "in"),
+    (r"halui\.machine\.is-on", "bool", "out"),
+    (r"halui\.estop\.is-activated", "bool", "out"),
+    (r"halui\.program\.is-(running|paused|idle)", "bool", "out"),
     # plasmac (QtPlasmaC's component): the torch and its sensors
-    (r"plasmac\.(arc-ok-in|float-switch|ohmic-probe|breakaway|move-up|move-down)", "bit", "in"),
-    (r"plasmac\.arc-voltage-in", "float", "in"),
-    (r"plasmac\.(torch-on|ohmic-enable|scribe-arm|scribe-on)", "bit", "out"),
+    (r"plasmac\.(arc-ok-in|float-switch|ohmic-probe|breakaway|move-up|move-down)", "bool", "in"),
+    (r"plasmac\.arc-voltage-in", "real", "in"),
+    (r"plasmac\.(torch-on|ohmic-enable|scribe-arm|scribe-on)", "bool", "out"),
 ]
 
 # suggestions offered in the window, by HAL type and direction there
@@ -604,7 +604,7 @@ def slave_pins(cfg):
                         out["%s.%s" % (name, e["pin"])] = (e.get("hal-type"), way)
                     for p in e.get("split") or []:
                         if p:
-                            out["%s.%s" % (name, p)] = ("bit", way)
+                            out["%s.%s" % (name, p)] = ("bool", way)
     return out
 
 

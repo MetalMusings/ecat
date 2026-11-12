@@ -24,7 +24,7 @@ from ecatsetup import __main__ as cli, config, halcheck, halpins, integrate  # n
 from test_integrate import Folder, cfg  # noqa: E402
 
 COMPONENT = os.path.join(os.path.dirname(__file__), "..", "component")
-HALTYPE = {"HAL_BIT": "bit", "HAL_FLOAT": "float", "HAL_S32": "s32", "HAL_U32": "u32"}
+HALTYPE = {"HAL_BOOL": "bool", "HAL_REAL": "real", "HAL_SINT": "sint", "HAL_UINT": "uint"}
 HALDIR = {"HAL_IN": "in", "HAL_OUT": "out", "HAL_IO": "io", "HAL_RW": "rw", "HAL_RO": "ro"}
 
 
@@ -62,11 +62,11 @@ class TestPinList(unittest.TestCase):
     def test_pins_of_a_configuration(self):
         c = cfg()
         p = halpins.pins(c)
-        self.assertEqual(p["io.out-1"], ("bit", "in"))
-        self.assertEqual(p["x.pos-fb"], ("float", "out"))
-        self.assertEqual(p["x.pos-scale"], ("float", "rw"))
-        self.assertEqual(p["ecat.0.all-op"], ("bit", "out"))
-        self.assertEqual(p["ecat.take-down"], ("bit", "in"))
+        self.assertEqual(p["io.out-1"], ("bool", "in"))
+        self.assertEqual(p["x.pos-fb"], ("real", "out"))
+        self.assertEqual(p["x.pos-scale"], ("real", "rw"))
+        self.assertEqual(p["ecat.0.all-op"], ("bool", "out"))
+        self.assertEqual(p["ecat.take-down"], ("bool", "in"))
         self.assertNotIn("x.index-enable", p)
         c["slaves"][0]["cia402"]["modes"] = ["hm"]
         self.assertIn("x.index-enable", halpins.pins(c))

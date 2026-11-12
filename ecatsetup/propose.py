@@ -20,9 +20,9 @@ CIA402_PROFILE = {0x603F, 0x6040, 0x6041, 0x6060, 0x6061,
                   0x6064, 0x606C, 0x607A, 0x6081, 0x60FF}
 # Other CiA 402 process data, with fixed pin names and types.
 CIA402_PINS = {
-    0x6071: ("torque-cmd", "s32"), 0x6077: ("torque-fb", "s32"),
-    0x60F4: ("following-error", "s32"), 0x60FD: ("digital-inputs", "u32"),
-    0x60FE: ("digital-outputs", "u32"), 0x6063: ("encoder-fb", "s32"),
+    0x6071: ("torque-cmd", "sint"), 0x6077: ("torque-fb", "sint"),
+    0x60F4: ("following-error", "sint"), 0x60FD: ("digital-inputs", "uint"),
+    0x60FE: ("digital-outputs", "uint"), 0x6063: ("encoder-fb", "sint"),
 }
 # What each CiA 402 cyclic mode needs in the process data.
 CIA402_MODES = {
@@ -39,9 +39,9 @@ CIA402_MODE_BITS = {0: "PP", 1: "VL", 2: "PV", 3: "TQ", 5: "HM", 6: "IP",
                     7: "CSP", 8: "CSV", 9: "CST"}
 PROFILE_NAMES = {402: "CiA 402 drive", 5001: "Modular device (ETG.5001)"}
 
-HAL_TYPES = {"BOOL": "bit", "SINT": "s32", "INT": "s32", "DINT": "s32",
-             "USINT": "u32", "UINT": "u32", "UDINT": "u32", "REAL": "float",
-             "LINT": "float", "ULINT": "float", "LREAL": "float"}  # no 64-bit HAL pins
+HAL_TYPES = {"BOOL": "bool", "SINT": "sint", "INT": "sint", "DINT": "sint",
+             "USINT": "uint", "UINT": "uint", "UDINT": "uint", "REAL": "real",
+             "LINT": "sint", "ULINT": "uint", "LREAL": "real"}  # 64-bit integer pins in 2.10
 # The ethercat tool's CoE type names, in ESI/SII terms.
 # Unsigned 32-bit entries that are counts which wrap, such as encoder
 # counters and latched positions: proposed as s32 pins.
@@ -65,6 +65,8 @@ class Entry:
     scale: float = None  # float pins of integer entries: read raw * scale + offset,
     offset: float = None  # written as (value + offset) * scale
     split: list = None    # a bit field: one pin name per bit (None: no pin), instead of pin
+    extend: bool = False  # an input counter of 16 or 32 bits: the pin keeps counting past the wrap (64 bits)
+    raw: bool = False     # a bit pattern (digital outputs): cut to the entry's width, not held at its top
 
 
 @dataclass
@@ -347,6 +349,7 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                                           for a in range(p.axes)):
                 a = next(a for a in range(p.axes) if e.index - a * AXIS_OFFSET in CIA402_PINS)
                 e.pin, e.hal_type = CIA402_PINS[e.index - a * AXIS_OFFSET]
+                e.raw = e.pin == "digital-outputs"
                 if p.axes > 1:
                     e.pin = "%s-%d" % (e.pin, a + 1)
             else:
@@ -354,19 +357,23 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                 # the part before "__" repeats the record's name.
                 base = kebab(e.name.split("__")[-1]) or "0x%04x-%02x" % (e.index, e.subindex)
                 e.pin = "%s.%s" % (kebab(pd.name), base) if counts[e.name] > 1 else base
-                e.hal_type = "bit" if e.bitlen == 1 else HAL_TYPES.get(e.data_type, "u32")
-                if e.hal_type == "u32" and e.bitlen == 32 and WRAPPING.search(e.name):
+                e.hal_type = "bool" if e.bitlen == 1 else HAL_TYPES.get(e.data_type, "uint")
+                if e.hal_type == "uint" and e.bitlen == 32 and WRAPPING.search(e.name):
                     # an encoder counter or latch counts down past 0;
                     # LinuxCNC's encoder and joint pins take it signed
-                    e.hal_type = "s32"
-                elif pd.direction == "tx" and e.bitlen == 16 and re.search(r"counter", e.name, re.I):
-                    p.notes.append("%s: a 16-bit counter, which wraps at 65536%s"
-                                   % (e.pin, "; a 32-bit set is offered with --pdo-set"
-                                      if esi_dev and len(esi_dev.pdo_sets) > 1 else ""))
+                    e.hal_type = "sint"
+                if (pd.direction == "tx" and e.hal_type in ("sint", "uint")
+                        and ((e.bitlen == 32 and WRAPPING.search(e.name))
+                             or (e.bitlen == 16 and re.search(r"counter", e.name, re.I)))):
+                    # the entry wraps; the pin counts on in 64 bits (a counter or a latched
+                    # position that goes past 0 is negative, as the encoder's own pins)
+                    e.hal_type, e.extend = "sint", True
+                    p.notes.append("%s: a %d-bit counter, extended to 64 bits (extend)"
+                                   % (e.pin, e.bitlen))
                 elif p.profile == 5001 and analog_value(e, pd.direction):
                     rng = analog_range(p.name) or analog_range(getattr(esi_dev, "name", ""))
                     if rng:
-                        e.hal_type = "float"
+                        e.hal_type = "real"
                         e.scale, e.offset = analog_scaling(rng, pd.direction == "rx")
                         p.notes.append("%s: analog %s, %g..%g %s from the device's name; the pin "
                                        "is in %s" % (e.pin, "output" if pd.direction == "rx"
@@ -382,7 +389,7 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         for e in pd.entries:
             qp = qpins.get((e.index, e.subindex))
             if qp and e.role == "pin" and qp.get("split"):
-                e.split, e.pin, e.hal_type = list(qp["split"]), "", "bit"
+                e.split, e.pin, e.hal_type = list(qp["split"]), "", "bool"
                 used.extend(x for x in e.split if x)
             elif qp and e.role == "pin":
                 e.pin = str(qp["pin"])

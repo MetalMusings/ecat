@@ -23,21 +23,21 @@ def _name(text, fallback):
 
 
 def _types(hal_type, bitlen, coe_type):
-    """(hal-type, data type) for an lcec halType, or (None, None)."""
+    """(hal-type, data type) for an lcec halType (the XML's own names), or (None, None)."""
     if hal_type == "bit":
-        return "bit", coe_type or ("BOOL" if bitlen == 1 else _UNSIGNED.get(bitlen))
+        return "bool", coe_type or ("BOOL" if bitlen == 1 else _UNSIGNED.get(bitlen))
     if hal_type == "s32":
-        return "s32", coe_type or _SIGNED.get(bitlen)
+        return "sint", coe_type or _SIGNED.get(bitlen)
     if hal_type == "u32":
-        return "u32", coe_type or _UNSIGNED.get(bitlen)
+        return "uint", coe_type or _UNSIGNED.get(bitlen)
     if hal_type == "float":
-        return "float", coe_type or _SIGNED.get(bitlen)
+        return "real", coe_type or _SIGNED.get(bitlen)
     if hal_type == "float-unsigned":
-        return "float", coe_type or _UNSIGNED.get(bitlen)
+        return "real", coe_type or _UNSIGNED.get(bitlen)
     if hal_type == "float-ieee":
-        return "float", "REAL"
+        return "real", "REAL"
     if hal_type == "float-double-ieee":
-        return "float", "LREAL"
+        return "real", "LREAL"
     return None, None
 
 
@@ -76,8 +76,8 @@ def _entry(x, coe, where, notes):
     e = {"object": obj, "bits": x.bitlen, "type": dtype or _UNSIGNED.get(x.bitlen, "UDINT")}
     if x.pin:
         if hal is None:
-            notes.append("%s: %s halType %r unknown, imported as u32" % (where, obj, x.hal_type))
-            hal = "u32"
+            notes.append("%s: %s halType %r unknown, imported as uint" % (where, obj, x.hal_type))
+            hal = "uint"
         e["pin"] = x.pin
         e["hal-type"] = hal
         if x.scale is not None:

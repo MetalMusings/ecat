@@ -1000,7 +1000,7 @@ name: Beckhoff EL7041
 match: {vendor: '0x00000002', product: '0x1B813052'}
 
 pins:                      # when the slave is proposed
-  '0x7010:21': {pin: velocity, hal-type: float, scale: 32767}
+  '0x7010:21': {pin: velocity, hal-type: real, scale: 32767}
   '0x6000:00': {split: [in-1, in-2, in-3, null, in-5]}   # one pin per bit
 
 settings:                  # added to the slave when it is proposed
@@ -1126,9 +1126,10 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   `--compare` compares them with an lcec XML file. With ESI files, a
   slave gets the ESI's predefined PDO assignment that the ESI marks as
   default (TwinCAT's "Predefined PDO Assignment"), or the one named with
-  `--pdo-set`. Unsigned 32-bit counters, latches and positions get `s32`
-  pins, since they count down past 0; a 16-bit counter is noted, as it
-  wraps at 65536.
+  `--pdo-set`. Unsigned 32-bit counters, latches and positions get `sint`
+  pins, since they count down past 0. Input counters of 16 and 32 bits get
+  `extend: true`, so that the pin goes on counting past the wrap of the entry
+  (64 bits); a note says so. The digital outputs (`0x60FE`) get `raw: true`.
 - `--write` writes the proposals as an ecat configuration file;
   `--import` converts an lcec XML file; `--check` checks a file and
   compares the bus with it.

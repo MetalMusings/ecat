@@ -26,8 +26,13 @@ HEADER = """\
 PROFILES = {402: "cia402", 5001: "mdp"}
 DATA_TYPES = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT",
               "ULINT", "REAL", "LREAL"}
-# LinuxCNC 2.9 has no 64-bit pins: LINT and ULINT entries are float pins
-HAL_TYPES = {"bit", "s32", "u32", "float"}
+# LinuxCNC 2.10's pin types. A file written for 2.9 spells them bit, s32, u32,
+# float: they are read as the same types and written with the new names.
+HAL_TYPES = {"bool", "sint", "uint", "real"}
+HAL_ALIASES = {"bit": "bool", "s32": "sint", "u32": "uint", "float": "real"}
+# 64-bit integer entries (LINT, ULINT): an integer pin of the same sign has
+# all 64 bits; a real pin carries them up to 2^53
+HAL_64 = {"LINT": "sint", "ULINT": "uint"}
 # a drive with several axes (cia402.axes): axis n's objects at index + n * 0x800
 AXIS_OFFSET = 0x800
 MAX_AXES = 4
@@ -86,6 +91,10 @@ def _entry(e):
             d["scale"] = e.scale
         if getattr(e, "offset", None):
             d["offset"] = e.offset
+        if getattr(e, "extend", False):
+            d["extend"] = True
+        if getattr(e, "raw", False):
+            d["raw"] = True
     return d
 
 
@@ -169,9 +178,20 @@ def write(cfg, path):
         f.write(dumps(cfg))
 
 
+def canonical_hal_types(cfg):
+    """Spell every hal-type with 2.10's names (in place); returns cfg."""
+    for s in (cfg or {}).get("slaves") or []:
+        for kind in ("outputs", "inputs"):
+            for pdo in (s.get("process-data") or {}).get(kind) or []:
+                for e in pdo.get("entries") or []:
+                    if e.get("hal-type") in HAL_ALIASES:
+                        e["hal-type"] = HAL_ALIASES[e["hal-type"]]
+    return cfg
+
+
 def load(path):
     with open(path) as f:
-        return yaml.safe_load(f)
+        return canonical_hal_types(yaml.safe_load(f))
 
 
 def axes(slave):
@@ -361,17 +381,31 @@ def check(cfg):
                         own = [e["pin"]]
                         if e.get("hal-type") not in HAL_TYPES:
                             err("%s: %s has unknown hal-type %r" % (where, e["object"], e.get("hal-type")))
-                        elif e.get("type") in ("LINT", "ULINT") and e.get("hal-type") != "float":
-                            err("%s: %s: a %s entry needs hal-type float (HAL has no 64-bit pins)"
-                                % (where, e["object"], e["type"]))
+                        elif e.get("type") in HAL_64 and e.get("hal-type") not in ("real", HAL_64[e["type"]]):
+                            err("%s: %s: a %s entry takes hal-type %s (or real)"
+                                % (where, e["object"], e["type"], HAL_64[e["type"]]))
                         if ("scale" in e or "offset" in e) and not (
-                                e.get("hal-type") == "float" and e.get("type") in INTEGER_TYPES):
-                            err("%s: %s: scale and offset need an integer type and hal-type float"
+                                e.get("hal-type") == "real" and e.get("type") in INTEGER_TYPES):
+                            err("%s: %s: scale and offset need an integer type and hal-type real"
                                 % (where, e["object"]))
+                        if e.get("raw") is not None and (
+                                e.get("raw") is not True and e.get("raw") is not False):
+                            err("%s: %s: raw is true or false" % (where, e["object"]))
+                        elif e.get("raw") and (e.get("hal-type") != "uint" or not isinstance(bits, int)
+                                               or bits > 32):
+                            err("%s: %s: raw is for an entry of up to 32 bits with hal-type uint"
+                                % (where, e["object"]))
+                        if e.get("extend") is not None and (
+                                e.get("extend") is not True and e.get("extend") is not False):
+                            err("%s: %s: extend is true or false" % (where, e["object"]))
+                        elif e.get("extend") and (direction != "inputs" or e.get("hal-type") != "sint"
+                                                  or not isinstance(bits, int) or not 8 <= bits <= 32):
+                            err("%s: %s: extend is for an input entry of 8 to 32 bits with "
+                                "hal-type sint" % (where, e["object"]))
                     if "invert" in e:
                         inv = e["invert"]
                         if "pin" in e:
-                            if not isinstance(inv, bool) or e.get("hal-type") != "bit":
+                            if not isinstance(inv, bool) or e.get("hal-type") != "bool":
                                 err("%s: %s: invert is true or false, for a bit pin"
                                     % (where, e["object"]))
                         elif not isinstance(inv, list) or "split" not in e:

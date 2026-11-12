@@ -143,7 +143,7 @@ slaves:
     - pdo: '0x1A01'
       sm: 3
       entries:
-      - {object: '0x6001:02', bits: 32, type: REAL, pin: unit1.voltage, hal-type: float}
+      - {object: '0x6001:02', bits: 32, type: REAL, pin: unit1.voltage, hal-type: real}
   settings:
   - {object: '0x2000:02', name: 'Settings_Unit1: I2C_address', type: USINT, value: 72}
 ```
@@ -275,10 +275,12 @@ entry has:
 | `bits` | Bit length. |
 | `type` | Data type: `BOOL`, `SINT`, `INT`, `DINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `REAL`, `LREAL`. |
 | `use` | `profile`: handled by the profile or an encoder channel, no pin (see [cia402](#the-cia402-profile), [encoder channels](#encoder-channels)). `gap`: padding. Left out: an ordinary entry. |
-| `pin`, `hal-type` | One pin for the whole entry; `hal-type` is `bit`, `s32`, `u32` or `float`. A `float` pin of a `REAL`/`LREAL` entry carries the value as it is; of an integer entry it is scaled. A `LINT`/`ULINT` entry must be `float` (LinuxCNC 2.9 has no 64-bit pins): the whole 64 bits are read and written, exact up to 2^53, and written values are held within the type's range. |
+| `pin`, `hal-type` | One pin for the whole entry; `hal-type` is `bool`, `sint`, `uint` or `real` (LinuxCNC 2.10's pin types; a file written for 2.9 spells them `bit`, `s32`, `u32`, `float`, which are read as the same types). Integer pins have 64 bits: a value written to an entry is held within the entry's range (an 8-bit entry takes -128..127 or 0..255 whatever the pin holds), see `raw` for bit patterns. A `real` pin of a `REAL`/`LREAL` entry carries the value as it is; of an integer entry it is scaled. A `LINT` entry takes a `sint` pin and a `ULINT` entry a `uint` pin, with all 64 bits exact (`real` still works, exact up to 2^53). |
+| `extend` | `true` on an input entry of 8 to 32 bits with `hal-type: sint`: the pin keeps counting past the wrap of the entry, in 64 bits (an encoder counter, a latched position). The first value is taken as signed, so a counter that counts down past 0 is negative. The counter must not move by half its range or more between two cycles. EtherCAT Setup proposes it for counters of 16 and 32 bits. |
+| `raw` | `true` on an entry of up to 32 bits with `hal-type: uint`: the value is a bit pattern (digital outputs), and a value wider than the entry is cut to its width instead of held at the top, which would switch every bit on. |
 | `scale`, `offset` | For a `float` pin of an integer entry: pin = value × scale + offset. |
-| `split` | One `bit` pin per bit, from bit 0; `null` for a bit without a pin. Instead of `pin`. |
-| `invert` | For a `bit` pin: `true` makes the pin the opposite of the bit (read and write), as for a normally closed switch, so that no `not` is needed in HAL. For a `split`: a list of the names of its pins to invert. |
+| `split` | One `bool` pin per bit, from bit 0; `null` for a bit without a pin. Instead of `pin`. |
+| `invert` | For a `bool` pin: `true` makes the pin the opposite of the bit (read and write), as for a normally closed switch, so that no `not` is needed in HAL. For a `split`: a list of the names of its pins to invert. |
 
 An entry with neither `pin` nor `split` is mapped but has no pin.
 
@@ -349,7 +351,7 @@ drivers](development.md#decision-profiles-with-quirks-no-product-drivers)).
 
 The `ecat` component reads the file with `loadrt ecat config=<file>`. It
 supports the profiles `cia402` ([cia402](#the-cia402-profile)), `mdp` and
-`generic`, and encoder channels on any of them ([encoder channels](#encoder-channels)). 64-bit integer entries are `float` pins (above).
+`generic`, and encoder channels on any of them ([encoder channels](#encoder-channels)). 64-bit integer entries are `sint`/`uint` pins (above).
 
 ### Open
 
@@ -399,7 +401,7 @@ them.
       - {object: '0x6041:00', bits: 16, type: UINT, use: profile}
       - {object: '0x6061:00', bits: 8, type: SINT, use: profile}
       - {object: '0x6064:00', bits: 32, type: DINT, use: profile}
-      - {object: '0x6077:00', bits: 32, type: DINT, pin: torque-fb, hal-type: s32}
+      - {object: '0x6077:00', bits: 32, type: DINT, pin: torque-fb, hal-type: sint}
 ```
 
 `mode` is `csp` (cyclic synchronous position) or `csv` (cyclic
@@ -436,24 +438,24 @@ Pins are `<slave name>.<pin>`.
 
 | Pin | Type | Dir | |
 |---|---|---|---|
-| `enable` | bit | in | Enable the drive. Connect `joint.N.amp-enable-out`. |
-| `pos-cmd` | float | in | Position command (`csp`), machine units. |
-| `velocity-cmd` | float | in | Velocity command (`csv`, `pv`). |
-| `fault-reset` | bit | in | A rising edge resets a drive fault. |
-| `watchdog` | u32 | in | Must change within `watchdog-ms`, if that is set. |
-| `pos-fb` | float | out | Position feedback, machine units. |
-| `velocity-fb` | float | out | Velocity feedback. |
-| `drv-fault` | bit | out | The drive was shut down while enabled; connect `joint.N.amp-fault-in`. |
-| `fault-reason` | s32 | out | Why, below. |
-| `cia-state` | s32 | out | The drive's state, below. |
-| `statusword`, `controlword` | u32 | out | As read and written. |
-| `opmode`, `opmode-display` | s32 | out | As written and read. |
-| `error-code` | u32 | out | `0x603F`, if mapped. |
-| `drv-actual-position`, `drv-actual-velocity` | s32 | out | Unscaled feedback. |
-| `drv-target-position`, `drv-target-velocity` | s32 | out | Unscaled commands as written. |
-| `pos-zero` | s32 | out | With `zero-at-start`: the drive's position taken as 0, in counts. |
-| `stat-switchon-ready`, `stat-switched-on`, `stat-op-enabled`, `stat-fault`, `stat-voltage-enabled`, `stat-quick-stop`, `stat-switchon-disabled`, `stat-warning`, `stat-remote`, `stat-target-reached` | bit | out | Status word bits. |
-| `opmode-no-mode`, `opmode-homing`, `opmode-cyclic-position`, `opmode-cyclic-velocity` | bit | out | From `opmode-display`. |
+| `enable` | bool | in | Enable the drive. Connect `joint.N.amp-enable-out`. |
+| `pos-cmd` | real | in | Position command (`csp`), machine units. |
+| `velocity-cmd` | real | in | Velocity command (`csv`, `pv`). |
+| `fault-reset` | bool | in | A rising edge resets a drive fault. |
+| `watchdog` | uint | in | Must change within `watchdog-ms`, if that is set. |
+| `pos-fb` | real | out | Position feedback, machine units. |
+| `velocity-fb` | real | out | Velocity feedback. |
+| `drv-fault` | bool | out | The drive was shut down while enabled; connect `joint.N.amp-fault-in`. |
+| `fault-reason` | sint | out | Why, below. |
+| `cia-state` | sint | out | The drive's state, below. |
+| `statusword`, `controlword` | uint | out | As read and written. |
+| `opmode`, `opmode-display` | sint | out | As written and read. |
+| `error-code` | uint | out | `0x603F`, if mapped. |
+| `drv-actual-position`, `drv-actual-velocity` | sint | out | Unscaled feedback. |
+| `drv-target-position`, `drv-target-velocity` | sint | out | Unscaled commands as written. |
+| `pos-zero` | sint | out | With `zero-at-start`: the drive's position taken as 0, in counts. |
+| `stat-switchon-ready`, `stat-switched-on`, `stat-op-enabled`, `stat-fault`, `stat-voltage-enabled`, `stat-quick-stop`, `stat-switchon-disabled`, `stat-warning`, `stat-remote`, `stat-target-reached` | bool | out | Status word bits. |
+| `opmode-no-mode`, `opmode-homing`, `opmode-cyclic-position`, `opmode-cyclic-velocity` | bool | out | From `opmode-display`. |
 
 Parameters:
 
@@ -560,7 +562,7 @@ net x-fault   x-drive.drv-fault      => joint.0.amp-fault-in
 
 With more modes than `mode` in `modes` (for example
 `cia402: {mode: pv, modes: [pp]}`, a spindle that also positions), the
-drive gets the pin `opmode-cmd` (s32, in): 0 for `mode`, or the number of
+drive gets the pin `opmode-cmd` (sint, in): 0 for `mode`, or the number of
 one of the modes: 1 PP, 3 PV, 8 CSP, 9 CSV. `opmode` shows the mode
 written, `opmode-display` the drive's. A number that is not a mode of
 the file shuts the drive down (`fault-reason` 7); homing (6) goes by its
@@ -600,8 +602,8 @@ Extra pins and parameter:
 
 | Pin | Type | Dir | |
 |---|---|---|---|
-| `at-speed` | bit | out | The drive runs at `velocity-cmd` (status word bit 10). Connect `spindle.N.at-speed`. |
-| `zero-speed` | bit | out | The drive reports zero speed (status word bit 12). |
+| `at-speed` | bool | out | The drive runs at `velocity-cmd` (status word bit 10). Connect `spindle.N.at-speed`. |
+| `zero-speed` | bool | out | The drive reports zero speed (status word bit 12). |
 
 | Parameter | Default | |
 |---|---|---|
@@ -664,12 +666,12 @@ Extra pins and parameters:
 
 | Pin | Type | Dir | |
 |---|---|---|---|
-| `pp-target` | float | in | Target position, machine units (`pos-scale`). |
-| `pp-velocity` | float | in | Profile velocity (`velo-scale`), if `0x6081` is in the process data; otherwise the drive's setting. |
-| `pp-start` | bit | in | A rising edge starts a move to `pp-target`. |
-| `pp-relative` | bit | in | The move is relative to the last target. |
-| `pp-halt` | bit | in | Stop (control word bit 8); released, the move goes on. |
-| `pp-done` | bit | out | At the target of the last move. |
+| `pp-target` | real | in | Target position, machine units (`pos-scale`). |
+| `pp-velocity` | real | in | Profile velocity (`velo-scale`), if `0x6081` is in the process data; otherwise the drive's setting. |
+| `pp-start` | bool | in | A rising edge starts a move to `pp-target`. |
+| `pp-relative` | bool | in | The move is relative to the last target. |
+| `pp-halt` | bool | in | Stop (control word bit 8); released, the move goes on. |
+| `pp-done` | bool | out | At the target of the last move. |
 
 | Parameter | Default | |
 |---|---|---|
@@ -821,11 +823,11 @@ Extra pins and parameter:
 
 | Pin | Type | Dir | |
 |---|---|---|---|
-| `index-enable` | bit | io | Connect `joint.N.index-enable`. A rising edge starts homing; it is cleared when the drive has homed. |
-| `home` | bit | in | A rising edge starts homing: for a drive that is not a joint (from an M-code, ladder or a tool changer), or for tests without motion. |
-| `stat-homing` | bit | out | Homing is in progress. |
-| `stat-homed` | bit | out | The drive has homed; until homing starts again. |
-| `home-error` | bit | out | The last homing failed or timed out. |
+| `index-enable` | bool | io | Connect `joint.N.index-enable`. A rising edge starts homing; it is cleared when the drive has homed. |
+| `home` | bool | in | A rising edge starts homing: for a drive that is not a joint (from an M-code, ladder or a tool changer), or for tests without motion. |
+| `stat-homing` | bool | out | Homing is in progress. |
+| `stat-homed` | bool | out | The drive has homed; until homing starts again. |
+| `home-error` | bool | out | The last homing failed or timed out. |
 
 | Parameter | Default | |
 |---|---|---|
@@ -1055,7 +1057,7 @@ open circuit or frequency, keep ordinary pins.
       entries:
       - {object: '0x6010:01', bits: 1, type: BOOL, use: profile}
       ...
-      - {object: '0x6010:09', bits: 1, type: BOOL, pin: status-of-input-a, hal-type: bit}
+      - {object: '0x6010:09', bits: 1, type: BOOL, pin: status-of-input-a, hal-type: bool}
       ...
       - {object: '0x6010:11', bits: 32, type: UDINT, use: profile}
       - {object: '0x6010:12', bits: 32, type: UDINT, use: profile}
@@ -1073,15 +1075,15 @@ Pins are `<slave name>.<channel name>.<pin>`.
 
 | Pin | Type | Dir | |
 |---|---|---|---|
-| `pos` | float | out | Position: counts / `pos-scale`, from the index or reset. |
-| `velocity` | float | out | Velocity in units per second, over `velocity-window-ms`. |
-| `counts` | s32 | out | Counts from the index or reset. |
-| `raw-count` | s32 | out | The terminal's counter as read. |
-| `index-enable` | bit | I/O | Set it to find the index: at the index pulse, `pos` becomes 0 and the pin is cleared. Connect it to `joint.N.index-enable` or `spindle.N.index-enable`. Only there when latch C is mapped. |
-| `reset` | bit | in | While true, `pos` is 0 at the current count. |
-| `latch-enable-pos`, `latch-enable-neg` | bit | I/O | Arm the external latch input for a rising or falling edge; cleared when it latches. Only there when the external latch is mapped. |
-| `latch-pos` | float | out | The position at the latched edge. |
-| `ok` | bit | out | The process data is valid (working counter, slave in OP). |
+| `pos` | real | out | Position: counts / `pos-scale`, from the index or reset. |
+| `velocity` | real | out | Velocity in units per second, over `velocity-window-ms`. |
+| `counts` | sint | out | Counts from the index or reset. |
+| `raw-count` | sint | out | The terminal's counter as read. |
+| `index-enable` | bool | I/O | Set it to find the index: at the index pulse, `pos` becomes 0 and the pin is cleared. Connect it to `joint.N.index-enable` or `spindle.N.index-enable`. Only there when latch C is mapped. |
+| `reset` | bool | in | While true, `pos` is 0 at the current count. |
+| `latch-enable-pos`, `latch-enable-neg` | bool | I/O | Arm the external latch input for a rising or falling edge; cleared when it latches. Only there when the external latch is mapped. |
+| `latch-pos` | real | out | The position at the latched edge. |
+| `ok` | bool | out | The process data is valid (working counter, slave in OP). |
 
 Parameters:
 
@@ -1135,9 +1137,9 @@ pins in the terminal's unit:
   - pdo: '0x1A00'
     sm: 3
     entries:
-    - {object: '0x6000:01', bits: 1, type: BOOL, pin: underrange, hal-type: bit}
-    - {object: '0x6000:07', bits: 1, type: BOOL, pin: error, hal-type: bit}
-    - {object: '0x6000:11', bits: 16, type: INT, pin: value, hal-type: float, scale: 0.00030518509475997192}
+    - {object: '0x6000:01', bits: 1, type: BOOL, pin: underrange, hal-type: bool}
+    - {object: '0x6000:07', bits: 1, type: BOOL, pin: error, hal-type: bool}
+    - {object: '0x6000:11', bits: 16, type: INT, pin: value, hal-type: real, scale: 0.00030518509475997192}
 ```
 
 ### The range
@@ -1159,8 +1161,8 @@ An input pin is `raw * scale + offset`. An output is written as
 4..20 mA). The program writes both.
 
 A terminal whose name has no range (temperature terminals, for example,
-which report 0.1 °C per count) keeps an `s32` pin in raw counts, with a
-note. Change `hal-type` to `float` and set `scale` by hand, or leave it.
+which report 0.1 °C per count) keeps a `sint` pin in raw counts, with a
+note. Change `hal-type` to `real` and set `scale` by hand, or leave it.
 
 ### Status and settings
 
@@ -1202,7 +1204,7 @@ The EL7041 has one, `beckhoff-el7041.yaml`, which gives:
 and HAL lines that reset an error when `enable` comes on again (below).
 For another terminal, copy that file, change `match` and the objects, and
 put it in `~/.config/ecatsetup/devices/`. Without a quirk file, the
-velocity is an `s32` pin in raw values (±32767).
+velocity is a `sint` pin in raw values (±32767).
 
 `nn` is the channel: the EL7041's motor is `0x7010`/`0x6010`, its
 encoder `0x7000`/`0x6000`. The encoder channel is handled by the
@@ -1254,11 +1256,11 @@ range, a 200-step motor and a 5 mm lead, 1.0 is 100 mm/s, so `FF1` is
 
 ### A joint with the position interface
 
-The position pin is a raw `s32` in microsteps. In the file, make it a
+The position pin is a raw `sint` in microsteps. In the file, make it a
 float in machine units:
 
 ```yaml
-    - {object: '0x7010:11', bits: 32, type: DINT, pin: position, hal-type: float, scale: 6400.0}
+    - {object: '0x7010:11', bits: 32, type: DINT, pin: position, hal-type: real, scale: 6400.0}
 ```
 
 (`scale` is microsteps per mm), and connect it:

@@ -369,7 +369,7 @@ class TestRun:
             self.disable_drives()
             for name, type_ in list(self.written.items()):
                 try:
-                    halcmd("setp", name, "0" if type_ != "bit" else "FALSE")
+                    halcmd("setp", name, "0" if type_ != "bool" else "FALSE")
                 except (TestError, OSError):
                     pass
             # let a few cycles carry the zeros out before the thread stops
@@ -477,9 +477,9 @@ class TestRun:
             raise TestError("the test does not run")
         if not self.writable(pin):
             raise TestError("%s cannot be set in the I/O test" % pin.name)
-        if pin.type == "bit":
+        if pin.type == "bool":
             text = "TRUE" if value in (True, 1, "1", "TRUE", "true") else "FALSE"
-        elif pin.type == "float":
+        elif pin.type == "real":
             text = repr(float(value))
         else:
             text = str(int(value, 0) if isinstance(value, str) else int(value))
