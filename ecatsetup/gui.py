@@ -131,6 +131,27 @@ def parse_int(text):
     return int(text.strip(), 0)
 
 
+# size in bits of the CoE types, for showing a value in hex
+TYPE_BITS = {"BOOL": 1, "BIT1": 1, "SINT": 8, "USINT": 8, "BYTE": 8, "INT": 16, "UINT": 16,
+             "WORD": 16, "DINT": 32, "UDINT": 32, "DWORD": 32, "LINT": 64, "ULINT": 64,
+             "LWORD": 64}
+
+
+def show_value(v, ttype=None, hexa=False):
+    """A setting's value as text: decimal, or (hexa) 0x hex for an integer, as wide as its
+    type (a negative one as its two's complement). Anything else as it is."""
+    if v is None:
+        return ""
+    if not hexa or isinstance(v, bool) or not isinstance(v, int):
+        return v
+    bits = TYPE_BITS.get(str(ttype or "").upper())
+    if v < 0:
+        if not bits:
+            return v
+        v += 1 << bits
+    return "0x%0*X" % ((bits + 3) // 4 if bits and bits > 1 else 0, v)
+
+
 def period_text(ns):
     if not ns:
         return "?"
@@ -1042,6 +1063,12 @@ class SlaveView(QWidget):
         buttons.addWidget(add)
         buttons.addWidget(remove)
         buttons.addWidget(self.read_now_button)
+        self.hex_box = QCheckBox("Values in hex")
+        self.hex_box.setToolTip("Show the values (and what the slave has now) as 0x hex. You can "
+                                "type a value in either form: 255 or 0xFF")
+        self.hex_box.setChecked(self.win.hex_values)
+        self.hex_box.toggled.connect(self.win.set_hex_values)
+        buttons.addWidget(self.hex_box)
         buttons.addStretch(1)
         st.add(buttons)
         lay.addWidget(st)
@@ -1388,15 +1415,18 @@ class SlaveView(QWidget):
         for st in s.get("settings") or []:
             r = self.st.rowCount()
             self.st.insertRow(r)
-            value = st.get("value", "")
+            value = show_value(st.get("value", ""), st.get("type"), self.win.hex_values)
             if "value" not in st and "data" in st:
                 value = "data %s" % st["data"]
             for c, v in enumerate((st.get("object"), st.get("name", ""), st.get("type", ""), value)):
                 self.st.setItem(r, c, item(v, editable=True, font=mono() if c == 0 else None))
-            self.st.setItem(r, 4, item(self.present.get((self.position, st.get("object")), ""),
-                                       font=mono(), colour=GREY))
-        self.st.resizeColumnsToContents()
-        self.st.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            now = self.present.get((self.position, st.get("object")), "")
+            try:
+                now = str(show_value(int(now, 0), st.get("type"), self.win.hex_values))
+            except ValueError:
+                pass
+            self.st.setItem(r, 4, item(now, font=mono(), colour=GREY))
+        fit_columns(self.st, stretch=1)
         fit_table(self.st, minimum=1)
         self.show_setting_problems(s)
         self.loading = False
@@ -2846,6 +2876,12 @@ class TestPage(QWidget):
                            "store parameters): once, on request, never at start")
         run_cmd.clicked.connect(self.sdo_run_command)
         form.addWidget(run_cmd)
+        self.hex_box = QCheckBox("Hex")
+        self.hex_box.setToolTip("Show a value read as 0x hex instead of decimal. You can write "
+                                "a value in either form: 255 or 0xFF")
+        self.hex_box.setChecked(self.win.hex_values)
+        self.hex_box.toggled.connect(self.win.set_hex_values)
+        form.addWidget(self.hex_box)
         sdo.add(form)
         self.sdo_name = sdo.add(label("", "hint"))
         lay.addWidget(sdo)
@@ -3051,7 +3087,8 @@ class TestPage(QWidget):
             self.win.status(str(e).splitlines()[-1])
             return
         if self.sdo_type.currentData() != "string" and len(text.split()) == 2:
-            text = text.split()[-1]     # "0x0010 16": hex and decimal
+            # "0x0010 16": hex and decimal
+            text = text.split()[0 if self.win.hex_values else -1]
         self.sdo_value.setText(text)
         self.win.status("0x%04X:%02X = %s" % (t[0], t[1], text))
 
@@ -3973,6 +4010,7 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(central)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
+        self.hex_values = False     # SDO values shown in hex (Settings and the SDO card)
         self.header = Header(self)
         lay.addWidget(self.header)
         self.tabs = NavTabs()
@@ -4104,6 +4142,19 @@ class MainWindow(QMainWindow):
             return "The bus matches %s." % where
         return "The bus matches %s, except slave%s %s." % (
             where, "" if len(odd) == 1 else "s", ", ".join(map(str, odd)))
+
+    def set_hex_values(self, on):
+        """Show SDO values in hex (or decimal) in the Settings table and the SDO card."""
+        if on == self.hex_values:
+            return
+        self.hex_values = on
+        for box in (self.slave_page.hex_box, self.test_page.hex_box):
+            box.blockSignals(True)
+            box.setChecked(on)
+            box.blockSignals(False)
+        s = self.session.slave(self.slave_page.position)
+        if s is not None:
+            self.slave_page.show_settings(s)
 
     def changed(self):
         """The configuration was edited: check it, show it, mark the list."""

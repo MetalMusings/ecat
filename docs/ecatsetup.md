@@ -146,6 +146,9 @@ Choosing a slave shows:
   command is an error and `--check` refuses it; one that only looks like a
   command, by its name, write-only access or 0x1010/0x1011, is a
   warning). *Read present values* fills the *Now* column from the slave.
+  *Values in hex* shows the values and *Now* as `0x` hex, as wide as the
+  type (the SDO card's *Hex* box is the same setting); you can type a value
+  in either form, `255` or `0xFF`, and the file keeps the number;
   The dictionary is the slave's own with the ESI file's ranges added; with
   no slave read, the ESI file's alone. `ecatsetup --check FILE --esi DIR`
   prints the same problems from the ESI files;

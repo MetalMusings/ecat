@@ -383,6 +383,36 @@ class TestWindow(BusTest):
         page.wiring_inverted(pin, False)
         self.assertIs(integrate.pin_inverted(s.cfg, pin), False)
 
+    def test_show_value_in_hex(self):
+        self.assertEqual(gui.show_value(255, "UINT", True), "0x00FF")
+        self.assertEqual(gui.show_value(255, "UINT", False), 255)
+        self.assertEqual(gui.show_value(-1, "INT", True), "0xFFFF")
+        self.assertEqual(gui.show_value(-1, "", True), -1)           # no type: stays decimal
+        self.assertEqual(gui.show_value(5, "USINT", True), "0x05")
+        self.assertEqual(gui.show_value(1.5, "REAL", True), 1.5)
+        self.assertEqual(gui.show_value(True, "BOOL", True), True)
+        self.assertEqual(gui.show_value(70000, None, True), "0x11170")
+        self.assertEqual(gui.show_value(None, None, True), "")
+
+    def test_settings_values_in_hex_and_back(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        s = w.session.slave(0)
+        s["settings"] = [{"object": "0x2000:03", "name": "f", "type": "UDINT", "value": 255}]
+        page.present[(0, "0x2000:03")] = "16"
+        page.show_settings(s)
+        self.assertEqual(page.st.item(0, 3).text(), "255")
+        w.set_hex_values(True)
+        self.assertEqual(page.st.item(0, 3).text(), "0x000000FF")
+        self.assertEqual(page.st.item(0, 4).text(), "0x00000010")
+        self.assertTrue(w.test_page.hex_box.isChecked())          # one setting for both places
+        page.st.item(0, 3).setText("0x10")                         # typed in hex: stored as number
+        self.assertEqual(s["settings"][0]["value"], 16)
+        w.set_hex_values(False)
+        self.assertEqual(page.st.item(0, 3).text(), "16")
+        self.assertFalse(page.hex_box.isChecked())
+
     def test_bit_pins_can_be_inverted(self):
         w = self.window()
         w.select_slave(0)
