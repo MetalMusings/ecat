@@ -56,7 +56,8 @@ jobs:
             libboost-python-dev libfmt-dev libtirpc-dev libcap-dev libgpiod-dev \
             libusb-1.0-0-dev libmodbus-dev libudev-dev libedit-dev \
             tcl8.6-dev tk8.6-dev tclx bwidget python3-tk libxmu-dev libgl-dev \
-            libglu1-mesa-dev libepoxy-dev intltool
+            libglu1-mesa-dev libepoxy-dev intltool \
+            libglib2.0-dev yapps2 procps psmisc kmod gawk
 
       - uses: actions/cache@v4
         id: linuxcnc
