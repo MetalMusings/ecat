@@ -325,6 +325,25 @@ class TestWindow(BusTest):
         self.assertEqual(e["hal-type"], "uint")
         self.assertNotIn("split", e)
 
+    def test_the_mouse_wheel_over_a_pin_box_connects_nothing(self):
+        from PyQt5.QtCore import QPoint, QPointF
+        from PyQt5.QtGui import QWheelEvent
+        from PyQt5.QtWidgets import QApplication
+        from ecatsetup import integrate
+        w = self.window()
+        w.select_slave(0)
+        w.hal_page.refresh()
+        boxes = [w.hal_page.pins.cellWidget(r, 5) for r in range(w.hal_page.pins.rowCount())]
+        boxes = [b for b in boxes if b is not None and b.count() > 1]
+        self.assertTrue(boxes)
+        for b in boxes:
+            before = b.currentText()
+            QApplication.sendEvent(b, QWheelEvent(
+                QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, -120), 0,
+                gui.Qt.Vertical, gui.Qt.NoButton, gui.Qt.NoModifier))
+            self.assertEqual(b.currentText(), before)
+        self.assertEqual(integrate.nets(w.session.cfg), [])
+
     def test_bit_pins_can_be_inverted(self):
         w = self.window()
         w.select_slave(0)

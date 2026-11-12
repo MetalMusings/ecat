@@ -168,6 +168,18 @@ def set_pill(lab, text, kind):
         restyle(lab)
 
 
+class QuietCombo(QComboBox):
+    """A combo box the mouse wheel does not change: scrolling a page over it must not
+    pick a value (it once connected pins by itself); the wheel scrolls the page."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def wheelEvent(self, ev):
+        ev.ignore()
+
+
 def label(text="", name=None, wrap=False):
     lab = QLabel(text)
     if name:
@@ -480,12 +492,12 @@ class MasterView(QWidget):
         lay.addWidget(label("Master", "bigTitle"))
         card = Card("Master", "The network card and how frames are sent.")
         form = QFormLayout()
-        self.interface = QComboBox()
+        self.interface = QuietCombo()
         self.interface.setEditable(True)
         self.interface.addItems(netif.interfaces())
         self.interface.editTextChanged.connect(self.edited)
         form.addRow("Network interface", self.interface)
-        self.transport = QComboBox()
+        self.transport = QuietCombo()
         self.transport.addItems(sorted(config.TRANSPORTS))
         self.transport.currentTextChanged.connect(self.edited)
         form.addRow("Transport", self.transport)
@@ -852,7 +864,7 @@ class SlaveView(QWidget):
         self.cia402 = QWidget()
         cform = QFormLayout(self.cia402)
         cform.setContentsMargins(0, 0, 0, 0)
-        self.mode = QComboBox()
+        self.mode = QuietCombo()
         for m, text in (("csp", "Cyclic synchronous position (CSP)"),
                         ("csv", "Cyclic synchronous velocity (CSV)"),
                         ("pv", "Profile velocity (PV), a spindle or conveyor"),
@@ -896,7 +908,7 @@ class SlaveView(QWidget):
         cform.setRowWrapPolicy(QFormLayout.WrapLongRows)
         op.add(self.cia402)
         again = QHBoxLayout()
-        self.pdo_set = QComboBox()
+        self.pdo_set = QuietCombo()
         self.pdo_set.setToolTip("The ESI file's predefined PDO assignments")
         again.addWidget(self.pdo_set, 1)
         self.again = QPushButton("Propose again")
@@ -950,11 +962,11 @@ class SlaveView(QWidget):
                                 "choice is written to Settings.")
         hform = QFormLayout()
         hform.setContentsMargins(0, 0, 0, 0)
-        self.home_axis = QComboBox()
+        self.home_axis = QuietCombo()
         self.home_axis.activated.connect(lambda *_: self.show_homing(
             self.win.session.slave(self.position)))
         hform.addRow("Axis", self.home_axis)
-        self.home_method = QComboBox()
+        self.home_method = QuietCombo()
         self.home_method.activated.connect(self.homing_edited)
         hform.addRow("Method", self.home_method)
         self.home_text = label("", "hint", wrap=True)
@@ -1322,7 +1334,7 @@ class SlaveView(QWidget):
         if fixed:
             self.pd.setItem(r, self.HALTYPE, item(""))
             return
-        box = QComboBox()
+        box = QuietCombo()
         box.addItems([""] + sorted(config.HAL_TYPES) + [self.BIT_FIELD])
         box.setCurrentText(self._type_text(e))
         box.setEnabled(self._type_enabled(e))
@@ -1809,7 +1821,7 @@ class TroubleshootPage(QWidget):
         self.state = pill()
         row.addWidget(self.state)
         row.addStretch(1)
-        self.slave = QComboBox()
+        self.slave = QuietCombo()
         self.slave.activated.connect(lambda i: win.select(self.slave.itemData(i), source=self))
         row.addWidget(self.slave)
         self.again = QPushButton("Examine again")
@@ -1896,7 +1908,7 @@ class TroubleshootPage(QWidget):
                                         "working counter, drive faults, the stop guard. It is "
                                         "kept after LinuxCNC stops; the run before is kept too.")
         er = QHBoxLayout()
-        self.events_run = QComboBox()
+        self.events_run = QuietCombo()
         self.events_run.addItem("This run (or the last)", events.PATH)
         self.events_run.addItem("The run before", events.PATH + ".prev")
         self.events_run.currentIndexChanged.connect(lambda _i: self.show_events())
@@ -2246,7 +2258,7 @@ class MoveCard(Card):
         form = QFormLayout(self.setup)
         form.setContentsMargins(0, 0, 0, 0)
         self.fields = {}
-        self.axis = QComboBox()
+        self.axis = QuietCombo()
         self.axis.setToolTip("The drive has several axes: the one to move")
         self.axis.currentIndexChanged.connect(lambda _i: self.slave and self.show_drive(self.slave))
         form.addRow("Axis", self.axis)
@@ -2292,7 +2304,7 @@ class MoveCard(Card):
             b.released.connect(lambda: self.enable(False))
             jog.addWidget(b)
         jog.addWidget(label("Step", "hint"))
-        self.step = QComboBox()
+        self.step = QuietCombo()
         for st in ("0.1", "1", "5"):
             self.step.addItem("%s mm" % st, float(st))
         self.step.setCurrentIndex(1)
@@ -2683,7 +2695,7 @@ class TestPage(QWidget):
         self.state = pill()
         row.addWidget(self.state)
         row.addStretch(1)
-        self.slave = QComboBox()
+        self.slave = QuietCombo()
         self.slave.activated.connect(lambda i: win.select(self.slave.itemData(i), source=self))
         row.addWidget(self.slave)
         lay.addLayout(row)
@@ -2782,7 +2794,7 @@ class TestPage(QWidget):
         self.sdo_obj.setMaximumWidth(110)
         self.sdo_obj.editingFinished.connect(self.sdo_object_typed)
         form.addWidget(self.sdo_obj)
-        self.sdo_type = QComboBox()
+        self.sdo_type = QuietCombo()
         self.sdo_type.addItem("type from the slave", None)
         for t in sorted(testmode.TOOL_TYPES.values()) + ["string"]:
             self.sdo_type.addItem(t, t)
@@ -3129,7 +3141,7 @@ class JointRow(QWidget):
         lay.addLayout(text)
         lay.addSpacing(12)
         lay.addWidget(label("→", "hint"))
-        self.drive = QComboBox()
+        self.drive = QuietCombo()
         self.drive.setMinimumWidth(220)
         self.drive.currentIndexChanged.connect(self.edited)
         lay.addWidget(self.drive)
@@ -3483,7 +3495,7 @@ class HalPage(QWidget):
             htype, way = own[pin]
             net = integrate.net_of(s.cfg, pin)
             others = [x for x in (net or {}).get("pins", []) if x != pin]
-            box = QComboBox()
+            box = QuietCombo()
             box.setEditable(True)
             box.setInsertPolicy(QComboBox.NoInsert)
             box.addItem("")
@@ -3563,7 +3575,7 @@ class HalPage(QWidget):
             if r.target != r.pin:
                 st += " (at %s)" % r.target
             t.setItem(i, 3, item(st, colour=colour, tip=where or None))
-            box = QComboBox()
+            box = QuietCombo()
             box.addItem("")
             want = "out" if r.way == "in" else "in"
             for pin, (ht, w) in sorted(own.items()):
