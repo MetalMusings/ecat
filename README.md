@@ -53,7 +53,7 @@ and how to try them, and to undo it. To build the package yourself:
 
 ```
 sudo systemctl stop ethercat          # the kernel master, if you have one
-sudo ethercat-uspace start -- -i enp2s0
+sudo ethercat-uspace start -- -i enp2s0    # or answer y when a command offers it (uspace 1.2)
 ecatsetup --gui ethercat.yaml --ini <machine>.ini
 ```
 

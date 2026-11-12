@@ -548,6 +548,16 @@ master's own `ethercat-uspace.conf` decides. If the kernel master is loaded
 it is never done without being shown. The box "Don't ask again this session"
 stops the offers, the button still works.
 
+The fork's own tool does the same. When you run `ethercat-uspace slaves`
+(or any command that needs a master) in a terminal and no master answers,
+it prints `sudo /opt/linuxcnc-ethercat-uspace/bin/ethercat start`, asks
+`[y/N]`, starts the master on Yes and runs your command again (needs
+linuxcnc-ethercat-uspace 1.2). It asks only with a terminal on both stdin
+and stderr, never as root, never while LinuxCNC has the interface, and not
+when `ETHERCAT_USPACE_NO_PROMPT=1` is set (ecatsetup sets it when it calls
+the tool). With the kernel master loaded it shows
+`sudo systemctl stop ethercat` first, as above.
+
 The window never runs as root and never asks for a password: it runs
 `sudo -n`. If sudo needs a password, the window tells you to run the command
 in a terminal. The command line runs plain `sudo`, which asks by itself.

@@ -135,5 +135,18 @@ class LinuxcncTest(unittest.TestCase):
             self.assertTrue(masterstart.linuxcnc_running(d))
 
 
+class ToolEnvTest(unittest.TestCase):
+    def test_tool_never_prompts_when_ecatsetup_runs_it(self):
+        from ecatsetup import tool
+        seen = {}
+
+        def fake(cmd, **kw):
+            seen.update(kw)
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+        with mock.patch.object(subprocess, "run", fake):
+            tool.run("slaves")
+        self.assertEqual(seen["env"]["ETHERCAT_USPACE_NO_PROMPT"], "1")
+
+
 if __name__ == "__main__":
     unittest.main()

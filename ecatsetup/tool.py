@@ -19,7 +19,9 @@ class ToolError(Exception):
 
 
 def run(*args, binary=False):
-    proc = subprocess.run([TOOL] + [str(a) for a in args], capture_output=True)
+    # The tool offers to start a master on a terminal; ecatsetup asks for itself.
+    env = dict(os.environ, ETHERCAT_USPACE_NO_PROMPT="1")
+    proc = subprocess.run([TOOL] + [str(a) for a in args], capture_output=True, env=env)
     if proc.returncode != 0:
         raise ToolError("%s %s: %s" % (TOOL, " ".join(map(str, args)),
                                        proc.stderr.decode(errors="replace").strip()))
