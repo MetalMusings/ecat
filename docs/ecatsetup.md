@@ -527,6 +527,32 @@ The steps:
 8. The other axes the same way. Stopping the test takes the slaves to
    PREOP; `0x603F` should be 0 on every drive afterwards.
 
+
+## Starting the master
+
+Reading the bus needs a running master. When none answers (and LinuxCNC is
+not running), EtherCAT Setup offers to start one:
+
+- the window asks at start, after a test has ended (the free-running master
+  does not come back by itself), and when you press *Start the master...* on
+  the Bus card;
+- the command line (`--propose`, `--diagnose`, `--update`) asks with
+  `[y/N]`, but only on a terminal; in a script it prints the old hint.
+
+The dialog shows the whole command, for example
+`sudo /usr/bin/ethercat-uspace start -- -i enp2s0 -t xdp-native`, and nothing
+runs until you answer Yes. The interface and transport come from the file's
+`master:` section when it names an interface that exists here; otherwise the
+master's own `ethercat-uspace.conf` decides. If the kernel master is loaded
+(`/dev/EtherCAT0`), `sudo systemctl stop ethercat` is shown and run first;
+it is never done without being shown. The box "Don't ask again this session"
+stops the offers, the button still works.
+
+The window never runs as root and never asks for a password: it runs
+`sudo -n`. If sudo needs a password, the window tells you to run the command
+in a terminal. The command line runs plain `sudo`, which asks by itself.
+The code is in `ecatsetup/masterstart.py`.
+
 ## Writing the configuration into LinuxCNC
 
 EtherCAT Setup writes an `ethercat.yaml` into a LinuxCNC configuration,

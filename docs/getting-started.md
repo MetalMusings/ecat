@@ -80,6 +80,9 @@ ethercat-uspace slaves
 ecatsetup --gui
 ```
 
+(You can skip the two commands: when no master answers, the window shows
+the same command and runs it with sudo once you have confirmed it.)
+
 This only reads. When you are done:
 
 ```

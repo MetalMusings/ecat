@@ -446,6 +446,28 @@ class TestWindow(BusTest):
         self.assertIs(s["cia402"]["zero-at-start"], True)
         self.assertIn("zero-at-start: true", w.hal_page.yaml.toPlainText())
 
+    def test_master_start_asks_and_runs_only_on_yes(self):
+        from ecatsetup import masterstart
+        w = self.window()
+        ran = []
+        w.run = lambda what, fn, done: done(fn(lambda text: None))
+        w.read_bus = lambda: ran.append("read")
+        with mock.patch.object(masterstart, "linuxcnc_running", lambda: False), \
+                mock.patch.object(masterstart, "run",
+                                  lambda p, noninteractive=True: ran.append(("run", noninteractive)) or (True, "ok")):
+            with mock.patch.object(gui.QMessageBox, "exec_", lambda self: gui.QMessageBox.No):
+                w.offer_master_start()
+            self.assertEqual(ran, [])
+            with mock.patch.object(gui.QMessageBox, "exec_", lambda self: gui.QMessageBox.Yes):
+                w.offer_master_start()
+            self.assertEqual(ran, [("run", True), "read"])      # sudo -n, then the bus is read
+            self.assertTrue(w.master_just_started)
+        ran.clear()
+        with mock.patch.object(masterstart, "linuxcnc_running", lambda: True), \
+                mock.patch.object(gui.QMessageBox, "exec_", lambda self: ran.append("asked")):
+            w.offer_master_start(force=True)
+        self.assertEqual(ran, [])                               # LinuxCNC has the bus
+
     def test_bus_rows_fit_their_text(self):
         w = self.window()
         w.session.slave(0)["name"] = "x-axis-drive-with-a-long-name"   # a subtitle that wraps

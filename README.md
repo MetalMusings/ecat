@@ -57,6 +57,10 @@ sudo ethercat-uspace start -- -i enp2s0
 ecatsetup --gui ethercat.yaml --ini <machine>.ini
 ```
 
+Starting the master by hand is optional: when no master answers, the window
+(and the command line, on a terminal) shows the command and offers to run it
+with sudo, see [Starting the master](docs/ecatsetup.md#starting-the-master).
+
 The window opens on a *Start* page that lists the tasks and the steps of
 each ([EtherCAT Setup](docs/ecatsetup.md)). It needs `python3-pyqt5`. The
 same functions are available as options for scripts (`ecatsetup --help`,

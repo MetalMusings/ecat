@@ -19,7 +19,7 @@ from dataclasses import asdict
 
 import yaml
 
-from . import config, diagnose, esi, events, importxml, integrate, lcecxml, netif, propose, tool, update
+from . import config, diagnose, esi, events, importxml, integrate, lcecxml, masterstart, netif, propose, tool, update
 from . import session
 from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F401
 
@@ -213,7 +213,12 @@ def main(argv=None):
     hand = {s.idx: s for s in lcecxml.load(args.compare).slaves} if args.compare else {}
 
     try:
-        positions = args.position or tool.slave_positions()
+        try:
+            positions = args.position or tool.slave_positions()
+        except tool.ToolError:
+            if not masterstart.offer_terminal():
+                raise
+            positions = args.position or tool.slave_positions()
     except tool.ToolError as e:
         sys.exit("Cannot reach a master: %s\nStart one with: sudo ethercat-uspace start" % e)
 
@@ -303,7 +308,12 @@ def apply_file(args):
 def diagnose_bus(args):
     """Diagnose the slaves on the bus. Returns an exit code."""
     try:
-        positions = args.position or tool.slave_positions()
+        try:
+            positions = args.position or tool.slave_positions()
+        except tool.ToolError:
+            if not masterstart.offer_terminal():
+                raise
+            positions = args.position or tool.slave_positions()
         found = diagnose.diagnose(positions, args.seconds)
     except tool.ToolError as e:
         print("Cannot reach a master: %s\nStart one with: sudo ethercat-uspace start" % e)

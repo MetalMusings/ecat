@@ -35,8 +35,8 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, homing, integrate, netif,
-               propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
+from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, homing, integrate, masterstart,
+               netif, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -363,6 +363,11 @@ class BusList(Card):
                                "Nothing is written to them.")
         self.rescan.clicked.connect(win.read_bus)
         self.head.addWidget(self.rescan)
+        self.start_master = QPushButton("Start the master...")
+        self.start_master.setToolTip("Run sudo ethercat-uspace start, after you have seen "
+                                     "the command and confirmed it")
+        self.start_master.clicked.connect(lambda: win.offer_master_start(force=True))
+        self.head.addWidget(self.start_master)
         self.list = QListWidget()
         self.list.setObjectName("slaves")
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -438,6 +443,8 @@ class BusList(Card):
         self.summary.setText(win.bus_summary())
         self.update_button.setEnabled(bool(s.bus) and not win.busy)
         self.rescan.setEnabled(not win.busy)
+        self.start_master.setVisible(bool(s.bus_error) and not s.bus and win.test is None)
+        self.start_master.setEnabled(not win.busy)
 
     def fit_rows(self):
         """Give each row the height its wrapped text needs at its real width."""
@@ -3850,6 +3857,8 @@ class MainWindow(QMainWindow):
         self.test = None        # testmode.TestRun while the I/O test runs
         self.current = None     # the chosen slave's position, MASTER_ITEM, or None
         self.messages_by_slave = {}
+        self.master_offer_off = False       # "Don't ask again this session"
+        self.master_just_started = False    # a failed read after a start is not offered again
         self.test_timer = QTimer(self)
         self.test_timer.setInterval(200)
         self.test_timer.timeout.connect(self.poll_test)
@@ -3983,7 +3992,7 @@ class MainWindow(QMainWindow):
     def bus_summary(self):
         s = self.session
         if s.bus_error and not s.bus:
-            return "No master running: start one with sudo ethercat-uspace start, then Rescan."
+            return "No master running: Start the master (sudo ethercat-uspace start), then Rescan."
         if not s.bus:
             return "The bus has not been read."
         if s.cfg is None:
@@ -4145,9 +4154,57 @@ class MainWindow(QMainWindow):
         self.set_messages([(RED, "", text.splitlines())])
         self.status(text.splitlines()[0])
         self.refresh()
+        if text.startswith("Cannot reach a master") and not self.master_just_started:
+            QTimer.singleShot(0, self.offer_master_start)
+        self.master_just_started = False
         if text.startswith("Test mode: "):
             # the messages are not on the Test page: without this the button seems dead
             QMessageBox.warning(self, TITLE, "The test did not start.\n\n" + text[len("Test mode: "):])
+
+    # -- starting the master
+
+    def offer_master_start(self, force=False):
+        """No master answers: show the sudo command and start the master if
+        the user confirms. Never while LinuxCNC runs or a test is on, and
+        not again for the session once the box was ticked (the button
+        still works)."""
+        if self.busy or self.test is not None or masterstart.linuxcnc_running():
+            return
+        if self.master_offer_off and not force:
+            return
+        p = masterstart.plan(self.session.cfg)
+        box = QMessageBox(self)
+        box.setWindowTitle(TITLE)
+        box.setIcon(QMessageBox.Question)
+        box.setText("No master is running. Start one with this command?")
+        box.setInformativeText("\n".join(p.notes + ([""] if p.notes else []) + [
+            masterstart.text(p), "",
+            "The window itself does not run as root; sudo must work without a password "
+            "here, or you start the master in a terminal."]))
+        again = QCheckBox("Don't ask again this session")
+        box.setCheckBox(again)
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.No)
+        yes = box.exec_() == QMessageBox.Yes
+        if again.isChecked():
+            self.master_offer_off = True
+        if not yes:
+            return
+
+        def work(progress):
+            progress("Starting the master...")
+            return masterstart.run(p, noninteractive=True)
+
+        def done(result):
+            ok, message = result
+            if not ok:
+                self.set_messages([(RED, "", message.splitlines())])
+                self.status(message.splitlines()[0])
+                return
+            self.master_just_started = True
+            self.read_bus()
+
+        self.run("Starting the master...", work, done)
 
     # -- actions
 
@@ -4157,6 +4214,7 @@ class MainWindow(QMainWindow):
             if self.session.cfg is None:
                 notes += self.session.new()
                 notes.append("A new configuration proposed from the bus; save it to keep it")
+            self.master_just_started = False
             self.status("Read %d slaves" % len(bus))
             self.check(extra=notes)
         self.run("Reading the bus...", lambda progress: self.session.read_bus(progress), done)
@@ -4391,7 +4449,11 @@ class MainWindow(QMainWindow):
                 return
             self.set_messages([(GREY, "", [
                 "Test stopped. The free-running master does not come back by itself: to read "
-                "the bus again, sudo ethercat-uspace start"])])
+                "the bus again, start it (Start the master... on the Bus card)"])])
+            try:
+                tool.master_mac()
+            except tool.ToolError:
+                QTimer.singleShot(0, self.offer_master_start)
         self.run("Stopping the test...", work, stopped)
 
     def set_pin(self, pin, value):
