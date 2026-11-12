@@ -344,6 +344,28 @@ class TestWindow(BusTest):
             self.assertEqual(b.currentText(), before)
         self.assertEqual(integrate.nets(w.session.cfg), [])
 
+    def test_bit_pins_are_edited_in_a_column_of_sane_width(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        row = next(r for r in range(page.pd.rowCount())
+                   if page.pd.item(r, page.PIN).flags() & gui.Qt.ItemIsEditable
+                   and page.pd.item(r, page.PIN).text()
+                   and (page._entry(r).get("bits") or 0) >= 8)
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText(page.BIT_FIELD)
+        split = page.pd.item(row, page.SPLIT)
+        self.assertTrue(split.flags() & gui.Qt.ItemIsEditable)
+        self.assertFalse(page.pd.item(row, page.PIN).flags() & gui.Qt.ItemIsEditable)
+        self.assertLess(page.pd.columnWidth(page.SPLIT), 600)    # not as wide as all the names
+        hdr = page.pd.horizontalHeader()
+        self.assertEqual(hdr.sectionResizeMode(page.SPLIT), gui.QHeaderView.Interactive)  # draggable
+        self.assertTrue(all(page.pd.columnWidth(c) <= 280 for c in range(page.pd.columnCount())
+                            if c != page.PIN))
+        page.pd_double_clicked(row, page.PIN)                    # takes you to the bit pins
+        self.assertEqual(page.pd.currentColumn(), page.SPLIT)
+        split.setText("lamp, valve, torch, spare")
+        self.assertEqual(page._entry(row)["split"], ["lamp", "valve", "torch", "spare"])
+
     def test_bit_pins_can_be_inverted(self):
         w = self.window()
         w.select_slave(0)

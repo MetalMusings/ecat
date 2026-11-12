@@ -127,7 +127,8 @@ Choosing a slave shows:
   drive's digital inputs (`0x60FD`), can get one `bit` pin per bit:
   choose *bit field* in the HAL type list. The pins are named
   `<pin>-0`, `<pin>-1`...; rename them, or leave a name empty to give a
-  bit no pin, in the *Split* column. Choosing a type again gives back one
+  bit no pin, in the *Bit pins* column (double-click the empty *HAL pin*
+  cell of the row to go there). Choosing a type again gives back one
   pin. The *Invert* column makes a bit pin the opposite of the bit (`yes`
   for a bit pin, the names of the bit pins for a bit field), for normally
   closed switches such as an E-stop: no `not` is needed in HAL;

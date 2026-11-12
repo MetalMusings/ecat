@@ -232,6 +232,24 @@ def fit_table(t, minimum=1):
     t.setFixedHeight(h)
 
 
+def fit_columns(t, stretch=None, wide=(), maxw=150, maxwide=280):
+    """Size a table's columns to their text but no wider than maxw (maxwide for `wide`
+    ones), still draggable, so that a row with long text does not push the right-hand
+    columns out of reach. Long text is cut and shown whole in a tooltip or by editing."""
+    h = t.horizontalHeader()
+    for c in range(t.columnCount()):
+        h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+    t.resizeColumnsToContents()
+    for c in range(t.columnCount()):
+        if c == stretch:
+            h.setSectionResizeMode(c, QHeaderView.Stretch)
+            continue
+        w = min(t.columnWidth(c), maxwide if c in wide else maxw)
+        h.setSectionResizeMode(c, QHeaderView.Interactive)
+        t.setColumnWidth(c, w)
+    t.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+
+
 def table(columns, stretch=None):
     t = QTableWidget(0, len(columns))
     t.setHorizontalHeaderLabels(columns)
@@ -999,6 +1017,7 @@ class SlaveView(QWidget):
                                   "without one; entries the profile handles have no pins.")
         self.pd = table(self.PD_COLUMNS, self.PIN)
         self.pd.itemChanged.connect(self.pd_edited)
+        self.pd.cellDoubleClicked.connect(self.pd_double_clicked)
         pd.add(self.pd)
         lay.addWidget(pd)
 
@@ -1287,8 +1306,7 @@ class SlaveView(QWidget):
             for pi, pdo in enumerate(pd.get(direction) or []):
                 for ei, e in enumerate(pdo.get("entries") or []):
                     self._pd_row(s, direction, pdo, pi, e, ei)
-        self.pd.resizeColumnsToContents()
-        self.pd.horizontalHeader().setSectionResizeMode(self.PIN, QHeaderView.Stretch)
+        fit_columns(self.pd, stretch=self.PIN, wide=(self.SPLIT,))
         fit_table(self.pd)
         self.loading = False
 
@@ -1312,20 +1330,27 @@ class SlaveView(QWidget):
                  "%s %s" % (e.get("type", ""), e.get("bits")), use]
         for c, v in enumerate(cells):
             self.pd.setItem(r, c, item(v, colour=GREY if v in ("profile", "gap") else None,
-                                       font=mono() if c in (1, 2) else None))
+                                       font=mono() if c in (1, 2) else None,
+                                       tip=str(v) if v and c == 3 else None))
         pin_text = e.get("pin", "")
         if use == "profile":
             pin_text = "handled by the %s" % ("CiA 402 profile" if s.get("profile") == "cia402"
                                               else "encoder function")
         self.pd.setItem(r, self.PIN, item(pin_text, editable=not fixed and "split" not in e,
                                           colour=GREY if fixed else None,
-                                          font=None if fixed else mono()))
+                                          font=None if fixed else mono(),
+                                          tip="A bit field has no pin name: its bit pins are named "
+                                              "in the Bit pins column (double-click here to go "
+                                              "there)" if "split" in e else None))
         self.pd.setItem(r, self.SCALE, item(e.get("scale", ""), editable=not fixed))
         self.pd.setItem(r, self.OFFSET, item(e.get("offset", ""), editable=not fixed))
         self.pd.setItem(r, self.SPLIT, item(", ".join(p or "" for p in e.get("split", [])),
                                             editable=not fixed and "pin" not in e,
                                             tip="One pin per bit, from bit 0, comma separated; "
-                                                "leave a bit empty to give it no pin"))
+                                                "leave a bit empty to give it no pin"
+                                                + ("\n\n" + ", ".join(p or "-" for p in
+                                                                       e.get("split", []))
+                                                   if "split" in e else "")))
         self.pd.setItem(r, self.INVERT, item(self._invert_text(e), editable=not fixed,
                                              tip="A normally closed switch reads 1 when it is "
                                                  "open: invert the pin so that it reads 0 then. "
@@ -1516,6 +1541,14 @@ class SlaveView(QWidget):
             else:
                 e.pop("invert", None)
 
+    def pd_double_clicked(self, row, col):
+        """A bit field has no pin name of its own: go to its bit pins instead."""
+        if col != self.PIN or row >= len(self.pd_rows):
+            return
+        if "split" in self._entry(row):
+            self.pd.setCurrentCell(row, self.SPLIT)
+            self.pd.editItem(self.pd.item(row, self.SPLIT))
+
     def _refresh_row(self, row, e):
         self.loading = True
         self.pd.item(row, 5).setText(self._use(e))
@@ -1566,7 +1599,7 @@ class SlaveView(QWidget):
         if text == self.BIT_FIELD:
             if "split" in e:
                 return
-            # one bit pin per bit, named <pin>-0, <pin>-1 ... (rename them in the Split column)
+            # one bit pin per bit, named <pin>-0, <pin>-1 ... (rename them in the Bit pins column)
             n = min(int(e.get("bits") or 0), 32)
             if n < 2:
                 self.win.status("A bit field needs an entry of more than one bit")
