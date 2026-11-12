@@ -45,17 +45,77 @@ HOMING = ("index-enable", "index-enable", "<=>", "index-enable")
 
 # -- the INI file
 
+EXPANDED = ".expanded"
+
+
+def include_path(ini_path, name):
+    """The file an #INCLUDE line names, as the linuxcnc script finds it:
+    ~ and $VARIABLES expanded, relative to the INI file's folder."""
+    name = os.path.expandvars(os.path.expanduser(name))
+    return os.path.join(os.path.dirname(os.path.abspath(ini_path)), name)
+
+
+def ini_lines(path):
+    """[(file, line)] of an INI file with its #INCLUDEs in place, as the
+    linuxcnc script expands them before anything reads the file: only the
+    main file's "#INCLUDE <file>" lines count (an included file is copied
+    as it is), and a file that cannot be read is left out. The #INCLUDE
+    line itself stays, as a comment of the main file."""
+    out = []
+    for line in read_text(path).splitlines(keepends=True):
+        out.append((path, line))
+        f = line.split()
+        if len(f) >= 2 and f[0] == "#INCLUDE":
+            inc = include_path(path, line.strip()[len("#INCLUDE"):].strip())
+            try:
+                text = read_text(inc)
+            except OSError:
+                continue
+            if text and not text.endswith("\n"):
+                text += "\n"
+            out += [(inc, x) for x in text.splitlines(keepends=True)]
+    return out
+
+
+def ini_includes(path):
+    """The files the INI file's #INCLUDE lines name that exist."""
+    return list(dict.fromkeys(f for f, _ in ini_lines(path) if f != path))
+
+
+def expanded_source(path):
+    """For the file LinuxCNC writes from an INI file with #INCLUDEs
+    (<name>.ini.expanded, written again at every start), the INI file it is
+    made from; None for any other file."""
+    if path.endswith(EXPANDED):
+        src = path[:-len(EXPANDED)]
+        return src if os.path.exists(src) else None
+    return None
+
+
+def _sections(lines):
+    """Each line's section, and whether it is in the first section of that
+    name: LinuxCNC's INI reader looks a key up in the first [SECTION] only."""
+    out, current, first, seen = [], None, False, set()
+    for line in lines:
+        t = line.strip()
+        if t.startswith("[") and "]" in t:
+            current = t[1:t.index("]")].strip()
+            first = current not in seen
+            seen.add(current)
+        out.append((current, first))
+    return out
+
+
 def read_ini(path):
-    """[(section, key, value)] in file order, as LinuxCNC reads them."""
-    out, section = [], None
-    with open(path, errors="replace") as f:
-        for line in f:
-            s = line.strip()
-            if s.startswith("[") and "]" in s:
-                section = s[1:s.index("]")].strip()
-            elif section and "=" in s and not s.startswith(("#", ";")):
-                k, v = s.split("=", 1)
-                out.append((section, k.strip(), v.split("#")[0].strip()))
+    """[(section, key, value)] in file order, as LinuxCNC reads them:
+    #INCLUDEs expanded, and only the first section of each name."""
+    out = []
+    lines = [x for _, x in ini_lines(path)]
+    for line, (section, first) in zip(lines, _sections(lines)):
+        s = line.strip()
+        if section and first and "=" in s and not s.startswith(("#", ";", "[")):
+            k, v = s.split("=", 1)
+            out.append((section, k.strip(), v.split("#")[0].strip()))
     return out
 
 
@@ -156,26 +216,20 @@ def basic_sim_file(ini_path):
     return path if os.path.exists(path) else None
 
 
-def ini_text(ini_path, yaml_name, replace=None):
-    """The INI file's text with [ETHERCAT]CONFIG and the two HALFILEs;
-    replace: {HALFILE value: new value} (a file copied into the folder)."""
-    with open(ini_path, errors="replace") as f:
-        lines = f.read().splitlines(keepends=True)
+def ini_texts(ini_path, yaml_name, replace=None):
+    """{file: new text} of the INI file and the files it includes, with
+    [ETHERCAT]CONFIG and the two HALFILEs; replace: {HALFILE value: new
+    value} (a file copied into the folder). The HALFILEs go into the first
+    [HAL] section, in the file that holds it (an #INCLUDEd one too), since
+    LinuxCNC reads only that one; a new [ETHERCAT] goes just before it."""
     nl = "\n"
-    for i, line in enumerate(lines):
-        t = line.strip()
+    tagged = [list(x) for x in ini_lines(ini_path)]   # [file, line]
+    for x in tagged:
+        t = x[1].strip()
         if replace and "=" in t and t.split("=", 1)[0].strip() in ("HALFILE", "POSTGUI_HALFILE"):
             v = t.split("=", 1)[1].split("#")[0].strip()
             if v in replace:
-                lines[i] = "%s = %s%s" % (t.split("=", 1)[0].strip(), replace[v], nl)
-
-    def section_of(i):
-        s = None
-        for line in lines[:i + 1]:
-            t = line.strip()
-            if t.startswith("[") and "]" in t:
-                s = t[1:t.index("]")].strip()
-        return s
+                x[1] = "%s = %s%s" % (t.split("=", 1)[0].strip(), replace[v], nl)
 
     def key_of(line):
         t = line.strip()
@@ -183,39 +237,50 @@ def ini_text(ini_path, yaml_name, replace=None):
             return None
         return t.split("=", 1)[0].strip()
 
-    # [HAL]: ours out, then in again where they belong
-    out = []
-    for i, line in enumerate(lines):
-        if section_of(i) == "HAL" and key_of(line) == "HALFILE" and \
-                line.split("=", 1)[1].split("#")[0].strip() in (LOAD_FILE, MAIN_FILE):
-            continue
-        out.append(line)
-    lines = out
-    hal = [i for i, line in enumerate(lines) if section_of(i) == "HAL"]
+    def in_first(name):
+        secs = _sections([x[1] for x in tagged])
+        return [i for i, (s, first) in enumerate(secs) if s == name and first]
+
+    # [HAL]: ours out (from every [HAL]), then in again where they belong
+    secs = _sections([x[1] for x in tagged])
+    tagged = [x for x, (s, _) in zip(tagged, secs)
+              if not (s == "HAL" and key_of(x[1]) == "HALFILE"
+                      and x[1].split("=", 1)[1].split("#")[0].strip() in (LOAD_FILE, MAIN_FILE))]
+    hal = in_first("HAL")
     if not hal:
-        if lines and not lines[-1].endswith("\n"):
-            lines[-1] += nl
-        lines += [nl, "[HAL]" + nl]
-        hal = [len(lines) - 1]
-    halfiles = [i for i in hal if key_of(lines[i]) == "HALFILE"]
+        mine = [x for x in tagged if x[0] == ini_path]
+        if mine and not mine[-1][1].endswith("\n"):
+            mine[-1][1] += nl
+        tagged += [[ini_path, nl], [ini_path, "[HAL]" + nl]]
+        hal = [len(tagged) - 1]
+    hal_file = tagged[hal[0]][0]
+    halfiles = [i for i in hal if key_of(tagged[i][1]) == "HALFILE"]
     first = halfiles[0] if halfiles else hal[0] + 1
     last = (halfiles[-1] + 1) if halfiles else hal[0] + 1
-    lines.insert(last, "HALFILE = %s%s" % (MAIN_FILE, nl))
-    lines.insert(first, "HALFILE = %s%s" % (LOAD_FILE, nl))
+    tagged.insert(last, [hal_file, "HALFILE = %s%s" % (MAIN_FILE, nl)])
+    tagged.insert(first, [hal_file, "HALFILE = %s%s" % (LOAD_FILE, nl)])
 
-    # [ETHERCAT]CONFIG
-    eth = [i for i in range(len(lines)) if section_of(i) == "ETHERCAT"]
+    # [ETHERCAT]CONFIG, in the first [ETHERCAT], or a new one before [HAL]
+    eth = in_first("ETHERCAT")
     cfg_line = "CONFIG = %s%s" % (yaml_name, nl)
-    keys = [i for i in eth if key_of(lines[i]) == "CONFIG"]
+    keys = [i for i in eth if key_of(tagged[i][1]) == "CONFIG"]
     if keys:
-        lines[keys[0]] = cfg_line
+        tagged[keys[0]][1] = cfg_line
     elif eth:
-        lines.insert(eth[0] + 1, cfg_line)
+        tagged.insert(eth[0] + 1, [tagged[eth[0]][0], cfg_line])
     else:
-        # before [HAL], where a reader looks for it
-        at = next(i for i in range(len(lines)) if lines[i].strip().startswith("[HAL]"))
-        lines[at:at] = ["[ETHERCAT]" + nl, cfg_line, nl]
-    return "".join(lines)
+        at = in_first("HAL")[0]
+        tagged[at:at] = [[hal_file, "[ETHERCAT]" + nl], [hal_file, cfg_line], [hal_file, nl]]
+
+    out = {}
+    for f, line in tagged:
+        out[f] = out.get(f, "") + line
+    return out
+
+
+def ini_text(ini_path, yaml_name, replace=None):
+    """The main INI file's new text (see ini_texts)."""
+    return ini_texts(ini_path, yaml_name, replace).get(ini_path, "")
 
 
 # -- the user's HAL files
@@ -767,6 +832,14 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
     if not os.path.exists(ini_path):
         p.errors.append("%s does not exist" % ini_path)
         return p
+    if ini_path.endswith(EXPANDED):
+        src = expanded_source(ini_path)
+        p.errors.append("%s is the file LinuxCNC writes from %s at every start, with its "
+                        "#INCLUDEs in place: what is written here is lost. Choose %s instead"
+                        % (os.path.basename(ini_path),
+                           os.path.basename(src) if src else "the INI file",
+                           os.path.basename(src) if src else "that INI file"))
+        return p
     ini_e = read_ini(ini_path)
     ds = drives(cfg)
     njoints = len(ini_joints(ini_path))
@@ -1035,11 +1108,13 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             p.edited.append(fname)
         if old != text:
             p.changes.append(FileChange(path, "change" if old else "new", old, text, what))
-    old_ini = read_text(ini_path)
-    new_ini = ini_text(ini_path, yaml_name, ini_replace)
-    if new_ini != old_ini:
-        p.changes.append(FileChange(ini_path, "change", old_ini, new_ini,
-                                    "[ETHERCAT]CONFIG and the HAL files"))
+    for path, new_ini in ini_texts(ini_path, yaml_name, ini_replace).items():
+        old_ini = read_text(path)
+        if new_ini != old_ini:
+            p.changes.append(FileChange(path, "change", old_ini, new_ini,
+                                        "[ETHERCAT]CONFIG and the HAL files" if path == ini_path
+                                        else "[ETHERCAT]CONFIG and the HAL files (#INCLUDEd by %s)"
+                                        % os.path.basename(ini_path)))
     p.notes += joint_checks(ini_path, cfg, max_counts)
     for path in hal_files:
         what = SIM_FILES.get(os.path.basename(path))

@@ -11,23 +11,15 @@ import shutil
 
 import yaml
 
-from . import coe as coe_mod, config, esi, importxml, lcecxml, netif, propose, sii as sii_mod, tool, update
+from . import coe as coe_mod, config, esi, importxml, integrate, lcecxml, netif, propose, sii as sii_mod, \
+    tool, update
 
 
 def ini_value(ini_path, section, key):
-    """The first value of a key, read as LinuxCNC reads its INI files: text
-    before the first section and lines without "=" are ignored."""
-    current = None
-    with open(ini_path, errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("[") and "]" in line:
-                current = line[1:line.index("]")].strip()
-            elif current == section and "=" in line and not line.startswith(("#", ";")):
-                k, v = line.split("=", 1)
-                if k.strip() == key:
-                    return v.split("#")[0].strip()
-    return None
+    """The first value of a key, read as LinuxCNC reads its INI files
+    (#INCLUDEs expanded, the first section of a name only); None if not
+    there."""
+    return integrate.ini_get(integrate.read_ini(ini_path), section, key)
 
 
 def servo_period(ini_path):

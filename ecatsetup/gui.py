@@ -1178,11 +1178,22 @@ class SlaveView(QWidget):
             self.pd.setItem(r, self.HALTYPE, item(""))
             return
         box = QComboBox()
-        box.addItems([""] + sorted(config.HAL_TYPES))
-        box.setCurrentText(e.get("hal-type", ""))
-        box.setEnabled("pin" in e)
+        box.addItems([""] + sorted(config.HAL_TYPES) + [self.BIT_FIELD])
+        box.setCurrentText(self._type_text(e))
+        box.setEnabled(self._type_enabled(e))
         box.currentTextChanged.connect(lambda t, row=r: self.hal_type_edited(row, t))
         self.pd.setCellWidget(r, self.HALTYPE, box)
+
+    BIT_FIELD = "bit field"      # in the type list: one bit pin per bit (`split`)
+
+    @staticmethod
+    def _type_text(e):
+        return SlaveView.BIT_FIELD if "split" in e else e.get("hal-type", "")
+
+    @staticmethod
+    def _type_enabled(e):
+        # a bit field needs more than one bit
+        return "pin" in e or "split" in e
 
     def _entry(self, row):
         direction, pi, ei = self.pd_rows[row]
@@ -1292,8 +1303,8 @@ class SlaveView(QWidget):
         box = self.pd.cellWidget(row, self.HALTYPE)
         if box:
             box.blockSignals(True)
-            box.setCurrentText(e.get("hal-type", ""))
-            box.setEnabled("pin" in e)
+            box.setCurrentText(self._type_text(e))
+            box.setEnabled(self._type_enabled(e))
             box.blockSignals(False)
         self.loading = False
 
@@ -1327,9 +1338,41 @@ class SlaveView(QWidget):
         if self.loading:
             return
         e = self._entry(row)
-        if "pin" not in e:
+        if "pin" not in e and "split" not in e:
             return
-        e["hal-type"] = text
+        if text == self.BIT_FIELD:
+            if "split" in e:
+                return
+            # one bit pin per bit, named <pin>-0, <pin>-1 ... (rename them in the Split column)
+            n = min(int(e.get("bits") or 0), 32)
+            if n < 2:
+                self.win.status("A bit field needs an entry of more than one bit")
+                self._refresh_row(row, e)
+                return
+            base = e.pop("pin")
+            for k in ("hal-type", "scale", "offset"):
+                e.pop(k, None)
+            e["split"] = ["%s-%d" % (base, i) for i in range(n)]
+            self.loading = True
+            self.pd.item(row, self.SPLIT).setText(", ".join(e["split"]))
+            self.pd.item(row, self.PIN).setText("")
+            self.pd.item(row, self.SCALE).setText("")
+            self.pd.item(row, self.OFFSET).setText("")
+            self.loading = False
+        elif "split" in e:
+            # back to one pin for the whole entry
+            first = (next((p for p in e["split"] if p), None) or "pin-0")
+            base = first[:-2] if first.endswith("-0") else first
+            e.pop("split")
+            e["pin"] = base
+            e["hal-type"] = text or propose.HAL_TYPES.get(e.get("type"), "s32")
+            self.loading = True
+            self.pd.item(row, self.SPLIT).setText("")
+            self.pd.item(row, self.PIN).setText(base)
+            self.loading = False
+        else:
+            e["hal-type"] = text
+        self._refresh_row(row, e)
         self.win.changed()
 
     def st_edited(self, it):
@@ -2862,13 +2905,14 @@ class HalPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         content = QWidget()
-        lay = QHBoxLayout(content)
+        # one column, in the order of the work: joints, pins, the checks
+        # (HAL check and the file side by side), and writing last, full width
+        # for the pins table and the changes
+        lay = QVBoxLayout(content)
         lay.setContentsMargins(24, 20, 24, 20)
-        lay.setSpacing(20)
+        lay.setSpacing(16)
         outer.addWidget(scroll(content))
 
-        left = QVBoxLayout()
-        left.setSpacing(16)
         self.axes = Card("Joints", "Choose the drive for each joint.")
         self.no_ini = QWidget()
         nl = QHBoxLayout(self.no_ini)
@@ -2891,7 +2935,7 @@ class HalPage(QWidget):
         self.take_over_text = label("", "hint", wrap=True)
         row.addWidget(self.take_over_text, 1)
         self.axes.lay.addLayout(row)
-        left.addWidget(self.axes)
+        lay.addWidget(self.axes)
 
         pins = Card("Inputs and outputs",
                     "The pins this configuration gives. Connect a slave's pin to LinuxCNC pins "
@@ -2912,7 +2956,7 @@ class HalPage(QWidget):
         self.io_proposal = {}
         self.hal_signals = {}
         self.hal_uses = {}
-        left.addWidget(pins)
+        lay.addWidget(pins)
 
         # the HAL files against the configuration
         self.check_card = Card("HAL check", "Your HAL files, ethercat-load.hal and ethercat.hal "
@@ -2926,38 +2970,47 @@ class HalPage(QWidget):
         self.check_table.horizontalHeader().sectionResized.connect(
             lambda *_: QTimer.singleShot(0, self.fit_check_table))
         self.check_card.add(self.check_table)
-        left.addWidget(self.check_card)
         yaml_card = Card("File contents", "ethercat.yaml as it will be written.")
         self.yaml = QPlainTextEdit()
         self.yaml.setReadOnly(True)
         self.yaml.setFont(mono())
         self.yaml.setMinimumHeight(360)
         yaml_card.add(self.yaml)
-        left.addWidget(yaml_card)
-        left.addStretch(1)
-        lay.addLayout(left, 3)
+        # beside the taller file view the check card keeps its content at the top
+        self.check_card.lay.addStretch(1)
+        checks = QHBoxLayout()
+        checks.setSpacing(16)
+        checks.addWidget(self.check_card, 1)
+        checks.addWidget(yaml_card, 1)
+        lay.addLayout(checks)
 
-        right = QVBoxLayout()
+        # writing: what and why on the left, the changes beside them
         apply = Card("Apply to LinuxCNC")
-        self.apply_text = apply.add(label("", wrap=True))
+        cols = QHBoxLayout()
+        cols.setSpacing(16)
+        side = QVBoxLayout()
+        side.setSpacing(8)
+        self.apply_text = label("", wrap=True)
+        side.addWidget(self.apply_text)
         self.files = QVBoxLayout()
         self.files.setSpacing(4)
-        apply.lay.addLayout(self.files)
+        side.addLayout(self.files)
         self.code = QPlainTextEdit()
         self.code.setObjectName("code")
         self.code.setReadOnly(True)
         self.code.setFont(mono())
         self.code.setMinimumHeight(260)
         self.code.setLineWrapMode(QPlainTextEdit.NoWrap)
-        apply.add(self.code)
-        self.problems = apply.add(label("", "problemText", wrap=True))
-        self.notes = apply.add(label("", "hint", wrap=True))
+        self.problems = label("", "problemText", wrap=True)
+        side.addWidget(self.problems)
+        self.notes = label("", "hint", wrap=True)
+        side.addWidget(self.notes)
         self.check_at_start = QCheckBox("Check the HAL files when LinuxCNC starts")
         self.check_at_start.setToolTip("ethercat-load.hal runs ecatsetup --check-hal first: "
                                        "LinuxCNC stops with a clear message when a HAL file uses "
                                        "a pin the configuration does not have. Takes a second.")
         self.check_at_start.toggled.connect(self.check_at_start_edited)
-        apply.add(self.check_at_start)
+        side.addWidget(self.check_at_start)
         buttons = QHBoxLayout()
         self.write_button = QPushButton("Write")
         self.write_button.setObjectName("primary")
@@ -2967,10 +3020,13 @@ class HalPage(QWidget):
         self.show_button.clicked.connect(self.show_changes)
         buttons.addWidget(self.show_button)
         buttons.addStretch(1)
-        apply.lay.addLayout(buttons)
-        right.addWidget(apply)
-        right.addStretch(1)
-        lay.addLayout(right, 2)
+        side.addLayout(buttons)
+        side.addStretch(1)
+        cols.addLayout(side, 2)
+        cols.addWidget(self.code, 3)
+        apply.lay.addLayout(cols)
+        lay.addWidget(apply)
+        lay.addStretch(1)
 
     # what is shown
 
@@ -3004,6 +3060,7 @@ class HalPage(QWidget):
         s, ini = self.win.session, self.ini()
         t = self.check_table
         t.setRowCount(0)
+        t.setVisible(False)
         if ini is None or s.cfg is None:
             self.check_text.setText("Choose the machine's INI file to check its HAL files.")
             fit_table(t, minimum=1)
@@ -3020,6 +3077,7 @@ class HalPage(QWidget):
             "work." % (errors, "" if errors == 1 else "s", len(found) - errors,
                        "" if len(found) - errors == 1 else "s"))
         t.setRowCount(len(found))
+        t.setVisible(bool(found))
         for r, f in enumerate(sorted(found, key=lambda f: (f.severity != "error", f.file, f.line))):
             colour = QColor("#c62828") if f.severity == "error" else QColor("#b26a00")
             t.setItem(r, 0, item("ERROR" if f.severity == "error" else "WARN", colour=colour))
@@ -4101,9 +4159,22 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "The machine's INI file", self.start_dir(),
                                               "LinuxCNC INI (*.ini);;All files (*)")
         if path:
-            self.session.ini_path, self.session.period = path, servo_period(path)
-            self.refresh(keep_page=True)
-            self.bus_page.master.show_config()
+            self.set_ini(path)
+
+    def set_ini(self, path):
+        """Use an INI file; for the .expanded file LinuxCNC writes, offer the
+        INI file it is made from."""
+        src = integrate.expanded_source(path)
+        if src and QMessageBox.question(
+                self, TITLE, "%s is the file LinuxCNC writes from %s at every start, with its "
+                "#INCLUDEs in place. It is not up to date until the next start, and what is "
+                "written into it is lost then.\n\nUse %s instead?" % (
+                    os.path.basename(path), os.path.basename(src),
+                    os.path.basename(src))) == QMessageBox.Yes:
+            path = src
+        self.session.ini_path, self.session.period = path, servo_period(path)
+        self.refresh(keep_page=True)
+        self.bus_page.master.show_config()
 
     def closeEvent(self, event):
         if self.busy or not self.ask_save():
@@ -4136,6 +4207,8 @@ def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
         else:
             win.session.path = path
     win.show()
+    if ini_path and integrate.expanded_source(ini_path):
+        QTimer.singleShot(300, lambda: win.set_ini(ini_path))
     if read_bus:
         win.read_bus()
     QTimer.singleShot(500, win.offer_restore)

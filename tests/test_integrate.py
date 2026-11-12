@@ -120,6 +120,86 @@ class TestIni(Folder):
         self.assertIn("CONFIG = plasma.yaml", integrate.ini_text(self.ini, "plasma.yaml"))
 
 
+class TestIniInclude(Folder):
+    """An INI file that #INCLUDEs the rest, as QtPlasmaC's do: the main file
+    has [DISPLAY] and the #INCLUDE line, the included file everything else."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("machine.inc", INI)
+        self.main = "[DISPLAY]\nDISPLAY = axis\n#INCLUDE machine.inc\n"
+        self.write("machine.ini", self.main)
+
+    def test_read_through_the_include(self):
+        self.assertEqual(integrate.ini_joints(self.ini),
+                         [(0, "X", "LINEAR"), (1, "Y", "LINEAR"), (2, "Z", "LINEAR")])
+        self.assertEqual(integrate.user_hal_files(self.ini), [
+            os.path.join(self.dir.name, "machine.hal"), os.path.join(self.lib.name, "basic.hal"),
+            os.path.join(self.dir.name, "postgui.hal")])
+        from ecatsetup.session import servo_period
+        self.assertEqual(servo_period(self.ini), 1000000)
+        self.assertEqual(integrate.ini_includes(self.ini), [os.path.join(self.dir.name, "machine.inc")])
+
+    def test_include_path_with_home_and_variables(self):
+        with mock.patch.dict(os.environ, {"MYCFG": self.dir.name}):
+            self.write("machine.ini", "[DISPLAY]\n#INCLUDE $MYCFG/machine.inc\n")
+            self.assertEqual(len(integrate.ini_joints(self.ini)), 3)
+
+    def test_a_missing_include_is_left_out(self):
+        self.write("machine.ini", self.main.replace("machine.inc", "gone.inc"))
+        self.assertEqual(integrate.ini_joints(self.ini), [])
+
+    def test_only_the_main_files_includes_count(self):
+        # LinuxCNC copies an included file as it is
+        self.write("other.inc", "[KINS]\nJOINTS = 5\n")
+        self.write("machine.inc", "#INCLUDE other.inc\n" + INI)
+        self.assertEqual(len(integrate.ini_joints(self.ini)), 3)
+
+    def test_only_the_first_section_of_a_name_counts(self):
+        self.write("machine.ini", self.main + "\n[HAL]\nHALFILE = extra.hal\n")
+        self.assertNotIn(os.path.join(self.dir.name, "extra.hal"), integrate.user_hal_files(self.ini))
+
+    def test_the_halfiles_go_into_the_included_file(self):
+        texts = integrate.ini_texts(self.ini, "ethercat.yaml")
+        inc = os.path.join(self.dir.name, "machine.inc")
+        # the main file has no [HAL]: it stays as it was
+        self.assertEqual(texts[self.ini], self.main)
+        text = texts[inc]
+        hal = text[text.index("[HAL]"):text.index("[JOINT_0]")].split("\n")
+        self.assertEqual([x for x in hal if x.startswith("HALFILE") or x.startswith("POSTGUI")], [
+            "HALFILE = ethercat-load.hal", "HALFILE = machine.hal", "HALFILE = LIB:basic.hal",
+            "HALFILE = ethercat.hal", "POSTGUI_HALFILE = postgui.hal"])
+        self.assertIn("[ETHERCAT]\nCONFIG = ethercat.yaml\n\n[HAL]", text)
+        # once is enough
+        self.write("machine.inc", text)
+        self.assertEqual(integrate.ini_texts(self.ini, "ethercat.yaml")[inc], text)
+
+    def test_ethercat_section_in_the_main_file_is_used(self):
+        self.write("machine.ini", "[ETHERCAT]\nCONFIG = old.yaml\n\n" + self.main)
+        texts = integrate.ini_texts(self.ini, "ethercat.yaml")
+        self.assertIn("[ETHERCAT]\nCONFIG = ethercat.yaml\n", texts[self.ini])
+        self.assertNotIn("[ETHERCAT]", texts[os.path.join(self.dir.name, "machine.inc")])
+
+    def test_plan_and_apply_change_the_included_file(self):
+        p = integrate.plan(self.ini, cfg())
+        self.assertEqual(p.errors, [])
+        inc = os.path.join(self.dir.name, "machine.inc")
+        self.assertIn(inc, [c.path for c in p.changes])
+        self.assertNotIn(self.ini, [c.path for c in p.changes])
+        integrate.apply(p)
+        self.assertIn("HALFILE = ethercat-load.hal", self.read("machine.inc"))
+        self.assertEqual(self.read("machine.ini"), self.main)
+
+    def test_the_expanded_file_is_refused(self):
+        exp = self.ini + ".expanded"
+        self.write("machine.ini.expanded", INI)
+        self.assertEqual(integrate.expanded_source(exp), self.ini)
+        self.assertIsNone(integrate.expanded_source(self.ini))
+        p = integrate.plan(exp, cfg())
+        self.assertTrue(any("machine.ini instead" in e for e in p.errors), p.errors)
+        self.assertEqual(p.changes, [])
+
+
 class TestPlan(Folder):
     def test_proposed_from_the_hal_files(self):
         c = cfg()

@@ -301,6 +301,41 @@ class TestWindow(BusTest):
         self.assertNotIn("pin", page._entry(row))
         self.assertNotIn("1 problem", self.rows(w)[1][1])
 
+    def test_a_32_bit_pin_becomes_a_bit_field_and_back(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        row = next(r for r in range(page.pd.rowCount())
+                   if page.pd.item(r, page.PIN).flags() & gui.Qt.ItemIsEditable
+                   and page.pd.item(r, page.PIN).text()
+                   and (page._entry(r).get("bits") or 0) >= 8)
+        e = page._entry(row)
+        base, bits = e["pin"], e["bits"]
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText(page.BIT_FIELD)
+        self.assertNotIn("pin", e)
+        self.assertNotIn("hal-type", e)
+        self.assertEqual(e["split"], ["%s-%d" % (base, i) for i in range(min(bits, 32))])
+        self.assertEqual(page.pd.item(row, 5).text(), "split")
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText("u32")
+        self.assertEqual(e["pin"], base)
+        self.assertEqual(e["hal-type"], "u32")
+        self.assertNotIn("split", e)
+
+    def test_a_one_bit_entry_cannot_become_a_bit_field(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        row = next(r for r in range(page.pd.rowCount())
+                   if page.pd.item(r, page.PIN).flags() & gui.Qt.ItemIsEditable
+                   and page.pd.item(r, page.PIN).text()
+                   and (page._entry(r).get("bits") or 0) >= 8)
+        e = page._entry(row)
+        e["bits"] = 1      # the fake bus has no one-bit entry with a pin
+        before = dict(e)
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText(page.BIT_FIELD)
+        self.assertEqual(e, before)
+        self.assertEqual(page.pd.cellWidget(row, page.HALTYPE).currentText(), before.get("hal-type", ""))
+
     def test_rename_slave(self):
         w = self.window()
         w.select_slave(1)

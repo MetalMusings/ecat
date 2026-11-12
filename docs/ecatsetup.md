@@ -123,7 +123,12 @@ Choosing a slave shows:
   ([Changing modes](component.md#changing-modes));
 - **Process data**: every PDO entry with its pin name and HAL type. Clear
   a pin name to map an entry without a pin; entries the profile handles
-  are marked as such and get no pin;
+  are marked as such and get no pin. An entry of several bits, such as a
+  drive's digital inputs (`0x60FD`), can get one `bit` pin per bit:
+  choose *bit field* in the HAL type list. The pins are named
+  `<pin>-0`, `<pin>-1`...; rename them, or leave a name empty to give a
+  bit no pin, in the *Split* column. Choosing a type again gives back one
+  pin;
 - **Settings**: SDOs written at every start, in PREOP (*Add setting*,
   *Remove setting*);
 - **Notes from the proposal**.
@@ -173,19 +178,23 @@ already running and changes nothing.
 
 ![HAL and LinuxCNC](images/gui-hal.png)
 
-Writing the configuration into a LinuxCNC machine ([writing into LinuxCNC](#writing-the-configuration-into-linuxcnc)):
+Writing the configuration into a LinuxCNC machine ([writing into LinuxCNC](#writing-the-configuration-into-linuxcnc)).
+One column, top to bottom in the order of the work:
 
 - **Joints**: choose the INI file, then the drive for each joint.
   *Take over from the HAL files* reads what your HAL files already use;
 - **Inputs and outputs**: the pins the configuration gives, and a column
   where you connect each to LinuxCNC pins;
-- **HAL check**: your HAL files against the configuration;
-- **File contents**: `ethercat.yaml` as it will be written;
-- **Apply to LinuxCNC**: what will be written (`ethercat-load.hal`,
+- **HAL check** and **File contents**, side by side: your HAL files
+  against the configuration, and `ethercat.yaml` as it will be written;
+- **Apply to LinuxCNC**, last: what will be written (`ethercat-load.hal`,
   `ethercat.hal`, the INI changes, the HAL lines that will be commented
-  out with `#ecatsetup: `), *Show all changes...* and *Write*. Work on a
-  copy of the configuration first. A checkbox runs the HAL check each time
-  LinuxCNC starts.
+  out with `#ecatsetup: `), *Show all changes...* and *Write* on the left,
+  the selected file's new text on the right. Work on a copy of the
+  configuration first. A checkbox runs the HAL check each time LinuxCNC
+  starts.
+
+![HAL check, file contents and Apply to LinuxCNC](images/gui-hal-apply.png)
 
 ## Bringing up a new slave
 
@@ -507,12 +516,23 @@ In the folder of the INI file:
 | `ethercat.yaml` | The configuration (the name of the file being edited). |
 | `ethercat-load.hal` | New. Loads the component: `loadrt ecat config=[ETHERCAT]CONFIG`. |
 | `ethercat.hal` | New. Adds `ecat.read-all` first and `ecat.write-all` last to the servo thread, and connects the joints to the drives. |
-| `<machine>.ini` | `[ETHERCAT]CONFIG = ethercat.yaml`; `HALFILE = ethercat-load.hal` before the other HAL files, `HALFILE = ethercat.hal` after them. |
+| `<machine>.ini` (or the file it `#INCLUDE`s that holds `[HAL]`) | `[ETHERCAT]CONFIG = ethercat.yaml`; `HALFILE = ethercat-load.hal` before the other HAL files, `HALFILE = ethercat.hal` after them. |
 | your HAL files | Only lines that would clash are commented out (below). |
 
 Every file that existed is kept as `.bak` first. `ethercat-load.hal` and
 `ethercat.hal` are rewritten each time; change the joints in the program,
 not in these files.
+
+An INI file that `#INCLUDE`s the rest, as QtPlasmaC's do, is read the way
+LinuxCNC reads it: the included file in place of the line (only in the
+main file, relative to its folder, `~` and `$VARIABLES` expanded), and
+only the first section of each name. The HALFILE lines go into the file
+that holds the first `[HAL]` section, so often the included `.inc` file,
+and a new `[ETHERCAT]` goes just before it. Do not choose the
+`<name>.ini.expanded` file: LinuxCNC writes it from the INI file at every
+start, so it is out of date until then and loses what is written into it.
+The program offers the INI file it comes from, and refuses to write into
+it.
 
 There are two files because the component must be loaded before your
 HAL files, so that the slaves' pins exist for them, but its functions can
