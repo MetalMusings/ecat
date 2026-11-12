@@ -59,6 +59,19 @@ class TestCoe(unittest.TestCase):
 
 
 class TestPropose(unittest.TestCase):
+    def test_a_legacy_encoder_without_esi_says_what_is_missing(self):
+        from ecatsetup import sii
+        pdos = [sii.Pdo(0x1600, "rx", 2, "Outputs", False, False, [
+                    sii.PdoEntry(0x7000, 1, "Ctrl", "USINT", 8), sii.PdoEntry(0x7000, 2, "Value", "UINT", 16)]),
+                sii.Pdo(0x1A00, "tx", 3, "Inputs", False, False, [
+                    sii.PdoEntry(0x6000, 1, "Status", "USINT", 8), sii.PdoEntry(0x6000, 2, "Value", "UINT", 16),
+                    sii.PdoEntry(0x6000, 3, "Latch", "UINT", 16)])]
+        s = sii.Sii(0x2, 0x13ED3052, 0x3F90000, 0, 0x04, name="EL5101", pdos=pdos)
+        p = propose.propose({"position": 3, "dc": False}, s, coe.Dictionary(), device_type=5001)
+        self.assertEqual(p.encoders, [])
+        self.assertTrue(any("no ESI file matches it" in n and "Standard 32 Bit (MDP 511)" in n
+                            for n in p.notes), p.notes)
+
     def test_mdp_slave(self):
         s, d = easercat()
         p = propose.propose({"position": 3, "dc": False}, s, d, device_type=5001)

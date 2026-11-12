@@ -21,7 +21,8 @@ Contents:
 
 - [The window](#the-window): a tour of the five tabs;
 - [Bringing up a new slave](#bringing-up-a-new-slave): where a proposal
-  comes from, ESI files, synchronisation;
+  comes from, ESI files, [a spindle encoder](#a-spindle-encoder-el5101),
+  synchronisation;
 - [Test mode](#test-mode): I/O, SDOs, moving a drive, homing;
 - [Writing the configuration into LinuxCNC](#writing-the-configuration-into-linuxcnc);
 - [Event log and report](#event-log-and-report): what to send when asking
@@ -275,6 +276,57 @@ the CoE dictionary, and says what is missing. *Choose ESI files...*
 folder. A folder chosen in the window is remembered, in
 `~/.config/ecatsetup/settings.yaml` (or `$ECATSETUP_SETTINGS`), and read
 again at the next start; a folder that no longer exists is skipped.
+
+### A spindle encoder (EL5101)
+
+How to get a terminal with an incremental encoder input (an EL5101, or
+another that follows ETG.5001 MDP 511) to be LinuxCNC's spindle encoder,
+for threading and other spindle-synchronised moves. The encoder function
+of the component does the work; the steps are to give EtherCAT Setup what
+it needs to propose it, and to connect two pins. Status: the encoder
+function has run an EL5101 (see [encoder channels](component.md#encoder-channels));
+connecting the spindle pins from the window is built and unit-tested, and
+has not been tried at a machine yet.
+
+1. **Give it the ESI files.** *Add ESI files...* (Bus page, or the
+   slave's *Choose ESI files...*) and choose the folder with Beckhoff's
+   XML files (`Beckhoff EL5xxx.xml` for an EL5101); the folder is
+   remembered. Without them the slave has only the process data it starts
+   with, which for an EL5101 is the *legacy* layout (`0x7000:01`, `:02`,
+   `0x6000:01` to `:03`: Ctrl, Value, Status, Value, Latch). The encoder
+   function does not handle it, and the proposal says so in its notes.
+2. **Read the bus again** (*Read the bus*, or *Propose again* on the
+   slave). *Where the configuration comes from* shows ✓ for the ESI file.
+   The proposal now uses the ESI file's default assignment, *Standard 16
+   Bit (MDP 511)*, and finds the channel: the notes say *encoder enc:
+   channel 0x6010 ...*, and the counter and latch entries are marked
+   *profile* under Process data. For a 32-bit counter choose *Standard 32
+   Bit (MDP 511)* under *PDO assignment*, then *Propose again*; the count
+   is extended to 64 bits either way. The DC settings and the way the
+   terminal reaches OP come from the ESI file too: if the slave does not
+   reach OP, the test mode names what it did not accept.
+3. **Set the scale.** The encoder's `pos` is in units of the scale:
+   `setp <slave>.enc.pos-scale <counts per revolution>` in a HAL file of
+   your own (a quadrature encoder gives four counts per line: 4096 for
+   a 1024-line encoder), so that one turn of the spindle is 1.0.
+4. **Connect the two pins.** On *HAL & LinuxCNC*, *Still to connect* lists
+   `spindle.0.revs` and `spindle.0.index-enable`, simulated while the
+   configuration still has LinuxCNC's spindle simulation
+   (`spindle_sim.hal`). Choose `<slave>.enc.pos` for `spindle.0.revs`
+   (the spindle position in revolutions) and `<slave>.enc.index-enable`
+   for `spindle.0.index-enable` (a handshake pin both sides drive, so
+   it is connected with `<=>`). Writing replaces the simulated encoder on
+   those signals; the rest of the simulation (the speed command) stays
+   until you take it out.
+5. **Check it by hand.** In the *Test* page (the free-running master and
+   `halrun`, no LinuxCNC) turn the spindle by hand: `enc.pos` counts one
+   per turn in the direction you expect (if it is backwards, make
+   `pos-scale` negative), and `index-enable` clears at the index pulse,
+   where `pos` returns to 0. Only then run the machine.
+
+See [Inputs and outputs](#inputs-and-outputs) for the connection pins in
+general, and [encoder channels](component.md#encoder-channels) for every
+pin of the channel (`velocity`, `counts`, `reset`, the external latch).
 
 ### Synchronisation, in the test mode
 

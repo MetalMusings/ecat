@@ -323,6 +323,19 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         p.notes.append("encoder %s: channel 0x%04X, %d-bit counter; position, velocity, index "
                        "and latch pins from the encoder function" % (name, index, bits))
 
+    # A modular-device terminal read without its ESI file is in the layout the terminal
+    # itself starts with, often the legacy one (an EL5101: 0x6000 Status, Value, Latch):
+    # the encoder function needs the ETG.5001 layout, which the ESI file's predefined
+    # assignments ("Standard 32 Bit (MDP 511)") give
+    if (p.profile == 5001 and esi_dev is None and not p.encoders
+            and any(re.search(r"latch|counter", e.name or "", re.I) for pd in pdos for e in pd.entries)):
+        p.notes.append("this terminal has a counter or latch, but no ESI file matches it: its "
+                       "process data is the terminal's own default, which may be a legacy layout "
+                       "without an encoder channel (position, velocity, index). Add the ESI "
+                       "files (Beckhoff's XML) and read the bus again: the ESI file's predefined "
+                       "assignments, such as \"Standard 32 Bit (MDP 511)\", give the encoder "
+                       "function")
+
     # Names that occur in more than one PDO get the PDO's name as a prefix.
     counts = {}
     for pd in pdos:
