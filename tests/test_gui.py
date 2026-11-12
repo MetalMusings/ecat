@@ -516,6 +516,21 @@ class TestWindow(BusTest):
         self.assertIn("m.ini", w.hal_page.expanded_warning.text())
         self.assertIn("writes from", w.hal_page.expanded_warning.text())
 
+    def test_a_selected_pin_shows_what_it_does_and_links(self):
+        from ecatsetup import wiring
+        w = self.window()
+        page = w.hal_page
+        page.wiring_rows = [wiring.Row("plasmac.breakaway", "bool", "in", "open"),
+                            wiring.Row("mycomp.0.in", "bool", "in", "open")]
+        page.wiring.setRowCount(2)
+        page.wiring.selectRow(0)
+        text = page.wiring_info.text()
+        self.assertIn("breakaway", text)
+        self.assertIn("https://linuxcnc.org/docs/html/plasma/qtplasmac.html", text)
+        self.assertIn("The whole QtPlasmaC page", text)
+        page.wiring.selectRow(1)
+        self.assertIn("no documentation known", page.wiring_info.text())
+
     def test_mode_switching(self):
         w = self.window()
         s = w.session.slave(0)

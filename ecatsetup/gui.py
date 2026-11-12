@@ -19,6 +19,7 @@ shows it. Reading the bus runs in a thread, so the window stays responsive.
 """
 
 import copy
+import html
 import os
 import re
 import sys
@@ -36,7 +37,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
 from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, homing, integrate, masterstart,
-               netif, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
+               netif, pindocs, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -3291,6 +3292,12 @@ class HalPage(QWidget):
         self.wiring.setWordWrap(True)
         self.wiring.setTextElideMode(Qt.ElideNone)
         self.wiring_card.add(self.wiring)
+        self.wiring_info = label("", "hint", wrap=True)
+        self.wiring_info.setTextFormat(Qt.RichText)
+        self.wiring_info.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self.wiring_info.setOpenExternalLinks(True)
+        self.wiring_card.add(self.wiring_info)
+        self.wiring.itemSelectionChanged.connect(self.show_pin_info)
         self.wiring_rows = []
         lay.addWidget(self.wiring_card)
 
@@ -3544,7 +3551,9 @@ class HalPage(QWidget):
             colour = (QColor("#2e7d32") if r.status == "connected" else
                       QColor("#b26a00") if r.status == "simulated" else QColor("#c62828"))
             arrow = "\u2192 LinuxCNC" if r.way == "in" else "LinuxCNC \u2192"
-            t.setItem(i, 0, item(r.pin, font=mono(), tip="%s (%s)" % (r.pin, arrow)))
+            doc = pindocs.info(r.pin)
+            t.setItem(i, 0, item(r.pin, font=mono(), tip="%s (%s)%s" % (
+                r.pin, arrow, "\n" + doc.text if doc else "")))
             t.setItem(i, 1, item(r.htype))
             now = r.now if r.status != "connected" else ("replaces " + r.now if r.now else "")
             where = r.where + (": a .tcl file, change it by hand" if r.tcl and r.status != "open"
@@ -3574,6 +3583,27 @@ class HalPage(QWidget):
             t.setCellWidget(i, 4, box)
         t.resizeRowsToContents()
         fit_table(t, minimum=1)
+        self.show_pin_info()
+
+    def show_pin_info(self):
+        """What the selected LinuxCNC pin does, with links to LinuxCNC's documentation
+        (the text is in pindocs.py; nothing is fetched)."""
+        rows = self.wiring.selectionModel().selectedRows() if self.wiring_rows else []
+        if not rows or rows[0].row() >= len(self.wiring_rows):
+            self.wiring_info.setText("Select a pin to see what it does.")
+            return
+        pin = self.wiring_rows[rows[0].row()].pin
+        doc = pindocs.info(pin)
+        if doc is None:
+            self.wiring_info.setText("<b>%s</b>: no documentation known (a pin of your own "
+                                     "component, or one LinuxCNC does not document)."
+                                     % html.escape(pin))
+            return
+        self.wiring_info.setText(
+            '<b>%s</b>: %s<br><a href="%s">Documentation of the pin</a> &nbsp;|&nbsp; '
+            '<a href="%s">The whole %s page</a>' % (
+                html.escape(pin), html.escape(doc.text), doc.pin_url, doc.page_url,
+                html.escape(doc.title)))
 
     def wiring_edited(self, row, slave_pin):
         cfg = self.win.session.cfg

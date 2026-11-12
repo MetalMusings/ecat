@@ -205,7 +205,13 @@ One column, top to bottom in the order of the work:
   (E-stop, home switches, probe, spindle, plasmac's torch and sensors ...)
   that the simulation still drives or reads, or that nothing does, with
   a choice of the slaves' pins of the right type for each (see
-  [what is still simulated](#what-is-still-simulated));
+  [what is still simulated](#what-is-still-simulated)). Select a row to
+  read what the LinuxCNC pin does (for example `plasmac.breakaway`), with
+  links to the pin's section and to the whole page (QtPlasmaC, motion,
+  halui ...) in LinuxCNC's documentation on linuxcnc.org. The text comes
+  from LinuxCNC's documentation and is kept in `ecatsetup/pindocs.py`;
+  nothing is fetched, the links open in your browser. Pins of your own
+  components have no text;
 - **Inputs and outputs**: the pins the configuration gives, and a column
   where you connect each to LinuxCNC pins;
 - **HAL check** and **File contents**, side by side: your HAL files
