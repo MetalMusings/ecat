@@ -34,10 +34,10 @@ ADD_TYPES(types)
 void lcec_generic_read(lcec_slave_t *slave, long period);
 void lcec_generic_write(lcec_slave_t *slave, long period);
 
-hal_s32_t lcec_generic_read_s32(uint8_t *pd, lcec_generic_pin_t *hal_data);
-hal_u32_t lcec_generic_read_u32(uint8_t *pd, lcec_generic_pin_t *hal_data);
-void lcec_generic_write_s32(uint8_t *pd, lcec_generic_pin_t *hal_data, hal_s32_t sval);
-void lcec_generic_write_u32(uint8_t *pd, lcec_generic_pin_t *hal_data, hal_u32_t uval);
+int64_t lcec_generic_read_sint(uint8_t *pd, lcec_generic_pin_t *hal_data);
+uint64_t lcec_generic_read_uint(uint8_t *pd, lcec_generic_pin_t *hal_data);
+void lcec_generic_write_sint(uint8_t *pd, lcec_generic_pin_t *hal_data, int64_t sval);
+void lcec_generic_write_uint(uint8_t *pd, lcec_generic_pin_t *hal_data, uint64_t uval);
 
 /// @brief Initialize a generic device.
 ///
@@ -62,7 +62,7 @@ int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
     }
 
     switch (hal_data->type) {
-      case HAL_BIT:
+      case HAL_BOOL:
         if (hal_data->bitLength == 1) {
           // single bit pin
           err = lcec_pin_newf(
@@ -81,10 +81,10 @@ int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
         }
         break;
 
-      case HAL_S32:
-      case HAL_U32:
-        // check data size
-        if (hal_data->bitLength > 32) {
+      case HAL_SINT:
+      case HAL_UINT:
+        // check data size: up to 32 bits anywhere, or 64 bits on a byte (LINT, ULINT)
+        if (hal_data->bitLength > 32 && hal_data->bitLength != 64) {
           rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "unable to export pin %s.%s: invalid process data bitlen!\n", slave->name, hal_data->name);
           continue;
         }
@@ -97,7 +97,7 @@ int lcec_generic_init(int comp_id, lcec_slave_t *slave) {
         }
         break;
 
-      case HAL_FLOAT:
+      case HAL_REAL:
         // check data size
         if ((hal_data->bitLength > 32) && (hal_data->subType != lcecPdoEntTypeFloatDoubleIeee)) {
           rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "unable to export pin %s.%s: invalid process data bitlen!\n", slave->name, hal_data->name);
@@ -126,7 +126,7 @@ void lcec_generic_read(lcec_slave_t *slave, long period) {
   lcec_generic_pin_t *hal_data = (lcec_generic_pin_t *)slave->hal_data;
   uint8_t *pd = master->process_data;
   int i, j, offset;
-  hal_float_t fval;
+  rtapi_real fval;
 
   // read data
   for (i = 0; i < slave->generic_pdo_entry_count; i++, hal_data++) {
@@ -136,38 +136,47 @@ void lcec_generic_read(lcec_slave_t *slave, long period) {
     }
 
     switch (hal_data->type) {
-      case HAL_BIT:
+      case HAL_BOOL:
         offset = ((hal_data->pdo_os << 3) | (hal_data->pdo_bp & 0x07)) + hal_data->bitOffset;
         for (j = 0; j < LCEC_CONF_GENERIC_MAX_SUBPINS && hal_data->pin[j] != NULL; j++, offset++) {
-          *((hal_bit_t *)hal_data->pin[j]) = lcec_generic_read_bit(pd, offset, hal_data->invert);
+          hal_set_bool((hal_bool_t)hal_data->pin[j], lcec_generic_read_bit(pd, offset, hal_data->invert));
         }
         break;
 
-      case HAL_S32:
-        *((hal_s32_t *)hal_data->pin[0]) = lcec_generic_read_s32(pd, hal_data);
+      case HAL_SINT:
+        if (hal_data->extend) {
+          // a counter that wraps at its width: count the wraps. The first value
+          // is taken as signed (a counter that counts down past 0 is negative).
+          int64_t low = lcec_generic_read_sint(pd, hal_data);
+          hal_data->extend_value = hal_data->extend_have ? hal_extend_counter(hal_data->extend_value, low, hal_data->bitLength) : low;
+          hal_data->extend_have = 1;
+          hal_set_sint((hal_sint_t)hal_data->pin[0], hal_data->extend_value);
+          break;
+        }
+        hal_set_sint((hal_sint_t)hal_data->pin[0], hal_data->bitLength == 64 ? EC_READ_S64(&pd[hal_data->pdo_os]) : lcec_generic_read_sint(pd, hal_data));
         break;
 
-      case HAL_U32:
-        *((hal_u32_t *)hal_data->pin[0]) = lcec_generic_read_u32(pd, hal_data);
+      case HAL_UINT:
+        hal_set_uint((hal_uint_t)hal_data->pin[0], hal_data->bitLength == 64 ? EC_READ_U64(&pd[hal_data->pdo_os]) : lcec_generic_read_uint(pd, hal_data));
         break;
 
-      case HAL_FLOAT:
+      case HAL_REAL:
         if (hal_data->bitLength == 64) {
           // LINT, ULINT: byte aligned, checked when the file is read
           fval = lcec_generic_read_int64(&pd[hal_data->pdo_os], hal_data->subType == lcecPdoEntTypeFloatUnsigned);
         } else if (hal_data->subType == lcecPdoEntTypeFloatUnsigned) {
-          fval = lcec_generic_read_u32(pd, hal_data);
+          fval = lcec_generic_read_uint(pd, hal_data);
         } else if (hal_data->subType == lcecPdoEntTypeFloatIeee) {
           fval = EC_READ_REAL(&pd[hal_data->pdo_os]);
         } else if (hal_data->subType == lcecPdoEntTypeFloatDoubleIeee) {
           fval = EC_READ_LREAL(&pd[hal_data->pdo_os]);
         } else {
-          fval = lcec_generic_read_s32(pd, hal_data);
+          fval = lcec_generic_read_sint(pd, hal_data);
         }
 
         fval *= hal_data->floatScale;
         fval += hal_data->floatOffset;
-        *((hal_float_t *)hal_data->pin[0]) = fval;
+        hal_set_real((hal_real_t)hal_data->pin[0], fval);
         break;
 
       default:
@@ -182,7 +191,7 @@ void lcec_generic_write(lcec_slave_t *slave, long period) {
   lcec_generic_pin_t *hal_data = (lcec_generic_pin_t *)slave->hal_data;
   uint8_t *pd = master->process_data;
   int i, j, offset;
-  hal_float_t fval;
+  rtapi_real fval;
 
   // write data
   for (i = 0; i < slave->generic_pdo_entry_count; i++, hal_data++) {
@@ -192,36 +201,44 @@ void lcec_generic_write(lcec_slave_t *slave, long period) {
     }
 
     switch (hal_data->type) {
-      case HAL_BIT:
+      case HAL_BOOL:
         offset = ((hal_data->pdo_os << 3) | (hal_data->pdo_bp & 0x07)) + hal_data->bitOffset;
         for (j = 0; j < LCEC_CONF_GENERIC_MAX_SUBPINS && hal_data->pin[j] != NULL; j++, offset++) {
-          lcec_generic_write_bit(pd, offset, hal_data->invert, *((hal_bit_t *)hal_data->pin[j]));
+          lcec_generic_write_bit(pd, offset, hal_data->invert, hal_get_bool((hal_bool_t)hal_data->pin[j]));
         }
         break;
 
-      case HAL_S32:
-        lcec_generic_write_s32(pd, hal_data, *((hal_s32_t *)hal_data->pin[0]));
+      case HAL_SINT:
+        if (hal_data->bitLength == 64) {
+          EC_WRITE_S64(&pd[hal_data->pdo_os], hal_get_sint((hal_sint_t)hal_data->pin[0]));
+        } else {
+          lcec_generic_write_sint(pd, hal_data, hal_get_sint((hal_sint_t)hal_data->pin[0]));
+        }
         break;
 
-      case HAL_U32:
-        lcec_generic_write_u32(pd, hal_data, *((hal_u32_t *)hal_data->pin[0]));
+      case HAL_UINT:
+        if (hal_data->bitLength == 64) {
+          EC_WRITE_U64(&pd[hal_data->pdo_os], hal_get_uint((hal_uint_t)hal_data->pin[0]));
+        } else {
+          lcec_generic_write_uint(pd, hal_data, hal_get_uint((hal_uint_t)hal_data->pin[0]));
+        }
         break;
 
-      case HAL_FLOAT:
-        fval = *((hal_float_t *)hal_data->pin[0]);
+      case HAL_REAL:
+        fval = hal_get_real((hal_real_t)hal_data->pin[0]);
         fval += hal_data->floatOffset;
         fval *= hal_data->floatScale;
 
         if (hal_data->bitLength == 64) {
           lcec_generic_write_int64(&pd[hal_data->pdo_os], hal_data->subType == lcecPdoEntTypeFloatUnsigned, fval);
         } else if (hal_data->subType == lcecPdoEntTypeFloatUnsigned) {
-          lcec_generic_write_u32(pd, hal_data, (hal_u32_t)fval);
+          lcec_generic_write_uint(pd, hal_data, (uint64_t)fval);
         } else if (hal_data->subType == lcecPdoEntTypeFloatIeee) {
           EC_WRITE_REAL(&pd[hal_data->pdo_os], fval);
         } else if (hal_data->subType == lcecPdoEntTypeFloatDoubleIeee) {
           EC_WRITE_LREAL(&pd[hal_data->pdo_os], fval);
         } else {
-          lcec_generic_write_s32(pd, hal_data, (hal_s32_t)fval);
+          lcec_generic_write_sint(pd, hal_data, (int64_t)fval);
         }
         break;
 
@@ -231,10 +248,10 @@ void lcec_generic_write(lcec_slave_t *slave, long period) {
   }
 }
 
-/// @brief Read a possibly-misaligned signed integer.
-hal_s32_t lcec_generic_read_s32(uint8_t *pd, lcec_generic_pin_t *hal_data) {
+/// @brief Read a possibly-misaligned signed integer (up to 32 bits).
+int64_t lcec_generic_read_sint(uint8_t *pd, lcec_generic_pin_t *hal_data) {
   int i, offset;
-  hal_s32_t sval;
+  int64_t sval;
 
   if (hal_data->pdo_bp == 0 && hal_data->bitOffset == 0) {
     switch (hal_data->bitLength) {
@@ -250,25 +267,22 @@ hal_s32_t lcec_generic_read_s32(uint8_t *pd, lcec_generic_pin_t *hal_data) {
   offset = ((hal_data->pdo_os << 3) | (hal_data->pdo_bp & 0x07)) + hal_data->bitOffset;
   for (sval = 0, i = 0; i < hal_data->bitLength; i++, offset++) {
     if (EC_READ_BIT(&pd[offset >> 3], offset & 0x07)) {
-      sval |= (1 << i);
+      sval |= (1LL << i);
     }
   }
 
-  // sign-extend shorter length integers
-  switch (hal_data->bitLength) {
-    case 8:
-      return (int8_t)sval;
-    case 16:
-      return (int16_t)sval;
+  // sign-extend shorter integers (the pin has 64 bits)
+  if (hal_data->bitLength > 0 && hal_data->bitLength < 64 && (sval & (1LL << (hal_data->bitLength - 1)))) {
+    sval |= ~0LL << hal_data->bitLength;
   }
 
   return sval;
 }
 
-/// @brief Read a possibly-misaligned unsigned integer.
-hal_u32_t lcec_generic_read_u32(uint8_t *pd, lcec_generic_pin_t *hal_data) {
+/// @brief Read a possibly-misaligned unsigned integer (up to 32 bits).
+uint64_t lcec_generic_read_uint(uint8_t *pd, lcec_generic_pin_t *hal_data) {
   int i, offset;
-  hal_u32_t uval;
+  uint64_t uval;
 
   if (hal_data->pdo_bp == 0 && hal_data->bitOffset == 0) {
     switch (hal_data->bitLength) {
@@ -284,17 +298,17 @@ hal_u32_t lcec_generic_read_u32(uint8_t *pd, lcec_generic_pin_t *hal_data) {
   offset = ((hal_data->pdo_os << 3) | (hal_data->pdo_bp & 0x07)) + hal_data->bitOffset;
   for (uval = 0, i = 0; i < hal_data->bitLength; i++, offset++) {
     if (EC_READ_BIT(&pd[offset >> 3], offset & 0x07)) {
-      uval |= (1 << i);
+      uval |= (1ULL << i);
     }
   }
   return uval;
 }
 
 /// @brief Write a possibly-misaligned signed integer.
-void lcec_generic_write_s32(uint8_t *pd, lcec_generic_pin_t *hal_data, hal_s32_t sval) {
+void lcec_generic_write_sint(uint8_t *pd, lcec_generic_pin_t *hal_data, int64_t sval) {
   int i, offset;
 
-  hal_s32_t lim = ((1LL << hal_data->bitLength) >> 1) - 1LL;
+  int64_t lim = ((1LL << hal_data->bitLength) >> 1) - 1LL;  // the entry's range; the pin has 64 bits
   if (sval > lim) sval = lim;
   lim = ~lim;
   if (sval < lim) sval = lim;
@@ -321,11 +335,16 @@ void lcec_generic_write_s32(uint8_t *pd, lcec_generic_pin_t *hal_data, hal_s32_t
 }
 
 /// @brief Write a possibly-misaligned unsigned integer.
-void lcec_generic_write_u32(uint8_t *pd, lcec_generic_pin_t *hal_data, hal_u32_t uval) {
+void lcec_generic_write_uint(uint8_t *pd, lcec_generic_pin_t *hal_data, uint64_t uval) {
   int i, offset;
 
-  hal_u32_t lim = (1LL << hal_data->bitLength) - 1LL;
-  if (uval > lim) uval = lim;
+  uint64_t lim = (1LL << hal_data->bitLength) - 1LL;
+  // the pin has 64 bits: a number is held at the top of the entry, a bit pattern cut to its width
+  if (hal_data->raw) {
+    uval &= lim;
+  } else if (uval > lim) {
+    uval = lim;
+  }
 
   if (hal_data->pdo_bp == 0 && hal_data->bitOffset == 0) {
     switch (hal_data->bitLength) {

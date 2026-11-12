@@ -162,7 +162,7 @@ static void test_io_slaves(void) {
   CHECK_EQ(ENTRY(1)->index, 0x6010);
   CHECK_EQ(ENTRY(1)->subindex, 1);
   CHECK_EQ(ENTRY(1)->bitLength, 1);
-  CHECK_EQ(ENTRY(1)->halType, HAL_BIT);
+  CHECK_EQ(ENTRY(1)->halType, HAL_BOOL);
   CHECK(!strcmp(ENTRY(1)->halPin, "din-1"));
 
   // two PDOs on one sync manager, and a gap without a pin
@@ -229,15 +229,69 @@ static void test_sync_manager_for_outputs_and_inputs(void) {
   "      entries:\n"            \
   "      - " entry "\n"
 
+static void test_hal_type_spellings(void) {
+  // 2.10 names, and the 2.9 spellings of the same types
+#define SPELLING(type, bits, hal, want) \
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: " #bits ", type: " type ", pin: p, hal-type: " hal "}")), 0); \
+  CHECK_EQ(ENTRY(0)->halType, want)
+  SPELLING("BOOL", 1, "bool", HAL_BOOL);
+  SPELLING("BOOL", 1, "bit", HAL_BOOL);
+  SPELLING("DINT", 32, "sint", HAL_SINT);
+  SPELLING("DINT", 32, "s32", HAL_SINT);
+  SPELLING("UDINT", 32, "uint", HAL_UINT);
+  SPELLING("UDINT", 32, "u32", HAL_UINT);
+  SPELLING("DINT", 32, "real", HAL_REAL);
+  SPELLING("DINT", 32, "float", HAL_REAL);
+#undef SPELLING
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: DINT, pin: p, hal-type: s64}"), "is not supported (bool, sint, uint, real)");
+}
+
+static void test_extend(void) {
+  // an input counter that keeps counting past its wrap, in 64 bits
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: sint, extend: true}")), 0);
+  CHECK_EQ(ENTRY(0)->extend, 1);
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p, hal-type: s32, extend: true}")), 0);
+  CHECK_EQ(ENTRY(0)->extend, 1);
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: sint}")), 0);
+  CHECK_EQ(ENTRY(0)->extend, 0);
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: sint, extend: false}")), 0);
+  CHECK_EQ(ENTRY(0)->extend, 0);
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: uint, extend: true}"),
+      "extend is for an input entry of 8 to 32 bits with hal-type sint");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: DINT, pin: p, hal-type: real, extend: true}"),
+      "extend is for an input entry");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: sint, extend: true}"),
+      "extend is for an input entry");
+  CHECK_FAILS(HEAD
+      "- position: 0\n"
+      "  name: s\n"
+      "  profile: generic\n"
+      "  process-data:\n"
+      "    outputs:\n"
+      "    - {pdo: '0x1600', sm: 2, entries: [{object: '0x7000:01', bits: 32, type: DINT, pin: a, hal-type: sint, extend: true}]}\n",
+      "extend is for an input entry");
+}
+
+static void test_raw(void) {
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: uint, raw: true}")), 0);
+  CHECK_EQ(ENTRY(0)->raw, 1);
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: uint}")), 0);
+  CHECK_EQ(ENTRY(0)->raw, 0);
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: DINT, pin: p, hal-type: sint, raw: true}"),
+      "raw is for an entry of up to 32 bits with hal-type uint");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: uint, raw: true}"),
+      "raw is for an entry of up to 32 bits");
+}
+
 static void test_hal_types(void) {
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: DINT, pin: p, hal-type: s32}")), 0);
-  CHECK_EQ(ENTRY(0)->halType, HAL_S32);
+  CHECK_EQ(ENTRY(0)->halType, HAL_SINT);
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeSimple);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p, hal-type: u32}")), 0);
-  CHECK_EQ(ENTRY(0)->halType, HAL_U32);
+  CHECK_EQ(ENTRY(0)->halType, HAL_UINT);
   // float from an integer: scaled
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: INT, pin: p, hal-type: float, scale: 0.5, offset: -3}")), 0);
-  CHECK_EQ(ENTRY(0)->halType, HAL_FLOAT);
+  CHECK_EQ(ENTRY(0)->halType, HAL_REAL);
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatSigned);
   CHECK_NEAR(ENTRY(0)->floatScale, 0.5, 0);
   CHECK_NEAR(ENTRY(0)->floatOffset, -3, 0);
@@ -249,7 +303,11 @@ static void test_hal_types(void) {
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatIeee);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LREAL, pin: p, hal-type: float}")), 0);
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatDoubleIeee);
-  // 64-bit integers: only as float
+  // 64-bit integers: as 64-bit integer pins, or as float (up to 2^53)
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: sint}")), 0);
+  CHECK_EQ(ENTRY(0)->halType, HAL_SINT);
+  CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: uint}")), 0);
+  CHECK_EQ(ENTRY(0)->halType, HAL_UINT);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: float}")), 0);
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatSigned);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: float}")), 0);
@@ -259,8 +317,12 @@ static void test_hal_types(void) {
 static void test_entry_errors(void) {
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p, hal-type: s64}"), "hal-type \"s64\" is not supported");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p}"), "hal-type \"\" is not supported");
-  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: s32}"), "a LINT entry needs hal-type float");
-  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: u32}"), "a ULINT entry needs hal-type float");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: s32}"), "a LINT entry takes hal-type sint (or real)");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: u32}"), "a ULINT entry takes hal-type uint (or real)");
+  // an integer pin of the other sign is no better
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: uint}"), "a LINT entry takes hal-type sint");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: sint}"), "a ULINT entry takes hal-type uint");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p}"), "a LINT entry takes hal-type sint");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: WORD, pin: p, hal-type: u32}"), "unknown type \"WORD\"");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 0, type: UINT, pin: p, hal-type: u32}"), "bits must be 1 to 64");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 65, type: UINT, pin: p, hal-type: u32}"), "bits must be 1 to 64");
@@ -282,7 +344,7 @@ static void test_split(void) {
   CHECK(!strcmp(COMPLEX(0)->halPin, "a"));
   CHECK_EQ(COMPLEX(1)->bitOffset, 2);
   CHECK(!strcmp(COMPLEX(1)->halPin, "c"));
-  CHECK_EQ(COMPLEX(1)->halType, HAL_BIT);
+  CHECK_EQ(COMPLEX(1)->halType, HAL_BOOL);
   CHECK_EQ(SLAVE(0)->pdoEntryCount, 1);
   CHECK_EQ(SLAVE(0)->pdoMappingCount, 2);
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:01', bits: 2, type: USINT, split: [a, b, c]}"), "split has more pins than bits");
@@ -696,6 +758,6 @@ static void test_too_many_encoders(void) {
 }
 
 RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
-    test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_settings,
+    test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders)

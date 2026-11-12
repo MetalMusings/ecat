@@ -21,11 +21,11 @@
 
 #include "lcec.h"
 
-static int lcec_pin_newfv(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_addr, const char *fmt, va_list ap);
+static int lcec_pin_newfv(hal_type_t type, hal_pdir_t dir, void **data_ptr_addr, const char *fmt, va_list ap);
 static int lcec_pin_newfv_list(void *base, const lcec_pindesc_t *list, va_list ap);
 extern int lcec_comp_id;
 
-static int lcec_pin_newfv(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_addr, const char *fmt, va_list ap) {
+static int lcec_pin_newfv(hal_type_t type, hal_pdir_t dir, void **data_ptr_addr, const char *fmt, va_list ap) {
   char name[HAL_NAME_LEN + 1];
   int sz;
   int err;
@@ -36,39 +36,39 @@ static int lcec_pin_newfv(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_ad
     return -ENOMEM;
   }
 
-  err = hal_pin_new(name, type, dir, data_ptr_addr, lcec_comp_id);
+  /* 2.10: one call per type; the pin starts at 0 (the default). */
+  switch (type) {
+    case HAL_BOOL:
+      err = hal_pin_new_bool(lcec_comp_id, dir, (hal_bool_t *)data_ptr_addr, 0, "%s", name);
+      break;
+    case HAL_REAL:
+      err = hal_pin_new_real(lcec_comp_id, dir, (hal_real_t *)data_ptr_addr, 0.0, "%s", name);
+      break;
+    case HAL_SINT:
+      err = hal_pin_new_sint(lcec_comp_id, dir, (hal_sint_t *)data_ptr_addr, 0, "%s", name);
+      break;
+    case HAL_UINT:
+      err = hal_pin_new_uint(lcec_comp_id, dir, (hal_uint_t *)data_ptr_addr, 0, "%s", name);
+      break;
+    default:
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "pin %s: unsupported type %d\n", name, (int)type);
+      return -EINVAL;
+  }
   if (err) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "exporting pin %s failed\n", name);
     return err;
-  }
-
-  switch (type) {
-    case HAL_BIT:
-      **((hal_bit_t **)data_ptr_addr) = 0;
-      break;
-    case HAL_FLOAT:
-      **((hal_float_t **)data_ptr_addr) = 0.0;
-      break;
-    case HAL_S32:
-      **((hal_s32_t **)data_ptr_addr) = 0;
-      break;
-    case HAL_U32:
-      **((hal_u32_t **)data_ptr_addr) = 0;
-      break;
-    default:
-      break;
   }
 
   return 0;
 }
 
 /// @brief Define a LinuxCNC HAL bin based on a printf pattern.
-/// @param[in] type Type of pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
+/// @param[in] type Type of pin (`HAL_BOOL`, `HAL_REAL`, `HAL_SINT`, or `HAL_UINT`).
 /// @param[in] dir Direction (`HAL_IN`, `HAL_OUT`, or `HAL_IO`)
 /// @param[out] data_ptr_addr A pointer to the data behind the pin.
 /// @param[in] fmt A string with printf() formatting for building the pin name.
 /// @return 0 if successful, negative for error.
-int lcec_pin_newf(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_addr, const char *fmt, ...) {
+int lcec_pin_newf(hal_type_t type, hal_pdir_t dir, void **data_ptr_addr, const char *fmt, ...) {
   va_list ap;
   int err;
 

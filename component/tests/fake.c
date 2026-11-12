@@ -203,33 +203,30 @@ int lcec_pin_newf_list(void *base, const lcec_pindesc_t *list, ...) {
   return 0;
 }
 
+int lcec_pin_newf(hal_type_t type, hal_pdir_t dir, void **data_ptr_addr, const char *fmt, ...) {
+  void *storage = zalloc(sizeof(double));
+  va_list ap;
+  (void)type, (void)dir;
+  *data_ptr_addr = storage;
+  va_start(ap, fmt);
+  add_name(storage, fmt, ap);
+  va_end(ap);
+  return 0;
+}
+
 int lcec_param_newf_list(void *base, const lcec_paramdesc_t *list, ...) {
   const lcec_paramdesc_t *p;
   va_list ap;
 
   for (p = list; p->type != HAL_TYPE_UNSPECIFIED; p++) {
-    void *data = (char *)base + p->offset;
-    // as hal_param_new: zero
-    switch (p->type) {
-      case HAL_BIT: *(hal_bit_t *)data = 0; break;
-      case HAL_FLOAT: *(hal_float_t *)data = 0; break;
-      default: *(hal_u32_t *)data = 0;
-    }
+    // a param is a reference too in 2.10, to storage that starts at zero
+    void *storage = zalloc(sizeof(double));
+    *(void **)((char *)base + p->offset) = storage;
     va_start(ap, list);
-    add_name(data, p->fmt, ap);
+    add_name(storage, p->fmt, ap);
     va_end(ap);
   }
   return 0;
-}
-
-int lcec_generic_init(int comp_id, struct lcec_slave *slave) {
-  (void)comp_id, (void)slave;
-  return 0;
-}
-
-void lcec_generic_read(struct lcec_slave *slave, long period) {
-  (void)slave, (void)period;
-  fake_generic_reads++;
 }
 
 fake_event_t fake_events[FAKE_EVENTS];
@@ -243,11 +240,6 @@ void lcec_event(lcec_slave_t *slave, int type, uint32_t a, uint32_t b) {
     fake_events[fake_n_events].b = b;
   }
   fake_n_events++;
-}
-
-void lcec_generic_write(struct lcec_slave *slave, long period) {
-  (void)slave, (void)period;
-  fake_generic_writes++;
 }
 
 // ---- runner ----------------------------------------------------------

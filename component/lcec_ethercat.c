@@ -22,7 +22,7 @@
 
 #include "lcec.h"
 
-static int lcec_param_newfv(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, va_list ap);
+static int lcec_param_newfv(hal_type_t type, hal_pdir_t dir, void *data_addr, const char *fmt, va_list ap);
 static int lcec_param_newfv_list(void *base, const lcec_paramdesc_t *list, va_list ap);
 int lcec_comp_id = -1;
 
@@ -505,7 +505,7 @@ int lcec_read_idn(lcec_slave_t *slave, uint8_t drive_no, uint16_t idn, uint8_t *
   return 0;
 }
 
-static int lcec_param_newfv(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, va_list ap) {
+static int lcec_param_newfv(hal_type_t type, hal_pdir_t dir, void *data_addr, const char *fmt, va_list ap) {
   char name[HAL_NAME_LEN + 1];
   int sz;
   int err;
@@ -516,34 +516,33 @@ static int lcec_param_newfv(hal_type_t type, hal_param_dir_t dir, void *data_add
     return -ENOMEM;
   }
 
-  err = hal_param_new(name, type, dir, data_addr, lcec_comp_id);
+  switch (type) {
+    case HAL_BOOL:
+      err = hal_param_new_bool(lcec_comp_id, dir, (hal_bool_t *)data_addr, 0, "%s", name);
+      break;
+    case HAL_REAL:
+      err = hal_param_new_real(lcec_comp_id, dir, (hal_real_t *)data_addr, 0.0, "%s", name);
+      break;
+    case HAL_SINT:
+      err = hal_param_new_sint(lcec_comp_id, dir, (hal_sint_t *)data_addr, 0, "%s", name);
+      break;
+    case HAL_UINT:
+      err = hal_param_new_uint(lcec_comp_id, dir, (hal_uint_t *)data_addr, 0, "%s", name);
+      break;
+    default:
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "param %s: unsupported type %d\n", name, (int)type);
+      return -EINVAL;
+  }
   if (err) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "exporting param %s failed\n", name);
     return err;
-  }
-
-  switch (type) {
-    case HAL_BIT:
-      *((hal_bit_t *)data_addr) = 0;
-      break;
-    case HAL_FLOAT:
-      *((hal_float_t *)data_addr) = 0.0;
-      break;
-    case HAL_S32:
-      *((hal_s32_t *)data_addr) = 0;
-      break;
-    case HAL_U32:
-      *((hal_u32_t *)data_addr) = 0;
-      break;
-    default:
-      break;
   }
 
   return 0;
 }
 
 /// @brief Create a new LinuxCNC `param` dynamically.
-int lcec_param_newf(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, ...) {
+int lcec_param_newf(hal_type_t type, hal_pdir_t dir, void *data_addr, const char *fmt, ...) {
   va_list ap;
   int err;
 

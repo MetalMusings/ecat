@@ -63,32 +63,32 @@ static void lcec_start_guard(lcec_master_t *master);
 
 /// @brief Global HAL Pins
 static const lcec_pindesc_t master_global_pins[] = {
-    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, slaves_responding), "%s.slaves-responding"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, state_init), "%s.state-init"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, state_preop), "%s.state-preop"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, state_safeop), "%s.state-safeop"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, state_op), "%s.state-op"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, link_up), "%s.link-up"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, all_op), "%s.all-op"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, dc_sync_failed), "%s.dc-sync-failed"},
-    {HAL_BIT, HAL_IN, offsetof(lcec_master_data_t, take_down), "%s.take-down"},
+    {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, slaves_responding), "%s.slaves-responding"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, state_init), "%s.state-init"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, state_preop), "%s.state-preop"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, state_safeop), "%s.state-safeop"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, state_op), "%s.state-op"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, link_up), "%s.link-up"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, all_op), "%s.all-op"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, dc_sync_failed), "%s.dc-sync-failed"},
+    {HAL_BOOL, HAL_IN, offsetof(lcec_master_data_t, take_down), "%s.take-down"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 /// @brief Master HAL pins
 static const lcec_pindesc_t master_pins[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
-    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, pll_err), "%s.pll-err"},
-    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, pll_out), "%s.pll-out"},
-    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, pll_reset_cnt), "%s.pll-reset-count"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, dc_phased), "%s.dc-phased"},
-    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, send_offset), "%s.send-offset"},
-    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, shift_time), "%s.shift-time"},
-    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, turnaround_cycles), "%s.turnaround-cycles"},
+    {HAL_SINT, HAL_OUT, offsetof(lcec_master_data_t, pll_err), "%s.pll-err"},
+    {HAL_SINT, HAL_OUT, offsetof(lcec_master_data_t, pll_out), "%s.pll-out"},
+    {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, pll_reset_cnt), "%s.pll-reset-count"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_master_data_t, dc_phased), "%s.dc-phased"},
+    {HAL_SINT, HAL_OUT, offsetof(lcec_master_data_t, send_offset), "%s.send-offset"},
+    {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, shift_time), "%s.shift-time"},
+    {HAL_SINT, HAL_OUT, offsetof(lcec_master_data_t, turnaround_cycles), "%s.turnaround-cycles"},
 #endif
 #if defined(EC_USPACE_MASTER) && defined(EC_HAVE_REQUEST_AL_STATE)
-    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, guard_state), "%s.guard-state"},
-    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, guard_cycles), "%s.guard-cycles"},
+    {HAL_SINT, HAL_OUT, offsetof(lcec_master_data_t, guard_state), "%s.guard-state"},
+    {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, guard_cycles), "%s.guard-cycles"},
 #endif
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
@@ -96,25 +96,25 @@ static const lcec_pindesc_t master_pins[] = {
 /// @brief Master params
 static const lcec_paramdesc_t master_params[] = {
 #ifdef RTAPI_TASK_PLL_SUPPORT
-    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
-    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_max_err), "%s.pll-max-err"},
-    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, dc_phase_max_err), "%s.dc-phase-max-err"},
-    {HAL_S32, HAL_RW, offsetof(lcec_master_data_t, send_offset_max), "%s.send-offset-max"},
-    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, auto_shift_margin), "%s.auto-shift-margin"},
-    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, auto_shift_input_margin), "%s.auto-shift-input-margin"},
+    {HAL_UINT, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
+    {HAL_UINT, HAL_RW, offsetof(lcec_master_data_t, pll_max_err), "%s.pll-max-err"},
+    {HAL_UINT, HAL_RW, offsetof(lcec_master_data_t, dc_phase_max_err), "%s.dc-phase-max-err"},
+    {HAL_SINT, HAL_RW, offsetof(lcec_master_data_t, send_offset_max), "%s.send-offset-max"},
+    {HAL_UINT, HAL_RW, offsetof(lcec_master_data_t, auto_shift_margin), "%s.auto-shift-margin"},
+    {HAL_UINT, HAL_RW, offsetof(lcec_master_data_t, auto_shift_input_margin), "%s.auto-shift-input-margin"},
 #endif
     {HAL_TYPE_UNSPECIFIED},
 };
 
 /// @brief Basic Slave pins
 static const lcec_pindesc_t slave_pins[] = {
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, online), "%s.slave-online"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, operational), "%s.slave-oper"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_init), "%s.slave-state-init"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_preop), "%s.slave-state-preop"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_safeop), "%s.slave-state-safeop"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, state_op), "%s.slave-state-op"},
-    {HAL_BIT, HAL_OUT, offsetof(lcec_slave_state_t, dc_sync_failed), "%s.slave-dc-sync-failed"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, online), "%s.slave-online"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, operational), "%s.slave-oper"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, state_init), "%s.slave-state-init"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, state_preop), "%s.slave-state-preop"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, state_safeop), "%s.slave-state-safeop"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, state_op), "%s.slave-state-op"},
+    {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, dc_sync_failed), "%s.slave-dc-sync-failed"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -615,7 +615,7 @@ static void lcec_guard_tick(lcec_master_t *master) {
   int state;
 
   if (master->hal_data != NULL) {
-    *(master->hal_data->guard_state) = __atomic_load_n(&master->guard_state, __ATOMIC_ACQUIRE);
+    hal_set_sint(master->hal_data->guard_state, __atomic_load_n(&master->guard_state, __ATOMIC_ACQUIRE));
   }
   if (!__atomic_load_n(&master->activated, __ATOMIC_ACQUIRE) || period <= 0) {
     return;
@@ -659,7 +659,7 @@ static void lcec_guard_tick(lcec_master_t *master) {
   ecrt_master_state(master->master, &ms);
   rtapi_mutex_give(&master->mutex);
   if (master->hal_data != NULL) {
-    (*(master->hal_data->guard_cycles))++;
+    hal_set_uint(master->hal_data->guard_cycles, hal_get_uint(master->hal_data->guard_cycles) + 1);
   }
 
   if (state == LCEC_GUARD_TAKING && ((ms.al_states & 0x0C) == 0 || now - master->guard_start > LCEC_GUARD_TIMEOUT)) {
@@ -691,7 +691,7 @@ static void lcec_create_guard(lcec_master_t *master) {
     }
   }
   master->guard_task = rtapi_task_new(lcec_guard_task, master, rtapi_prio_next_higher(rtapi_prio_lowest()),
-      lcec_guard_module, 65536, RTAPI_USES_FP);
+      lcec_guard_module, 65536);
   if (master->guard_task < 0) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s: no stop guard (rtapi_task_new %d)\n", master->name, master->guard_task);
     master->guard_task = -1;
@@ -849,14 +849,14 @@ static void ecat_config_dc(lcec_master_t *master) {
 
 #ifdef RTAPI_TASK_PLL_SUPPORT
   // set default PLL_STEP: use +/-0.1% of period
-  master->hal_data->pll_step = master->app_time_period / 1000;
+  hal_set_uint(master->hal_data->pll_step, master->app_time_period / 1000);
   // set default PLL_MAX_ERR: one period
-  master->hal_data->pll_max_err = master->app_time_period;
+  hal_set_uint(master->hal_data->pll_max_err, master->app_time_period);
   // set default DC_PHASE_MAX_ERR: 10% of period
-  master->hal_data->dc_phase_max_err = master->app_time_period / 10;
-  master->hal_data->auto_shift_margin = LCEC_AUTOSHIFT_MARGIN_DEFAULT;
-  master->hal_data->auto_shift_input_margin = LCEC_AUTOSHIFT_INPUT_MARGIN_DEFAULT;
-  *(master->hal_data->shift_time) = master->global_shift_time;
+  hal_set_uint(master->hal_data->dc_phase_max_err, master->app_time_period / 10);
+  hal_set_uint(master->hal_data->auto_shift_margin, LCEC_AUTOSHIFT_MARGIN_DEFAULT);
+  hal_set_uint(master->hal_data->auto_shift_input_margin, LCEC_AUTOSHIFT_INPUT_MARGIN_DEFAULT);
+  hal_set_uint(master->hal_data->shift_time, master->global_shift_time);
   if (master->auto_shift) {
     lcec_autoshift_init(&master->autoshift, master->app_time_period, master->global_shift_time);
   }
@@ -1065,13 +1065,13 @@ int rtapi_app_main(void) {
 
     // export read function
     rtapi_snprintf(name, HAL_NAME_LEN, "%s.%s.read", LCEC_MODULE_NAME, master->name);
-    if (hal_export_funct(name, lcec_read_master, master, 0, 0, lcec_comp_id) != 0) {
+    if (hal_export_funct(name, lcec_read_master, master, 0, lcec_comp_id) != 0) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s read funct export failed\n", master->name);
       goto fail2;
     }
     // export write function
     rtapi_snprintf(name, HAL_NAME_LEN, "%s.%s.write", LCEC_MODULE_NAME, master->name);
-    if (hal_export_funct(name, lcec_write_master, master, 0, 0, lcec_comp_id) != 0) {
+    if (hal_export_funct(name, lcec_write_master, master, 0, lcec_comp_id) != 0) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s write funct export failed\n", master->name);
       goto fail2;
     }
@@ -1079,13 +1079,13 @@ int rtapi_app_main(void) {
 
   // export read-all function
   rtapi_snprintf(name, HAL_NAME_LEN, "%s.read-all", LCEC_MODULE_NAME);
-  if (hal_export_funct(name, lcec_read_all, NULL, 0, 0, lcec_comp_id) != 0) {
+  if (hal_export_funct(name, lcec_read_all, NULL, 0, lcec_comp_id) != 0) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "read-all funct export failed\n");
     goto fail2;
   }
   // export write-all function
   rtapi_snprintf(name, HAL_NAME_LEN, "%s.write-all", LCEC_MODULE_NAME);
-  if (hal_export_funct(name, lcec_write_all, NULL, 0, 0, lcec_comp_id) != 0) {
+  if (hal_export_funct(name, lcec_write_all, NULL, 0, lcec_comp_id) != 0) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "write-all funct export failed\n");
     goto fail2;
   }
@@ -1177,7 +1177,7 @@ int lcec_parse_config(void) {
   ec_pdo_info_t *generic_pdos;
   ec_sync_info_t *generic_sync_managers;
   lcec_generic_pin_t *generic_hal_data;
-  hal_pin_dir_t generic_hal_dir;
+  hal_pdir_t generic_hal_dir;
   lcec_slave_sdoconf_t *sdo_config;
   lcec_slave_idnconf_t *idn_config;
   lcec_slave_modparam_t *modparams;
@@ -1528,6 +1528,8 @@ int lcec_parse_config(void) {
           generic_hal_data->bitOffset = 0;
           generic_hal_data->bitLength = pe_conf->bitLength;
           generic_hal_data->invert = pe_conf->invert;
+          generic_hal_data->extend = pe_conf->extend;
+          generic_hal_data->raw = pe_conf->raw;
           generic_hal_data->dir = generic_hal_dir;
           generic_hal_data->pdo_idx = pe_conf->index;
           generic_hal_data->pdo_sidx = pe_conf->subindex;
@@ -1792,25 +1794,25 @@ lcec_slave_state_t *lcec_init_slave_state_hal(char *master_name, char *slave_nam
 
 /// @brief Update HAL pins for the master.
 void lcec_update_master_hal(lcec_master_data_t *hal_data, ec_master_state_t *ms) {
-  *(hal_data->slaves_responding) = ms->slaves_responding;
-  *(hal_data->state_init) = (ms->al_states & 0x01) != 0;
-  *(hal_data->state_preop) = (ms->al_states & 0x02) != 0;
-  *(hal_data->state_safeop) = (ms->al_states & 0x04) != 0;
-  *(hal_data->state_op) = (ms->al_states & 0x08) != 0;
-  *(hal_data->link_up) = ms->link_up;
-  *(hal_data->all_op) = (ms->al_states == 0x08);
+  hal_set_uint(hal_data->slaves_responding, ms->slaves_responding);
+  hal_set_bool(hal_data->state_init, (ms->al_states & 0x01) != 0);
+  hal_set_bool(hal_data->state_preop, (ms->al_states & 0x02) != 0);
+  hal_set_bool(hal_data->state_safeop, (ms->al_states & 0x04) != 0);
+  hal_set_bool(hal_data->state_op, (ms->al_states & 0x08) != 0);
+  hal_set_bool(hal_data->link_up, ms->link_up);
+  hal_set_bool(hal_data->all_op, (ms->al_states == 0x08));
 }
 
 /// @brief Update generic HAL pins for a slave.
 void lcec_update_slave_state_hal(lcec_slave_state_t *hal_data, ec_slave_config_state_t *ss) {
-  *(hal_data->online) = ss->online;
-  *(hal_data->operational) = ss->operational;
-  *(hal_data->state_init) = (ss->al_state & 0x01) != 0;
-  *(hal_data->state_preop) = (ss->al_state & 0x02) != 0;
-  *(hal_data->state_safeop) = (ss->al_state & 0x04) != 0;
-  *(hal_data->state_op) = (ss->al_state & 0x08) != 0;
+  hal_set_bool(hal_data->online, ss->online);
+  hal_set_bool(hal_data->operational, ss->operational);
+  hal_set_bool(hal_data->state_init, (ss->al_state & 0x01) != 0);
+  hal_set_bool(hal_data->state_preop, (ss->al_state & 0x02) != 0);
+  hal_set_bool(hal_data->state_safeop, (ss->al_state & 0x04) != 0);
+  hal_set_bool(hal_data->state_op, (ss->al_state & 0x08) != 0);
 #ifdef EC_HAVE_DC_SYNC_FAILED
-  *(hal_data->dc_sync_failed) = ss->dc_sync_failed;
+  hal_set_bool(hal_data->dc_sync_failed, ss->dc_sync_failed);
 #endif
 }
 
@@ -1833,7 +1835,7 @@ void lcec_read_all(void *arg, long period) {
 
   // update global state pins
   lcec_update_master_hal(global_hal_data, &global_ms);
-  *(global_hal_data->dc_sync_failed) = dc_sync_failed;
+  hal_set_bool(global_hal_data->dc_sync_failed, dc_sync_failed);
 }
 
 /// @brief Update all output pins across all masters and slaves.
@@ -2033,7 +2035,7 @@ void lcec_read_master(void *arg, long period) {
   // a slave whose DC sync check timed out, as of the last state check
   if (check_states) {
     master->dc_sync_failed = dc_sync_failed;
-    *(master->hal_data->dc_sync_failed) = dc_sync_failed;
+    hal_set_bool(master->hal_data->dc_sync_failed, dc_sync_failed);
   }
 }
 
@@ -2056,16 +2058,16 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
   int32_t step;
   int phase_valid = 0;
 
-  *(hal_data->pll_err) = 0;
-  *(hal_data->pll_out) = 0;
-  *(hal_data->dc_phased) = 0;
-  *(hal_data->send_offset) = (int32_t)send_offset;
+  hal_set_sint(hal_data->pll_err, 0);
+  hal_set_sint(hal_data->pll_out, 0);
+  hal_set_bool(hal_data->dc_phased, 0);
+  hal_set_sint(hal_data->send_offset, (int32_t)send_offset);
 
   // the first read dc_time value seems to be invalid, so wait for two successive successful reads
   if (dc_time_valid && master->dc_time_valid_last && period > 0) {
     // cyclic communication is running; ignore the slow start-up cycles for the max value
-    if (*(hal_data->send_offset) > hal_data->send_offset_max) {
-      hal_data->send_offset_max = *(hal_data->send_offset);
+    if (hal_get_sint(hal_data->send_offset) > hal_get_sint(hal_data->send_offset_max)) {
+      hal_set_sint(hal_data->send_offset_max, hal_get_sint(hal_data->send_offset));
     }
 
     // Track the 64-bit offset between DC time and app time by unwrapping the
@@ -2083,10 +2085,10 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
       master->dc_app_offset += delta;
     }
 
-    if ((uint32_t)abs(delta) > hal_data->pll_max_err) {
+    if ((uint32_t)abs(delta) > hal_get_uint(hal_data->pll_max_err)) {
       // DC time jumped (e.g. IgH wrote the system time offset). The offset
       // has been tracked, but skip control this cycle and document the event.
-      (*(hal_data->pll_reset_cnt))++;
+      hal_set_uint(hal_data->pll_reset_cnt, hal_get_uint(hal_data->pll_reset_cnt) + 1);
     } else {
       // DC time at the previous cycle's nominal thread start
       uint64_t dc_wake = master->app_time_last + master->dc_app_offset - master->send_offset_last;
@@ -2097,20 +2099,20 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
         phase += period;
       }
       // positive error: thread starts too early relative to SYNC0, lengthen period
-      *(hal_data->pll_err) = (int32_t)(-phase);
+      hal_set_sint(hal_data->pll_err, (int32_t)(-phase));
       phase_valid = 1;
     }
 
-    if (phase_valid && (uint32_t)abs(*(hal_data->pll_err)) < hal_data->dc_phase_max_err) {
-      *(hal_data->dc_phased) = 1;
+    if (phase_valid && (uint32_t)abs(hal_get_sint(hal_data->pll_err)) < hal_get_uint(hal_data->dc_phase_max_err)) {
+      hal_set_bool(hal_data->dc_phased, 1);
     }
 
     // globalShiftTime="auto": a new shift moves the thread against SYNC0
     // through the PLL below, pll-step per cycle, as at start-up
     if (master->auto_shift) {
-      master->autoshift.margin = hal_data->auto_shift_margin;
-      master->autoshift.input_margin = hal_data->auto_shift_input_margin;
-      if (lcec_autoshift_update(&master->autoshift, *(hal_data->dc_phased) && *(hal_data->all_op), *(hal_data->send_offset))) {
+      master->autoshift.margin = hal_get_uint(hal_data->auto_shift_margin);
+      master->autoshift.input_margin = hal_get_uint(hal_data->auto_shift_input_margin);
+      if (lcec_autoshift_update(&master->autoshift, hal_get_bool(hal_data->dc_phased) && hal_get_bool(hal_data->all_op), hal_get_sint(hal_data->send_offset))) {
         master->global_shift_time = master->autoshift.shift;
         ecat_events_add(master->events, ECAT_EV_SHIFT, -1, master->global_shift_time, master->autoshift.state);
         // two cycles is the aim; the cia402 profile counts on it
@@ -2123,8 +2125,8 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
             : master->autoshift.state != LCEC_AUTOSHIFT_TWO ? ", not 2: the send-offset varies too much (servo thread latency); drive profiles count on 2"
                                                             : "");
       }
-      *(hal_data->turnaround_cycles) = master->autoshift.state >= LCEC_AUTOSHIFT_TWO ? master->autoshift.state : 0;
-      *(hal_data->shift_time) = master->global_shift_time;
+      hal_set_sint(hal_data->turnaround_cycles, master->autoshift.state >= LCEC_AUTOSHIFT_TWO ? master->autoshift.state : 0);
+      hal_set_uint(hal_data->shift_time, master->global_shift_time);
     }
 
     // syncToRefClock=true: DC is the clock source; steer the servo thread so
@@ -2133,15 +2135,16 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
     // already anchored to the thread grid via app_start_time; pll_err is
     // only calculated for monitoring.
     if (master->sync_to_ref_clock && phase_valid) {
-      step = (int32_t)hal_data->pll_step;
-      *(hal_data->pll_out) = (*(hal_data->pll_err) < 0) ? -step : step;
+      rtapi_uint step_pin = hal_get_uint(hal_data->pll_step);
+      step = step_pin > INT32_MAX ? INT32_MAX : (int32_t)step_pin;
+      hal_set_sint(hal_data->pll_out, (hal_get_sint(hal_data->pll_err) < 0) ? -step : step);
     }
   }
 
   // Only masters that steer the thread touch the thread's PLL correction, so
   // that a non-synchronizing master doesn't cancel another master's correction.
   if (master->sync_to_ref_clock) {
-    rtapi_task_pll_set_correction(*(hal_data->pll_out));
+    rtapi_task_pll_set_correction(hal_get_sint(hal_data->pll_out));
   }
   master->app_time_last = app_time;
   master->send_offset_last = send_offset;
@@ -2158,7 +2161,7 @@ static void lcec_update_dc_phase(lcec_master_t *master, int dc_time_valid, uint3
 /// PREOP (the state-safeop and state-op pins): ecat-take-down does both,
 /// from [HAL]SHUTDOWN. Clearing it takes the slaves back to OP.
 static void lcec_take_down(lcec_master_t *master) {
-  int take = *(global_hal_data->take_down) || *(master->hal_data->take_down);
+  int take = hal_get_bool(global_hal_data->take_down) || hal_get_bool(master->hal_data->take_down);
 
   if (take != master->taking_down) {
     master->taking_down = take;

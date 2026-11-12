@@ -205,71 +205,71 @@ typedef struct {
 
 typedef struct {
   // in
-  hal_bit_t *enable;
-  hal_float_t *pos_cmd;
-  hal_float_t *velocity_cmd;
-  hal_bit_t *fault_reset;
-  hal_u32_t *watchdog;
+  hal_bool_t enable;
+  hal_real_t pos_cmd;
+  hal_real_t velocity_cmd;
+  hal_bool_t fault_reset;
+  hal_uint_t watchdog;
   // out
-  hal_float_t *pos_fb;
-  hal_float_t *velocity_fb;
-  hal_bit_t *drv_fault;
-  hal_s32_t *fault_reason;
-  hal_s32_t *cia_state;
-  hal_u32_t *statusword;
-  hal_u32_t *controlword;
-  hal_s32_t *opmode;
-  hal_s32_t *opmode_display;
-  hal_u32_t *error_code;
-  hal_s32_t *drv_actual_position;
-  hal_s32_t *drv_actual_velocity;
-  hal_s32_t *drv_target_position;
-  hal_s32_t *drv_target_velocity;
-  hal_bit_t *stat_switchon_ready;
-  hal_bit_t *stat_switched_on;
-  hal_bit_t *stat_op_enabled;
-  hal_bit_t *stat_fault;
-  hal_bit_t *stat_voltage_enabled;
-  hal_bit_t *stat_quick_stop;
-  hal_bit_t *stat_switchon_disabled;
-  hal_bit_t *stat_warning;
-  hal_bit_t *stat_remote;
-  hal_bit_t *stat_target_reached;
-  hal_bit_t *opmode_no_mode;
-  hal_bit_t *opmode_homing;
-  hal_bit_t *opmode_cyclic_position;
-  hal_bit_t *opmode_cyclic_velocity;
+  hal_real_t pos_fb;
+  hal_real_t velocity_fb;
+  hal_bool_t drv_fault;
+  hal_sint_t fault_reason;
+  hal_sint_t cia_state;
+  hal_uint_t statusword;
+  hal_uint_t controlword;
+  hal_sint_t opmode;
+  hal_sint_t opmode_display;
+  hal_uint_t error_code;
+  hal_sint_t drv_actual_position;
+  hal_sint_t drv_actual_velocity;
+  hal_sint_t drv_target_position;
+  hal_sint_t drv_target_velocity;
+  hal_bool_t stat_switchon_ready;
+  hal_bool_t stat_switched_on;
+  hal_bool_t stat_op_enabled;
+  hal_bool_t stat_fault;
+  hal_bool_t stat_voltage_enabled;
+  hal_bool_t stat_quick_stop;
+  hal_bool_t stat_switchon_disabled;
+  hal_bool_t stat_warning;
+  hal_bool_t stat_remote;
+  hal_bool_t stat_target_reached;
+  hal_bool_t opmode_no_mode;
+  hal_bool_t opmode_homing;
+  hal_bool_t opmode_cyclic_position;
+  hal_bool_t opmode_cyclic_velocity;
   // homing, only with mode hm
-  hal_bit_t *index_enable;
-  hal_bit_t *home;
-  hal_bit_t *stat_homing;
-  hal_bit_t *stat_homed;
-  hal_bit_t *home_error;
+  hal_bool_t index_enable;
+  hal_bool_t home;
+  hal_bool_t stat_homing;
+  hal_bool_t stat_homed;
+  hal_bool_t home_error;
   // PV only
-  hal_bit_t *at_speed;
-  hal_bit_t *zero_speed;
+  hal_bool_t at_speed;
+  hal_bool_t zero_speed;
   // PP only
-  hal_float_t *pp_target;
-  hal_float_t *pp_velocity;
-  hal_bit_t *pp_start;
-  hal_bit_t *pp_relative;
-  hal_bit_t *pp_halt;
-  hal_bit_t *pp_done;
+  hal_real_t pp_target;
+  hal_real_t pp_velocity;
+  hal_bool_t pp_start;
+  hal_bool_t pp_relative;
+  hal_bool_t pp_halt;
+  hal_bool_t pp_done;
   // with more than one mode
-  hal_s32_t *opmode_cmd;
+  hal_sint_t opmode_cmd;
   // with zero-at-start
-  hal_s32_t *pos_zero;
+  hal_sint_t pos_zero;
   // parameters
-  hal_float_t pos_scale;
-  hal_float_t velo_scale;
-  hal_bit_t auto_fault_reset;
-  hal_u32_t enable_timeout_ms;
-  hal_u32_t watchdog_ms;
-  hal_s32_t mode;  // read only: 8 CSP, 9 CSV
-  hal_u32_t home_timeout_ms;
-  hal_u32_t stop_timeout_ms;
-  hal_u32_t pp_timeout_ms;
-  hal_bit_t pp_immediate;   // PP: "change set immediately" (bit 5) with every set-point; the ECT60 acknowledges and then does not move with it
+  hal_real_t pos_scale;
+  hal_real_t velo_scale;
+  hal_bool_t auto_fault_reset;
+  hal_uint_t enable_timeout_ms;
+  hal_uint_t watchdog_ms;
+  hal_sint_t mode;  // read only: 8 CSP, 9 CSV
+  hal_uint_t home_timeout_ms;
+  hal_uint_t stop_timeout_ms;
+  hal_uint_t pp_timeout_ms;
+  hal_bool_t pp_immediate;   // PP: "change set immediately" (bit 5) with every set-point; the ECT60 acknowledges and then does not move with it
 
   // process data
   obj_t error_code_o, controlword_o, statusword_o, modes_o, modes_display_o;
@@ -285,7 +285,7 @@ typedef struct {
   long long enable_ns;  // time since enable, until "Operation enabled"
   long long reset_ns;   // fault reset in progress, time left
   int reset_start;      // first cycle of a fault reset: bit 7 low
-  uint32_t watchdog_old;
+  rtapi_uint watchdog_old;
   long long watchdog_ns;
   unsigned int allowed; // the modes the file allows, bit n for mode n
   int active;           // the mode in use
@@ -325,105 +325,105 @@ typedef struct {
 } cia402_t;
 
 static const lcec_pindesc_t pins[] = {
-    {HAL_BIT, HAL_IN, offsetof(cia402_t, enable), "%s.enable"},
-    {HAL_FLOAT, HAL_IN, offsetof(cia402_t, pos_cmd), "%s.pos-cmd"},
-    {HAL_FLOAT, HAL_IN, offsetof(cia402_t, velocity_cmd), "%s.velocity-cmd"},
-    {HAL_BIT, HAL_IN, offsetof(cia402_t, fault_reset), "%s.fault-reset"},
-    {HAL_U32, HAL_IN, offsetof(cia402_t, watchdog), "%s.watchdog"},
-    {HAL_FLOAT, HAL_OUT, offsetof(cia402_t, pos_fb), "%s.pos-fb"},
-    {HAL_FLOAT, HAL_OUT, offsetof(cia402_t, velocity_fb), "%s.velocity-fb"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, drv_fault), "%s.drv-fault"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, fault_reason), "%s.fault-reason"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, cia_state), "%s.cia-state"},
-    {HAL_U32, HAL_OUT, offsetof(cia402_t, statusword), "%s.statusword"},
-    {HAL_U32, HAL_OUT, offsetof(cia402_t, controlword), "%s.controlword"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, opmode), "%s.opmode"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, opmode_display), "%s.opmode-display"},
-    {HAL_U32, HAL_OUT, offsetof(cia402_t, error_code), "%s.error-code"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, drv_actual_position), "%s.drv-actual-position"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, drv_actual_velocity), "%s.drv-actual-velocity"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, drv_target_position), "%s.drv-target-position"},
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, drv_target_velocity), "%s.drv-target-velocity"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_switchon_ready), "%s.stat-switchon-ready"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_switched_on), "%s.stat-switched-on"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_op_enabled), "%s.stat-op-enabled"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_fault), "%s.stat-fault"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_voltage_enabled), "%s.stat-voltage-enabled"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_quick_stop), "%s.stat-quick-stop"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_switchon_disabled), "%s.stat-switchon-disabled"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_warning), "%s.stat-warning"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_remote), "%s.stat-remote"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_target_reached), "%s.stat-target-reached"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, opmode_no_mode), "%s.opmode-no-mode"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, opmode_homing), "%s.opmode-homing"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, opmode_cyclic_position), "%s.opmode-cyclic-position"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, opmode_cyclic_velocity), "%s.opmode-cyclic-velocity"},
+    {HAL_BOOL, HAL_IN, offsetof(cia402_t, enable), "%s.enable"},
+    {HAL_REAL, HAL_IN, offsetof(cia402_t, pos_cmd), "%s.pos-cmd"},
+    {HAL_REAL, HAL_IN, offsetof(cia402_t, velocity_cmd), "%s.velocity-cmd"},
+    {HAL_BOOL, HAL_IN, offsetof(cia402_t, fault_reset), "%s.fault-reset"},
+    {HAL_UINT, HAL_IN, offsetof(cia402_t, watchdog), "%s.watchdog"},
+    {HAL_REAL, HAL_OUT, offsetof(cia402_t, pos_fb), "%s.pos-fb"},
+    {HAL_REAL, HAL_OUT, offsetof(cia402_t, velocity_fb), "%s.velocity-fb"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, drv_fault), "%s.drv-fault"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, fault_reason), "%s.fault-reason"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, cia_state), "%s.cia-state"},
+    {HAL_UINT, HAL_OUT, offsetof(cia402_t, statusword), "%s.statusword"},
+    {HAL_UINT, HAL_OUT, offsetof(cia402_t, controlword), "%s.controlword"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, opmode), "%s.opmode"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, opmode_display), "%s.opmode-display"},
+    {HAL_UINT, HAL_OUT, offsetof(cia402_t, error_code), "%s.error-code"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, drv_actual_position), "%s.drv-actual-position"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, drv_actual_velocity), "%s.drv-actual-velocity"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, drv_target_position), "%s.drv-target-position"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, drv_target_velocity), "%s.drv-target-velocity"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_switchon_ready), "%s.stat-switchon-ready"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_switched_on), "%s.stat-switched-on"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_op_enabled), "%s.stat-op-enabled"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_fault), "%s.stat-fault"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_voltage_enabled), "%s.stat-voltage-enabled"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_quick_stop), "%s.stat-quick-stop"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_switchon_disabled), "%s.stat-switchon-disabled"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_warning), "%s.stat-warning"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_remote), "%s.stat-remote"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_target_reached), "%s.stat-target-reached"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, opmode_no_mode), "%s.opmode-no-mode"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, opmode_homing), "%s.opmode-homing"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, opmode_cyclic_position), "%s.opmode-cyclic-position"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, opmode_cyclic_velocity), "%s.opmode-cyclic-velocity"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_pindesc_t homing_pins[] = {
-    {HAL_BIT, HAL_IO, offsetof(cia402_t, index_enable), "%s.index-enable"},
-    {HAL_BIT, HAL_IN, offsetof(cia402_t, home), "%s.home"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_homing), "%s.stat-homing"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, stat_homed), "%s.stat-homed"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, home_error), "%s.home-error"},
+    {HAL_BOOL, HAL_IO, offsetof(cia402_t, index_enable), "%s.index-enable"},
+    {HAL_BOOL, HAL_IN, offsetof(cia402_t, home), "%s.home"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_homing), "%s.stat-homing"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_homed), "%s.stat-homed"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, home_error), "%s.home-error"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_paramdesc_t homing_params[] = {
-    {HAL_U32, HAL_RW, offsetof(cia402_t, home_timeout_ms), "%s.home-timeout-ms"},
+    {HAL_UINT, HAL_RW, offsetof(cia402_t, home_timeout_ms), "%s.home-timeout-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_pindesc_t pv_pins[] = {
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, at_speed), "%s.at-speed"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, zero_speed), "%s.zero-speed"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, at_speed), "%s.at-speed"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, zero_speed), "%s.zero-speed"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_pindesc_t pp_pins[] = {
-    {HAL_FLOAT, HAL_IN, offsetof(cia402_t, pp_target), "%s.pp-target"},
-    {HAL_BIT, HAL_IN, offsetof(cia402_t, pp_start), "%s.pp-start"},
-    {HAL_BIT, HAL_IN, offsetof(cia402_t, pp_relative), "%s.pp-relative"},
-    {HAL_BIT, HAL_IN, offsetof(cia402_t, pp_halt), "%s.pp-halt"},
-    {HAL_BIT, HAL_OUT, offsetof(cia402_t, pp_done), "%s.pp-done"},
+    {HAL_REAL, HAL_IN, offsetof(cia402_t, pp_target), "%s.pp-target"},
+    {HAL_BOOL, HAL_IN, offsetof(cia402_t, pp_start), "%s.pp-start"},
+    {HAL_BOOL, HAL_IN, offsetof(cia402_t, pp_relative), "%s.pp-relative"},
+    {HAL_BOOL, HAL_IN, offsetof(cia402_t, pp_halt), "%s.pp-halt"},
+    {HAL_BOOL, HAL_OUT, offsetof(cia402_t, pp_done), "%s.pp-done"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 // only with 0x6081 in the process data
 static const lcec_pindesc_t pp_velocity_pins[] = {
-    {HAL_FLOAT, HAL_IN, offsetof(cia402_t, pp_velocity), "%s.pp-velocity"},
+    {HAL_REAL, HAL_IN, offsetof(cia402_t, pp_velocity), "%s.pp-velocity"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_pindesc_t zero_pins[] = {
-    {HAL_S32, HAL_OUT, offsetof(cia402_t, pos_zero), "%s.pos-zero"},
+    {HAL_SINT, HAL_OUT, offsetof(cia402_t, pos_zero), "%s.pos-zero"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_pindesc_t mode_pins[] = {
-    {HAL_S32, HAL_IN, offsetof(cia402_t, opmode_cmd), "%s.opmode-cmd"},
+    {HAL_SINT, HAL_IN, offsetof(cia402_t, opmode_cmd), "%s.opmode-cmd"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_paramdesc_t stop_params[] = {
-    {HAL_U32, HAL_RW, offsetof(cia402_t, stop_timeout_ms), "%s.stop-timeout-ms"},
+    {HAL_UINT, HAL_RW, offsetof(cia402_t, stop_timeout_ms), "%s.stop-timeout-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_paramdesc_t pp_params[] = {
-    {HAL_U32, HAL_RW, offsetof(cia402_t, pp_timeout_ms), "%s.pp-timeout-ms"},
-    {HAL_BIT, HAL_RW, offsetof(cia402_t, pp_immediate), "%s.pp-immediate"},
+    {HAL_UINT, HAL_RW, offsetof(cia402_t, pp_timeout_ms), "%s.pp-timeout-ms"},
+    {HAL_BOOL, HAL_RW, offsetof(cia402_t, pp_immediate), "%s.pp-immediate"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_paramdesc_t params[] = {
-    {HAL_FLOAT, HAL_RW, offsetof(cia402_t, pos_scale), "%s.pos-scale"},
-    {HAL_FLOAT, HAL_RW, offsetof(cia402_t, velo_scale), "%s.velo-scale"},
-    {HAL_BIT, HAL_RW, offsetof(cia402_t, auto_fault_reset), "%s.auto-fault-reset"},
-    {HAL_U32, HAL_RW, offsetof(cia402_t, enable_timeout_ms), "%s.enable-timeout-ms"},
-    {HAL_U32, HAL_RW, offsetof(cia402_t, watchdog_ms), "%s.watchdog-ms"},
-    {HAL_S32, HAL_RO, offsetof(cia402_t, mode), "%s.mode"},
+    {HAL_REAL, HAL_RW, offsetof(cia402_t, pos_scale), "%s.pos-scale"},
+    {HAL_REAL, HAL_RW, offsetof(cia402_t, velo_scale), "%s.velo-scale"},
+    {HAL_BOOL, HAL_RW, offsetof(cia402_t, auto_fault_reset), "%s.auto-fault-reset"},
+    {HAL_UINT, HAL_RW, offsetof(cia402_t, enable_timeout_ms), "%s.enable-timeout-ms"},
+    {HAL_UINT, HAL_RW, offsetof(cia402_t, watchdog_ms), "%s.watchdog-ms"},
+    {HAL_SINT, HAL_RO, offsetof(cia402_t, mode), "%s.mode"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -525,17 +525,17 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
   if (d->zero_at_start && (err = lcec_pin_newf_list(d, zero_pins, name)) != 0) return err;
 
   // after the parameters are made, which zeroes them
-  d->mode = mode;
+  hal_set_sint(d->mode, mode);
   d->active = mode;
-  d->home_timeout_ms = 60000;
-  d->stop_timeout_ms = 10000;
-  d->pp_timeout_ms = 60000;
-  d->pp_immediate = 0;
-  d->pos_scale = 1.0;
-  d->velo_scale = 1.0;
-  d->auto_fault_reset = 1;
-  d->enable_timeout_ms = 2000;
-  d->watchdog_ms = 0;
+  // (some of them exist only for the modes that need them)
+  if (d->home_timeout_ms) hal_set_uint(d->home_timeout_ms, 60000);
+  if (d->stop_timeout_ms) hal_set_uint(d->stop_timeout_ms, 10000);
+  if (d->pp_timeout_ms) hal_set_uint(d->pp_timeout_ms, 60000);
+  hal_set_real(d->pos_scale, 1.0);
+  hal_set_real(d->velo_scale, 1.0);
+  hal_set_bool(d->auto_fault_reset, 1);
+  hal_set_uint(d->enable_timeout_ms, 2000);
+  hal_set_uint(d->watchdog_ms, 0);
   d->state = ST_UNKNOWN;
   return 0;
 }
@@ -596,7 +596,11 @@ static int32_t clamp_s32(double v) {
   return (int32_t)lrint(v);
 }
 
-static double scale_or_one(hal_float_t s) { return (s > -1e-20 && s < 1e-20) ? 1.0 : s; }
+// Parameters that exist only for some modes (homing, PV, PP): 0 if there is none,
+// as when they were plain values that nothing set.
+static rtapi_uint opt_uint(hal_uint_t p) { return p ? hal_get_uint(p) : 0; }
+static rtapi_bool opt_bool(hal_bool_t p) { return p ? hal_get_bool(p) : 0; }
+static double scale_or_one(double s) { return (s > -1e-20 && s < 1e-20) ? 1.0 : s; }
 
 // Positions with pos-zero: wrapping as the drive's 32-bit counter does.
 static int32_t from_drive(cia402_t *d, int32_t counts) { return (int32_t)((uint32_t)counts - (uint32_t)d->zero); }
@@ -611,61 +615,61 @@ static void axis_read(lcec_slave_t *slave, cia402_t *d) {
   sw = EC_READ_U16(&pd[d->statusword_o.os]);
   d->state = d->bus_ok ? decode_state(sw) : ST_UNKNOWN;
 
-  *d->statusword = sw;
-  *d->cia_state = d->state;
-  *d->stat_switchon_ready = (sw >> 0) & 1;
-  *d->stat_switched_on = (sw >> 1) & 1;
-  *d->stat_op_enabled = (sw >> 2) & 1;
-  *d->stat_fault = (sw >> 3) & 1;
-  *d->stat_voltage_enabled = (sw >> 4) & 1;
-  *d->stat_quick_stop = (sw >> 5) & 1;
-  *d->stat_switchon_disabled = (sw >> 6) & 1;
-  *d->stat_warning = (sw >> 7) & 1;
-  *d->stat_remote = (sw >> 9) & 1;
+  hal_set_uint(d->statusword, sw);
+  hal_set_sint(d->cia_state, d->state);
+  hal_set_bool(d->stat_switchon_ready, (sw >> 0) & 1);
+  hal_set_bool(d->stat_switched_on, (sw >> 1) & 1);
+  hal_set_bool(d->stat_op_enabled, (sw >> 2) & 1);
+  hal_set_bool(d->stat_fault, (sw >> 3) & 1);
+  hal_set_bool(d->stat_voltage_enabled, (sw >> 4) & 1);
+  hal_set_bool(d->stat_quick_stop, (sw >> 5) & 1);
+  hal_set_bool(d->stat_switchon_disabled, (sw >> 6) & 1);
+  hal_set_bool(d->stat_warning, (sw >> 7) & 1);
+  hal_set_bool(d->stat_remote, (sw >> 9) & 1);
 
   if (d->modes_display_o.mapped) {
     md = EC_READ_S8(&pd[d->modes_display_o.os]);
-    *d->opmode_display = md;
+    hal_set_sint(d->opmode_display, md);
   }
-  *d->opmode_no_mode = md == 0;
-  *d->opmode_homing = md == MODE_HOMING;
-  *d->opmode_cyclic_position = md == MODE_CSP;
-  *d->opmode_cyclic_velocity = md == MODE_CSV;
-  *d->stat_target_reached = (md == MODE_CSP || md == MODE_CSV || md == MODE_PV || md == MODE_PP) && ((sw >> 10) & 1);
+  hal_set_bool(d->opmode_no_mode, md == 0);
+  hal_set_bool(d->opmode_homing, md == MODE_HOMING);
+  hal_set_bool(d->opmode_cyclic_position, md == MODE_CSP);
+  hal_set_bool(d->opmode_cyclic_velocity, md == MODE_CSV);
+  hal_set_bool(d->stat_target_reached, (md == MODE_CSP || md == MODE_CSV || md == MODE_PV || md == MODE_PP) && ((sw >> 10) & 1));
   if (d->zero_speed != NULL) {
     int pv = d->state == ST_OPERATION_ENABLED && d->active == MODE_PV && (!d->modes_display_o.mapped || md == MODE_PV);
-    *d->zero_speed = pv && (sw & SW_SPEED_ZERO);
+    hal_set_bool(d->zero_speed, pv && (sw & SW_SPEED_ZERO));
     // at-speed only while running at the command, see cia402_write
-    if (!pv) *d->at_speed = 0;
+    if (!pv) hal_set_bool(d->at_speed, 0);
   }
 
-  if (d->error_code_o.mapped) *d->error_code = EC_READ_U16(&pd[d->error_code_o.os]);
+  if (d->error_code_o.mapped) hal_set_uint(d->error_code, EC_READ_U16(&pd[d->error_code_o.os]));
   if (d->actual_position_o.mapped) {
-    *d->drv_actual_position = EC_READ_S32(&pd[d->actual_position_o.os]);
+    hal_set_sint(d->drv_actual_position, EC_READ_S32(&pd[d->actual_position_o.os]));
     if (d->zero_at_start && !d->zeroed && d->bus_ok) {
-      d->zero = *d->drv_actual_position;
+      d->zero = hal_get_sint(d->drv_actual_position);
       d->zeroed = 1;
     }
     // with zero-at-start, 0 until the position is taken
-    *d->pos_fb = d->zero_at_start && !d->zeroed ? 0 : from_drive(d, *d->drv_actual_position) / scale_or_one(d->pos_scale);
-    if (d->pos_zero != NULL) *d->pos_zero = d->zero;
+    hal_set_real(d->pos_fb, d->zero_at_start && !d->zeroed ? 0 : from_drive(d, hal_get_sint(d->drv_actual_position)) / scale_or_one(hal_get_real(d->pos_scale)));
+    if (d->pos_zero != NULL) hal_set_sint(d->pos_zero, d->zero);
   }
   // homing for motion: no following error until index-enable is cleared
-  if (d->hs != HS_IDLE && d->hs_index) *d->pos_fb = *d->pos_cmd;
+  if (d->hs != HS_IDLE && d->hs_index) hal_set_real(d->pos_fb, hal_get_real(d->pos_cmd));
   if (d->actual_velocity_o.mapped) {
-    *d->drv_actual_velocity = EC_READ_S32(&pd[d->actual_velocity_o.os]);
-    *d->velocity_fb = *d->drv_actual_velocity / scale_or_one(d->velo_scale);
+    hal_set_sint(d->drv_actual_velocity, EC_READ_S32(&pd[d->actual_velocity_o.os]));
+    hal_set_real(d->velocity_fb, hal_get_sint(d->drv_actual_velocity) / scale_or_one(hal_get_real(d->velo_scale)));
   }
 
   // the flight recorder: the drive's faults, and the profile shutting it down
   {
     int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
-    if (faulted && !d->ev_fault) lcec_event(slave, ECAT_EV_DRIVE_FAULT, *d->error_code, sw);
+    if (faulted && !d->ev_fault) lcec_event(slave, ECAT_EV_DRIVE_FAULT, hal_get_uint(d->error_code), sw);
     if (!faulted && d->ev_fault && d->bus_ok) lcec_event(slave, ECAT_EV_DRIVE_CLEAR, 0, d->axis);
     if (faulted || d->bus_ok) d->ev_fault = faulted;
-    if (*d->fault_reason != d->ev_reason) {
-      if (*d->fault_reason) lcec_event(slave, ECAT_EV_DRIVE_BLOCK, *d->fault_reason, d->axis);
-      d->ev_reason = *d->fault_reason;
+    if (hal_get_sint(d->fault_reason) != d->ev_reason) {
+      if (hal_get_sint(d->fault_reason)) lcec_event(slave, ECAT_EV_DRIVE_BLOCK, hal_get_sint(d->fault_reason), d->axis);
+      d->ev_reason = hal_get_sint(d->fault_reason);
     }
   }
 }
@@ -682,21 +686,21 @@ static void cia402_read(lcec_slave_t *slave, long period) {
 /// reached, which while halted means standing still, in PP); other modes
 /// hold their targets and count as still.
 static int standing_still(cia402_t *d) {
-  uint16_t sw = *d->statusword;
+  uint16_t sw = hal_get_uint(d->statusword);
   return d->active == MODE_PV ? (sw & SW_SPEED_ZERO) != 0 : d->active == MODE_PP ? (sw & SW_TARGET_REACHED) != 0 : 1;
 }
 
 static void block(cia402_t *d, int why) {
   if (!d->blocked) {
     d->blocked = 1;
-    *d->fault_reason = why;
+    hal_set_sint(d->fault_reason, why);
   }
 }
 
 /// Homing: start, follow and end it; called while the drive may run.
 /// Returns the control word bits to add.
 static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
-  int index = *d->index_enable, home = *d->home;
+  int index = hal_get_bool(d->index_enable), home = hal_get_bool(d->home);
   int index_edge = index && !d->index_old;
   int home_edge = home && !d->home_old;
   uint16_t bits = 0;
@@ -706,7 +710,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
   if (!run || d->state != ST_OPERATION_ENABLED) {
     // disabled or shut down: homing is abandoned, the mode goes back
     d->hs = HS_IDLE;
-    *d->stat_homing = 0;
+    hal_set_bool(d->stat_homing, 0);
     return 0;
   }
   d->hs_ns += period;
@@ -718,8 +722,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
         d->hs_ns = 0;
         d->hs_cycles = 0;
         d->hs_index = index_edge;
-        *d->stat_homed = 0;
-        *d->home_error = 0;
+        hal_set_bool(d->stat_homed, 0);
+        hal_set_bool(d->home_error, 0);
       }
       if (d->hs != HS_STOP) break;
       // fall through
@@ -733,7 +737,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       } else if (d->hs_cycles > STATUS_CYCLES && standing_still(d)) {
         d->hs = HS_TO_HM;
         d->hs_ns = 0;
-      } else if (d->stop_timeout_ms != 0 && d->hs_ns > (long long)d->stop_timeout_ms * 1000000LL) {
+      } else if (opt_uint(d->stop_timeout_ms) != 0 && d->hs_ns > (long long)opt_uint(d->stop_timeout_ms) * 1000000LL) {
         block(d, WHY_WRONG_MODE);
       }
       break;
@@ -741,7 +745,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       if (d->hs_index && !index) {
         d->hs = HS_BACK;  // motion gave up
         d->hs_ns = 0;
-      } else if (*d->opmode_display == MODE_HOMING) {
+      } else if (hal_get_sint(d->opmode_display) == MODE_HOMING) {
         d->hs = HS_HOMING;
         d->hs_ns = 0;
         d->hs_seen = 0;
@@ -757,27 +761,27 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
         d->hs_ns = 0;
         bits = 0;
       } else if (sw & SW_HOMING_ERROR) {
-        *d->home_error = 1;
+        hal_set_bool(d->home_error, 1);
         block(d, WHY_HOMING_ERROR);
       } else if ((sw & (SW_HOMING_ATTAINED | SW_TARGET_REACHED)) != (SW_HOMING_ATTAINED | SW_TARGET_REACHED)) {
         d->hs_seen = 1;
-        if (d->home_timeout_ms != 0 && d->hs_ns > (long long)d->home_timeout_ms * 1000000LL) {
-          *d->home_error = 1;
+        if (opt_uint(d->home_timeout_ms) != 0 && d->hs_ns > (long long)opt_uint(d->home_timeout_ms) * 1000000LL) {
+          hal_set_bool(d->home_error, 1);
           block(d, WHY_HOMING_TIMEOUT);
         }
       } else if (d->hs_seen || d->hs_ns >= HOMING_SETTLE_NS) {
         // attained and reached: a drive that keeps these bits from an
         // earlier homing gets HOMING_SETTLE_NS to clear them
-        *d->stat_homed = 1;
+        hal_set_bool(d->stat_homed, 1);
         d->hs = HS_BACK;
         d->hs_ns = 0;
         bits = 0;
       }
       break;
     case HS_BACK:
-      if (*d->opmode_display == d->active) {
+      if (hal_get_sint(d->opmode_display) == d->active) {
         d->hs = HS_IDLE;
-        if (d->hs_index) *d->index_enable = 0;
+        if (d->hs_index) hal_set_bool(d->index_enable, 0);
         d->index_old = 0;
         // the drive's position is the homed one now
         d->zero = 0;
@@ -793,27 +797,27 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
     d->hs = HS_IDLE;
     bits = 0;
   }
-  *d->stat_homing = d->hs != HS_IDLE;
+  hal_set_bool(d->stat_homing, d->hs != HS_IDLE);
   return bits;
 }
 
 /// PP: the set-point handshake. Returns the control word bits to add.
 static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
-  int start = *d->pp_start;
+  int start = hal_get_bool(d->pp_start);
   int start_edge = start && !d->pp_start_old;
   int ack = (sw & SW_SET_POINT_ACK) != 0;
-  int in_pp = !d->modes_display_o.mapped || *d->opmode_display == MODE_PP;
+  int in_pp = !d->modes_display_o.mapped || hal_get_sint(d->opmode_display) == MODE_PP;
   uint16_t bits = 0;
 
   d->pp_start_old = start;
   if (!run || d->state != ST_OPERATION_ENABLED || d->hs != HS_IDLE) {
     d->pp = PP_IDLE;
     d->pp_pending = 0;
-    *d->pp_done = 0;
+    hal_set_bool(d->pp_done, 0);
     return 0;
   }
   if (start_edge) d->pp_pending = 1;
-  if (*d->pp_halt) {
+  if (hal_get_bool(d->pp_halt)) {
     bits |= CW_HALT;
     d->pp_halt_wait = STATUS_CYCLES;
   } else if (d->pp_halt_wait > 0) {
@@ -823,14 +827,14 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
   // for a set-point (acknowledge low); it replaces a move in progress
   if (d->pp_pending && in_pp && !ack && d->pp != PP_SET) {
     d->pp_pending = 0;
-    d->pp_rel = *d->pp_relative;
-    d->pp_set = clamp_s32(*d->pp_target * scale_or_one(d->pos_scale));
+    d->pp_rel = hal_get_bool(d->pp_relative);
+    d->pp_set = clamp_s32(hal_get_real(d->pp_target) * scale_or_one(hal_get_real(d->pos_scale)));
     if (!d->pp_rel) d->pp_set = to_drive(d, d->pp_set);
-    d->pp_vel = d->pp_velocity != NULL ? (uint32_t)clamp_s32(fabs(*d->pp_velocity) * scale_or_one(d->velo_scale)) : 0;
+    d->pp_vel = d->pp_velocity != NULL ? (uint32_t)clamp_s32(fabs(hal_get_real(d->pp_velocity)) * scale_or_one(hal_get_real(d->velo_scale))) : 0;
     d->pp = PP_SET;
     d->pp_retries = 0;
     d->pp_ns = 0;
-    *d->pp_done = 0;
+    hal_set_bool(d->pp_done, 0);
   }
   switch (d->pp) {
     case PP_SET:
@@ -850,7 +854,7 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
     case PP_MOVING:
       // after the acknowledge, "target reached" answers this set-point;
       // while halted it means standing still, not at the target
-      if (!d->pp_started && !*d->pp_halt) {
+      if (!d->pp_started && !hal_get_bool(d->pp_halt)) {
         if (!(sw & SW_TARGET_REACHED)) {
           d->pp_started = 1;
         } else if (--d->pp_wait <= 0) {
@@ -864,16 +868,16 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
           }
         }
       }
-      if (d->pp == PP_MOVING && d->pp_started && !ack && (sw & SW_TARGET_REACHED) && !*d->pp_halt && d->pp_halt_wait == 0) {
+      if (d->pp == PP_MOVING && d->pp_started && !ack && (sw & SW_TARGET_REACHED) && !hal_get_bool(d->pp_halt) && d->pp_halt_wait == 0) {
         d->pp = PP_DONE;
-        *d->pp_done = 1;
+        hal_set_bool(d->pp_done, 1);
       }
       break;
   }
   if (d->pp == PP_SET || d->pp == PP_RETRY || d->pp == PP_MOVING) {
-    bits |= (d->pp_immediate ? CW_CHANGE_IMMEDIATELY : 0) | (d->pp_rel ? CW_RELATIVE : 0);
-    if (!*d->pp_halt) d->pp_ns += period;
-    if (d->pp_timeout_ms != 0 && d->pp_ns > (long long)d->pp_timeout_ms * 1000000LL) block(d, WHY_PP_TIMEOUT);
+    bits |= (opt_bool(d->pp_immediate) ? CW_CHANGE_IMMEDIATELY : 0) | (d->pp_rel ? CW_RELATIVE : 0);
+    if (!hal_get_bool(d->pp_halt)) d->pp_ns += period;
+    if (opt_uint(d->pp_timeout_ms) != 0 && d->pp_ns > (long long)opt_uint(d->pp_timeout_ms) * 1000000LL) block(d, WHY_PP_TIMEOUT);
   }
   if (d->blocked) {
     d->pp = PP_IDLE;
@@ -884,7 +888,10 @@ static uint16_t pp_move(cia402_t *d, int run, uint16_t sw, long period) {
 
 /// Changing modes on opmode-cmd. Returns the control word bits to add.
 static uint16_t mode_change(cia402_t *d, int run, int enable, long period) {
-  int want = *d->opmode_cmd == 0 ? d->mode : *d->opmode_cmd;
+  // the pin has 64 bits: a value that is no mode (also not after a cast to int) is a bad command
+  int64_t cmd = hal_get_sint(d->opmode_cmd);
+  int64_t want64 = cmd == 0 ? hal_get_sint(d->mode) : cmd;
+  int want = (want64 > 0 && want64 < 32) ? (int)want64 : -1;
 
   if (want <= 0 || want >= 32 || want == MODE_HOMING || !(d->allowed & MODE_BIT(want))) {
     // not a mode of the file: like any other bad command
@@ -919,12 +926,12 @@ static uint16_t mode_change(cia402_t *d, int run, int enable, long period) {
       if (d->mc_cycles > STATUS_CYCLES && standing_still(d)) {
         d->mc = MC_SWITCH;
         d->mc_ns = 0;
-      } else if (d->stop_timeout_ms != 0 && d->mc_ns > (long long)d->stop_timeout_ms * 1000000LL) {
+      } else if (opt_uint(d->stop_timeout_ms) != 0 && d->mc_ns > (long long)opt_uint(d->stop_timeout_ms) * 1000000LL) {
         block(d, WHY_WRONG_MODE);
       }
       break;
     case MC_SWITCH:
-      if (*d->opmode_display == d->mc_to) {
+      if (hal_get_sint(d->opmode_display) == d->mc_to) {
         d->active = d->mc_to;
         d->mc = MC_RUN;
         d->sync = 1;  // PP needs a new pp-start anyway
@@ -942,9 +949,9 @@ static uint16_t mode_change(cia402_t *d, int run, int enable, long period) {
 
 static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   uint8_t *pd = slave->master->process_data;
-  int enable = *d->enable;
+  int enable = hal_get_bool(d->enable);
   int enable_edge = enable && !d->enable_old;
-  int reset_edge = *d->fault_reset && !d->fault_reset_old;
+  int reset_edge = hal_get_bool(d->fault_reset) && !d->fault_reset_old;
   int faulted = d->state == ST_FAULT || d->state == ST_FAULT_REACTION_ACTIVE;
   int homing_now = d->hs != HS_IDLE;
 #ifdef EC_HAVE_DC_SYNC_FAILED
@@ -952,27 +959,27 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
 #else
   int dc_failed = 0;
 #endif
-  int mode_ok = !d->modes_display_o.mapped || *d->opmode_display == d->active || homing_now;
-  double cmd = (d->active == MODE_CSV || d->active == MODE_PV) ? *d->velocity_cmd
-                : d->active == MODE_PP                         ? *d->pp_target
-                                                               : *d->pos_cmd;
+  int mode_ok = !d->modes_display_o.mapped || hal_get_sint(d->opmode_display) == d->active || homing_now;
+  double cmd = (d->active == MODE_CSV || d->active == MODE_PV) ? hal_get_real(d->velocity_cmd)
+                : d->active == MODE_PP                         ? hal_get_real(d->pp_target)
+                                                               : hal_get_real(d->pos_cmd);
   int halt = 0;
   int run;
   uint16_t cw, hbits = 0, pbits = 0, mbits = 0;
 
   d->enable_old = enable;
-  d->fault_reset_old = *d->fault_reset;
+  d->fault_reset_old = hal_get_bool(d->fault_reset);
 
   // watchdog: the pin must change within watchdog-ms
-  if (d->watchdog_ms == 0 || *d->watchdog != d->watchdog_old) {
+  if (hal_get_uint(d->watchdog_ms) == 0 || hal_get_uint(d->watchdog) != d->watchdog_old) {
     d->watchdog_ns = 0;
-  } else if (d->watchdog_ns < (long long)d->watchdog_ms * 1000000LL) {
+  } else if (d->watchdog_ns < (long long)hal_get_uint(d->watchdog_ms) * 1000000LL) {
     d->watchdog_ns += period;
   }
-  d->watchdog_old = *d->watchdog;
+  d->watchdog_old = hal_get_uint(d->watchdog);
 
   // fault reset: on the fault-reset pin, or on enable with auto-fault-reset
-  if (faulted && (reset_edge || (enable_edge && d->auto_fault_reset))) {
+  if (faulted && (reset_edge || (enable_edge && hal_get_bool(d->auto_fault_reset)))) {
     d->reset_ns = FAULT_RESET_NS;
     d->reset_start = 1;
   }
@@ -982,7 +989,7 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
     d->blocked = 0;
     d->was_enabled = 0;
     d->enable_ns = 0;
-    *d->fault_reason = WHY_NONE;
+    hal_set_sint(d->fault_reason, WHY_NONE);
   } else if (!d->blocked) {
     if (!d->bus_ok) {
       block(d, WHY_BUS);
@@ -990,9 +997,9 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
       // the drive's SYNC0 does not follow the other slaves and the servo
       // thread: not run at all
       block(d, WHY_DC_SYNC);
-    } else if (d->watchdog_ms != 0 && d->watchdog_ns >= (long long)d->watchdog_ms * 1000000LL) {
+    } else if (hal_get_uint(d->watchdog_ms) != 0 && d->watchdog_ns >= (long long)hal_get_uint(d->watchdog_ms) * 1000000LL) {
       block(d, WHY_WATCHDOG);
-    } else if (!isfinite(cmd) || (d->pp_velocity != NULL && !isfinite(*d->pp_velocity))) {
+    } else if (!isfinite(cmd) || (d->pp_velocity != NULL && !isfinite(hal_get_real(d->pp_velocity)))) {
       // never clamped into a target: that would be a jump to the end of
       // the range
       block(d, WHY_BAD_COMMAND);
@@ -1002,7 +1009,7 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
       block(d, faulted ? WHY_DRIVE_FAULT : WHY_LEFT_ENABLED);
     } else if (d->state != ST_OPERATION_ENABLED) {
       d->enable_ns += period;
-      if (d->enable_timeout_ms != 0 && d->enable_ns > (long long)d->enable_timeout_ms * 1000000LL) {
+      if (hal_get_uint(d->enable_timeout_ms) != 0 && d->enable_ns > (long long)hal_get_uint(d->enable_timeout_ms) * 1000000LL) {
         block(d, mode_ok ? WHY_ENABLE_TIMEOUT : WHY_WRONG_MODE);
       }
     }
@@ -1013,13 +1020,13 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
     run = enable && !d->blocked;  // a mode change may have failed
   }
   if (d->can_home) {
-    uint16_t sw = *d->statusword;
+    uint16_t sw = hal_get_uint(d->statusword);
     hbits = homing(d, run && d->mc == MC_RUN, sw, period);
     run = enable && !d->blocked;  // homing may have shut it down
   }
 
   if (d->pp_start != NULL) {
-    pbits = pp_move(d, run && d->active == MODE_PP && d->mc == MC_RUN, *d->statusword, period);
+    pbits = pp_move(d, run && d->active == MODE_PP && d->mc == MC_RUN, hal_get_uint(d->statusword), period);
     run = enable && !d->blocked;  // a move may have timed out
   }
 
@@ -1030,7 +1037,7 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   if ((d->active == MODE_PV || d->active == MODE_PP) && !run && d->state == ST_OPERATION_ENABLED) {
     d->stop_ns += period;
     d->stop_cycles++;
-    halt = (d->stop_cycles <= STATUS_CYCLES || !standing_still(d)) && d->stop_ns <= (long long)d->stop_timeout_ms * 1000000LL;
+    halt = (d->stop_cycles <= STATUS_CYCLES || !standing_still(d)) && d->stop_ns <= (long long)opt_uint(d->stop_timeout_ms) * 1000000LL;
   } else {
     d->stop_ns = 0;
     d->stop_cycles = 0;
@@ -1067,13 +1074,13 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   if (d->reset_ns > 0) d->reset_ns -= period;
   if (run && d->state == ST_OPERATION_ENABLED) d->was_enabled = 1;
 
-  *d->drv_fault = enable && d->blocked;
-  *d->controlword = cw;
+  hal_set_bool(d->drv_fault, enable && d->blocked);
+  hal_set_uint(d->controlword, cw);
   EC_WRITE_U16(&pd[d->controlword_o.os], cw);
   if (d->modes_o.mapped) {
     int8_t m = (d->hs == HS_TO_HM || d->hs == HS_HOMING) ? MODE_HOMING : d->mc == MC_SWITCH ? d->mc_to : d->active;
     EC_WRITE_S8(&pd[d->modes_o.os], m);
-    *d->opmode = m;
+    hal_set_sint(d->opmode, m);
   }
 
   // Targets: follow the commands only in "Operation enabled", for this
@@ -1083,10 +1090,10 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   if (run && d->sync) {
     // after a mode change: start from the actual values, without a jump
     if (d->active == MODE_CSP) {
-      long long dist = (long long)clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale)) - from_drive(d, *d->drv_actual_position);
+      long long dist = (long long)clamp_s32(hal_get_real(d->pos_cmd) * scale_or_one(hal_get_real(d->pos_scale))) - from_drive(d, hal_get_sint(d->drv_actual_position));
       if (dist >= -SYNC_COUNTS && dist <= SYNC_COUNTS) d->sync = 0;
     } else if (d->active == MODE_CSV) {
-      if (clamp_s32(*d->velocity_cmd * scale_or_one(d->velo_scale)) == 0) d->sync = 0;
+      if (clamp_s32(hal_get_real(d->velocity_cmd) * scale_or_one(hal_get_real(d->velo_scale))) == 0) d->sync = 0;
     } else {
       d->sync = 0;
     }
@@ -1094,21 +1101,21 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   run = run && !d->sync;
   if (d->target_position_o.mapped) {
     if (run && d->active == MODE_CSP) {
-      *d->drv_target_position = to_drive(d, clamp_s32(*d->pos_cmd * scale_or_one(d->pos_scale)));
+      hal_set_sint(d->drv_target_position, to_drive(d, clamp_s32(hal_get_real(d->pos_cmd) * scale_or_one(hal_get_real(d->pos_scale)))));
     } else if (run && d->active == MODE_PP && d->pp != PP_IDLE) {
-      *d->drv_target_position = d->pp_set;
+      hal_set_sint(d->drv_target_position, d->pp_set);
     } else {
-      *d->drv_target_position = *d->drv_actual_position;
+      hal_set_sint(d->drv_target_position, hal_get_sint(d->drv_actual_position));
     }
-    EC_WRITE_S32(&pd[d->target_position_o.os], *d->drv_target_position);
+    EC_WRITE_S32(&pd[d->target_position_o.os], hal_get_sint(d->drv_target_position));
   }
   if (d->target_velocity_o.mapped) {
     if (run && (d->active == MODE_CSV || d->active == MODE_PV)) {
-      *d->drv_target_velocity = clamp_s32(*d->velocity_cmd * scale_or_one(d->velo_scale));
+      hal_set_sint(d->drv_target_velocity, clamp_s32(hal_get_real(d->velocity_cmd) * scale_or_one(hal_get_real(d->velo_scale))));
     } else {
-      *d->drv_target_velocity = 0;
+      hal_set_sint(d->drv_target_velocity, 0);
     }
-    EC_WRITE_S32(&pd[d->target_velocity_o.os], *d->drv_target_velocity);
+    EC_WRITE_S32(&pd[d->target_velocity_o.os], hal_get_sint(d->drv_target_velocity));
   }
 
   if (d->profile_velocity_o.mapped) {
@@ -1116,14 +1123,14 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   }
 
   if (d->at_speed != NULL) {
-    if (*d->drv_target_velocity != d->pv_target) {
-      d->pv_target = *d->drv_target_velocity;
+    if (hal_get_sint(d->drv_target_velocity) != d->pv_target) {
+      d->pv_target = hal_get_sint(d->drv_target_velocity);
       d->pv_wait = STATUS_CYCLES;
     } else if (d->pv_wait > 0) {
       d->pv_wait--;
     }
-    *d->at_speed = run && d->active == MODE_PV && d->pv_wait == 0 && (*d->statusword & SW_TARGET_REACHED) &&
-                   (!d->modes_display_o.mapped || *d->opmode_display == MODE_PV);
+    hal_set_bool(d->at_speed, run && d->active == MODE_PV && d->pv_wait == 0 && (hal_get_uint(d->statusword) & SW_TARGET_REACHED) &&
+                   (!d->modes_display_o.mapped || hal_get_sint(d->opmode_display) == MODE_PV));
   }
 }
 

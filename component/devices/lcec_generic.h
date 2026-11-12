@@ -29,12 +29,16 @@ typedef struct {
   char name[LCEC_CONF_STR_MAXLEN];
   hal_type_t type;
   LCEC_PDOENT_TYPE_T subType;
-  hal_float_t floatScale;
-  hal_float_t floatOffset;
+  rtapi_real floatScale;
+  rtapi_real floatOffset;
   uint8_t bitOffset;
   uint8_t bitLength;
   uint8_t invert;  // bit pins: the pin is the opposite of the bit
-  hal_pin_dir_t dir;
+  uint8_t extend;  // input counters: the pin counts on past the wrap, in 64 bits
+  uint8_t raw;     // a bit pattern: masked to the entry's width when written, not held at its top
+  uint8_t extend_have;     // extend_value is valid
+  int64_t extend_value;    // the counter so far, as the pin shows it
+  hal_pdir_t dir;
   void *pin[LCEC_CONF_GENERIC_MAX_SUBPINS];
   uint16_t pdo_idx;
   uint8_t pdo_sidx;

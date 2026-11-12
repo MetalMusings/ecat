@@ -42,10 +42,13 @@ void fake_set(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint32_t va
 void *fake_find(const char *name);
 
 /// A pin's or parameter's value, by its full name; it must exist.
-#define PIN_BIT(name) (*(hal_bit_t *)fake_pin(name))
-#define PIN_S32(name) (*(hal_s32_t *)fake_pin(name))
-#define PIN_U32(name) (*(hal_u32_t *)fake_pin(name))
-#define PIN_FLOAT(name) (*(hal_float_t *)fake_pin(name))
+/// The storage behind a pin is a 2.10 mapped value (bool, sint, uint or
+/// real, 64 bits at most): the devices read and write it with hal_get_*()
+/// and hal_set_*() on the pin's reference, the tests through these.
+#define PIN_BIT(name) (*(volatile rtapi_bool *)fake_pin(name))
+#define PIN_S32(name) (*(volatile rtapi_sint *)fake_pin(name))
+#define PIN_U32(name) (*(volatile rtapi_uint *)fake_pin(name))
+#define PIN_FLOAT(name) (*(volatile rtapi_real *)fake_pin(name))
 void *fake_pin(const char *name);
 
 /// Calls of lcec_generic_read and lcec_generic_write.

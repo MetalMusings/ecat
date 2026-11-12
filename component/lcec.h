@@ -186,42 +186,42 @@ typedef struct {
 } LCEC_CONF_FSOE_T;
 
 typedef struct lcec_master_data {
-  hal_u32_t *slaves_responding;
-  hal_bit_t *state_init;
-  hal_bit_t *state_preop;
-  hal_bit_t *state_safeop;
-  hal_bit_t *state_op;
-  hal_bit_t *link_up;
-  hal_bit_t *all_op;
-  hal_bit_t *dc_sync_failed;       ///< A slave's DC sync check timed out (userspace master only).
-  hal_bit_t *take_down;            ///< In: zero all outputs and take the slaves to PREOP (orderly stop).
-  hal_s32_t *guard_state;          ///< The stop guard: 0 the servo thread runs, 1 taking the slaves to PREOP, 2 done.
-  hal_u32_t *guard_cycles;         ///< Cycles the stop guard sent because the servo thread was late or stopped.
+  hal_uint_t slaves_responding;
+  hal_bool_t state_init;
+  hal_bool_t state_preop;
+  hal_bool_t state_safeop;
+  hal_bool_t state_op;
+  hal_bool_t link_up;
+  hal_bool_t all_op;
+  hal_bool_t dc_sync_failed;       ///< A slave's DC sync check timed out (userspace master only).
+  hal_bool_t take_down;            ///< In: zero all outputs and take the slaves to PREOP (orderly stop).
+  hal_sint_t guard_state;          ///< The stop guard: 0 the servo thread runs, 1 taking the slaves to PREOP, 2 done.
+  hal_uint_t guard_cycles;         ///< Cycles the stop guard sent because the servo thread was late or stopped.
 #ifdef RTAPI_TASK_PLL_SUPPORT
-  hal_s32_t *pll_err;
-  hal_s32_t *pll_out;
-  hal_u32_t pll_step;
-  hal_u32_t pll_max_err;
-  hal_u32_t *pll_reset_cnt;
-  hal_u32_t dc_phase_max_err;
-  hal_bit_t *dc_phased;            // DC phase synchronization status
-  hal_s32_t *send_offset;          ///< Time from nominal thread start to the app time sample before sending (ns).
-  hal_s32_t send_offset_max;        ///< Max of send_offset while DC is running; write 0 to reset.
-  hal_u32_t *shift_time;           ///< The globalShiftTime in use (ns).
-  hal_s32_t *turnaround_cycles;    ///< globalShiftTime="auto": 0 waiting or measuring, 2 or 3 cycles.
-  hal_u32_t auto_shift_margin;     ///< globalShiftTime="auto": ns kept between a frame and SYNC0.
-  hal_u32_t auto_shift_input_margin; ///< globalShiftTime="auto": ns from SYNC0 until the slaves' inputs are ready.
+  hal_sint_t pll_err;
+  hal_sint_t pll_out;
+  hal_uint_t pll_step;
+  hal_uint_t pll_max_err;
+  hal_uint_t pll_reset_cnt;
+  hal_uint_t dc_phase_max_err;
+  hal_bool_t dc_phased;            // DC phase synchronization status
+  hal_sint_t send_offset;          ///< Time from nominal thread start to the app time sample before sending (ns).
+  hal_sint_t send_offset_max;        ///< Max of send_offset while DC is running; write 0 to reset.
+  hal_uint_t shift_time;           ///< The globalShiftTime in use (ns).
+  hal_sint_t turnaround_cycles;    ///< globalShiftTime="auto": 0 waiting or measuring, 2 or 3 cycles.
+  hal_uint_t auto_shift_margin;     ///< globalShiftTime="auto": ns kept between a frame and SYNC0.
+  hal_uint_t auto_shift_input_margin; ///< globalShiftTime="auto": ns from SYNC0 until the slaves' inputs are ready.
 #endif
 } lcec_master_data_t;
 
 typedef struct lcec_slave_state {
-  hal_bit_t *online;        ///< Is device online?  Equivalent to the `.slave-online` HAL pin.
-  hal_bit_t *operational;   ///< Is device operational?  Equivalent to the `.slave-oper` HAL pin.
-  hal_bit_t *state_init;    ///< Is the device in state `INIT`?  Equivalant to the `.slave-state-init` HAL pin.
-  hal_bit_t *state_preop;   ///< Is the device in state `PREOP`?  Equivalant to the `.slave-state-preop` HAL pin.
-  hal_bit_t *state_safeop;  ///< Is the device in state `SAFEOP`?  Equivalant to the `.slave-state-safeop` HAL pin.
-  hal_bit_t *state_op;      ///< Is the device in state `OP`?  Equivalant to the `.slave-state-op` HAL pin.
-  hal_bit_t *dc_sync_failed;  ///< The slave's DC sync check timed out; SYNC0 runs on an unsynchronized clock.
+  hal_bool_t online;        ///< Is device online?  Equivalent to the `.slave-online` HAL pin.
+  hal_bool_t operational;   ///< Is device operational?  Equivalent to the `.slave-oper` HAL pin.
+  hal_bool_t state_init;    ///< Is the device in state `INIT`?  Equivalant to the `.slave-state-init` HAL pin.
+  hal_bool_t state_preop;   ///< Is the device in state `PREOP`?  Equivalant to the `.slave-state-preop` HAL pin.
+  hal_bool_t state_safeop;  ///< Is the device in state `SAFEOP`?  Equivalant to the `.slave-state-safeop` HAL pin.
+  hal_bool_t state_op;      ///< Is the device in state `OP`?  Equivalant to the `.slave-state-op` HAL pin.
+  hal_bool_t dc_sync_failed;  ///< The slave's DC sync check timed out; SYNC0 runs on an unsynchronized clock.
 } lcec_slave_state_t;
 
 typedef struct lcec_master {
@@ -369,16 +369,16 @@ void lcec_event(lcec_slave_t *slave, int type, uint32_t a, uint32_t b);
 
 /// @brief HAL pin description.
 typedef struct {
-  hal_type_t type;    ///< HAL type of this pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
-  hal_pin_dir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
+  hal_type_t type;    ///< HAL type of this pin (`HAL_BOOL`, `HAL_REAL`, `HAL_SINT`, or `HAL_UINT`).
+  hal_pdir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
   int offset;         ///< Offset for this pin's data in `hal_data`.
   const char *fmt;    ///< Format string for generating pin names via sprintf().
 } lcec_pindesc_t;
 
 /// @brief HAL pin description.
 typedef struct {
-  hal_type_t type;      ///< HAL type of this pin (`HAL_BIT`, `HAL_FLOAT`, `HAL_S32`, or `HAL_U32`).
-  hal_param_dir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
+  hal_type_t type;      ///< HAL type of this pin (`HAL_BOOL`, `HAL_REAL`, `HAL_SINT`, or `HAL_UINT`).
+  hal_pdir_t dir;  ///< Direction for this pin (`HAL_IN`, `HAL_OUT`, or `HAL_IO`).
   int offset;           ///< Offset for this pin's data in `hal_data`.
   const char *fmt;      ///< Format string for generating pin names via sprintf().
 } lcec_paramdesc_t;
@@ -437,9 +437,9 @@ int lcec_write_sdo8_modparam(lcec_slave_t *slave, uint16_t index, uint8_t subind
 int lcec_write_sdo16_modparam(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint16_t value, const char *mpname);
 int lcec_write_sdo32_modparam(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint32_t value, const char *mpname);
 
-int lcec_pin_newf(hal_type_t type, hal_pin_dir_t dir, void **data_ptr_addr, const char *fmt, ...);
+int lcec_pin_newf(hal_type_t type, hal_pdir_t dir, void **data_ptr_addr, const char *fmt, ...);
 int lcec_pin_newf_list(void *base, const lcec_pindesc_t *list, ...);
-int lcec_param_newf(hal_type_t type, hal_param_dir_t dir, void *data_addr, const char *fmt, ...);
+int lcec_param_newf(hal_type_t type, hal_pdir_t dir, void *data_addr, const char *fmt, ...);
 int lcec_param_newf_list(void *base, const lcec_paramdesc_t *list, ...);
 
 void copy_fsoe_data(lcec_slave_t *slave, unsigned int slave_offset, unsigned int master_offset) __attribute__((nonnull));

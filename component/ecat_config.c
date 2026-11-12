@@ -402,20 +402,34 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
 
   if (pin != NULL) {
     copy_str(pe->halPin, pin);
-    if (dt->bytes == 8 && !dt->is_float && (hal == NULL || strcmp(hal, "float"))) {
-      // LinuxCNC 2.9 has no 64-bit pins: a float carries it, exact up to 2^53
-      error(c, "%s: a %s entry needs hal-type float (HAL has no 64-bit pins)", object, dt->name);
-      return;
+    // 2.10 names: bool, real, sint, uint. The 2.9 spellings (bit, float, s32,
+    // u32) are the same types: files written for 2.9 keep working.
+    const char *hal_as_written = hal;
+    if (hal != NULL) {
+      if (!strcmp(hal, "bit")) hal = "bool";
+      else if (!strcmp(hal, "float")) hal = "real";
+      else if (!strcmp(hal, "s32")) hal = "sint";
+      else if (!strcmp(hal, "u32")) hal = "uint";
     }
-    if (hal != NULL && !strcmp(hal, "bit")) {
-      pe->halType = HAL_BIT;
+    if (dt->bytes == 8 && !dt->is_float) {
+      // LINT, ULINT: an integer pin of the same sign has all 64 bits; a real
+      // pin carries them up to 2^53
+      // (s32 and u32 meant 32-bit pins: not for these)
+      if (hal == NULL || !strcmp(hal_as_written, "s32") || !strcmp(hal_as_written, "u32") ||
+          (strcmp(hal, "real") && strcmp(hal, dt->is_signed ? "sint" : "uint"))) {
+        error(c, "%s: a %s entry takes hal-type %s (or real)", object, dt->name, dt->is_signed ? "sint" : "uint");
+        return;
+      }
+    }
+    if (hal != NULL && !strcmp(hal, "bool")) {
+      pe->halType = HAL_BOOL;
       pe->invert = get_bool(c, e, "invert", 0);
-    } else if (hal != NULL && !strcmp(hal, "s32")) {
-      pe->halType = HAL_S32;
-    } else if (hal != NULL && !strcmp(hal, "u32")) {
-      pe->halType = HAL_U32;
-    } else if (hal != NULL && !strcmp(hal, "float")) {
-      pe->halType = HAL_FLOAT;
+    } else if (hal != NULL && !strcmp(hal, "sint")) {
+      pe->halType = HAL_SINT;
+    } else if (hal != NULL && !strcmp(hal, "uint")) {
+      pe->halType = HAL_UINT;
+    } else if (hal != NULL && !strcmp(hal, "real")) {
+      pe->halType = HAL_REAL;
       if (dt->is_float) {
         pe->subType = dt->bytes == 8 ? lcecPdoEntTypeFloatDoubleIeee : lcecPdoEntTypeFloatIeee;
       } else {
@@ -424,8 +438,24 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
         pe->floatOffset = get_float(c, e, "offset", 0.0);
       }
     } else {
-      error(c, "%s: hal-type \"%s\" is not supported (bit, s32, u32, float)", object, hal ? hal : "");
+      error(c, "%s: hal-type \"%s\" is not supported (bool, sint, uint, real)", object, hal ? hal : "");
       return;
+    }
+    if (get_bool(c, e, "raw", 0)) {
+      // a bit pattern (digital outputs): too wide a value is cut, not held at the top
+      if (strcmp(hal, "uint") || bits > 32) {
+        error(c, "%s: raw is for an entry of up to 32 bits with hal-type uint", object);
+        return;
+      }
+      pe->raw = 1;
+    }
+    if (get_bool(c, e, "extend", 0)) {
+      // a counter that wraps at its width: the pin keeps counting, in 64 bits
+      if (output || strcmp(hal, "sint") || bits < 8 || bits > 32) {
+        error(c, "%s: extend is for an input entry of 8 to 32 bits with hal-type sint", object);
+        return;
+      }
+      pe->extend = 1;
     }
     (*pins)++;
   }
@@ -447,7 +477,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
       }
       if (!found) error(c, "%s: invert lists %s, which is not in split", object, name ? name : "");
     }
-  } else if (pin != NULL && invert != NULL && (hal == NULL || strcmp(hal, "bit"))) {
+  } else if (pin != NULL && invert != NULL && (hal == NULL || (strcmp(hal, "bit") && strcmp(hal, "bool")))) {
     error(c, "%s: invert is for bit pins", object);
   }
   if (split != NULL) {
@@ -472,7 +502,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
       ce->bitOffset = i;
       ce->bitLength = 1;
       ce->subType = lcecPdoEntTypeSimple;
-      ce->halType = HAL_BIT;
+      ce->halType = HAL_BOOL;
       ce->floatScale = 1.0;
       copy_str(ce->halPin, scalar(bit));
       ce->invert = inverted(c, invert, scalar(bit));

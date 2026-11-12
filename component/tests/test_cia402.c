@@ -1511,6 +1511,22 @@ static void test_opmode_cmd_not_in_the_file(void) {
   CHECK_EQ(PIN_S32("m.fault-reason"), 7);
 }
 
+static void test_opmode_cmd_is_64_bits(void) {
+  // 2^32 + 8 is no mode, though its low 32 bits are CSP's 8
+  mm_drive(8, BIT(3));
+  PIN_S32("m.opmode-cmd") = (1LL << 32) + 3;
+  PIN_BIT("m.enable") = 1;
+  mm_run(1);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("m.fault-reason"), 7);
+  PIN_S32("m.opmode-cmd") = -(1LL << 32) + 3;
+  PIN_BIT("m.enable") = 0;
+  mm_run(1);
+  PIN_BIT("m.enable") = 1;
+  mm_run(1);
+  CHECK_EQ(PIN_S32("m.fault-reason"), 7);
+}
+
 static void test_mode_change_while_disabled(void) {
   int i;
   mm_drive(8, BIT(3));
@@ -2097,7 +2113,7 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_pp_done_not_from_an_old_target_reached, test_pp_relative_and_a_new_move, test_pp_start_while_acknowledging, test_pp_halt,
     test_pp_halts_before_switching_off, test_pp_timeouts, test_pp_timeout_paused_while_halted,
     test_pp_start_waits_for_the_mode, test_pp_bad_command, test_opmode_cmd_only_with_more_modes,
-    test_opmode_cmd_not_in_the_file, test_mode_change_while_disabled, test_mode_change_halts_first, test_mode_change_waits_for_the_answer,
+    test_opmode_cmd_not_in_the_file, test_opmode_cmd_is_64_bits, test_mode_change_while_disabled, test_mode_change_halts_first, test_mode_change_waits_for_the_answer,
     test_mode_change_from_csp_holds_the_position, test_mode_change_into_csp_waits_for_the_command,
     test_mode_change_into_csv_waits_for_zero, test_mode_change_not_taken, test_mode_change_drive_does_not_stop,
     test_mode_change_asked_back, test_homing_halts_pv_first, test_homing_halts_pp_first,

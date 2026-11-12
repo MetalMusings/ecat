@@ -240,6 +240,15 @@ static void test_velocity(void) {
   PIN_U32("e.enc.velocity-window-ms") = 1000;
   for (i = 0; i < 300; i++) move(10);
   CHECK_NEAR(PIN_FLOAT("e.enc.velocity"), 100.0, 1e-9);
+  // the parameter has 64 bits: a huge one is the whole history, not what its low
+  // bits say (10 ms). A burst at the end tells them apart: 10 ms sees all of it
+  // (about 370), the history only a small part (about 110).
+  PIN_U32("e.enc.velocity-window-ms") = (1ULL << 32) + 10;
+  for (i = 0; i < 3; i++) move(100);
+  CHECK(PIN_FLOAT("e.enc.velocity") > 100.0 && PIN_FLOAT("e.enc.velocity") < 130.0);
+  PIN_U32("e.enc.velocity-window-ms") = ~0ULL;
+  move(10);
+  CHECK(PIN_FLOAT("e.enc.velocity") > 100.0 && PIN_FLOAT("e.enc.velocity") < 130.0);
 }
 
 static void test_velocity_from_the_start(void) {

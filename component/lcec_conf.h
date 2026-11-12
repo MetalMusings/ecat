@@ -136,9 +136,11 @@ typedef struct {
   uint8_t bitLength;
   LCEC_PDOENT_TYPE_T subType;
   hal_type_t halType;
-  hal_float_t floatScale;
-  hal_float_t floatOffset;
+  rtapi_real floatScale;
+  rtapi_real floatOffset;
   uint8_t invert;  // bit pins: the pin is the opposite of the bit
+  uint8_t extend;  // input counters of 8..32 bits: the pin counts on past the wrap, in 64 bits
+  uint8_t raw;     // uint pins: a bit pattern; a value is cut to the entry's width, not held at its top
   char halPin[LCEC_CONF_STR_MAXLEN];
 } LCEC_CONF_PDOENTRY_T;
 
@@ -148,8 +150,8 @@ typedef struct {
   uint8_t bitLength;
   LCEC_PDOENT_TYPE_T subType;
   hal_type_t halType;
-  hal_float_t floatScale;
-  hal_float_t floatOffset;
+  rtapi_real floatScale;
+  rtapi_real floatOffset;
   uint8_t invert;  // the pin is the opposite of the bit
   char halPin[LCEC_CONF_STR_MAXLEN];
 } LCEC_CONF_COMPLEXENTRY_T;
@@ -176,10 +178,10 @@ typedef struct {
 } LCEC_CONF_IDNCONF_T;
 
 typedef union {
-  hal_bit_t bit;
-  hal_s32_t s32;
-  hal_u32_t u32;
-  hal_float_t flt;
+  rtapi_bool bit;
+  rtapi_sint s32;
+  rtapi_uint u32;
+  rtapi_real flt;
   char str[LCEC_CONF_STR_MAXLEN];
 } LCEC_CONF_MODPARAM_VAL_T;
 

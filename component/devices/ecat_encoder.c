@@ -49,20 +49,20 @@ typedef struct {
 
 typedef struct {
   // in
-  hal_bit_t *reset;
-  hal_bit_t *index_enable;
-  hal_bit_t *latch_enable_pos;
-  hal_bit_t *latch_enable_neg;
+  hal_bool_t reset;
+  hal_bool_t index_enable;
+  hal_bool_t latch_enable_pos;
+  hal_bool_t latch_enable_neg;
   // out
-  hal_s32_t *counts;
-  hal_s32_t *raw_count;
-  hal_float_t *pos;
-  hal_float_t *velocity;
-  hal_float_t *latch_pos;
-  hal_bit_t *ok;
+  hal_sint_t counts;
+  hal_sint_t raw_count;
+  hal_real_t pos;
+  hal_real_t velocity;
+  hal_real_t latch_pos;
+  hal_bool_t ok;
   // parameters
-  hal_float_t pos_scale;
-  hal_u32_t velocity_window_ms;
+  hal_real_t pos_scale;
+  hal_uint_t velocity_window_ms;
 
   // process data
   obj_t latch_c_valid, latch_ext_valid, count, latch;
@@ -86,32 +86,32 @@ typedef struct {
 } encoders_t;
 
 static const lcec_pindesc_t pins[] = {
-    {HAL_BIT, HAL_IN, offsetof(channel_t, reset), "%s.%s.reset"},
-    {HAL_S32, HAL_OUT, offsetof(channel_t, counts), "%s.%s.counts"},
-    {HAL_S32, HAL_OUT, offsetof(channel_t, raw_count), "%s.%s.raw-count"},
-    {HAL_FLOAT, HAL_OUT, offsetof(channel_t, pos), "%s.%s.pos"},
-    {HAL_FLOAT, HAL_OUT, offsetof(channel_t, velocity), "%s.%s.velocity"},
-    {HAL_BIT, HAL_OUT, offsetof(channel_t, ok), "%s.%s.ok"},
+    {HAL_BOOL, HAL_IN, offsetof(channel_t, reset), "%s.%s.reset"},
+    {HAL_SINT, HAL_OUT, offsetof(channel_t, counts), "%s.%s.counts"},
+    {HAL_SINT, HAL_OUT, offsetof(channel_t, raw_count), "%s.%s.raw-count"},
+    {HAL_REAL, HAL_OUT, offsetof(channel_t, pos), "%s.%s.pos"},
+    {HAL_REAL, HAL_OUT, offsetof(channel_t, velocity), "%s.%s.velocity"},
+    {HAL_BOOL, HAL_OUT, offsetof(channel_t, ok), "%s.%s.ok"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 // only when latch C is mapped: a HAL file must not wait for an index that
 // can never come
 static const lcec_pindesc_t index_pins[] = {
-    {HAL_BIT, HAL_IO, offsetof(channel_t, index_enable), "%s.%s.index-enable"},
+    {HAL_BOOL, HAL_IO, offsetof(channel_t, index_enable), "%s.%s.index-enable"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_pindesc_t latch_pins[] = {
-    {HAL_BIT, HAL_IO, offsetof(channel_t, latch_enable_pos), "%s.%s.latch-enable-pos"},
-    {HAL_BIT, HAL_IO, offsetof(channel_t, latch_enable_neg), "%s.%s.latch-enable-neg"},
-    {HAL_FLOAT, HAL_OUT, offsetof(channel_t, latch_pos), "%s.%s.latch-pos"},
+    {HAL_BOOL, HAL_IO, offsetof(channel_t, latch_enable_pos), "%s.%s.latch-enable-pos"},
+    {HAL_BOOL, HAL_IO, offsetof(channel_t, latch_enable_neg), "%s.%s.latch-enable-neg"},
+    {HAL_REAL, HAL_OUT, offsetof(channel_t, latch_pos), "%s.%s.latch-pos"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_paramdesc_t params[] = {
-    {HAL_FLOAT, HAL_RW, offsetof(channel_t, pos_scale), "%s.%s.pos-scale"},
-    {HAL_U32, HAL_RW, offsetof(channel_t, velocity_window_ms), "%s.%s.velocity-window-ms"},
+    {HAL_REAL, HAL_RW, offsetof(channel_t, pos_scale), "%s.%s.pos-scale"},
+    {HAL_UINT, HAL_RW, offsetof(channel_t, velocity_window_ms), "%s.%s.velocity-window-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -168,8 +168,8 @@ static int channel_init(lcec_slave_t *slave, channel_t *c, uint16_t s, const cha
   }
   if ((err = lcec_param_newf_list(c, params, slave->name, name)) != 0) return err;
   // after the parameters are made, which zeroes them
-  c->pos_scale = 1.0;
-  c->velocity_window_ms = 10;
+  hal_set_real(c->pos_scale, 1.0);
+  hal_set_uint(c->velocity_window_ms, 10);
   return 0;
 }
 
@@ -224,22 +224,22 @@ static int32_t diff(uint32_t a, uint32_t b, int bits) {
   return bits == 16 ? (int16_t)(uint16_t)(a - b) : (int32_t)(a - b);
 }
 
-static double scale_or_one(hal_float_t s) { return (s > -1e-20 && s < 1e-20) ? 1.0 : s; }
+static double scale_or_one(double s) { return (s > -1e-20 && s < 1e-20) ? 1.0 : s; }
 
 static void channel_read(lcec_slave_t *slave, channel_t *c, long period) {
   uint8_t *pd = slave->master->process_data;
   int bus_ok = slave->master->domain_state.wc_state == EC_WC_COMPLETE && slave->state.operational;
-  double scale = scale_or_one(c->pos_scale);
+  double scale = scale_or_one(hal_get_real(c->pos_scale));
   uint32_t raw;
   int n, back;
 
-  *c->ok = bus_ok;
+  hal_set_bool(c->ok, bus_ok);
   if (!bus_ok) {
     // hold the position; continue from it when data comes back
     c->have = 0;
     c->armed_c = c->armed_ext = 0;
     c->filled = 0;
-    *c->velocity = 0.0;
+    hal_set_real(c->velocity, 0.0);
     return;
   }
 
@@ -250,17 +250,17 @@ static void channel_read(lcec_slave_t *slave, channel_t *c, long period) {
   }
   c->ext += diff(raw, c->last_raw, c->count.bits);
   c->last_raw = raw;
-  *c->raw_count = c->count.bits == 16 ? (int16_t)raw : (int32_t)raw;
+  hal_set_sint(c->raw_count, c->count.bits == 16 ? (int16_t)raw : (int32_t)raw);
 
-  if (*c->reset) c->ref = c->ext;
+  if (hal_get_bool(c->reset)) c->ref = c->ext;
 
   // index: latch C is armed while index-enable; at the index, position 0
-  if (c->index_enable != NULL && *c->index_enable) {
+  if (c->index_enable != NULL && hal_get_bool(c->index_enable)) {
     if (!get(pd, &c->latch_c_valid)) {
       c->armed_c = 1;
     } else if (c->armed_c) {
       c->ref = c->ext + diff(get(pd, &c->latch), raw, c->count.bits);
-      *c->index_enable = 0;
+      hal_set_bool(c->index_enable, 0);
       c->armed_c = 0;
     }
   } else {
@@ -268,32 +268,37 @@ static void channel_read(lcec_slave_t *slave, channel_t *c, long period) {
   }
 
   // external latch: the position at the edge
-  if (c->latch_enable_pos != NULL && (*c->latch_enable_pos || *c->latch_enable_neg)) {
+  if (c->latch_enable_pos != NULL && (hal_get_bool(c->latch_enable_pos) || hal_get_bool(c->latch_enable_neg))) {
     if (!get(pd, &c->latch_ext_valid)) {
       c->armed_ext = 1;
     } else if (c->armed_ext) {
       int64_t at = c->ext + diff(get(pd, &c->latch), raw, c->count.bits);
-      *c->latch_pos = (double)(at - c->ref) / scale;
-      *c->latch_enable_pos = 0;
-      *c->latch_enable_neg = 0;
+      hal_set_real(c->latch_pos, (double)(at - c->ref) / scale);
+      hal_set_bool(c->latch_enable_pos, 0);
+      hal_set_bool(c->latch_enable_neg, 0);
       c->armed_ext = 0;
     }
   } else {
     c->armed_ext = 0;
   }
 
-  *c->counts = (int32_t)(c->ext - c->ref);
-  *c->pos = (double)(c->ext - c->ref) / scale;
+  hal_set_sint(c->counts, (int32_t)(c->ext - c->ref));
+  hal_set_real(c->pos, (double)(c->ext - c->ref) / scale);
 
   // velocity over the window, from the samples before this one
-  n = period > 0 ? (int)((long long)c->velocity_window_ms * 1000000LL / period) : 0;
+  {
+    // the parameter has 64 bits: cap it before it is made into a count of samples
+    rtapi_uint ms = hal_get_uint(c->velocity_window_ms);
+    long long samples = period > 0 ? (long long)(ms > 1000000000ULL ? 1000000000ULL : ms) * 1000000LL / period : 0;
+    n = samples > HIST ? HIST : (int)samples;
+  }
   if (n < 1) n = 1;
   if (n > c->filled) n = c->filled;
   if (n > 0) {
     back = (c->head - (n - 1) + HIST) % HIST;
-    *c->velocity = (double)(c->ext - c->hist[back]) / scale / (n * (double)period * 1e-9);
+    hal_set_real(c->velocity, (double)(c->ext - c->hist[back]) / scale / (n * (double)period * 1e-9));
   } else {
-    *c->velocity = 0.0;
+    hal_set_real(c->velocity, 0.0);
   }
   c->head = (c->head + 1) % HIST;
   c->hist[c->head] = c->ext;
@@ -303,9 +308,9 @@ static void channel_read(lcec_slave_t *slave, channel_t *c, long period) {
 static void channel_write(lcec_slave_t *slave, channel_t *c) {
   uint8_t *pd = slave->master->process_data;
 
-  put(pd, &c->en_latch_c, c->index_enable != NULL && *c->index_enable);
-  put(pd, &c->en_latch_ext_pos, c->latch_enable_pos != NULL && *c->latch_enable_pos);
-  put(pd, &c->en_latch_ext_neg, c->latch_enable_neg != NULL && *c->latch_enable_neg);
+  put(pd, &c->en_latch_c, c->index_enable != NULL && hal_get_bool(c->index_enable));
+  put(pd, &c->en_latch_ext_pos, c->latch_enable_pos != NULL && hal_get_bool(c->latch_enable_pos));
+  put(pd, &c->en_latch_ext_neg, c->latch_enable_neg != NULL && hal_get_bool(c->latch_enable_neg));
   put(pd, &c->set_counter, 0);
   put(pd, &c->set_value, 0);
 }
