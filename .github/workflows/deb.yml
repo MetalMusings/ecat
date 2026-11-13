@@ -22,7 +22,7 @@ on:
     inputs:
       master_release:
         description: uspace-v* release of MetalMusings/ethercat with the master package (1.1 or later)
-        default: uspace-v1.1
+        default: uspace-v1.2
   push:
     tags: ['ecat-v*']
 
@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 env:
-  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.1' }}
+  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.2' }}
   LINUXCNC_COMMIT: b0e7b191b92066c771f2063714dc00736899ec95  # 2.10.0~pre2-436, 2026-11-12
 
 jobs:
