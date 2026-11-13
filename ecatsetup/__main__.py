@@ -362,6 +362,12 @@ def write_report(args):
     """Write the report file. Returns an exit code."""
     from . import report
     path = args.report or report.default_name()
+    try:
+        tool.slave_positions()
+    except tool.ToolError:
+        # the report reads the bus: offer a master (on a terminal, after a yes) first;
+        # declined, the report says that none answered
+        masterstart.offer_terminal()
     text = report.build(args.check, args.ini, seconds=args.seconds)
     with open(path, "w") as f:
         f.write(text)
