@@ -38,10 +38,10 @@ import subprocess
 import tempfile
 import time
 
-from . import config, netif, quirks
+from . import config, lcnc_env, netif, quirks
 
-HALRUN = os.environ.get("ECAT_HALRUN", "halrun")
-HALCMD = os.environ.get("ECAT_HALCMD", "halcmd")
+HALRUN = os.environ.get("ECAT_HALRUN") or lcnc_env.program("halrun")
+HALCMD = os.environ.get("ECAT_HALCMD") or lcnc_env.program("halcmd")
 KERNEL_MASTER = "/dev/EtherCAT0"
 TEST_LOCK = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
                          "ecatsetup", "test.lock")
@@ -205,7 +205,8 @@ def drives_enabled(cfg, upload):
 
 
 def halcmd(*args, check=True):
-    proc = subprocess.run([HALCMD] + [str(a) for a in args], capture_output=True, text=True)
+    proc = subprocess.run([HALCMD] + [str(a) for a in args], capture_output=True, text=True,
+                          env=lcnc_env.env())
     if check and proc.returncode != 0:
         raise TestError((proc.stderr or proc.stdout).strip() or "halcmd %s failed" % args[0])
     return proc.stdout
@@ -311,7 +312,8 @@ class TestRun:
         self.log = open(self.log_path, "w")
         self.proc = subprocess.Popen([HALRUN, "-I", "-f", hal_path], cwd=self.dir,
                                      stdin=subprocess.PIPE, stdout=self.log,
-                                     stderr=subprocess.STDOUT, text=True)
+                                     stderr=subprocess.STDOUT, text=True,
+                                     env=lcnc_env.env())
         begin = time.monotonic()
         end = begin + timeout
         told = 0
@@ -427,7 +429,8 @@ class TestRun:
         if not values:
             return
         text = "".join("setp %s %s\n" % (k, v) for k, v in values.items())
-        proc = subprocess.run([HALCMD, "-k", "-f"], input=text, capture_output=True, text=True)
+        proc = subprocess.run([HALCMD, "-k", "-f"], input=text, capture_output=True, text=True,
+                          env=lcnc_env.env())
         if proc.returncode != 0:
             raise TestError((proc.stderr or proc.stdout).strip() or "halcmd setp failed")
 

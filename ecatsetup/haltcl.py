@@ -19,6 +19,8 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 
+from . import lcnc_env
+
 TCLSH = os.environ.get("ECAT_TCLSH") or shutil.which("tclsh") or "tclsh"
 
 # halcmd's commands (halcmd -h); those that are Tcl commands already
@@ -140,7 +142,7 @@ def expand(path, ini_path=None, timeout=10):
             ini_arg = ini
         with open(prelude, "w") as f:
             f.write(PRELUDE % {"commands": " ".join(COMMANDS), "queries": " ".join(sorted(QUERIES))})
-        env = dict(os.environ)
+        env = dict(lcnc_env.env() or os.environ)
         if ini_path:
             env["INI_FILE_NAME"] = os.path.abspath(ini_path)
         env.setdefault("HALLIB_DIR", integrate.HALLIB)

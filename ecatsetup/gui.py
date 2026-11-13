@@ -36,7 +36,8 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, halpins, homing, integrate, masterstart,
+from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, halpins, homing, integrate, lcnc_env,
+               masterstart,
                netif, pindocs, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
@@ -4241,6 +4242,10 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.tabs.strip)
         lay.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
+        self.lcnc_label = QLabel("LinuxCNC: " + lcnc_env.describe())
+        self.lcnc_label.setToolTip("The LinuxCNC the tests (halrun) and the HAL files' library "
+                                   "come from; set `linuxcnc:` in %s" % settings.path())
+        self.statusBar().addPermanentWidget(self.lcnc_label)
         self._actions()
         # the start page when there is nothing yet, else where the work is
         if session.cfg is not None or session.bus:

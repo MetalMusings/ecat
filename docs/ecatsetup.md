@@ -28,6 +28,7 @@ Contents:
 - [Event log and report](#event-log-and-report): what to send when asking
   for help;
 - [Quirk files](#quirk-files): keeping what you chose for a device;
+- [Which LinuxCNC](#which-linuxcnc): the run-in-place tree it works with;
 - [Command line](#command-line).
 
 ## The window
@@ -618,6 +619,18 @@ The steps:
 8. The other axes the same way. Stopping the test takes the slaves to
    PREOP; `0x603F` should be 0 on every drive afterwards.
 
+
+## Which LinuxCNC
+
+The test mode runs `halrun`, and the HAL files' library (`LIB:` names) and
+`.tcl` HALFILEs need LinuxCNC's `hallib` and Tcl. With a LinuxCNC installed as a
+package these are found on the PATH. With a run-in-place build, EtherCAT Setup
+needs to know the tree: `linuxcnc: /home/you/src/linuxcnc-2.10` in
+`~/.config/ecatsetup/settings.yaml` (the installer of the run-in-place archive
+writes it), or `ECATSETUP_LINUXCNC=<tree>` in the environment, or just start it
+from a shell that has read the tree's `scripts/rip-environment`. EtherCAT Setup
+then reads that file itself for the programs it starts, so you need not. The
+status bar of the window says which LinuxCNC it uses.
 
 ## Starting the master
 

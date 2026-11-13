@@ -24,7 +24,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 
-from . import config
+from . import config, lcnc_env
 
 LOAD_FILE = "ethercat-load.hal"
 MAIN_FILE = "ethercat.hal"
@@ -149,7 +149,7 @@ def ini_joints(ini_path):
              ini_get(e, "JOINT_%d" % j, "TYPE", "LINEAR")) for j in range(n)]
 
 
-HALLIB = os.environ.get("HALLIB_DIR") or "/usr/share/linuxcnc/hallib"
+HALLIB = os.environ.get("HALLIB_DIR") or lcnc_env.hallib()
 
 
 def find_hal_file(d, name):
