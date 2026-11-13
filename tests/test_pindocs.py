@@ -27,6 +27,21 @@ class TestPinDocs(unittest.TestCase):
         self.assertIn("revolutions", pindocs.info("spindle.1.revs").text)
         self.assertIn("handshake", pindocs.info("joint.2.index-enable").text)
 
+    def test_every_known_pin_has_a_text(self):
+        def samples(pat):
+            out = [pat.replace("\\d+", "0").replace("\\d", "0")]
+            while any("(" in x for x in out):
+                new = []
+                for x in out:
+                    m = re.search(r"\(([^()]*)\)", x)
+                    new += [x[:m.start()] + alt + x[m.end():] for alt in m.group(1).split("|")] \
+                        if m else [x]
+                out = new
+            return [x.replace("\\.", ".") for x in out]
+        for pat, _, _ in integrate.KNOWN_PINS:
+            for pin in samples(pat):
+                self.assertIsNotNone(pindocs.info(pin), pin)
+
     def test_own_component_has_none(self):
         self.assertIsNone(pindocs.info("mycomp.0.in"))
         self.assertIsNone(pindocs.info("plasmac.breakaway-extra"))

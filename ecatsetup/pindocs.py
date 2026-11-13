@@ -120,6 +120,8 @@ PATTERNS = [
     (r"halui\.program\.is-idle", "halui", "TRUE while no program runs."),
     (r"halui\.mist\.on", "halui", "A pulse here starts mist."),
     (r"halui\.mist\.off", "halui", "A pulse here stops mist."),
+    (r"halui\.mist\.is-on", "halui", "TRUE while mist is on."),
+    (r"halui\.flood\.is-on", "halui", "TRUE while flood is on."),
     (r"halui\.flood\.on", "halui", "A pulse here starts flood."),
     (r"halui\.flood\.off", "halui", "A pulse here stops flood."),
     # plasmac

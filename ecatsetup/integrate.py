@@ -554,9 +554,10 @@ KNOWN_PINS = [
     (r"spindle\.\d+\.orient-fault", "sint", "in"),
     (r"spindle\.\d+\.(speed-in|revs)", "real", "in"),
     (r"(joint|spindle)\.\d+\.index-enable", "bool", "io"),
-    (r"halui\.(machine|estop|program|mist|flood)\.(on|off|activate|reset|run|pause|"
-     r"resume|step|stop)", "bool", "in"),
-    (r"halui\.machine\.is-on", "bool", "out"),
+    (r"halui\.(machine|mist|flood)\.(on|off)", "bool", "in"),
+    (r"halui\.estop\.(activate|reset)", "bool", "in"),
+    (r"halui\.program\.(run|pause|resume|step|stop)", "bool", "in"),
+    (r"halui\.(machine|mist|flood)\.is-on", "bool", "out"),
     (r"halui\.estop\.is-activated", "bool", "out"),
     (r"halui\.program\.is-(running|paused|idle)", "bool", "out"),
     # plasmac (QtPlasmaC's component): the torch and its sensors
