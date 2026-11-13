@@ -312,12 +312,15 @@ linuxcnc:
   nets:
   - signal: home-x
     pins: [lcec.0.E7000.in-1, joint.0.home-sw-in]
+  params:
+  - {pin: Encoder.enc.pos-scale, value: 4096.0}
 ```
 
 | Key | Meaning |
 |---|---|
 | `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0). Each joint and each slave once. |
 | `check-hal-at-start` | `true`: `ethercat-load.hal` runs the HAL check (`ecatsetup --check-hal`) when LinuxCNC starts ([writing into LinuxCNC](ecatsetup.md#checking-the-hal-files)). |
+| `params` | A list of `pin` (a parameter of a slave, of one of its axes or encoder channels, such as `Encoder.enc.pos-scale`) and `value` (a number; `true` or `false` for a bool parameter; a whole number, not negative for a `uint`), each parameter once. Written as `setp` lines in `ethercat.hal`. Not the master's parameters, and not the `pos-scale` of a drive a joint sets. |
 | `nets` | A list of `signal` (a HAL signal name: no blanks or `#`, at most 47 characters, each once) and `pins` (at least two; at least one of them a slave's pin; each pin in one net only, and not a pin a joint's connection takes). |
 
 ### Importing lcec XML files

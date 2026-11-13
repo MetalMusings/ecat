@@ -706,6 +706,33 @@ def set_net(cfg, pin, others, signal=None):
             cfg.pop("linuxcnc", None)
 
 
+def params(cfg):
+    """The configuration's parameter values: [{"pin", "value"}]."""
+    return ((cfg or {}).get("linuxcnc") or {}).get("params") or []
+
+
+def set_param(cfg, pin, value):
+    """Give a slave's parameter a value (None: back to the component's default)."""
+    lc = cfg.setdefault("linuxcnc", {})
+    ps = [e for e in lc.get("params") or [] if e.get("pin") != pin]
+    if value is not None:
+        ps.append({"pin": pin, "value": value})
+    ps.sort(key=lambda e: e.get("pin") or "")
+    if ps:
+        lc["params"] = ps
+    else:
+        lc.pop("params", None)
+        if not lc:
+            cfg.pop("linuxcnc", None)
+
+
+def param_text(value):
+    """A parameter value as HAL's setp takes it."""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    return repr(float(value)) if isinstance(value, float) else str(value)
+
+
 def joint_pins(cfg):
     """{pin: joint} of the pins a joint's connection takes."""
     out = {}
@@ -1239,6 +1266,16 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             else:
                 body.append("net %s %s => %s" % (sig, jpin, dpin))
         body.append("")
+    prm = params(cfg)
+    if prm:
+        body.append("# parameters")
+        user_setp = setp_values(hal_files, ini_path)
+        for e in prm:
+            body.append("setp %s %s" % (e["pin"], param_text(e["value"])))
+            if e["pin"] in user_setp:
+                p.notes.append("%s is set in your HAL files too (to %s); ethercat.hal is read "
+                               "last and wins: take it out there" % (e["pin"], user_setp[e["pin"]]))
+        body.append("")
     if io:
         body.append("# inputs and outputs")
     own = slave_pins(cfg)
@@ -1370,7 +1407,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             p.notes.append("%s still simulates %s: connect the real ones (Joints, Inputs and "
                            "outputs), then take it out of the INI file" % (
                                os.path.basename(path), what))
-    if not managed and not io:
+    if not managed and not io and not prm:
         p.notes.append("no joint or pin is connected here: ethercat.hal only adds the "
                        "component's functions; your HAL files keep their connections")
     for j, _, _ in ini_joints(ini_path) if managed else []:

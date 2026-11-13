@@ -1009,3 +1009,59 @@ class TestSteps(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestParameters(TestWindow):
+    """The Parameters card: values for the slaves' parameters."""
+
+    def encoder_window(self):
+        from ecatsetup import integrate  # noqa: F401
+        w = self.window()
+        w.session.cfg["slaves"][0]["encoders"] = [{"name": "enc", "index": "0x6010"}]
+        w.refresh()
+        return w
+
+    def cell(self, page, pin, col=3):
+        for r in range(page.params.rowCount()):
+            if page.params.item(r, 0).text() == pin:
+                return page.params.item(r, col)
+        self.fail("%s is not in the table" % pin)
+
+    def test_hidden_without_parameters_and_listed_with_them(self):
+        w = self.window()
+        self.assertTrue(w.hal_page.params_card.isHidden())
+        w = self.encoder_window()
+        page = w.hal_page
+        self.assertFalse(page.params_card.isHidden())
+        slave = w.session.cfg["slaves"][0]["name"]
+        pin = "%s.enc.pos-scale" % slave
+        self.assertEqual(self.cell(page, pin, 2).text(), "1.0")
+        self.assertEqual(self.cell(page, pin).text(), "")
+
+    def test_a_value_is_stored_and_empty_removes_it(self):
+        from ecatsetup import integrate
+        w = self.encoder_window()
+        page, cfg = w.hal_page, w.session.cfg
+        pin = "%s.enc.pos-scale" % cfg["slaves"][0]["name"]
+        self.cell(page, pin).setText("-4096")
+        gui.QApplication.processEvents()
+        gui.QApplication.processEvents()
+        self.assertEqual(integrate.params(cfg), [{"pin": pin, "value": -4096.0}])
+        self.assertEqual(self.cell(page, pin).text(), "-4096.0")
+        self.cell(page, pin).setText("")
+        gui.QApplication.processEvents()
+        gui.QApplication.processEvents()
+        self.assertEqual(integrate.params(cfg), [])
+
+    def test_a_wrong_value_is_refused_and_said(self):
+        from ecatsetup import integrate
+        w = self.encoder_window()
+        page, cfg = w.hal_page, w.session.cfg
+        slave = cfg["slaves"][0]["name"]
+        for pin, text in (("%s.enc.pos-scale" % slave, "abc"), ("%s.enc.pos-scale" % slave, "0"),
+                          ("%s.enc.velocity-window-ms" % slave, "-5")):
+            self.cell(page, pin).setText(text)
+            gui.QApplication.processEvents()
+            self.assertEqual(integrate.params(cfg), [], text)
+            self.assertIn(pin, page.params_text.text())
+            self.assertEqual(self.cell(page, pin).text(), "", text)

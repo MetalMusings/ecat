@@ -74,6 +74,15 @@ ENCODER_LATCH = [("latch-enable-pos", "bool", "io"), ("latch-enable-neg", "bool"
                  ("latch-pos", "real", "out")]
 FUNCTIONS = ["ecat.read-all", "ecat.write-all"]
 
+# Defaults of the parameters a user may set (docs/component.md); a parameter
+# not listed has no default shown.
+DEFAULTS = {
+    "pos-scale": 1.0, "velo-scale": 1.0, "auto-fault-reset": True,
+    "enable-timeout-ms": 2000, "watchdog-ms": 0, "stop-timeout-ms": 10000,
+    "pp-timeout-ms": 60000, "pp-immediate": False, "home-timeout-ms": 60000,
+    "velocity-window-ms": 10,
+}
+
 
 def _mapped(slave):
     out = set()
@@ -147,3 +156,23 @@ def pins(cfg):
             if {(index, 0x02), (index, 0x12)} <= mapped and mapped & {(o, 0x02), (o, 0x04)}:
                 add(prefix, ENCODER_LATCH)
     return out
+
+
+def parameters(cfg):
+    """{name: (HAL type, default)} of the parameters of the slaves, their axes
+    and encoder channels that the configuration can set (`linuxcnc.params`):
+    not the master's, and not the scale of a drive that a joint sets."""
+    from . import integrate
+    scaled = {"%s.pos-scale" % j.get("slave") for j in integrate.joints(cfg)}
+    out = {}
+    for pin, (htype, d) in pins(cfg).items():
+        if d == "rw" and not pin.startswith("ecat.") and pin not in scaled:
+            out[pin] = (htype, DEFAULTS.get(pin.rsplit(".", 1)[1]))
+    return out
+
+
+def encoder_scales(cfg):
+    """The `pos-scale` parameters of the encoder channels."""
+    return [p for p in parameters(cfg) if p.endswith(".pos-scale") and
+            any(p == "%s.%s.pos-scale" % (s.get("name"), ch.get("name"))
+                for s in (cfg or {}).get("slaves") or [] for ch in s.get("encoders") or [])]

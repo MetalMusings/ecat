@@ -305,10 +305,11 @@ has not been tried at a machine yet.
    is extended to 64 bits either way. The DC settings and the way the
    terminal reaches OP come from the ESI file too: if the slave does not
    reach OP, the test mode names what it did not accept.
-3. **Set the scale.** The encoder's `pos` is in units of the scale:
-   `setp <slave>.enc.pos-scale <counts per revolution>` in a HAL file of
-   your own (a quadrature encoder gives four counts per line: 4096 for
-   a 1024-line encoder), so that one turn of the spindle is 1.0.
+3. **Set the scale.** The encoder's `pos` is in units of the scale, so
+   that one turn of the spindle is 1.0. On *HAL & LinuxCNC*, the
+   [*Parameters*](#parameters) card has `<slave>.enc.pos-scale`: type the
+   counts per revolution (a quadrature encoder gives four counts per
+   line: 4096 for a 1024-line encoder). It is written into `ethercat.hal`.
 4. **Connect the two pins.** On *HAL & LinuxCNC*, *Still to connect* lists
    `spindle.0.revs` and `spindle.0.index-enable`, simulated while the
    configuration still has LinuxCNC's spindle simulation
@@ -799,6 +800,31 @@ cutter's configuration (three drives, one input for X's home switch):
 the loops and the E-stop loop-back replaced, Z's shared simulated switch
 left for its own input, `core_sim.hal` and `simulated_home.hal` copied
 in, and the HAL check found nothing.
+
+### Parameters
+
+The *Parameters* card on the *HAL & LinuxCNC* page lists the parameters of
+the slaves, their axes and encoder channels with their type, the
+component's default and a *Value* you can type: `pos-scale` and
+`velocity-window-ms` of an encoder channel, `enable-timeout-ms`,
+`auto-fault-reset` and the PV and PP timeouts of a drive, and so on (the
+[component's](component.md) tables say what each does). Empty keeps the
+default. The value is kept in `linuxcnc.params` of `ethercat.yaml` and
+written as a `setp` line in `ethercat.hal` under `# parameters`:
+
+```
+# parameters
+setp Encoder.enc.pos-scale 4096.0
+```
+
+Not listed: the master's parameters (`ecat.0.*`), and a drive's
+`pos-scale` that a joint sets (the *Joints* card). A parameter that your
+own HAL files set too gets a note when the files are written:
+`ethercat.hal` is read last and wins, so take it out of your file.
+
+An encoder's `pos-scale` is its counts per revolution: four counts per
+line for a quadrature encoder, so 1024 lines give 4096. A minus sign in
+front of the value counts the other way.
 
 ### Inputs and outputs
 

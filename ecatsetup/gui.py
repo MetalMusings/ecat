@@ -3461,6 +3461,16 @@ class HalPage(QWidget):
         self.hal_uses = {}
         lay.addWidget(pins)
 
+        # values for the parameters of the slaves (setp lines in ethercat.hal)
+        self.params_card = Card("Parameters",
+                                "Values for the slaves' parameters, written as setp lines in "
+                                "ethercat.hal. Leave the value empty to keep the default.")
+        self.params = table(["Parameter", "Type", "Default", "Value"])
+        self.params.itemChanged.connect(self.param_edited)
+        self.params_card.add(self.params)
+        self.params_text = self.params_card.add(label("", "hint", wrap=True))
+        lay.addWidget(self.params_card)
+
         # the HAL files against the configuration
         self.check_card = Card("HAL check", "Your HAL files, ethercat-load.hal and ethercat.hal "
                                             "against this configuration, as LinuxCNC would read "
@@ -3537,6 +3547,7 @@ class HalPage(QWidget):
         s = self.win.session
         self.yaml.setPlainText(s.dumps())
         self.show_pins()
+        self.show_params()
         if self.win.tabs.currentWidget() is self:
             self.show_joints()
             self.show_wiring()
@@ -3546,6 +3557,82 @@ class HalPage(QWidget):
         self.check_at_start.setChecked(integrate.check_at_start(s.cfg))
         self.check_at_start.setEnabled(s.cfg is not None)
         self.check_at_start.blockSignals(False)
+
+    @staticmethod
+    def param_shown(value, htype):
+        if value is None:
+            return ""
+        if htype == "bool":
+            return "true" if value else "false"
+        return str(value)
+
+    def show_params(self):
+        cfg = self.win.session.cfg
+        known = halpins.parameters(cfg) if cfg is not None else {}
+        values = {e.get("pin"): e.get("value") for e in integrate.params(cfg)} \
+            if cfg is not None else {}
+        self.params.blockSignals(True)
+        self.params.setRowCount(0)
+        for pin in sorted(known):
+            htype, default = known[pin]
+            r = self.params.rowCount()
+            self.params.insertRow(r)
+            self.params.setItem(r, 0, item(pin, font=mono()))
+            self.params.setItem(r, 1, item(htype))
+            self.params.setItem(r, 2, item(self.param_shown(default, htype)))
+            self.params.setItem(r, 3, item(self.param_shown(values.get(pin), htype),
+                                           editable=True, font=mono()))
+        self.params.blockSignals(False)
+        fit_table(self.params, minimum=1)
+        self.params_card.setVisible(bool(known))
+
+    def param_edited(self, it):
+        cfg = self.win.session.cfg
+        if cfg is None or it.column() != 3:
+            return
+        pin = self.params.item(it.row(), 0).text()
+        htype = halpins.parameters(cfg).get(pin, (None,))[0]
+        text = it.text().strip()
+        try:
+            value = self.parse_param(text, htype)
+            if value is not None and pin in halpins.encoder_scales(cfg) and value == 0:
+                raise ValueError("the scale must not be 0")
+        except ValueError as e:
+            self.params_text.setText("%s: %s" % (pin, e))
+            QTimer.singleShot(0, self.show_params)
+            return
+        self.params_text.setText("")
+        if value == next((e.get("value") for e in integrate.params(cfg)
+                          if e.get("pin") == pin), None):
+            return
+        integrate.set_param(cfg, pin, value)
+        QTimer.singleShot(0, self.win.changed)
+
+    @staticmethod
+    def parse_param(text, htype):
+        """The value a parameter's cell says (None: empty, the default); ValueError
+        with the reason when it does not fit the type."""
+        if text == "":
+            return None
+        if htype == "bool":
+            t = text.lower()
+            if t in ("true", "1", "yes", "on"):
+                return True
+            if t in ("false", "0", "no", "off"):
+                return False
+            raise ValueError("true or false")
+        try:
+            if htype == "real":
+                v = float(text)
+                if v != v or abs(v) == float("inf"):
+                    raise ValueError
+                return v
+            v = int(text, 0)
+        except ValueError:
+            raise ValueError("a number" if htype == "real" else "a whole number") from None
+        if htype == "uint" and v < 0:
+            raise ValueError("a whole number, not negative")
+        return v
 
     def check_at_start_edited(self, on):
         cfg = self.win.session.cfg

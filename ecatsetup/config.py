@@ -484,7 +484,7 @@ def check(cfg):
                     if (i + a * AXIS_OFFSET, sub) not in set_objects:
                         err("%s: cia402 mode pp needs the setting %s"
                             % (where, obj(i + a * AXIS_OFFSET, sub)))
-    return errors + check_joints(cfg) + check_nets(cfg)
+    return errors + check_joints(cfg) + check_nets(cfg) + check_params(cfg)
 
 
 def check_joints(cfg):
@@ -586,4 +586,43 @@ def check_nets(cfg):
             errors.append("%s: pins of different HAL types (%s)" % (where, ", ".join(sorted(types))))
         if len(writers) > 1:
             errors.append("%s: more than one pin writes it (%s)" % (where, ", ".join(writers)))
+    return errors
+
+
+def check_params(cfg):
+    """Errors in linuxcnc.params: parameters of the slaves given a value."""
+    from . import halpins
+    lc = cfg.get("linuxcnc")
+    if not isinstance(lc, dict) or lc.get("params") is None:
+        return []
+    ps = lc["params"]
+    if not isinstance(ps, list):
+        return ["linuxcnc.params: must be a list"]
+    known = halpins.parameters(cfg)
+    errors, seen = [], set()
+    for e in ps:
+        if not isinstance(e, dict):
+            errors.append("linuxcnc.params: each entry must be a mapping with pin and value")
+            continue
+        pin, v = e.get("pin"), e.get("value")
+        where = "linuxcnc.params: %s" % (pin,)
+        if pin not in known:
+            errors.append("%s: not a parameter of a slave (the master's and a joint's "
+                          "pos-scale are not set here)" % where)
+            continue
+        if pin in seen:
+            errors.append("%s: listed twice" % where)
+        seen.add(pin)
+        htype = known[pin][0]
+        if htype == "bool":
+            if not isinstance(v, bool):
+                errors.append("%s: must be true or false" % where)
+        elif htype == "real":
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v \
+                    or abs(v) == float("inf"):
+                errors.append("%s: must be a number" % where)
+            elif pin.endswith(".pos-scale") and v == 0:
+                errors.append("%s: the scale must not be 0" % where)
+        elif not isinstance(v, int) or isinstance(v, bool) or (htype == "uint" and v < 0):
+            errors.append("%s: must be a%s whole number" % (where, " positive" if htype == "uint" else ""))
     return errors

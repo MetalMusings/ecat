@@ -776,3 +776,66 @@ class TestJointChecks(Folder):
         self.write("machine.ini", INI.replace("SERVO_PERIOD = 1000000\n", ""))
         self.assertTrue(any("SERVO_PERIOD is not set" in n
                             for n in integrate.joint_checks(self.ini, c)))
+
+
+class TestParams(Folder):
+    """linuxcnc.params: slave parameters given a value in ethercat.hal."""
+
+    def cfg(self):
+        c = cfg()
+        integrate.set_joint(c, 0, "x", 100.0)
+        c["slaves"][-1]["encoders"] = [{"name": "enc", "index": "0x6010"}]
+        return c
+
+    def test_offered_and_checked(self):
+        from ecatsetup import halpins
+        c = self.cfg()
+        known = halpins.parameters(c)
+        self.assertEqual(known["y.enc.pos-scale"], ("real", 1.0))
+        self.assertEqual(known["y.enc.velocity-window-ms"], ("uint", 10))
+        self.assertEqual(known["x.auto-fault-reset"], ("bool", True))
+        # a joint sets its drive's pos-scale; the master's parameters are not offered
+        self.assertNotIn("x.pos-scale", known)
+        self.assertFalse([k for k in known if k.startswith("ecat.")])
+        self.assertEqual(halpins.encoder_scales(c), ["y.enc.pos-scale"])
+        for bad in ({"pin": "x.pos-scale", "value": 5.0},
+                    {"pin": "ecat.0.pll-step", "value": 5},
+                    {"pin": "y.enc.pos-scale", "value": 0},
+                    {"pin": "y.enc.pos-scale", "value": "4096"},
+                    {"pin": "y.enc.velocity-window-ms", "value": -1},
+                    {"pin": "x.auto-fault-reset", "value": 1}):
+            c2 = self.cfg()
+            c2.setdefault("linuxcnc", {})["params"] = [bad]
+            self.assertTrue([e for e in config.check(c2) if "linuxcnc.params" in e], bad)
+        integrate.set_param(c, "y.enc.pos-scale", -4096.0)
+        integrate.set_param(c, "x.auto-fault-reset", False)
+        integrate.set_param(c, "y.enc.velocity-window-ms", 20)
+        # (the made-up encoder has no counter mapped: that error is not ours)
+        self.assertEqual([e for e in config.check(c) if "linuxcnc.params" in e], [])
+
+    def test_written_into_ethercat_hal_and_a_clash_is_said(self):
+        c = self.cfg()
+        integrate.set_param(c, "y.enc.pos-scale", 4096.0)
+        integrate.set_param(c, "x.auto-fault-reset", False)
+        integrate.set_param(c, "y.enc.velocity-window-ms", 20)
+        self.write("machine.hal", MACHINE + "setp y.enc.pos-scale 1000\n")
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        main = next(ch.new for ch in p.changes if ch.name == "ethercat.hal")
+        for line in ("setp y.enc.pos-scale 4096.0", "setp x.auto-fault-reset FALSE",
+                     "setp y.enc.velocity-window-ms 20"):
+            self.assertIn("\n" + line + "\n", main)
+        self.assertGreater(main.index("# parameters"), main.index("setp x.pos-scale 100.0"))
+        self.assertTrue([n for n in p.notes if "y.enc.pos-scale is set in your HAL files" in n])
+        self.assertFalse([n for n in p.notes if "x.auto-fault-reset is set" in n])
+
+    def test_removed_again(self):
+        c = self.cfg()
+        integrate.set_param(c, "y.enc.pos-scale", 4096.0)
+        self.assertEqual(integrate.params(c), [{"pin": "y.enc.pos-scale", "value": 4096.0}])
+        integrate.set_param(c, "y.enc.pos-scale", None)
+        self.assertEqual(integrate.params(c), [])
+        self.assertEqual([j["joint"] for j in c["linuxcnc"]["joints"]], [0])
+        p = integrate.plan(self.ini, c)
+        main = next(ch.new for ch in p.changes if ch.name == "ethercat.hal")
+        self.assertNotIn("# parameters", main)
