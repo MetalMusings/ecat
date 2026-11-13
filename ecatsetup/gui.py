@@ -182,7 +182,11 @@ def pill(text="", kind="grey"):
     lab = QLabel(text)
     lab.setProperty("pill", kind)
     lab.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-    lab.setVisible(bool(text))
+    # an empty pill is hidden; one with text is left alone: setVisible(True) on a
+    # label that has no parent yet shows it as a small window of its own, until it
+    # is put into a layout
+    if not text:
+        lab.hide()
     return lab
 
 

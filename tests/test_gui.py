@@ -225,7 +225,9 @@ except ImportError:  # pragma: no cover
 
 
 @unittest.skipIf(gui is None, "PyQt5 is not installed")
-class TestWindow(BusTest):
+class WindowBase(BusTest):
+    """A window against the fake bus; the tests are in the classes that use it."""
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -250,6 +252,9 @@ class TestWindow(BusTest):
             out.append((it.data(gui.Qt.UserRole), texts))
         return out
 
+
+
+class TestWindow(WindowBase):
     def test_start_page(self):
         from ecatsetup import tasks
         w = self.window()
@@ -1011,7 +1016,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestParameters(TestWindow):
+class TestParameters(WindowBase):
     """The Parameters card: values for the slaves' parameters."""
 
     def encoder_window(self):
@@ -1065,3 +1070,35 @@ class TestParameters(TestWindow):
             self.assertEqual(integrate.params(cfg), [], text)
             self.assertIn(pin, page.params_text.text())
             self.assertEqual(self.cell(page, pin).text(), "", text)
+
+
+class TestNoStrayWindows(WindowBase):
+    """A label with no parent that is shown becomes a small empty window of its own for as
+    long as it takes to put it into a layout: it showed as a flash on the screen."""
+
+    def test_a_pill_without_a_parent_is_not_shown(self):
+        self.assertFalse(gui.pill("PREOP", "green").isVisible())
+        self.assertFalse(gui.pill("", "green").isVisible())
+
+    def test_no_window_but_the_main_one_is_shown(self):
+        from PyQt5.QtCore import QEvent, QObject
+        shown = []
+
+        class Watch(QObject):
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Show and hasattr(obj, "isWindow") and obj.isWindow():
+                    shown.append("%s %r" % (type(obj).__name__, getattr(obj, "text", lambda: "")()))
+                return False
+        watch = Watch()
+        self.app.installEventFilter(watch)
+        self.addCleanup(lambda: self.app.removeEventFilter(watch))
+        w = self.window()
+        w.show()
+        for page in (w.start_page, w.bus_page, w.trouble_page, w.test_page, w.hal_page):
+            w.tabs.setCurrentWidget(page)
+            self.app.processEvents()
+        w.refresh()
+        self.app.processEvents()
+        self.assertEqual([x for x in shown if not x.startswith("MainWindow")], [])
+
+
