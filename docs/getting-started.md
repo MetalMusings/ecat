@@ -42,15 +42,45 @@ gone at the next boot).
 
 ## Install
 
-For Debian 12 or 13 with LinuxCNC 2.10 or newer (2.9: use ecat 0.11),
-download the two packages from the releases ([README](../README.md#install))
-and:
+ecat needs LinuxCNC 2.10 (2.9: use ecat 0.11) and the userspace master
+`linuxcnc-ethercat-uspace` (1.1 or newer, from the
+[releases](https://github.com/MetalMusings/ethercat/releases) of the master).
+Both are for Debian 12 or 13. Install the master first:
 
 ```
-sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb ./linuxcnc-ecat_*_amd64.deb
+sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb
 ```
 
-To remove them again:
+Then ecat, one of two ways ([README](../README.md#install) says where to
+download):
+
+**LinuxCNC 2.10 built run-in-place** (there are no 2.10 packages yet). Unpack
+`ecat-rip-<version>-debian13.tar.gz` (or `-debian12`) and run its installer:
+
+```
+tar xzf ecat-rip-*-debian13.tar.gz
+cd ecat-rip-*-debian13
+./install
+```
+
+`./install` finds your run-in-place tree (`~/src/linuxcnc*`, or `--rip DIR`),
+puts `ecat.so` in its `rtlib`, and puts `ecatsetup` in `~/.local/bin` (it reads the
+tree's `rip-environment` itself for what it starts, so you do not have to).
+`ecat.so` is built against one LinuxCNC, named in the release notes and in
+`BUILD-INFO`. The installer compares the HAL headers of your tree with those it
+was built against and **refuses to install if they differ**, since a different
+HAL API could crash a machine; it then says what to do: use the LinuxCNC of
+the release, or build ecat for yours
+([Developing ecat](development.md#build-and-test)). It never touches your
+configurations. `./install --uninstall` takes it away again.
+
+**LinuxCNC 2.10 as a package.** Install the package:
+
+```
+sudo apt install ./linuxcnc-ecat_*_amd64.deb
+```
+
+To remove ecat again: `./install --uninstall` (run-in-place), or
 
 ```
 sudo apt remove linuxcnc-ecat linuxcnc-ethercat-uspace

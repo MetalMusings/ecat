@@ -1,0 +1,144 @@
+#!/bin/bash
+# Installs ecat into a run-in-place LinuxCNC 2.10 and EtherCAT Setup for the
+# user. Part of the archive ecat-rip-<version>-<distro>.tar.gz; run it from
+# the unpacked folder:
+#
+#   ./install [--rip DIR] [--prefix DIR]    install
+#   ./install --uninstall                   take it away again
+#
+# --rip     the run-in-place tree (the folder with scripts/rip-environment);
+#           found from $EMC2_HOME or ~/src/linuxcnc* when not given
+# --prefix  where EtherCAT Setup goes (default ~/.local: bin/ecatsetup and
+#           lib/ecat-rip/)
+#
+# ecat.so in the archive was built against one LinuxCNC (BUILD-INFO). It is
+# installed only if the LinuxCNC headers it was built with are the same as in
+# your tree (ecat-abi.sha256); a different HAL API would crash. Otherwise this
+# stops and says how to build ecat for your LinuxCNC.
+
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+PREFIX=$HOME/.local
+RIP=
+MODE=install
+STATE=${XDG_DATA_HOME:-$HOME/.local/share}/ecat-rip
+
+die() { echo "install: $*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        --rip) RIP=$2; shift 2 ;;
+        --prefix) PREFIX=$2; shift 2 ;;
+        --uninstall) MODE=uninstall; shift ;;
+        -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
+        *) die "unknown option $1 (see --help)" ;;
+    esac
+done
+
+settings_file=${ECATSETUP_SETTINGS:-${XDG_CONFIG_HOME:-$HOME/.config}/ecatsetup/settings.yaml}
+
+set_linuxcnc() {   # set (or with no argument remove) `linuxcnc:` in the settings
+    python3 - "$settings_file" "${1:-}" <<'PY'
+import os, sys, yaml
+path, value = sys.argv[1:3]
+try:
+    data = yaml.safe_load(open(path)) or {}
+except OSError:
+    data = {}
+if value:
+    data["linuxcnc"] = value
+else:
+    data.pop("linuxcnc", None)
+os.makedirs(os.path.dirname(path), exist_ok=True)
+yaml.safe_dump(data, open(path, "w"), default_flow_style=False)
+PY
+}
+
+if [ "$MODE" = uninstall ]; then
+    [ -f "$STATE/manifest" ] || die "nothing to uninstall (no $STATE/manifest)"
+    while IFS= read -r f; do
+        [ -n "$f" ] && rm -rf -- "$f" && echo "removed $f"
+    done <"$STATE/manifest"
+    rm -rf -- "$STATE"
+    set_linuxcnc ""
+    echo "ecat is uninstalled. The master (linuxcnc-ethercat-uspace) and your ethercat.yaml files are not touched."
+    exit 0
+fi
+
+# --- the run-in-place tree
+if [ -z "$RIP" ]; then
+    for c in "${EMC2_HOME:-}" "$HOME"/src/linuxcnc*; do
+        if [ -n "$c" ] && [ -f "$c/scripts/rip-environment" ]; then RIP=$c; break; fi
+    done
+fi
+[ -n "$RIP" ] || die "no run-in-place LinuxCNC found: give it with --rip DIR (the folder that has scripts/rip-environment)"
+RIP=$(cd "$RIP" && pwd)
+[ -f "$RIP/scripts/rip-environment" ] || die "$RIP has no scripts/rip-environment: not a run-in-place tree"
+[ -d "$RIP/include" ] && [ -d "$RIP/rtlib" ] || die "$RIP is not built (no include/ and rtlib/): build LinuxCNC first"
+
+# --- same LinuxCNC headers as the archive was built against?
+echo "Archive: $(grep -m1 '^ecat' "$HERE/BUILD-INFO")"
+echo "Built against LinuxCNC: $(grep -m1 '^linuxcnc' "$HERE/BUILD-INFO")"
+bad=$(cd "$RIP/include" && sha256sum -c "$HERE/ecat-abi.sha256" 2>&1 | grep -v ': OK$' || true)
+if [ -n "$bad" ]; then
+    cat >&2 <<EOF
+
+$RIP is not the LinuxCNC this ecat.so was built against: its HAL headers differ
+or are missing:
+$(echo "$bad" | sed 's/^/    /')
+
+ecat.so is not installed (a different HAL API could crash a running machine).
+Either use LinuxCNC as in BUILD-INFO:
+    $(grep -m1 '^linuxcnc' "$HERE/BUILD-INFO")
+or build ecat for your LinuxCNC from source (needs libyaml-dev and the master's
+headers in /opt/linuxcnc-ethercat-uspace/include):
+    git clone https://github.com/MetalMusings/ecat && cd ecat
+    git checkout $(grep -m1 '^ecat' "$HERE/BUILD-INFO" | awk '{print $2}' | sed 's/^/ecat-v/;s/+.*//')
+    . $RIP/scripts/rip-environment && make -C component install
+(docs/development.md, "LinuxCNC 2.10" and "Build and test").
+EOF
+    exit 1
+fi
+
+# --- warnings that do not stop the install
+[ -f /opt/linuxcnc-ethercat-uspace/lib/libethercat.so.2 ] || echo "WARNING: the userspace master is not installed: sudo apt install ./linuxcnc-ethercat-uspace_*.deb (from https://github.com/MetalMusings/ethercat/releases). ecat.so will not load without it." >&2
+python3 -c 'import yaml' 2>/dev/null || echo "WARNING: python3-yaml is missing: sudo apt install python3-yaml" >&2
+python3 -c 'import PyQt5' 2>/dev/null || echo "WARNING: python3-pyqt5 is missing, the window (ecatsetup --gui) will not start: sudo apt install python3-pyqt5" >&2
+
+# --- install
+mkdir -p "$STATE" "$PREFIX/bin" "$PREFIX/lib"
+: >"$STATE/manifest"
+note() { echo "$1" >>"$STATE/manifest"; }
+
+install -m 644 "$HERE/ecat.so" "$RIP/rtlib/ecat.so"
+note "$RIP/rtlib/ecat.so"
+echo "installed $RIP/rtlib/ecat.so"
+
+LIB=$PREFIX/lib/ecat-rip
+rm -rf "$LIB"
+mkdir -p "$LIB"
+cp -r "$HERE/ecatsetup" "$LIB/"
+cp "$HERE/BUILD-INFO" "$LIB/"
+[ -d "$HERE/docs" ] && cp -r "$HERE/docs" "$LIB/"
+note "$LIB"
+echo "installed EtherCAT Setup in $LIB"
+
+cat >"$PREFIX/bin/ecatsetup" <<EOF
+#!/bin/sh
+# EtherCAT Setup from $LIB; it reads $RIP/scripts/rip-environment itself
+# for the programs it starts (settings.yaml: linuxcnc).
+exec env PYTHONPATH="$LIB" python3 -m ecatsetup "\$@"
+EOF
+chmod 755 "$PREFIX/bin/ecatsetup"
+note "$PREFIX/bin/ecatsetup"
+if [ -f "$HERE/ecat-take-down" ]; then
+    install -m 755 "$HERE/ecat-take-down" "$PREFIX/bin/ecat-take-down"
+    note "$PREFIX/bin/ecat-take-down"
+fi
+set_linuxcnc "$RIP"
+echo "settings: linuxcnc: $RIP ($settings_file)"
+
+case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) echo "NOTE: $PREFIX/bin is not on your PATH." ;; esac
+echo
+echo "Done. Next: start the master and EtherCAT Setup:  ecatsetup --gui   (docs: $LIB/docs/getting-started.md)"

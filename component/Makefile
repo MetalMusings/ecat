@@ -12,6 +12,14 @@
 
 .DEFAULT_GOAL := all
 
+# YAML_STATIC=1 links libyaml into ecat.so (the installation archive for a
+# run-in-place LinuxCNC uses it, so that the user needs no libyaml package).
+ifeq ($(YAML_STATIC),1)
+YAML_LIBS := -Wl,-Bstatic -lyaml -Wl,-Bdynamic
+else
+YAML_LIBS := -lyaml
+endif
+
 USPACE_ETHERCAT ?= /opt/linuxcnc-ethercat-uspace
 # A package build can take the master's headers and libraries from a staging
 # directory, while the run-time path (rpath) stays USPACE_ETHERCAT.
@@ -54,7 +62,7 @@ ecat.so: $(objs)
 	@$(CC) -shared -Bsymbolic -Wl,--version-script,$@.ver -o $@ $(objs) -lm \
 	  -L$(LIBDIR) -Wl,-rpath,$(or $(LINUXCNC_LIBDIR),$(LIBDIR)) -llinuxcnchal \
 	  -L$(USPACE_BUILD)/lib -Wl,-rpath,$(USPACE_ETHERCAT)/lib -l:libethercat.so.2 \
-	  -lyaml -lpthread -lrt
+	  $(YAML_LIBS) -lpthread -lrt
 	@chmod -x $@
 	@rm -f $@.tmp $@.sym $@.ver
 

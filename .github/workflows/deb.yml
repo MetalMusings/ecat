@@ -96,10 +96,18 @@ jobs:
           . /opt/linuxcnc-src/scripts/rip-environment
           scripts/build-deb.sh -o out
 
+      - name: Build the archive for a run-in-place LinuxCNC
+        shell: bash
+        run: |
+          . /opt/linuxcnc-src/scripts/rip-environment
+          scripts/build-rip-archive -o out
+
       - uses: actions/upload-artifact@v4
         with:
           name: deb-${{ matrix.debian }}
-          path: out/*.deb
+          path: |
+            out/*.deb
+            out/*.tar.gz
           if-no-files-found: error
 
   release:
@@ -119,7 +127,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Pre-release while ecat is in early development.
-          gh release create "${{ github.ref_name }}" out/*.deb \
+          gh release create "${{ github.ref_name }}" out/*.deb out/*.tar.gz \
             --repo "${{ github.repository }}" --prerelease \
             --title "ecat ${{ github.ref_name }}" \
-            --notes "Packages of the ecat HAL component and EtherCAT Setup (ecatsetup) for LinuxCNC 2.10 or newer: debian12 for Debian 12 (bookworm), debian13 for Debian 13 (trixie). LinuxCNC 2.9 users take [ecat-v0.11](https://github.com/${{ github.repository }}/releases/tag/ecat-v0.11). 2.10 is not released and has no Debian packages yet: build it from source ([docs/development.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/development.md#linuxcnc-210)); the package needs linuxcnc-uspace 2.10 installed, and with a run-in-place build use make -C component install instead. Needs linuxcnc-ethercat-uspace 1.1 or newer from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases); built against ${{ env.MASTER_RELEASE }}. The window, ecatsetup --gui, needs python3-pyqt5. To try it without disturbing your setup: [getting started](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/getting-started.md). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."
+            --notes "ecat for LinuxCNC 2.10. **Run-in-place LinuxCNC** (there are no 2.10 packages yet): unpack ecat-rip-*-debian12 or -debian13.tar.gz and run ./install. It installs ecat.so for LinuxCNC ${{ env.LINUXCNC_COMMIT }} (2.10.0~pre2-436) and EtherCAT Setup, and refuses another LinuxCNC (see docs/development.md for building ecat for it). **With a LinuxCNC 2.10 package:** the linuxcnc-ecat .deb. Both need linuxcnc-ethercat-uspace 1.1 or newer from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases); built against ${{ env.MASTER_RELEASE }}. The window, ecatsetup --gui, needs python3-pyqt5. LinuxCNC 2.9 users take [ecat-v0.11](https://github.com/${{ github.repository }}/releases/tag/ecat-v0.11). To try ecat without disturbing your setup: [getting started](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/getting-started.md). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."

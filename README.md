@@ -33,27 +33,30 @@ ecat has two parts:
 
 ## Install
 
-Packages for Debian 12 and 13 with **LinuxCNC 2.10 or newer**. 2.10 is not
-released yet and has no Debian packages: build it from source
-(run-in-place, or with `dpkg-buildpackage`; see
-[Developing ecat](docs/development.md#linuxcnc-210)). With LinuxCNC 2.9, use
-ecat 0.11 (tag `ecat-v0.11`), which is the last for 2.9.
-
+For Debian 12 and 13 with **LinuxCNC 2.10**. 2.10 is not released yet and has
+no Debian packages, so most people run it run-in-place (built from source, see
+[Developing ecat](docs/development.md#linuxcnc-210)): ecat then comes as an
+archive with an installer, tested against one LinuxCNC commit (named in the
+release notes). With LinuxCNC 2.9, use ecat 0.11 (tag `ecat-v0.11`), the last
+for 2.9.
 
 1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace`, from the
    `uspace-v*` releases of
    [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases);
-2. `linuxcnc-ecat` from this repository's `ecat-v*`
-   [releases](https://github.com/MetalMusings/ecat/releases): the `ecat`
-   HAL component and the `ecatsetup` command.
+2. ecat from this repository's `ecat-v*`
+   [releases](https://github.com/MetalMusings/ecat/releases): for a
+   run-in-place LinuxCNC `ecat-rip-*-debian12|13.tar.gz` (unpack, `./install`),
+   for a packaged LinuxCNC `linuxcnc-ecat_*.deb`.
 
 ```
-sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb ./linuxcnc-ecat_*_amd64.deb
+sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb
+tar xzf ecat-rip-*-debian13.tar.gz && cd ecat-rip-*-debian13 && ./install
 ```
 
-[Getting started](docs/getting-started.md) says what the packages install
-and how to try them, and to undo it. To build the package yourself:
-`scripts/build-deb.sh` ([Developing ecat](docs/development.md#build-and-test)).
+[Getting started](docs/getting-started.md) says what gets installed and how
+to try it, and to undo it. To build it yourself: `scripts/build-deb.sh` (the
+package) or `scripts/build-rip-archive` (the archive),
+[Developing ecat](docs/development.md#build-and-test).
 
 ## Quick start
 

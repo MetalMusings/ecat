@@ -26,6 +26,26 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
   records and the errors.
 - The window's tests run offscreen against a fake bus and are skipped
   without PyQt5.
+- **The archive for a run-in-place LinuxCNC** (`scripts/build-rip-archive`, run
+  after `. <linuxcnc>/scripts/rip-environment`; `-w` for the working tree):
+  `ecat-rip-<version>-<distro>.tar.gz` with `ecat.so` (libyaml linked in,
+  `make YAML_STATIC=1`), EtherCAT Setup, `install` (`packaging/install-rip`)
+  and `ecat-abi.sha256`: the checksums of the LinuxCNC headers `ecat.so`
+  includes (from the compiler's `.d` files), with `BUILD-INFO` naming the
+  LinuxCNC commit. `install` runs `sha256sum -c` over the user's
+  `<tree>/include` and refuses on any difference: ecat.so is tied to the HAL
+  API it was built with, and 2.10 is a pre-release whose API changed as late as
+  October 2026. The CI builds the archive at the pinned LinuxCNC commit
+  (`LINUXCNC_COMMIT` in `deb.yml`); moving that commit moves what the release
+  supports. A user on another commit builds from source (`. rip-environment`,
+  `make -C component install`, EtherCAT Setup from the checkout with
+  `linuxcnc: <tree>` in `~/.config/ecatsetup/settings.yaml`). The tests of the
+  installer are `tests/test_install_rip.py`.
+- EtherCAT Setup works with the LinuxCNC named in `settings.yaml` (`linuxcnc:`),
+  in `$ECATSETUP_LINUXCNC`, or the one the shell is in (`$EMC2_HOME`), else the
+  installed one (`ecatsetup/lcnc_env.py`): it reads that tree's
+  `scripts/rip-environment` for `halrun`, `halcmd` and `tclsh` and takes the
+  HAL library (`hallib`) from it. The window shows which one in its status bar.
 - `scripts/build-deb.sh` runs both test suites and builds the package for
   Debian 12 and 13 (`.github/workflows/deb.yml` does so for releases).
 
