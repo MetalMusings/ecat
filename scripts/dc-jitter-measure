@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Measure how much servo-thread jitter reaches the DC clocks, in the two
+clock variants (master.dc.servo-thread-follows-ref-clock true / false).
+
+Runs ecat in halrun with no motion, samples every servo cycle (halsampler)
+and prints min / mean / p99 / max / stddev of:
+
+  send-offset   ns from the nominal thread start to the frame being sent
+  pll-err       ns phase between the thread's start and SYNC0
+  td            ns between two runs of the thread (timedelta), minus the period
+
+and at the end the number of PLL resets, whether DC was phased, and any
+slave with its DC sync check failed. Use it as:
+
+    . ~/src/linuxcnc-2.10/scripts/rip-environment
+    scripts/dc-jitter-measure --mode slaves --seconds 600
+    scripts/dc-jitter-measure --mode slaves --seconds 600 --load
+    scripts/dc-jitter-measure --mode follows --seconds 600 --load
+    scripts/dc-jitter-measure --analyze DIR/samples.txt --period 1000000
+
+Needs the bus on the NIC of the configuration (stop the kernel master first
+on a machine that has one: sudo systemctl stop ethercat) and the userspace
+master started. The base configuration (--yaml) is copied; only
+master.dc is changed. Results go to --out (default ./dc-jitter-<mode>[-load]).
+No outputs are set, no drive is enabled.
+"""
+import argparse
+import copy
+import math
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+# column order in the sampler's file, after the sample number
+COLS = ["send-offset", "pll-err", "td", "all-op", "dc-phased", "reset-count"]
+
+
+def make_yaml(base, mode, shift, out):
+    import yaml
+    with open(base) as f:
+        cfg = yaml.safe_load(f)
+    cfg = copy.deepcopy(cfg)
+    dc = cfg.setdefault("master", {}).setdefault("dc", {})
+    dc["servo-thread-follows-ref-clock"] = (mode == "follows")
+    dc["sync0-shift-ns"] = "auto" if (mode == "follows" and shift == "auto") else \
+        (300000 if shift == "auto" else int(shift))
+    with open(out, "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+
+def make_hal(path, yaml_path, period, total, tag):
+    with open(path, "w") as f:
+        f.write("""loadrt threads name1=servo-thread period1=%(period)d
+loadrt ecat config=%(yaml)s
+loadrt timedelta
+loadrt sampler depth=40000 cfg=ssssbu
+addf timedelta.0 servo-thread
+addf ecat.read-all servo-thread
+addf ecat.write-all servo-thread
+addf sampler.0 servo-thread
+net so ecat.0.send-offset => sampler.0.pin.0
+net pe ecat.0.pll-err => sampler.0.pin.1
+net td timedelta.0.out => sampler.0.pin.2
+net op ecat.0.all-op => sampler.0.pin.3
+net dp ecat.0.dc-phased => sampler.0.pin.4
+net rc ecat.0.pll-reset-count => sampler.0.pin.5
+start
+loadusr -w ./sample.sh %(total)d samples.txt
+show pin dc-sync
+show pin dc-phased
+show pin turnaround
+show pin shift-time
+show pin pll-reset-count
+""" % {"period": period, "yaml": yaml_path, "total": total})
+
+
+def pct(sorted_vals, p):
+    if not sorted_vals:
+        return float("nan")
+    return sorted_vals[min(len(sorted_vals) - 1, int(p * len(sorted_vals)))]
+
+
+def stats(vals):
+    if not vals:
+        return None
+    s = sorted(vals)
+    mean = sum(vals) / len(vals)
+    sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals))
+    return (s[0], mean, pct(s, 0.99), pct(s, 0.999), s[-1], sd)
+
+
+def analyze(path, period, settle_s):
+    rows = []
+    overruns = 0
+    with open(path) as f:
+        for line in f:
+            p = line.split()
+            if line.startswith("overrun"):
+                overruns += 1
+                continue
+            if len(p) != 1 + len(COLS):
+                continue
+            try:
+                rows.append([int(x) for x in p[1:]])
+            except ValueError:
+                pass
+    skip = int(settle_s * 1e9 / period)
+    print("%d samples, %d overrun lines; analysing from sample %d (settle %g s, and all-op && dc-phased)"
+          % (len(rows), overruns, skip, settle_s))
+    good = [r for r in rows[skip:] if r[3] and r[4]]
+    if not good:
+        print("no sample with all slaves in OP and DC phased: nothing to analyse")
+        return 1
+    print("%-12s %10s %10s %10s %10s %10s %10s" % ("ns", "min", "mean", "p99", "p99.9", "max", "stddev"))
+    for name, vals in (("send-offset", [r[0] for r in good]),
+                       ("pll-err", [r[1] for r in good]),
+                       ("td - period", [r[2] - period for r in good])):
+        print("%-12s %10d %10.0f %10d %10d %10d %10.0f" % ((name,) + tuple(stats(vals))))
+    print("PLL resets during the analysed time: %d" % (good[-1][5] - good[0][5]))
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--mode", choices=["follows", "slaves"], default="slaves",
+                    help="follows: servo-thread-follows-ref-clock true; slaves: false")
+    ap.add_argument("--seconds", type=int, default=300)
+    ap.add_argument("--period", type=int, default=1000000, help="servo period, ns")
+    ap.add_argument("--settle", type=float, default=20, help="seconds to leave out at the start")
+    ap.add_argument("--shift", default="auto",
+                    help="sync0-shift-ns: auto (follows only; slaves mode then uses 300000) or ns")
+    ap.add_argument("--yaml", default=os.path.expanduser("~/ecat-test/run/ethercat.yaml"))
+    ap.add_argument("--load", action="store_true", help="run stress-ng meanwhile")
+    ap.add_argument("--out")
+    ap.add_argument("--analyze", metavar="FILE", help="only analyse an earlier samples file")
+    a = ap.parse_args()
+
+    if a.analyze:
+        return analyze(a.analyze, a.period, a.settle)
+
+    out = os.path.abspath(a.out or "dc-jitter-%s%s" % (a.mode, "-load" if a.load else ""))
+    os.makedirs(out, exist_ok=True)
+    if shutil.which("halrun") is None:
+        sys.exit("halrun not found: . ~/src/linuxcnc-2.10/scripts/rip-environment first")
+    yaml_path = os.path.join(out, "ethercat.yaml")
+    make_yaml(a.yaml, a.mode, a.shift, yaml_path)
+    total = a.seconds * 1000000000 // a.period + 2000
+    make_hal(os.path.join(out, "run.hal"), "ethercat.yaml", a.period, total, a.mode)
+    sample = os.path.join(out, "sample.sh")
+    with open(sample, "w") as f:
+        f.write('#!/bin/sh\nexec halsampler -n "$1" > "$2"\n')
+    os.chmod(sample, 0o755)
+
+    stress = None
+    if a.load:
+        if shutil.which("stress-ng") is None:
+            sys.exit("--load needs stress-ng")
+        stress = subprocess.Popen(
+            ["stress-ng", "--cpu", "4", "--vm", "2", "--vm-bytes", "20%", "--cache", "2", "--io", "1",
+             "--timeout", "%ds" % (a.seconds + 60)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("mode %s, %d s at %d ns%s, in %s" % (a.mode, a.seconds, a.period, ", with load" if a.load else "", out))
+    t0 = time.time()
+    try:
+        with open(os.path.join(out, "halrun.log"), "w") as log:
+            subprocess.run(["halrun", "-f", "run.hal"], cwd=out, stdout=log, stderr=subprocess.STDOUT)
+    finally:
+        if stress:
+            stress.terminate()
+            stress.wait()
+    print("halrun ended after %.0f s; log: %s/halrun.log" % (time.time() - t0, out))
+    # the end of the log has the `show pin` output
+    try:
+        with open(os.path.join(out, "halrun.log")) as f:
+            tail = [l.rstrip() for l in f if "ecat.0" in l or "dc-sync" in l]
+        print("\n".join(tail[-20:]))
+    except OSError:
+        pass
+    sf = os.path.join(out, "samples.txt")
+    if not os.path.exists(sf):
+        sys.exit("no samples written")
+    return analyze(sf, a.period, a.settle)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
