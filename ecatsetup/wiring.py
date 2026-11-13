@@ -367,3 +367,40 @@ def connect(cfg, row, slave_pin):
         net = integrate.net_of(cfg, slave_pin)
         others = [x for x in (net or {}).get("pins", []) if x != slave_pin]
         integrate.set_net(cfg, slave_pin, others + [row.target])
+
+
+def signals(g):
+    """Every signal name of the HAL files."""
+    return set(g.writers) | set(g.readers) | set(g.unknown)
+
+
+def expand_signals(g, way, tokens):
+    """What a slave's pin is connected to when the words typed for it are pins
+    and signal names of the HAL files. way: its direction as in
+    integrate.slave_pins ("out": it writes the signal, "in": it reads it, "io").
+
+    Returns (pins, signal, dropped, conflicts): the pins to connect it with (a
+    signal's other pins, so that the HAL files' signal keeps its readers or
+    its writer), the signal name when one signal was typed (so that it keeps
+    its name), the simulated pins that give way, and the real pins that also
+    write a signal this pin writes (to be asked about, not connected)."""
+    pins, named, dropped, conflicts = [], [], [], []
+    names = signals(g)
+    for t in tokens:
+        if t in g.signal or t not in names:
+            pins.append(t)
+            continue
+        named.append(t)
+        w, r, u = (g.writers.get(t, []), g.readers.get(t, []), g.unknown.get(t, []))
+        sim = [x for x in w + r + u if is_sim(g, x)]
+        if way == "out":
+            pins += [x for x in r + u if x not in sim]
+            conflicts += [x for x in w if x not in sim]
+        elif way == "in":
+            pins += [x for x in w if x not in sim]
+        else:
+            pins += [x for x in w + r + u if x not in sim]
+        dropped += [x for x in sim if x in w or way == "io"]
+    pins = list(dict.fromkeys(pins))
+    return pins, (named[0] if len(named) == 1 else None), list(dict.fromkeys(dropped)), \
+        list(dict.fromkeys(conflicts))

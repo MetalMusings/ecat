@@ -3748,6 +3748,12 @@ class HalPage(QWidget):
                 k = integrate.known_pin(x)
                 if k and k[0] == htype and (k[1] == "io" if way == "io" else k[1] not in (way, "io")):
                     box.addItem(x)
+            for sig, sig_pins in sorted(self.hal_signals.items()):
+                # a signal of the HAL files that has a LinuxCNC pin of the right kind on it
+                if any((k := integrate.known_pin(x)) and k[0] == htype and
+                       (k[1] == "io" if way == "io" else k[1] not in (way, "io"))
+                       for x in sig_pins):
+                    box.addItem(sig)
             box.setEditText(" ".join(others))
             box.lineEdit().setCursorPosition(0)
             box.setFont(mono())
@@ -3896,10 +3902,33 @@ class HalPage(QWidget):
         if cfg is None:
             return
         others = box.currentText().replace(",", " ").split()
+        signal = None
+        ini = self.ini()
+        if ini and others:
+            # a signal's name stands for the pins on it in the HAL files
+            try:
+                g = wiring.graph(ini, cfg)
+                pins, signal, dropped, conflicts = wiring.expand_signals(
+                    g, integrate.slave_pins(cfg).get(pin, (None, "out"))[1], others)
+            except OSError:
+                pins, signal, dropped, conflicts = others, None, [], []
+            if conflicts:
+                QMessageBox.information(
+                    self, "Signal with another writer",
+                    "%s is written by %s in your HAL files. A signal has one writer: take that "
+                    "line out of your HAL files, or choose another signal." % (
+                        signal or "The signal", ", ".join(conflicts)))
+                QTimer.singleShot(0, self.win.changed)
+                return
+            if dropped:
+                self.win.statusBar().showMessage(
+                    "%s: %s gives way (it is a simulation)" % (signal or "signal",
+                                                               ", ".join(dropped)), 10000)
+            others = pins
         net = integrate.net_of(cfg, pin)
         if others == [x for x in (net or {}).get("pins", []) if x != pin]:
             return
-        integrate.set_net(cfg, pin, others)
+        integrate.set_net(cfg, pin, others, signal)
         # the box sends this from its own signal: rebuild the table after it
         QTimer.singleShot(0, self.win.changed)
 

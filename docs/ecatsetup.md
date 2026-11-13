@@ -840,7 +840,14 @@ A slave's pin can be connected to LinuxCNC pins in the program: the
 of the offered LinuxCNC pins (only those of the pin's HAL type and the
 other direction are offered: an input of the slave is offered
 `motion.digital-in-00`, `joint.0.home-sw-in`, `iocontrol.0.emc-enable-in`
-and so on). Pins of other components, such as `not.0.in` or
+and so on). You can also type the name of a signal that the HAL files already have
+(`spindle-revs`): the slave's pin then takes the place of what the simulation
+wrote or read there. The signal keeps its name and its other pins; pins
+that only a simulation wrote or read give way (the status bar says which),
+and a signal that a real pin already writes is not joined by a second writer:
+the window tells you instead. For a handshake pin (`index-enable`) all the
+signal's pins are joined.
+Pins of other components, such as `not.0.in` or
 `plasmac.arc-voltage-in`, can be typed too; the component must be loaded
 by a HALFILE, since `ethercat.hal` comes after them. `ethercat.hal` then
 holds, for example:

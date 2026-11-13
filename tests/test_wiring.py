@@ -294,3 +294,53 @@ class TestEncoderChannelPins(unittest.TestCase):
         sim = next(ch.new for ch in p.changes if ch.name == "spindle_sim.hal")
         self.assertIn(integrate.COMMENT + "net spindle-index-enable", sim)
         self.assertIn("net spindle-speed spindle.0.speed-out => spindle_sim.velocity-cmd\n", sim)
+
+
+class TestSignalNames(TestEncoderChannelPins):
+    """A slave's pin is connected by a signal's name: the signal's other pins,
+    the simulation's writer giving way."""
+
+    def graph(self, c):
+        return wiring.graph(self.ini, c)
+
+    def test_a_signal_the_simulation_writes(self):
+        c = encoder_cfg()
+        g = self.graph(c)
+        self.assertIn("spindle-revs", wiring.signals(g))
+        # the slave writes the position: the readers of the signal are connected, the
+        # simulated writer gives way
+        pins, sig, dropped, conflicts = wiring.expand_signals(g, "out", ["spindle-revs"])
+        self.assertEqual((pins, sig, conflicts), (["spindle.0.revs"], "spindle-revs", []))
+        self.assertEqual(len(dropped), 1)
+        self.assertIn("spindle_sim", dropped[0])
+        # a pin is a pin, not looked up
+        pins, sig, _, _ = wiring.expand_signals(g, "out", ["spindle.0.revs"])
+        self.assertEqual((pins, sig), (["spindle.0.revs"], None))
+        # a word that is neither stays as typed (the check says what is wrong with it)
+        self.assertEqual(wiring.expand_signals(g, "out", ["no-such"])[0], ["no-such"])
+
+    def test_a_real_writer_is_reported_as_a_conflict(self):
+        c = encoder_cfg()
+        with open(os.path.join(self.dir.name, "extra.hal"), "w") as f:
+            f.write("loadrt scale names=real_rev\nnet real-revs real_rev.out => spindle.0.revs\n")
+        with open(self.ini) as f:
+            ini = f.read()
+        with open(self.ini, "w") as f:
+            f.write(ini.replace("HALFILE = spindle_sim.hal", "HALFILE = spindle_sim.hal\nHALFILE = extra.hal"))
+        g = self.graph(c)
+        pins, sig, dropped, conflicts = wiring.expand_signals(g, "out", ["real-revs"])
+        self.assertEqual((pins, conflicts, dropped), (["spindle.0.revs"], ["real_rev.out"], []))
+        # a slave's pin that reads takes the signal's real writer
+        pins, _, _, conflicts = wiring.expand_signals(g, "in", ["real-revs"])
+        self.assertEqual((pins, conflicts), (["real_rev.out"], []))
+
+    def test_the_connection_by_signal_writes_the_same_net(self):
+        c = encoder_cfg()
+        g = self.graph(c)
+        pins, sig, _, _ = wiring.expand_signals(g, "out", ["spindle-revs"])
+        integrate.set_net(c, "io.enc.pos", pins, sig)
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        main = next(ch.new for ch in p.changes if ch.path.endswith(integrate.MAIN_FILE))
+        self.assertIn("net spindle-revs io.enc.pos => spindle.0.revs\n", main)
+        self.assertNotIn("spindle_sim.position-fb", main)

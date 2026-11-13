@@ -1072,6 +1072,53 @@ class TestParameters(WindowBase):
             self.assertEqual(self.cell(page, pin).text(), "", text)
 
 
+class TestSignalNameInTheBox(WindowBase):
+    """Typing a HAL signal's name in "Connected to" connects the pins on it."""
+
+    def test_a_signal_name_stands_for_its_pins(self):
+        from unittest import mock
+        from ecatsetup import integrate
+        sys.path.insert(0, os.path.dirname(__file__))
+        import test_wiring as tw
+        w = self.window()
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        for name, text in (("machine.ini", tw.SPINDLE_INI), ("spindle_sim.hal", tw.SPINDLE_SIM)):
+            with open(os.path.join(d.name, name), "w") as f:
+                f.write(text)
+        lib = tempfile.TemporaryDirectory()
+        self.addCleanup(lib.cleanup)
+        p = mock.patch.object(integrate, "HALLIB", lib.name)
+        p.start()
+        self.addCleanup(p.stop)
+        s = w.session
+        s.cfg = tw.encoder_cfg()
+        page = w.hal_page
+        page.ini = lambda: os.path.join(d.name, "machine.ini")
+        page.refresh()
+        box = gui.QComboBox()
+        box.setEditable(True)
+        box.setEditText("spindle-revs")
+        page.pin_edited("io.enc.pos", box)
+        gui.QApplication.processEvents()
+        self.assertEqual(integrate.nets(s.cfg),
+                         [{"signal": "spindle-revs", "pins": ["io.enc.pos", "spindle.0.revs"]}])
+        # the simulation's writer is told to give way
+        self.assertIn("gives way", w.statusBar().currentMessage())
+        # a signal the slave's pin cannot join: a second writer
+        with open(os.path.join(d.name, "extra.hal"), "w") as f:
+            f.write("loadrt scale names=real_rev\nnet real-revs real_rev.out => spindle.0.revs\n")
+        with open(os.path.join(d.name, "machine.ini"), "w") as f:
+            f.write(tw.SPINDLE_INI.replace("HALFILE = spindle_sim.hal",
+                                           "HALFILE = spindle_sim.hal\nHALFILE = extra.hal"))
+        s.cfg = tw.encoder_cfg()
+        box.setEditText("real-revs")
+        with mock.patch.object(gui.QMessageBox, "information") as info:
+            page.pin_edited("io.enc.pos", box)
+        self.assertTrue(info.called)
+        self.assertEqual(integrate.nets(s.cfg), [])
+
+
 class TestNoStrayWindows(WindowBase):
     """A label with no parent that is shown becomes a small empty window of its own for as
     long as it takes to put it into a layout: it showed as a flash on the screen."""
