@@ -1,6 +1,7 @@
 """Read an lcec XML configuration (ethercat-conf.xml), to compare with or
 import into ecat."""
 
+import os
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
@@ -87,8 +88,14 @@ def _entry(e):
 
 
 def load(path):
+    """An lcec XML file as an LcecConfig. ValueError for a file with more than
+    one master: ecat drives one."""
     root = ET.parse(path).getroot()
     cfg = LcecConfig()
+    masters = root.findall("master")
+    if len(masters) > 1:
+        raise ValueError("%s has %d masters; ecat drives one EtherCAT master, so a configuration "
+                         "with more cannot be converted" % (os.path.basename(path), len(masters)))
     master = root.find("master")
     if master is None:
         return cfg

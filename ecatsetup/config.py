@@ -484,7 +484,9 @@ def check(cfg):
                     if (i + a * AXIS_OFFSET, sub) not in set_objects:
                         err("%s: cia402 mode pp needs the setting %s"
                             % (where, obj(i + a * AXIS_OFFSET, sub)))
-    return errors + check_joints(cfg) + check_nets(cfg) + check_params(cfg)
+    from . import fromlcec
+    return errors + check_joints(cfg) + check_nets(cfg) + check_params(cfg) + \
+        fromlcec.check(cfg)
 
 
 def check_joints(cfg):

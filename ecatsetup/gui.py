@@ -25,19 +25,19 @@ import re
 import sys
 import time
 
-from PyQt5.QtCore import QSize, QThread, QTimer, Qt, pyqtSignal
+from PyQt5.QtCore import QLocale, QSize, QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence, QPainter, QPen
 from PyQt5.QtWidgets import (
     QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QDoubleSpinBox, QFileDialog, QFormLayout,
+    QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog,
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea,
     QSizePolicy, QSpinBox, QStackedWidget, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, diagnose, drivetest, esi, events, guidance, halcheck, halpins, homing, integrate, lcnc_env,
-               masterstart,
+from . import (config, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
+               integrate, lcnc_env, masterstart,
                netif, pindocs, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
@@ -197,6 +197,15 @@ def set_pill(lab, text, kind):
     if lab.property("pill") != kind:
         lab.setProperty("pill", kind)
         restyle(lab)
+
+
+def use_point():
+    """Numbers with . as the decimal point and no thousands separator in every
+    widget, whatever the system's language: the values go into HAL and YAML files,
+    which take only that."""
+    c = QLocale.c()
+    c.setNumberOptions(QLocale.OmitGroupSeparator | QLocale.RejectGroupSeparator)
+    QLocale.setDefault(c)
 
 
 class QuietCombo(QComboBox):
@@ -3338,13 +3347,16 @@ class JointRow(QWidget):
         self.drive.currentIndexChanged.connect(self.edited)
         lay.addWidget(self.drive)
         lay.addWidget(label("counts per unit", "hint"))
-        self.scale = QDoubleSpinBox()
-        self.scale.setRange(-1e9, 1e9)
-        self.scale.setDecimals(6)
-        self.scale.setMinimumWidth(130)
-        self.scale.setToolTip("The drive's pos-scale: counts per machine unit (mm or degree)")
-        self.scale.valueChanged.connect(self.edited)
+        # a text field, not a spin box: the value is kept and shown with all its
+        # digits (66.6666666666666), and typed freely; taken when you leave it
+        self.scale = QLineEdit()
+        self.scale.setFont(mono())
+        self.scale.setMinimumWidth(160)
+        self.scale.setToolTip("The drive's pos-scale: counts per machine unit (mm or degree), "
+                              "with . as the decimal point")
+        self.scale.editingFinished.connect(self.scale_edited)
         lay.addWidget(self.scale)
+        self.value = 1.0          # the scale shown, as a number
         self.calc = QPushButton("Calculate...")
         self.calc.setToolTip("The scale from the drive's counts per motor revolution and the "
                              "screw's or pulley's lead")
@@ -3365,7 +3377,7 @@ class JointRow(QWidget):
         j = next((j for j in integrate.joints(cfg) if j.get("joint") == self.joint), None)
         i = self.drive.findData(j["slave"]) if j else 0
         self.drive.setCurrentIndex(max(i, 0))
-        self.scale.setValue(float(j.get("scale", 1.0)) if j else 1.0)
+        self.show_scale(float(j.get("scale", 1.0)) if j else 1.0)
         self.scale.setEnabled(j is not None)
         self.calc.setEnabled(j is not None)
         name = j["slave"] if j else None
@@ -3419,14 +3431,42 @@ class JointRow(QWidget):
                                          boxes["gear"].value())
         except ValueError:
             return
-        self.scale.setValue(value)
+        self.show_scale(value)
+        self.edited()
+
+    @staticmethod
+    def scale_text(value):
+        """A scale as typed: all its digits, . as the decimal point, no needless .0."""
+        text = repr(float(value))
+        return text[:-2] if text.endswith(".0") else text
+
+    def show_scale(self, value):
+        self.value = float(value)
+        self.scale.setText(self.scale_text(value))
+        self.scale.setCursorPosition(0)
+
+    def scale_edited(self):
+        text = self.scale.text().strip()
+        try:
+            value = float(text)
+            if value != value or abs(value) == float("inf"):
+                raise ValueError
+        except ValueError:
+            self.page.win.status("joint.%d: %r is not a number (use . as the decimal point)"
+                                 % (self.joint, text))
+            self.show_scale(self.value)
+            return
+        if value == self.value:
+            return
+        self.value = value
+        self.edited()
 
     def edited(self, *_):
         cfg = self.page.win.session.cfg
         if cfg is None:
             return
         name = self.drive.currentData()
-        scale = self.scale.value()
+        scale = self.value
         if name and scale == 0:
             scale = 1.0
         if name and not any(j.get("joint") == self.joint for j in integrate.joints(cfg)):
@@ -3485,6 +3525,43 @@ class HalPage(QWidget):
         row.addWidget(self.take_over_text, 1)
         self.axes.lay.addLayout(row)
         lay.addWidget(self.axes)
+
+        # an lcec configuration: the old pins and what takes their place
+        self.lcec_card = Card("From lcec",
+                              "Your HAL files use lcec. Each pin of lcec (and of the cia402 "
+                              "component, where the profile does not replace it) needs the ecat "
+                              "pin that takes its place, or to be taken out; writing then "
+                              "comments those lines out and puts them back with the new pins.")
+        self.lcec_text = self.lcec_card.add(label("", "hint", wrap=True))
+        self.lcec_problems = self.lcec_card.add(label("", "problemText", wrap=True))
+        row = QHBoxLayout()
+        self.lcec_names = QPushButton("Name the slaves as lcec did")
+        self.lcec_names.clicked.connect(self.do_lcec_names)
+        row.addWidget(self.lcec_names)
+        self.lcec_suggest = QPushButton("Use the suggestions")
+        self.lcec_suggest.setToolTip("Choose the suggested pin for every old pin that has no "
+                                     "choice yet")
+        self.lcec_suggest.clicked.connect(self.do_lcec_suggestions)
+        row.addWidget(self.lcec_suggest)
+        row.addStretch(1)
+        self.lcec_card.lay.addLayout(row)
+        self.lcec_table = table(["Old pin", "Used in", "New pin", "", "Suggested because"], 4)
+        self.lcec_table.setWordWrap(True)
+        self.lcec_table.setTextElideMode(Qt.ElideNone)
+        self.lcec_card.add(self.lcec_table)
+        self.lcec_settings_text = self.lcec_card.add(label("", "hint", wrap=True))
+        self.lcec_settings = table(["Slave", "Object", "Name", "lcec wrote", "Now", ""], 2)
+        self.lcec_card.add(self.lcec_settings)
+        row = QHBoxLayout()
+        self.lcec_add_all = QPushButton("Add all these settings")
+        self.lcec_add_all.clicked.connect(lambda: self.add_lcec_settings(self.lcec_hints))
+        row.addWidget(self.lcec_add_all)
+        row.addStretch(1)
+        self.lcec_card.lay.addLayout(row)
+        self.lcec_found = None
+        self.lcec_rows = []
+        self.lcec_hints = []
+        lay.addWidget(self.lcec_card)
 
         # what the machine still gets from the simulation, or from nothing
         self.wiring_card = Card("Still to connect",
@@ -3615,6 +3692,7 @@ class HalPage(QWidget):
         self.show_params()
         if self.win.tabs.currentWidget() is self:
             self.show_joints()
+            self.show_lcec()
             self.show_wiring()
             self.show_plan()
             self.show_check()
@@ -3818,6 +3896,171 @@ class HalPage(QWidget):
             "%s (%s)" % (sig, " ".join(p for p in pins if integrate.is_own(s.cfg, p)))
             for sig, pins in sorted(self.io_proposal.items())) + ".")
 
+    TAKE_OUT = "(take it out)"
+
+    def show_lcec(self):
+        """The card From lcec: the old pins of an lcec configuration, and lcec's settings."""
+        s, ini = self.win.session, self.ini()
+        self.lcec_found, self.lcec_rows, self.lcec_hints = None, [], []
+        t = self.lcec_table
+        t.setRowCount(0)
+        if ini is not None and s.cfg is not None:
+            try:
+                self.lcec_found = fromlcec.find(ini)
+            except OSError:
+                self.lcec_found = None
+        f = self.lcec_found
+        self.lcec_card.setVisible(f is not None)
+        if f is None:
+            return
+        cfg = s.cfg
+        allrows = fromlcec.rows(f, cfg)
+        self.lcec_rows = rows = [r for r in allrows if not r.auto]
+        undecided = [r for r in rows if not r.decided]
+        auto = len(allrows) - len(rows)
+        text = []
+        if f.xml_path and f.xml is not None:
+            text.append("Suggestions from %s." % os.path.basename(f.xml_path))
+        text += [n[0].upper() + n[1:] + "." for n in f.notes]
+        text += [n + "." for n in fromlcec.glue_notes(f, cfg)]
+        if auto:
+            text.append("%d pin%s of the cia402 component and the lcec pins it connects to %s "
+                        "taken care of by the profile." % (auto, "" if auto == 1 else "s",
+                                                         "is" if auto == 1 else "are"))
+        text.append("%d of %d old pins still need a choice." % (len(undecided), len(rows))
+                    if undecided else "Every old pin has its new pin, or is taken out.")
+        self.lcec_text.setText(" ".join(text))
+        self.lcec_problems.setText("\n".join("\u2717 " + x for x in f.problems))
+        self.lcec_problems.setVisible(bool(f.problems))
+        self.lcec_suggest.setVisible(any(r.suggestion for r in undecided))
+        names = fromlcec.names(f, cfg)
+        self.lcec_names.setVisible(bool(names))
+        self.lcec_names.setToolTip("Rename " + ", ".join("%s to %s" % kv for kv in names.items()))
+        pins = sorted(p for p in halpins.pins(cfg) if not p.startswith("ecat.")) + \
+            sorted(p for p in halpins.pins(cfg) if p.startswith("ecat."))
+        t.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            colour = None if r.decided else QColor("#c62828")
+            t.setItem(i, 0, item(r.pin, font=mono(), colour=colour,
+                                 tip=None if r.decided else "No new pin chosen yet"))
+            t.setItem(i, 1, item(", ".join("%s:%d" % u for u in r.uses)))
+            box = QuietCombo()
+            box.setEditable(True)
+            box.setInsertPolicy(QComboBox.NoInsert)
+            box.addItem("")
+            box.addItem(self.TAKE_OUT)
+            if r.suggestion:
+                box.addItem(r.suggestion)
+            for x in pins:
+                if x != r.suggestion:
+                    box.addItem(x)
+            box.setEditText("" if not r.decided else r.new or self.TAKE_OUT)
+            box.lineEdit().setPlaceholderText(r.suggestion or "")
+            box.setFont(mono())
+            box.setMinimumWidth(260)
+            box.setToolTip("The ecat pin that takes the place of %s in your HAL files, or %s: "
+                           "its lines go" % (r.pin, self.TAKE_OUT))
+            box.lineEdit().editingFinished.connect(lambda r=r, b=box: self.lcec_edited(r, b))
+            box.activated.connect(lambda _i, r=r, b=box: self.lcec_edited(r, b))
+            t.setCellWidget(i, 2, box)
+            if r.suggestion and not r.decided:
+                use = QPushButton("Use")
+                use.setToolTip("Use the suggestion %s for %s" % (r.suggestion, r.pin))
+                use.clicked.connect(lambda _c=False, r=r: self.lcec_use(r))
+                t.setCellWidget(i, 3, use)
+            else:
+                t.setItem(i, 3, item(""))
+            t.setItem(i, 4, item(r.why, tip=r.why))
+        t.setVisible(bool(rows))
+        t.resizeRowsToContents()
+        fit_table(t, minimum=1)
+        # lcec's settings, as suggestions
+        dicts = {x.idx: s.dictionary(x.idx) for x in (f.xml.slaves if f.xml else [])}
+        self.lcec_hints = hints = fromlcec.setting_hints(f, cfg, dicts)
+        st = self.lcec_settings
+        st.setRowCount(len(hints))
+        for i, h in enumerate(hints):
+            st.setItem(i, 0, item(h.slave, font=mono()))
+            if h.zero_at_start:
+                st.setItem(i, 1, item("cia402.zero-at-start", font=mono()))
+                st.setItem(i, 2, item(h.what, tip=h.what))
+                st.setItem(i, 3, item("true"))
+                st.setItem(i, 4, item("false"))
+            else:
+                st.setItem(i, 1, item(h.setting["object"], font=mono()))
+                st.setItem(i, 2, item(h.setting.get("name", ""), tip=h.what))
+                v = h.setting.get("value", h.setting.get("data"))
+                ttype = h.setting.get("type")
+                st.setItem(i, 3, item(show_value(v, ttype, self.win.hex_values), font=mono(),
+                                      tip=h.what))
+                st.setItem(i, 4, item("not set" if h.now is None else
+                                      show_value(h.now, ttype, self.win.hex_values), font=mono()))
+            add = QPushButton("Add")
+            add.clicked.connect(lambda _c=False, h=h: self.add_lcec_settings([h]))
+            st.setCellWidget(i, 5, add)
+        st.setVisible(bool(hints))
+        fit_table(st, minimum=1)
+        self.lcec_add_all.setVisible(len(hints) > 1)
+        self.lcec_settings_text.setText(
+            "lcec wrote these settings at every start; the configuration does not have them, or "
+            "has another value. A drive that does not keep them has its own values again after "
+            "a power cycle. Add those that are still wanted." if hints else
+            "" if f.xml is None else "lcec's settings are all in the configuration.")
+
+    def lcec_edited(self, row, box):
+        cfg = self.win.session.cfg
+        if cfg is None:
+            return
+        text = box.currentText().strip()
+        if text == "":
+            if row.decided:
+                fromlcec.set_choice(cfg, row.pin, None, decided=False)
+                QTimer.singleShot(0, self.win.changed)
+            return
+        new = None if text == self.TAKE_OUT else text
+        if new is not None and new not in halpins.pins(cfg):
+            self.win.statusBar().showMessage("%s is not a pin or parameter of this configuration"
+                                             % new, 10000)
+            QTimer.singleShot(0, self.show_lcec)
+            return
+        if row.decided and row.new == new and not row.auto:
+            return
+        fromlcec.set_choice(cfg, row.pin, new)
+        QTimer.singleShot(0, self.win.changed)
+
+    def lcec_use(self, row):
+        """Take one row's suggestion."""
+        cfg = self.win.session.cfg
+        if cfg is None or not row.suggestion:
+            return
+        fromlcec.set_choice(cfg, row.pin, row.suggestion)
+        QTimer.singleShot(0, self.win.changed)
+
+    def do_lcec_suggestions(self):
+        cfg = self.win.session.cfg
+        if cfg is None:
+            return
+        for r in self.lcec_rows:
+            if not r.decided and r.suggestion:
+                fromlcec.set_choice(cfg, r.pin, r.suggestion)
+        self.win.changed()
+
+    def do_lcec_names(self):
+        cfg = self.win.session.cfg
+        if cfg is None or self.lcec_found is None:
+            return
+        renamed = fromlcec.take_names(self.lcec_found, cfg)
+        self.win.status("Renamed " + ", ".join("%s to %s" % kv for kv in renamed.items()))
+        self.win.changed()
+
+    def add_lcec_settings(self, hints):
+        cfg = self.win.session.cfg
+        if cfg is None or not hints:
+            return
+        for h in hints:
+            fromlcec.add_setting(cfg, h)
+        self.win.changed()
+
     STATUS_TEXT = {"simulated": "simulated", "open": "not connected", "connected": "connected"}
 
     def show_wiring(self):
@@ -4003,23 +4246,27 @@ class HalPage(QWidget):
             for r in self.rows:
                 self.rows_box.addWidget(r)
             self.rows_for = key
-            self.proposal = {}
-            self.known_scales = {}
-            if ini and s.cfg is not None:
-                try:
-                    self.proposal = integrate.propose_joints(ini, s.cfg)
-                    files = integrate.user_hal_files(ini)
-                    setp = integrate.setp_values(files, ini)
-                    e = integrate.read_ini(ini)
-                    for name in integrate.drives(s.cfg):
-                        v = integrate.resolve(setp.get("%s.pos-scale" % name), e)
-                        try:
-                            if v is not None:
-                                self.known_scales[name] = float(v)
-                        except ValueError:
-                            pass
-                except OSError:
-                    pass
+        # the proposal follows the configuration (a drive renamed, a profile chosen)
+        self.proposal = {}
+        self.known_scales = {}
+        if ini and s.cfg is not None:
+            try:
+                self.proposal = integrate.propose_joints(ini, s.cfg)
+                files = integrate.user_hal_files(ini)
+                setp = integrate.setp_values(files, ini)
+                e = integrate.read_ini(ini)
+                for name in integrate.drives(s.cfg):
+                    v = integrate.resolve(setp.get("%s.pos-scale" % name), e)
+                    try:
+                        if v is not None:
+                            self.known_scales[name] = float(v)
+                    except ValueError:
+                        pass
+                # an lcec configuration's cia402 component had the scale
+                for name, scale in self.proposal.values():
+                    self.known_scales.setdefault(name, scale)
+            except OSError:
+                pass
         self.axes.hint.setText("Joints from %s. Choose the drive for each; ethercat.hal "
                                "connects them." % os.path.basename(ini) if ini else "")
         tested = set(self.win.tested_drives)
@@ -4227,6 +4474,7 @@ class NavTabs(QStackedWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self, session):
+        use_point()
         super().__init__()
         self.session = session
         self.reports = {}       # position -> diagnose.Report
@@ -4570,6 +4818,13 @@ class MainWindow(QMainWindow):
         if self.master_offer_off and not force:
             return
         p = masterstart.plan(self.session.cfg)
+        if p.needs_interface:
+            # no file names the card, nor ethercat-uspace.conf: ask, or the master
+            # would not start (and the bus could not be read to make a file)
+            nic = self.ask_master_interface()
+            if nic is None:
+                return
+            p = masterstart.plan(self.session.cfg, interface=nic)
         box = QMessageBox(self)
         box.setWindowTitle(TITLE)
         box.setIcon(QMessageBox.Question)
@@ -4602,6 +4857,23 @@ class MainWindow(QMainWindow):
             self.read_bus()
 
         self.run("Starting the master...", work, done)
+
+    def ask_master_interface(self):
+        """The network card to start the master on, chosen by the user; None if
+        cancelled or there is none."""
+        cards = masterstart.wired()
+        if not cards:
+            QMessageBox.warning(self, TITLE, "No master is running, and no wired network card "
+                                "was found to start one on.")
+            return None
+        items = ["%s  (%s)" % (n, "link" if up else "no link") for n, up in cards]
+        choice, ok = QInputDialog.getItem(
+            self, TITLE, "No master is running, and nothing names its network card (no "
+            "configuration file yet, and no INTERFACE in ethercat-uspace.conf).\n\n"
+            "Which network card are the slaves connected to?", items, 0, False)
+        if not ok:
+            return None
+        return cards[items.index(choice)][0]
 
     def offer_master_restart(self):
         """The master that runs has no link, sees no slaves or sits on another
@@ -5147,6 +5419,7 @@ class MainWindow(QMainWindow):
 
 def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    use_point()
     app.setApplicationName(TITLE)
     # the ESI folders given before, then those on the command line
     esi_paths = list(dict.fromkeys(settings.esi_folders() + list(esi_paths)))

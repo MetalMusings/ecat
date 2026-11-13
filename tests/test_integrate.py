@@ -403,6 +403,35 @@ class TestHalPage(Folder):
             row.calculate()
         self.assertEqual(integrate.joints(s.cfg)[0]["scale"], 2000.0)
 
+    def test_scale_field_keeps_every_digit_and_takes_a_point(self):
+        s = session.Session(ini_path=self.ini)
+        s.cfg, s.path = cfg(), os.path.join(self.dir.name, "ethercat.yaml")
+        integrate.set_joint(s.cfg, 0, "x", 66.6666666666666)
+        gui.QLocale.setDefault(gui.QLocale(gui.QLocale.Swedish))   # a decimal comma
+        w = gui.MainWindow(s)
+        self.addCleanup(lambda: (s.__setattr__("saved", s.cfg), w.close()))
+        w.tabs.setCurrentWidget(w.hal_page)
+        w.hal_page.refresh()
+        row = w.hal_page.rows[0]
+        self.assertEqual(row.scale.text(), "66.6666666666666")
+        # typed and left: taken as typed
+        row.scale.setText("212.206591")
+        row.scale.editingFinished.emit()
+        self.assertEqual(integrate.joints(s.cfg)[0]["scale"], 212.206591)
+        row = w.hal_page.rows[0]
+        self.assertEqual(row.scale.text(), "212.206591")
+        # a comma is not a decimal point here, whatever the language
+        row.scale.setText("12,5")
+        row.scale.editingFinished.emit()
+        self.assertEqual(integrate.joints(s.cfg)[0]["scale"], 212.206591)
+        self.assertEqual(row.scale.text(), "212.206591")
+        self.assertEqual(gui.QLocale().decimalPoint(), ".")
+        box = gui.QDoubleSpinBox()
+        box.setDecimals(2)
+        box.setRange(0, 1e6)
+        box.setValue(1234.5)
+        self.assertEqual(box.text(), "1234.50")
+
     def test_connect_pins(self):
         s = session.Session(ini_path=self.ini)
         s.cfg, s.path = cfg(), os.path.join(self.dir.name, "ethercat.yaml")

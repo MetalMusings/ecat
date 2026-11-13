@@ -111,7 +111,10 @@ def graph(ini_path, cfg=None):
     """The HAL files' signals, with writers and readers from the arrows of
     each net (and the slaves' and LinuxCNC's known pins where a net has
     none)."""
+    from . import fromlcec
     own = integrate.slave_pins(cfg) if cfg else {}
+    # an lcec configuration's old pins as the new ones that take their place
+    sub = fromlcec.substituter(ini_path, cfg)
     g = Graph({}, {}, {}, {}, {}, {}, set())
     paths = [p for p, _ in _hal_files(ini_path)]
     for path in paths:
@@ -121,6 +124,9 @@ def graph(ini_path, cfg=None):
         except OSError:
             continue
         for line, t in stmts:
+            t = sub(t)
+            if t is None:
+                continue
             g.tokens.update(t)
             for inst, typ in _loaded(t):
                 g.instance.setdefault(inst, (typ, name))

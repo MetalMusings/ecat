@@ -110,6 +110,54 @@ class PlanTest(unittest.TestCase):
         p = self.plan({"master": {"interface": "enp2s0", "transport": "x; rm"}})
         self.assertEqual(p.commands[0][1:], ["start", "--", "-i", "enp2s0"])
 
+    def conf(self, text):
+        path = os.path.join(self.net, "ethercat-uspace.conf")
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def test_a_card_is_needed_without_a_file_or_the_conf(self):
+        conf = self.conf("# INTERFACE=enp2s0\n")
+        p = masterstart.plan(None, sys_net=self.net, kernel_device=self.nokernel, conf=conf)
+        self.assertTrue(p.needs_interface)
+        conf = self.conf("INTERFACE=\"enp2s0\"  # the bus\n")
+        self.assertEqual(masterstart.conf_interface(conf), "enp2s0")
+        p = masterstart.plan(None, sys_net=self.net, kernel_device=self.nokernel, conf=conf)
+        self.assertFalse(p.needs_interface)
+        p = masterstart.plan({"master": {"interface": "enp2s0"}}, sys_net=self.net,
+                             kernel_device=self.nokernel, conf=self.conf(""))
+        self.assertFalse(p.needs_interface)
+        self.assertEqual(p.interface, "enp2s0")
+
+    def test_the_chosen_card(self):
+        p = masterstart.plan(None, sys_net=self.net, kernel_device=self.nokernel,
+                             interface="enp2s0", conf=self.conf(""))
+        self.assertEqual(p.commands[0][1:], ["start", "--", "-i", "enp2s0"])
+        self.assertFalse(p.needs_interface)
+        # the file's transport goes with the file's card only
+        cfg = {"master": {"interface": "enp2s0", "transport": "xdp-native"}}
+        p = masterstart.plan(cfg, sys_net=self.net, kernel_device=self.nokernel, interface="enp2s0")
+        self.assertEqual(p.commands[0][1:], ["start", "--", "-i", "enp2s0", "-t", "xdp-native"])
+        cfg = {"master": {"interface": "enp1s0", "transport": "xdp-native"}}
+        p = masterstart.plan(cfg, sys_net=self.net, kernel_device=self.nokernel, interface="enp2s0")
+        self.assertEqual(p.commands[0][1:], ["start", "--", "-i", "enp2s0"])
+        # a chosen card that does not exist is not passed on either
+        p = masterstart.plan(None, sys_net=self.net, kernel_device=self.nokernel,
+                             interface="nope0", conf=self.conf(""))
+        self.assertEqual(p.commands[0][1:], ["start"])
+
+    def test_wired_cards(self):
+        for nic, up in (("enp3s0", "0"), ("wlan0", "1")):
+            os.makedirs(os.path.join(self.net, nic, "device"))
+            with open(os.path.join(self.net, nic, "carrier"), "w") as f:
+                f.write(up + "\n")
+        os.makedirs(os.path.join(self.net, "wlan0", "wireless"))
+        os.makedirs(os.path.join(self.net, "enp2s0", "device"))
+        with open(os.path.join(self.net, "enp2s0", "carrier"), "w") as f:
+            f.write("1\n")
+        # with a link first; no wireless, nothing without a device (enp1s0 here, lo, bridges)
+        self.assertEqual(masterstart.wired(self.net), [("enp2s0", True), ("enp3s0", False)])
+
     def test_kernel_master_is_stopped_first_and_visibly(self):
         p = self.plan(kernel=self.net)      # any path that exists
         self.assertEqual(p.commands[0], ["systemctl", "stop", "ethercat"])
@@ -150,13 +198,35 @@ class RunTest(unittest.TestCase):
 
 
 class OfferTest(unittest.TestCase):
-    def offer(self, answer, tty=True, linuxcnc=False):
+    def offer(self, answer, tty=True, linuxcnc=False, conf_nic="enp1s0", net=None):
         ran, said = [], []
-        with mock.patch.object(masterstart, "linuxcnc_running", lambda: linuxcnc):
+        answers = list(answer) if isinstance(answer, list) else None
+        with mock.patch.object(masterstart, "linuxcnc_running", lambda: linuxcnc), \
+                mock.patch.object(masterstart, "conf_interface", lambda path=None: conf_nic):
             started = masterstart.offer_terminal(
-                stdin=Tty(tty), stderr=Tty(tty), input_fn=lambda prompt: answer, out=said.append,
+                stdin=Tty(tty), stderr=Tty(tty),
+                input_fn=lambda prompt: answers.pop(0) if answers is not None else answer,
+                out=said.append, sys_net=net or masterstart.SYS_NET,
                 runner=lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess([], 0, "", ""))
         return started, ran, said
+
+    def test_the_card_is_asked_for_when_nothing_names_it(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        for nic, up in (("enp1s0", "0"), ("enp2s0", "1")):
+            os.makedirs(os.path.join(d.name, nic, "device"))
+            with open(os.path.join(d.name, nic, "carrier"), "w") as f:
+                f.write(up)
+        # Enter takes the card with a link
+        started, ran, said = self.offer(["", "y"], conf_nic=None, net=d.name)
+        self.assertTrue(started)
+        self.assertEqual(ran[-1][-3:], ["--", "-i", "enp2s0"])
+        self.assertTrue(any("enp2s0 (link), enp1s0 (no link)" in x for x in said))
+        started, ran, _ = self.offer(["enp1s0", "y"], conf_nic=None, net=d.name)
+        self.assertEqual(ran[-1][-2:], ["-i", "enp1s0"])
+        started, ran, said = self.offer(["wlan9"], conf_nic=None, net=d.name)
+        self.assertEqual((started, ran), (False, []))
+        self.assertIn("wlan9 is not one of them.", said)
 
     def test_yes_runs_the_command(self):
         started, ran, said = self.offer("y")

@@ -636,6 +636,7 @@ class TestWindow(WindowBase):
         w.run = lambda what, fn, done: done(fn(lambda text: None))
         w.read_bus = lambda: ran.append("read")
         with mock.patch.object(masterstart, "linuxcnc_running", lambda: False), \
+                mock.patch.object(masterstart, "conf_interface", lambda path=None: "enp1s0"), \
                 mock.patch.object(masterstart, "run",
                                   lambda p, noninteractive=True: ran.append(("run", noninteractive)) or (True, "ok")):
             with mock.patch.object(gui.QMessageBox, "exec_", lambda self: gui.QMessageBox.No):
@@ -650,6 +651,28 @@ class TestWindow(WindowBase):
                 mock.patch.object(gui.QMessageBox, "exec_", lambda self: ran.append("asked")):
             w.offer_master_start(force=True)
         self.assertEqual(ran, [])                               # LinuxCNC has the bus
+
+    def test_master_start_asks_for_the_card_when_nothing_names_it(self):
+        from ecatsetup import masterstart
+        w = self.window()
+        w.session.cfg = None            # no file yet
+        plans = []
+        w.run = lambda what, fn, done: None
+        with mock.patch.object(masterstart, "linuxcnc_running", lambda: False), \
+                mock.patch.object(masterstart, "conf_interface", lambda path=None: None), \
+                mock.patch.object(masterstart, "wired", lambda *a: [("lo0", True), ("enp9s0", False)]), \
+                mock.patch.object(masterstart, "plan", wraps=masterstart.plan) as plan, \
+                mock.patch.object(gui.QMessageBox, "exec_", lambda self: plans.append(
+                    self.informativeText()) or gui.QMessageBox.No):
+            with mock.patch.object(gui.QInputDialog, "getItem", return_value=("", False)):
+                w.offer_master_start()
+            self.assertEqual(plans, [])                         # cancelled: nothing more
+            with mock.patch.object(gui.QInputDialog, "getItem",
+                                   return_value=("enp9s0  (no link)", True)) as ask:
+                w.offer_master_start()
+            self.assertIn("enp9s0  (no link)", ask.call_args[0][3])
+            self.assertEqual(plan.call_args.kwargs.get("interface"), "enp9s0")
+            self.assertEqual(len(plans), 1)                     # then the command is shown
 
     def test_bus_rows_fit_their_text(self):
         w = self.window()

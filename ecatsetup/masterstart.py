@@ -26,9 +26,63 @@ LINUXCNC_PROCESSES = {"linuxcncsvr", "milltask", "linuxcnc"}
 class Plan:
     """The commands to run, in order, and what the user should know first."""
 
-    def __init__(self, commands, notes):
+    def __init__(self, commands, notes, interface=None, needs_interface=False):
         self.commands = commands    # list of argv lists, without "sudo"
         self.notes = notes          # list of text lines
+        self.interface = interface  # the network card passed with -i, if any
+        # neither the file, the caller nor ethercat-uspace.conf names a card:
+        # the master would not start, so the user is asked for one
+        self.needs_interface = needs_interface
+
+
+def conf_path():
+    """ethercat-uspace.conf of the installed tool (<prefix>/etc), or None."""
+    exe = shutil.which(tool.TOOL)
+    if not exe:
+        return None
+    prefix = os.path.dirname(os.path.dirname(os.path.realpath(exe)))
+    path = os.path.join(prefix, "etc", "ethercat-uspace.conf")
+    return path if os.path.exists(path) else None
+
+
+def conf_interface(path=None):
+    """The INTERFACE an active line of ethercat-uspace.conf sets, or None."""
+    path = path or conf_path()
+    if not path:
+        return None
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    nic = None
+    for line in lines:
+        t = line.split("#", 1)[0].strip()
+        if t.startswith("INTERFACE="):
+            nic = t[len("INTERFACE="):].strip().strip("\"'") or None
+    return nic
+
+
+def wired(sys_net=SYS_NET):
+    """[(name, has a link)] of the network cards a master can use: those with a
+    device (not lo, bridges or tunnels), with a link first."""
+    out = []
+    try:
+        names = sorted(os.listdir(sys_net))
+    except OSError:
+        return []
+    for name in names:
+        d = os.path.join(sys_net, name)
+        if name == "lo" or not os.path.exists(os.path.join(d, "device")) or \
+                os.path.isdir(os.path.join(d, "wireless")):
+            continue
+        try:
+            with open(os.path.join(d, "carrier")) as f:
+                up = f.read().strip() == "1"
+        except OSError:
+            up = False
+        out.append((name, up))
+    return sorted(out, key=lambda x: not x[1])
 
 
 def linuxcnc_running(proc="/proc"):
@@ -47,15 +101,21 @@ def linuxcnc_running(proc="/proc"):
     return False
 
 
-def plan(cfg=None, sys_net=SYS_NET, kernel_device=KERNEL_MASTER_DEVICE):
-    """What to run to get a master. `cfg` is the loaded file (or None).
-    Interface and transport are passed only when the file gives them and
-    they are valid (an existing NIC, a known transport); nothing else is
-    ever passed on."""
+def plan(cfg=None, sys_net=SYS_NET, kernel_device=KERNEL_MASTER_DEVICE, interface=None,
+         conf=None):
+    """What to run to get a master. `cfg` is the loaded file (or None);
+    `interface` a network card the user chose, used in place of the file's.
+    Interface and transport are passed only when they are valid (an existing
+    NIC, a known transport); nothing else is ever passed on. conf: the path of
+    ethercat-uspace.conf (default: the installed tool's)."""
     master = (cfg or {}).get("master") or {}
     start = [os.path.abspath(shutil.which(tool.TOOL) or tool.TOOL), "start"]
     notes, extra = [], []
     nic, transport = master.get("interface"), master.get("transport")
+    if interface:
+        nic = interface
+        if master.get("interface") not in (None, interface):
+            transport = None
     if nic and os.path.isdir(os.path.join(sys_net, str(nic))) and "/" not in str(nic):
         extra += ["-i", str(nic)]
         if transport in config.TRANSPORTS:
@@ -70,7 +130,9 @@ def plan(cfg=None, sys_net=SYS_NET, kernel_device=KERNEL_MASTER_DEVICE):
         commands.insert(0, ["systemctl", "stop", "ethercat"])
         notes.append("The kernel master is loaded (%s). It is stopped first: it shares "
                      "the network card, and may be in use on purpose." % kernel_device)
-    return Plan(commands, notes)
+    passed = extra[1] if extra else None
+    needs = passed is None and not conf_interface(conf)
+    return Plan(commands, notes, passed, needs)
 
 
 def master_status(text):
@@ -161,7 +223,8 @@ def confirm_terminal(p, input_fn=input, out=print):
         return False
 
 
-def offer_terminal(cfg=None, stdin=None, stderr=None, input_fn=input, out=print, runner=subprocess.run):
+def offer_terminal(cfg=None, stdin=None, stderr=None, input_fn=input, out=print, runner=subprocess.run,
+                   sys_net=SYS_NET, conf=None):
     """For the command line: when no master answers, offer to start one.
     Returns True if one was started. Nothing is offered without a terminal
     (a script must not hang), nor while LinuxCNC runs (it has the bus)."""
@@ -169,7 +232,24 @@ def offer_terminal(cfg=None, stdin=None, stderr=None, input_fn=input, out=print,
     stdin, stderr = stdin or sys.stdin, stderr or sys.stderr
     if not (stdin.isatty() and stderr.isatty()) or linuxcnc_running():
         return False
-    p = plan(cfg)
+    p = plan(cfg, sys_net=sys_net, conf=conf)
+    if p.needs_interface:
+        cards = wired(sys_net)
+        out("No master is running, and nothing names its network card (no file, and no "
+            "INTERFACE in ethercat-uspace.conf).")
+        if not cards:
+            out("No wired network card found.")
+            return False
+        out("Network cards: " + ", ".join("%s (%s)" % (n, "link" if up else "no link")
+                                           for n, up in cards))
+        try:
+            nic = input_fn("Start the master on [%s]: " % cards[0][0]).strip() or cards[0][0]
+        except EOFError:
+            return False
+        if nic not in [n for n, _ in cards]:
+            out("%s is not one of them." % nic)
+            return False
+        p = plan(cfg, sys_net=sys_net, interface=nic, conf=conf)
     if not confirm_terminal(p, input_fn, out):
         return False
     ok, msg = run(p, noninteractive=False, runner=runner)

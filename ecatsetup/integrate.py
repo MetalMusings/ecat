@@ -524,12 +524,14 @@ def rename_slave(cfg, old, new):
     for j in joints(cfg):
         if j.get("slave") in renamed:
             j["slave"] = renamed[j["slave"]]
+    def follow(p):
+        prefix = next((o for o in renamed if p.startswith(o + ".")), None)
+        return renamed[prefix] + p[len(prefix):] if prefix else p
     for n in nets(cfg):
-        out = []
-        for p in n.get("pins") or []:
-            prefix = next((o for o in renamed if p.startswith(o + ".")), None)
-            out.append(renamed[prefix] + p[len(prefix):] if prefix else p)
-        n["pins"] = out
+        n["pins"] = [follow(p) for p in n.get("pins") or []]
+    for e in ((cfg or {}).get("linuxcnc") or {}).get("old-pins") or []:
+        if isinstance(e, dict) and isinstance(e.get("new"), str):
+            e["new"] = follow(e["new"])
     return renamed
 
 
@@ -847,6 +849,13 @@ def propose_joints(ini_path, cfg):
                     except ValueError:
                         scale = 1.0
                     out[j] = (name, scale)
+    # the cia402 component of an lcec configuration, replaced by the profile
+    from . import fromlcec
+    f = fromlcec.find(ini_path)
+    if f is not None:
+        for j, v in fromlcec.propose_joints(f, cfg).items():
+            if j not in have and j not in out and j in {n for n, _, _ in ini_joints(ini_path)}:
+                out[j] = v
     return out
 
 
@@ -1063,6 +1072,30 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
     postgui = set(user_hal_files(ini_path, postgui=True))
     scale_pins = {"%s.pos-scale" % name for _, name, _, _ in managed}
 
+    # an lcec configuration: its old pins are replaced by the ones chosen
+    # (fromlcec.py), and the cia402 component by the profile
+    from . import fromlcec
+    lcec = fromlcec.find(ini_path)
+
+    def sub(t):
+        return t
+    if lcec is not None:
+        p.errors += lcec.problems
+        p.notes += lcec.notes + fromlcec.glue_notes(lcec, cfg)
+        lrows = fromlcec.rows(lcec, cfg)
+        undecided = [r for r in lrows if not r.decided]
+        if undecided:
+            p.errors.append("%d pin%s of the lcec configuration %s no new pin chosen (the card "
+                            "From lcec): %s" % (
+                                len(undecided), "" if len(undecided) == 1 else "s",
+                                "has" if len(undecided) == 1 else "have",
+                                ", ".join("%s (%s:%d)" % ((r.pin,) + r.uses[0]) for r in undecided)))
+        lmap = {r.pin: r.new for r in lrows if r.decided}
+        lgone = set(fromlcec.replaced(lcec, cfg))
+
+        def sub(t):
+            return fromlcec.substitute(t, lmap, lgone)
+
     # LIB:basic_sim.tcl builds the simulation when LinuxCNC starts; the file it
     # saved then is static HAL, and takes its place
     ini_replace = {}
@@ -1110,7 +1143,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         clash = []          # (Tcl line, what)
         for a, _, t in statements(x.text):
             pins = []
-            if _is_ecat_line(t):
+            if _is_ecat_line(t) or sub(t) is not t:
                 pins = [" ".join(t)]
             elif t[0] == "setp" and len(t) == 3 and t[1] in scale_pins:
                 pins = [t[1]]
@@ -1191,6 +1224,13 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         dropped = []         # writers of a POSTGUI line that a real pin replaces
         for a, b, t in statements(text):
             why = None
+            # a line with old pins (lcec's) goes, or comes back with the new ones
+            t2 = sub(t)
+            renewed = t2 is not t
+            if t2 is None:
+                hit.update(range(a, b + 1))
+                continue
+            t = t2
             if _is_ecat_line(t):
                 why = True
             elif t[0] == "setp" and len(t) == 3 and t[1] in scale_pins:
@@ -1234,10 +1274,14 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                             ours = [x for x in pins if x in managed_pins]
                             sig = sig_of_pin.get(ours[0], name) if ours else name
                             after[b] = "net %s => %s%s\n" % (sig, " ".join(rest), ADDED)
+            if renewed and not why:
+                why = True
+                after.setdefault(b, " ".join(t) + ADDED + "\n")
             if why:
                 hit.update(range(a, b + 1))
         if hit and path in postgui:
-            moved = sorted({pin for a, b, t in statements(text) if a in hit and t[0] == "net"
+            moved = sorted({pin for a, b, t0 in statements(text) if a in hit
+                            for t in [sub(t0)] if t and t[0] == "net"
                             for pin in net_pins(t)[1] if pin in managed_pins})
             late = [x for x in moved if not exists_early(x)]
             if late:

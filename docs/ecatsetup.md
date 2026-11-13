@@ -230,6 +230,9 @@ One column, top to bottom in the order of the work:
 
 - **Joints**: choose the INI file, then the drive for each joint.
   *Take over from the HAL files* reads what your HAL files already use;
+- **From lcec** (only for a configuration that uses lcec): every pin of
+  lcec your HAL files use, with the ecat pin that takes its place, and the
+  settings lcec wrote at start (see [from an lcec configuration](#from-an-lcec-configuration));
 - **Still to connect**: LinuxCNC's inputs and outputs to the machine
   (E-stop, home switches, probe, spindle, plasmac's torch and sensors ...)
   that the simulation still drives or reads, or that nothing does, with
@@ -656,7 +659,11 @@ The dialog shows the whole command, for example
 `sudo /usr/bin/ethercat-uspace start -- -i enp2s0 -t xdp-native`, and nothing
 runs until you answer Yes. The interface and transport come from the file's
 `master:` section when it names an interface that exists here; otherwise the
-master's own `ethercat-uspace.conf` decides. If the kernel master is loaded
+master's own `ethercat-uspace.conf` decides. When neither names one (no file
+yet, as for a first look at a bus, and no active `INTERFACE=` line in
+`ethercat-uspace.conf`), you are first asked which network card the slaves are
+on: the wired cards, those with a link first (the window lists them, the
+command line takes the first one on Enter). If the kernel master is loaded
 (`/dev/EtherCAT0`), `sudo systemctl stop ethercat` is shown and run first;
 it is never done without being shown. The box "Don't ask again this session"
 stops the offers, the button still works.
@@ -847,6 +854,70 @@ cutter's configuration (three drives, one input for X's home switch):
 the loops and the E-stop loop-back replaced, Z's shared simulated switch
 left for its own input, `core_sim.hal` and `simulated_home.hal` copied
 in, and the HAL check found nothing.
+
+### From an lcec configuration
+
+A machine that runs lcec (with `lcec_conf` and an XML file) moves to ecat
+the same way: read the bus, so that the slaves get ecat's proposal (the
+drives the cia402 profile), and open the machine's INI file. The XML file
+is not imported; the HAL files say what is needed, and the XML file that
+`loadusr -W lcec_conf <file>` loads gives suggestions. An XML file with more
+than one master is refused: ecat drives one.
+
+- **The cia402 component.** lcec configurations often put the `cia402`
+  component ([hal-cia402](https://github.com/dbraun1981/hal-cia402))
+  between a joint and a generic slave: the joint drives `cia402.X.pos-cmd`,
+  the component writes the drive's control word and target position
+  through lcec's pins. Where the drive at that slave's position has ecat's
+  cia402 profile, the profile replaces the component: the Joints card
+  offers the joint (its `pos-scale` from `setp cia402.X.pos-scale`), and
+  when you write, the component's `loadrt` and `addf` lines and the nets
+  between it and lcec's pins are commented out. Its other pins become the
+  drive's pins of the same name (`cia402.X.drv-fault` becomes
+  `X.drv-fault`; `csp-mode` goes, the mode is `cia402.mode`). A net that
+  also takes the drive's position elsewhere (`lcec.0.X.actual-position =>
+  cia402.X.drv-actual-position ddt.0.in`) keeps that reader, on the
+  profile's pin (`X.drv-actual-position => ddt.0.in`). A drive without the
+  cia402 profile keeps the component; choose the profile on the Bus page
+  to replace it. lcec's C drivers with their own CiA 402 code are not
+  recognised.
+- **The other pins.** Every other pin of lcec in the HAL files is a row of
+  the card *From lcec*: where it is used, and a box for the ecat pin that
+  takes its place, or *(take it out)*. A suggestion comes from the XML file
+  (the same object, or the same bit of it, of the slave at the same
+  position: `lcec.0.E7000.in-1` is bit 0 of `0x6000:00`, which is
+  `E7000.in-1` if that bit has a pin), the master's state pins
+  (`lcec.0.all-op` becomes `ecat.0.all-op`), the slaves' state pins
+  (`slave-online` ...), or the same name. A row's *Use* button takes its
+  suggestion; *Use the suggestions* takes every suggestion for the rows
+  without a choice. Writing is refused while a row has none. The choices are kept in `ethercat.yaml` as
+  `linuxcnc.old-pins` ([the file format](component.md#linuxcnc)).
+- **Names.** The slaves keep the proposal's names; *Name the slaves as lcec
+  did* gives them the XML file's (`X`, `E7000`), as on the Bus page. The
+  choices follow a rename.
+- **What is written.** Each line with an old pin is commented out with
+  `#ecatsetup: `, and the line with the new pins follows it, marked
+  `#ecatsetup: added`: your HAL files keep their order, comments and signal
+  names. A pin taken out leaves the line's other pins on the signal; a line
+  with nothing left goes. lcec's own lines (`loadusr lcec_conf`, `loadrt
+  lcec`, `addf lcec.*`) are commented out as always. A `.tcl` HAL file with
+  old pins is turned into a `.hal` file, as for a simulation.
+- **lcec's settings.** lcec wrote its `sdoConfig` values (and modParams,
+  through the quirk files) at every start. Those the configuration does not
+  have, or has with another value, are listed under the pins with *Add* (and
+  *Add all these settings*); nothing is added unasked. A drive that does
+  not keep a value has its own again after a power cycle, so check the list.
+  A command lcec wrote as a setting (the ECT60's `0x2010` Zero Position) is
+  offered as what replaces it (`cia402.zero-at-start`).
+
+Tried on a copy of the plasma cutter's lcec configuration (three ECT60
+through the cia402 component, an EaserCAT 7000 with bit pins), against
+the configuration of the bus, without a machine: the three components
+replaced, all 27 other pins suggested from the XML file, and the result
+the same as the configuration converted by hand (`QtPlasma-ecat402`);
+writing again changed nothing, and the HAL check found nothing. Then done
+by the user in the window on a fresh copy against the bus, and LinuxCNC
+started with the result and ran without remarks (2026-11-13).
 
 ### Parameters
 

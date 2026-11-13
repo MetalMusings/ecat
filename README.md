@@ -97,7 +97,9 @@ is frozen; it stays in
 [MetalMusings/linuxcnc-ethercat](https://github.com/MetalMusings/linuxcnc-ethercat)
 (see its `INSTALL-USPACE.md`), with master packages up to 1.0, and is not
 needed for ecat. Unlike linuxcnc-ethercat, `ecat` will not
-read lcec's XML files; they can be imported instead. ecat is a project
+read lcec's XML files; they can be imported instead, and EtherCAT Setup
+moves a whole lcec configuration, its HAL files too, to ecat
+([from an lcec configuration](docs/ecatsetup.md#from-an-lcec-configuration)). ecat is a project
 of its own: it keeps no backward compatibility with linuxcnc-ethercat
 and does not take in its future changes. The userspace master is
 developed actively as part of the project.

@@ -314,6 +314,9 @@ linuxcnc:
     pins: [lcec.0.E7000.in-1, joint.0.home-sw-in]
   params:
   - {pin: Encoder.enc.pos-scale, value: 4096.0}
+  old-pins:
+  - {old: lcec.0.E7000.in-1, new: E7000.in-1}
+  - {old: lcec.0.E7000.rawData-1}
 ```
 
 | Key | Meaning |
@@ -321,6 +324,7 @@ linuxcnc:
 | `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0). Each joint and each slave once. |
 | `check-hal-at-start` | `true`: `ethercat-load.hal` runs the HAL check (`ecatsetup --check-hal`) when LinuxCNC starts ([writing into LinuxCNC](ecatsetup.md#checking-the-hal-files)). |
 | `params` | A list of `pin` (a parameter of a slave, of one of its axes or encoder channels, such as `Encoder.enc.pos-scale`) and `value` (a number; `true` or `false` for a bool parameter; a whole number, not negative for a `uint`), each parameter once. Written as `setp` lines in `ethercat.hal`. Not the master's parameters, and not the `pos-scale` of a drive a joint sets. |
+| `old-pins` | For a configuration moved from lcec ([from an lcec configuration](ecatsetup.md#from-an-lcec-configuration)): a list of `old` (a pin the HAL files use, of lcec or of the cia402 component) and `new` (the pin or parameter of this configuration that takes its place; left out: the pin is taken out of its lines), each old pin once. |
 | `nets` | A list of `signal` (a HAL signal name: no blanks or `#`, at most 47 characters, each once) and `pins` (at least two; at least one of them a slave's pin; each pin in one net only, and not a pin a joint's connection takes). |
 
 ### Importing lcec XML files
@@ -335,6 +339,8 @@ driver are configured from the slave's own data if a master is running,
 and otherwise left out. With a master running, settings get names and
 types from the slaves' CoE dictionaries, and mappings are checked against
 them. The import prints a note for everything it changes or leaves out.
+To move a whole LinuxCNC configuration from lcec, its HAL files too, read
+the bus instead and see [from an lcec configuration](ecatsetup.md#from-an-lcec-configuration).
 
 Some lcec settings are replaced by what ecat does instead (in
 [quirk files](ecatsetup.md#quirk-files)): an Rtelligent ECT60's `sdoConfig` of `0x2010`
