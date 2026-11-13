@@ -1027,9 +1027,46 @@ running: the bus recovers by itself, without a restart.
 - Not fixed: a `working counter zero` of a millisecond, logged as ERROR,
   comes while the bus climbs back to OP (after rows 1-3 and 5). It is
   harmless, but the log cannot tell it from a real one.
+- Both since 2026-11-13 (03f04dc): the event log shows these offline
+  reports and working counter drops as information, with the reason, when the
+  events before them explain them (a master reading the bus again, slaves
+  climbing back). Decided 2026-11-13 that this is enough: no change in the
+  component.
 - The port counters of the master side and of a slave that lost power
   start again from zero, so those show nothing: the event log is the
   record for them.
+
+## Automatic SYNC0 shift while the machine moves
+
+`sync0-shift-ns: auto` was tried with no motion only (turner, two cycles at
+1 ms and 500 us). The question for a moving machine: does the servo thread's
+timing change when motion, the drives and the GUI are busy, enough that the
+component chooses a new shift or that the turn-around leaves two cycles?
+
+**Setup.** A copy of the plasma cutter's 2.10 configuration,
+`~/linuxcnc/configs/QtPlasma-ecat402-210-autoshift` (untracked, like the
+original): `sync0-shift-ns: auto` instead of 300000, and a second sampler
+channel `sampler.1` (cfg `sssbbu`, depth 40000) with `timedelta.0`, wired
+as in `scripts/dc-jitter-measure` (send-offset, pll-err, timedelta,
+all-op, dc-phased, pll-reset-count), added after `ecat.write-all`.
+
+**Steps** (the user at the machine):
+
+1. Kernel master stopped, userspace master up on enp2s0, `.
+   ~/src/linuxcnc-2.10/scripts/rip-environment`.
+2. Start LinuxCNC with the copy. In the log: `turn-around 2 cycles`, and
+   `ecat.0.turnaround-cycles` 2 once all slaves are in OP.
+3. Baseline at rest: `scripts/dc-jitter-measure --attach --seconds 60 --out
+   ~/autoshift-rest`.
+4. While moving: start `scripts/dc-jitter-measure --attach --seconds 180
+   --out ~/autoshift-move`, then home, jog X, Y and Z at full speed, and run a
+   program without the arc (lines and arcs at 1000 and 3000 mm/min).
+5. Optionally the same with load (`stress-ng`, as `--load` in the script).
+
+**Passes when:** `turnaround-cycles` stays 2 and `shift-time` does not change
+(no "new shift" event), no `servo thread late`, no DC sync check event,
+no following error; `send-offset` stays within the window that the margins
+leave (its spread compared with the rest run), and no PLL reset.
 
 
 ## LinuxCNC 2.10

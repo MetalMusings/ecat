@@ -17,6 +17,13 @@ slave with its DC sync check failed. Use it as:
     scripts/dc-jitter-measure --mode slaves --seconds 600 --load
     scripts/dc-jitter-measure --mode follows --seconds 600 --load
     scripts/dc-jitter-measure --analyze DIR/samples.txt --period 1000000 --mode slaves
+    scripts/dc-jitter-measure --attach --channel 1 --seconds 120
+With --attach it measures a LinuxCNC that already runs (for instance while
+the machine moves) instead of starting halrun: its HAL must have a sampler
+channel with the columns below, in this order, as in make_hal (sampler cfg
+"sssbbu", and timedelta). It also prints ecat.0.shift-time and
+ecat.0.turnaround-cycles before and after, and the events of the run
+(a new shift, a late servo thread, a DC sync check, a drive fault).
 
 Needs the bus on the NIC of the configuration (stop the kernel master first
 on a machine that has one: sudo systemctl stop ethercat) and the userspace
@@ -126,23 +133,73 @@ def analyze(path, period, settle_s, phased=True):
     return 0
 
 
+ATTACH_PINS = ("ecat.0.shift-time", "ecat.0.turnaround-cycles", "ecat.0.pll-reset-count")
+
+
+def getp(pin):
+    r = subprocess.run(["halcmd", "-s", "getp", pin], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else "?"
+
+
+def attach(a):
+    """Measure a running LinuxCNC through its own sampler channel."""
+    from ecatsetup import events
+    for tool in ("halcmd", "halsampler"):
+        if shutil.which(tool) is None:
+            sys.exit("%s not found: . ~/src/linuxcnc-2.10/scripts/rip-environment first" % tool)
+    if getp("ecat.0.all-op") == "?":
+        sys.exit("no ecat.0 pins: LinuxCNC with ecat is not running")
+    out = os.path.abspath(a.out or "dc-jitter-attach")
+    os.makedirs(out, exist_ok=True)
+    try:
+        first = events.read().total
+    except events.EventsError:
+        first = None
+    before = {p: getp(p) for p in ATTACH_PINS}
+    n = a.seconds * 1000000000 // a.period
+    sf = os.path.join(out, "samples.txt")
+    print("sampling channel %d for %d s (%d samples) into %s; move the machine now"
+          % (a.channel, a.seconds, n, sf))
+    with open(sf, "w") as f:
+        subprocess.run(["halsampler", "-c", str(a.channel), "-n", str(n)], stdout=f)
+    after = {p: getp(p) for p in ATTACH_PINS}
+    for p in ATTACH_PINS:
+        print("%-28s before %-10s after %s" % (p, before[p], after[p]))
+    if first is not None:
+        log = events.read()
+        evs = [e for e in log.events if e.index >= first and e.type in
+               (events.SHIFT, events.LATE, events.DC_SYNC, events.DRIVE_FAULT, events.WC)]
+        print("%d event(s) of interest during the run%s" % (len(evs), ":" if evs else ""))
+        for e in evs:
+            print("  %s  %s" % (events.stamp(e.time), events.text(e)[1]))
+    return analyze(sf, a.period, a.settle, True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mode", choices=["follows", "slaves"], default="slaves",
                     help="follows: servo-thread-follows-ref-clock true; slaves: false")
     ap.add_argument("--seconds", type=int, default=300)
     ap.add_argument("--period", type=int, default=1000000, help="servo period, ns")
-    ap.add_argument("--settle", type=float, default=20, help="seconds to leave out at the start")
+    ap.add_argument("--settle", type=float, help="seconds to leave out at the start "
+                    "(default 20; 0 with --attach)")
     ap.add_argument("--shift", default="auto",
                     help="sync0-shift-ns: auto (follows only; slaves mode then uses 300000) or ns")
     ap.add_argument("--yaml", default=os.path.expanduser("~/ecat-test/run/ethercat.yaml"))
     ap.add_argument("--load", action="store_true", help="run stress-ng meanwhile")
     ap.add_argument("--out")
     ap.add_argument("--analyze", metavar="FILE", help="only analyse an earlier samples file")
+    ap.add_argument("--attach", action="store_true",
+                    help="measure a LinuxCNC that runs, through its sampler channel --channel")
+    ap.add_argument("--channel", type=int, default=1, help="--attach: the sampler channel")
     a = ap.parse_args()
+    if a.settle is None:
+        a.settle = 0 if a.attach else 20
 
     if a.analyze:
         return analyze(a.analyze, a.period, a.settle, a.mode == "follows")
+    if a.attach:
+        return attach(a)
 
     out = os.path.abspath(a.out or "dc-jitter-%s%s" % (a.mode, "-load" if a.load else ""))
     os.makedirs(out, exist_ok=True)
