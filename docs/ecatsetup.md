@@ -1066,7 +1066,10 @@ late` at that moment is the thread stopping. With a master running,
 **What is harmless.** The master prints `SDO upload 0x10F3:01 aborted` or
 `0x1001:00 aborted`, abort message `0x06020000` ("This object does not
 exist in the object directory"), for a slave that has no such object:
-these are optional diagnostic objects. A `working counter incomplete` or
+these are optional diagnostic objects (the diagnosis history and the
+error register), which EtherCAT Setup's slave diagnosis reads from every
+slave it examines (`ethercat diag` and an upload of `0x1001`), also
+while LinuxCNC runs. A `working counter incomplete` or
 `zero` of tens of milliseconds at each climb back to OP is known. After
 the cable the slaves need about ten seconds to come back (see the fault
 tests in [development.md](development.md)); the drives are shut down

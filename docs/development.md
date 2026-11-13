@@ -743,6 +743,12 @@ Each step is useful on its own; the order may change as parts are tried.
    `--test-plan`), the steps of "Trying the configuration in LinuxCNC"
    ([ecatsetup.md](ecatsetup.md)) with the file's own slave names, scales
    and pins, and only the parts the configuration has.
+   Also optional: a "following-error limit" suggestion on the Settings card
+   for a CiA 402 drive: the object from its quirk file (`limits:
+   following-error`, such as the ECT60's `0x2022`) or `0x6065`, the
+   drive's present value, and a value worked out from the joint's
+   `MAX_VELOCITY` and scale, written as an ordinary setting. Not needed
+   while LinuxCNC's own following error (`FERROR`) is the protection used.
 
 Where it stands (2026-11-09): steps 1-3 are done (`ecatsetup` on the
 command line, `ethercat.yaml`, the `ecat` component, which runs the
