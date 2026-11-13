@@ -16,7 +16,7 @@ slave with its DC sync check failed. Use it as:
     scripts/dc-jitter-measure --mode slaves --seconds 600
     scripts/dc-jitter-measure --mode slaves --seconds 600 --load
     scripts/dc-jitter-measure --mode follows --seconds 600 --load
-    scripts/dc-jitter-measure --analyze DIR/samples.txt --period 1000000
+    scripts/dc-jitter-measure --analyze DIR/samples.txt --period 1000000 --mode slaves
 
 Needs the bus on the NIC of the configuration (stop the kernel master first
 on a machine that has one: sudo systemctl stop ethercat) and the userspace
@@ -57,7 +57,7 @@ def make_hal(path, yaml_path, period, total, tag):
         f.write("""loadrt threads name1=servo-thread period1=%(period)d
 loadrt ecat config=%(yaml)s
 loadrt timedelta
-loadrt sampler depth=40000 cfg=ssssbu
+loadrt sampler depth=40000 cfg=sssbbu
 addf timedelta.0 servo-thread
 addf ecat.read-all servo-thread
 addf ecat.write-all servo-thread
@@ -70,11 +70,7 @@ net dp ecat.0.dc-phased => sampler.0.pin.4
 net rc ecat.0.pll-reset-count => sampler.0.pin.5
 start
 loadusr -w ./sample.sh %(total)d samples.txt
-show pin dc-sync
-show pin dc-phased
-show pin turnaround
-show pin shift-time
-show pin pll-reset-count
+show pin ecat.0
 """ % {"period": period, "yaml": yaml_path, "total": total})
 
 
@@ -93,7 +89,7 @@ def stats(vals):
     return (s[0], mean, pct(s, 0.99), pct(s, 0.999), s[-1], sd)
 
 
-def analyze(path, period, settle_s):
+def analyze(path, period, settle_s, phased=True):
     rows = []
     overruns = 0
     with open(path) as f:
@@ -102,16 +98,18 @@ def analyze(path, period, settle_s):
             if line.startswith("overrun"):
                 overruns += 1
                 continue
-            if len(p) != 1 + len(COLS):
+            if len(p) == 1 + len(COLS):      # an older halsampler prints the sample number
+                p = p[1:]
+            if len(p) != len(COLS):
                 continue
             try:
-                rows.append([int(x) for x in p[1:]])
+                rows.append([int(x) for x in p])
             except ValueError:
                 pass
     skip = int(settle_s * 1e9 / period)
-    print("%d samples, %d overrun lines; analysing from sample %d (settle %g s, and all-op && dc-phased)"
-          % (len(rows), overruns, skip, settle_s))
-    good = [r for r in rows[skip:] if r[3] and r[4]]
+    print("%d samples, %d overrun lines; analysing from sample %d (settle %g s, and all-op%s)"
+          % (len(rows), overruns, skip, settle_s, " && dc-phased" if phased else ""))
+    good = [r for r in rows[skip:] if r[3] and (r[4] or not phased)]
     if not good:
         print("no sample with all slaves in OP and DC phased: nothing to analyse")
         return 1
@@ -120,6 +118,10 @@ def analyze(path, period, settle_s):
                        ("pll-err", [r[1] for r in good]),
                        ("td - period", [r[2] - period for r in good])):
         print("%-12s %10d %10.0f %10d %10d %10d %10.0f" % ((name,) + tuple(stats(vals))))
+    pe = [r[1] for r in good]
+    k = max(1, len(pe) // 10)
+    print("pll-err, mean of the first and last tenth: %.0f and %.0f ns (a drift here is the PC clock "
+          "against the bus)" % (sum(pe[:k]) / k, sum(pe[-k:]) / k))
     print("PLL resets during the analysed time: %d" % (good[-1][5] - good[0][5]))
     return 0
 
@@ -140,7 +142,7 @@ def main():
     a = ap.parse_args()
 
     if a.analyze:
-        return analyze(a.analyze, a.period, a.settle)
+        return analyze(a.analyze, a.period, a.settle, a.mode == "follows")
 
     out = os.path.abspath(a.out or "dc-jitter-%s%s" % (a.mode, "-load" if a.load else ""))
     os.makedirs(out, exist_ok=True)
@@ -175,14 +177,15 @@ def main():
     # the end of the log has the `show pin` output
     try:
         with open(os.path.join(out, "halrun.log")) as f:
-            tail = [l.rstrip() for l in f if "ecat.0" in l or "dc-sync" in l]
-        print("\n".join(tail[-20:]))
+            tail = [l.rstrip() for l in f if any(k in l for k in ("dc-sync", "turnaround", "shift-time",
+                                                                      "pll-reset", "dc-phased"))]
+        print("\n".join(tail))
     except OSError:
         pass
     sf = os.path.join(out, "samples.txt")
     if not os.path.exists(sf):
         sys.exit("no samples written")
-    return analyze(sf, a.period, a.settle)
+    return analyze(sf, a.period, a.settle, a.mode == "follows")
 
 
 if __name__ == "__main__":
