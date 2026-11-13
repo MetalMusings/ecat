@@ -797,6 +797,17 @@ class TestHomingIni(Folder):
         self.assertEqual(len(integrate.joint_checks(self.ini, c)), 1)
 
 
+class TestKnownPins(unittest.TestCase):
+    def test_orient_fault_is_a_sint_input(self):
+        self.assertEqual(integrate.known_pin("spindle.0.orient-fault"), ("sint", "in"))
+        self.assertIsNone(integrate.known_pin("spindle.0.orient-fault-in"))
+
+    def test_no_lube_pins_in_2_10(self):
+        # iocontrol.0.lube and lube_level are gone from LinuxCNC 2.10 (also halui's)
+        for pin in ("iocontrol.0.lube", "iocontrol.0.lube_level", "halui.lube.on"):
+            self.assertIsNone(integrate.known_pin(pin), pin)
+
+
 class TestParams(Folder):
     """linuxcnc.params: slave parameters given a value in ethercat.hal."""
 

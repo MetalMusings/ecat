@@ -86,6 +86,9 @@ PATTERNS = [
      "(in CSS mode) at each rapid to feed transition."),
     (r"spindle\.\d+\.is-oriented", "motion",
      "Acknowledges spindle-orient: completes the orient cycle."),
+    (r"spindle\.\d+\.orient-fault", "motion",
+     "A fault code (an integer) during spindle-orient: non-zero aborts the orient cycle "
+     "and motion reports it."),
     (r"spindle\.\d+\.index-enable", "motion",
      "A handshake pin (it is read and written by both sides). For spindle-synchronised moves "
      "(threading, G33, G95) it must be connected to the index-enable pin of the spindle "

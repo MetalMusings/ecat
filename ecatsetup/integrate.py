@@ -527,8 +527,7 @@ KNOWN_PINS = [
     (r"iocontrol\.0\.emc-enable-in", "bool", "in"),
     (r"iocontrol\.0\.user-enable-out", "bool", "out"),
     (r"iocontrol\.0\.user-request-enable", "bool", "out"),
-    (r"iocontrol\.0\.(coolant-flood|coolant-mist|lube)", "bool", "out"),
-    (r"iocontrol\.0\.lube_level", "bool", "in"),
+    (r"iocontrol\.0\.(coolant-flood|coolant-mist)", "bool", "out"),
     (r"motion\.digital-in-\d\d", "bool", "in"),
     (r"motion\.digital-out-\d\d", "bool", "out"),
     (r"motion\.analog-in-\d\d", "real", "in"),
@@ -543,10 +542,11 @@ KNOWN_PINS = [
     (r"spindle\.\d+\.(on|forward|reverse|brake)", "bool", "out"),
     (r"spindle\.\d+\.(speed-out|speed-out-abs|speed-out-rps|speed-out-rps-abs)",
      "real", "out"),
-    (r"spindle\.\d+\.(at-speed|is-oriented|orient-fault-in)", "bool", "in"),
+    (r"spindle\.\d+\.(at-speed|is-oriented)", "bool", "in"),
+    (r"spindle\.\d+\.orient-fault", "sint", "in"),
     (r"spindle\.\d+\.(speed-in|revs)", "real", "in"),
     (r"(joint|spindle)\.\d+\.index-enable", "bool", "io"),
-    (r"halui\.(machine|estop|program|mist|flood|lube)\.(on|off|activate|reset|run|pause|"
+    (r"halui\.(machine|estop|program|mist|flood)\.(on|off|activate|reset|run|pause|"
      r"resume|step|stop)", "bool", "in"),
     (r"halui\.machine\.is-on", "bool", "out"),
     (r"halui\.estop\.is-activated", "bool", "out"),
