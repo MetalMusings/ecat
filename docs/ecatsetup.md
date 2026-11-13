@@ -1122,6 +1122,12 @@ before is kept as `/dev/shm/ecat-events.prev`. Both are gone after the
 computer restarts. Writing an event costs a few memory stores in the
 servo thread.
 
+After a cable break the master reads the whole bus again and every slave is
+offline for a while, and the working counter shows zero or incomplete while the
+slaves climb back to OP. The log shows these as information (with the reason),
+not as errors, when the events before them explain them: a slave beyond the
+number that respond is still reported offline.
+
 To see it:
 
 - in the window: the *Troubleshoot* page, *Event log*, newest first,

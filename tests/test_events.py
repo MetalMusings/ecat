@@ -89,6 +89,39 @@ class TestRead(unittest.TestCase):
             self.assertEqual(s, sev, msg)
             self.assertIn(part, msg)
 
+    def test_context_calms_what_the_master_does_by_itself(self):
+        E = events.Event
+        # a cable broken after slave 1 of 4: the master reads the bus again and all slaves
+        # are offline for a while; only 2 and 3 are really gone
+        evs = [E(0, 0, events.LINK, -1, 1, 0), E(1, 0, events.RESPONDING, -1, 2, 4),
+               E(2, 0, events.SLAVE_ONLINE, 0, 0, 0), E(3, 0, events.SLAVE_ONLINE, 1, 0, 0),
+               E(4, 0, events.SLAVE_ONLINE, 2, 0, 0), E(5, 0, events.SLAVE_ONLINE, 3, 0, 0)]
+        t = events.annotate(evs, {1: "x"})
+        self.assertEqual([t[i][0] for i in range(2, 6)], ["info", "info", "error", "error"])
+        self.assertIn("slave 1 (x) offline while the master reads the bus again", t[3][1])
+        self.assertEqual(t[4][1], "slave 2 OFFLINE")
+        # no slave answers (link lost): every one is gone
+        evs = [E(0, 0, events.LINK, -1, 0, 1), E(1, 0, events.RESPONDING, -1, 0, 4),
+               E(2, 0, events.SLAVE_ONLINE, 0, 0, 0)]
+        self.assertEqual(events.annotate(evs)[2][0], "error")
+        # the log starts after the context: the event keeps its own text
+        self.assertEqual(events.annotate([E(0, 0, events.SLAVE_ONLINE, 0, 0, 0)])[0][0], "error")
+
+    def test_the_working_counter_while_the_slaves_climb_to_op(self):
+        E = events.Event
+        up = [E(0, 0, events.LINK, -1, 1, 0), E(1, 0, events.MASTER_AL, -1, 0x0C, 0)]
+        wc = [E(2, 0, events.WC, -1, 1, 2), E(3, 0, events.WC, -1, 0, 1)]
+        t = events.annotate(up + wc)
+        self.assertEqual([t[2][0], t[3][0]], ["info", "info"])
+        self.assertIn("still coming up", t[2][1])
+        # in OP the same events are faults
+        run = [E(0, 0, events.LINK, -1, 1, 0), E(1, 0, events.MASTER_AL, -1, 0x08, 0)]
+        t = events.annotate(run + wc)
+        self.assertEqual([t[2][0], t[3][0]], ["error", "error"])
+        # without a master state before it (an overwritten log) nothing is calmed
+        t = events.annotate(wc)
+        self.assertEqual([t[2][0], t[3][0]], ["error", "error"])
+
     def test_report(self):
         write_log(self.path, [(0, events.START, -1, 4, 0), (1, events.LINK, -1, 0, 1)])
         out = []

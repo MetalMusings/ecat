@@ -169,6 +169,38 @@ def text(e, names=None):
     return "info", "event %d (%s, %d, %d)" % (t, who, e.a, e.b)
 
 
+def annotate(evs, names=None):
+    """{event index: (severity, text)} for events in order, with what the events
+    before them say: the master reading the bus again, or the slaves still
+    coming up, are not faults. An event whose context is not in the list (the
+    log was overwritten) gets its own text."""
+    out = {}
+    responding = master_al = link = None
+    for e in evs:
+        sev, msg = text(e, names)
+        if e.type == LINK:
+            link = e.a
+        elif e.type == RESPONDING:
+            responding = e.a
+        elif e.type == MASTER_AL:
+            master_al = e.a
+        elif e.type == SLAVE_ONLINE and not e.a and link and responding is not None \
+                and 0 <= e.slave < responding:
+            # after a cable break the master reads the bus again and every slave is
+            # offline for a while, also those that answer: only those beyond it are
+            sev, msg = "info", "%s offline while the master reads the bus again " \
+                "(it responds)" % ("slave %d" % e.slave if not names or e.slave not in names
+                                   else "slave %d (%s)" % (e.slave, names[e.slave]))
+        elif e.type == WC and e.a != 2 and e.b == 2 and link and master_al not in (None, 0, 8):
+            sev, msg = "info", "working counter %s (was %s): the slaves are still coming up" % (
+                WC_STATES.get(e.a, e.a), WC_STATES.get(e.b, e.b))
+        elif e.type == WC and e.a == 0 and e.b == 1 and link and master_al not in (None, 0, 8):
+            sev, msg = "info", "working counter zero (was incomplete): the slaves are still " \
+                "coming up"
+        out[e.index] = (sev, msg)
+    return out
+
+
 def stamp(t):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + ".%03d" % (int(t * 1000) % 1000)
 
@@ -181,8 +213,9 @@ def report(log, names=None, out=print, last=None):
     if log.lost > 0:
         out("(%d older events were overwritten)" % log.lost)
     events = log.events[-last:] if last else log.events
+    texts = annotate(log.events, names)
     for e in events:
-        sev, msg = text(e, names)
+        sev, msg = texts[e.index]
         out("%s %-5s %s" % (stamp(e.time), {"info": "", "warn": "WARN", "error": "ERROR"}[sev],
                             msg))
     if not events:

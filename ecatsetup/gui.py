@@ -2101,8 +2101,9 @@ class TroubleshootPage(QWidget):
         t = self.events_table
         t.setRowCount(len(rows))
         colours = {"info": None, "warn": QColor("#b26a00"), "error": QColor("#c62828")}
+        texts = events.annotate(log.events, names)
         for r, e in enumerate(rows):
-            sev, msg = events.text(e, names)
+            sev, msg = texts[e.index]
             t.setItem(r, 0, item(events.stamp(e.time), font=mono()))
             t.setItem(r, 1, item({"info": "", "warn": "WARN", "error": "ERROR"}[sev],
                                  colour=colours[sev]))

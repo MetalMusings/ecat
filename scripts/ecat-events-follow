@@ -30,9 +30,10 @@ def main():
             elif seen[0] != key or log.total <= seen[1]:
                 print("--- a new run started ---")
                 seen = (key, -1)
+            texts = events.annotate(log.events)
             for e in log.events:
                 if e.index > seen[1]:
-                    sev, msg = events.text(e)
+                    sev, msg = texts[e.index]
                     print("%s %-5s %s" % (events.stamp(e.time),
                                           {"info": "", "warn": "WARN", "error": "ERROR"}[sev], msg),
                           flush=True)
