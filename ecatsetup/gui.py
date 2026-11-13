@@ -621,7 +621,10 @@ class MasterView(QWidget):
         else:
             text = ("The servo period stays as it is; the first DC slave's clock is steered to the "
                     "PC clock and the other slaves follow it (servo-thread-follows-ref-clock: false). "
-                    "No automatic SYNC0 shift: set it by hand.")
+                    "No automatic SYNC0 shift: set it by hand. Measured with ECT60 drives: the slaves' "
+                    "clock drifted ~20 us/s against the thread, so SYNC0 wandered through the whole "
+                    "period and the turn-around alternated between 2 and 3 cycles. Prefer the other "
+                    "choice when drives count on 2.")
         self.clock_hint.setText(text)
 
     def _show_xdp(self):

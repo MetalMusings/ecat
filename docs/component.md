@@ -169,7 +169,7 @@ run in.
 | `transport` | `raw` (default, any network card), `xdp-native` (driver with XDP support, such as `igc` or `igb`) or `xdp-skb`. |
 | `start-check` | `true` (default): the component stops at load when the bus differs from the file (below). `false`: it only warns, and starts with the slaves that match. |
 | `dc.ref-clock-sync-cycles` | How often the DC clocks are synchronised, in cycles. |
-| `dc.servo-thread-follows-ref-clock` | `true`: LinuxCNC's servo thread is steered to follow the DC reference clock (the first DC slave); `false`: the slaves' clocks follow the PC's clock. Called `sync-to-ref-clock` before; that name is an error now. |
+| `dc.servo-thread-follows-ref-clock` | `true`: LinuxCNC's servo thread is steered to follow the DC reference clock (the first DC slave); `false`: the slaves' clocks follow the PC's clock (measured 2026-11-13 with ECT60 drives, 1 ms: the slaves' clock drifted ~20 us/s against the thread although the reference clock was synchronised every 1000 cycles, so SYNC0 wandered through the whole period and the turn-around alternated between 2 and 3 cycles; under load (stress-ng, 10 min) the master's DC sync check also failed; use `true` when drives count on 2; `scripts/dc-jitter-measure` repeats the measurement). Called `sync-to-ref-clock` before; that name is an error now. |
 | `dc.sync0-shift-ns` | Time from the nominal start of the servo period to SYNC0, for all DC slaves, in ns; or `auto` (below). *Global shift time* in EtherCAT Setup, `globalShiftTime` in lcec. |
 
 A configuration without an `interface` gets the one the master read the
