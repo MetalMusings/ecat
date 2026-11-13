@@ -984,6 +984,9 @@ class TestCards(unittest.TestCase):
         self.assertEqual([r[0] for r in rows], [True, False, False, False, False], rows)
         pins["turnaround-cycles"] = "0"
         self.assertIsNone(gui.sync_rows(cfg, pins.get, [], 1000000)[3][0])
+        cfg["master"]["dc"] = {"servo-thread-follows-ref-clock": False, "sync0-shift-ns": 500000}
+        rows = gui.sync_rows(cfg, pins.get, [], 1000000)
+        self.assertTrue(any("slaves follow the servo thread" in r[1] for r in rows), rows)
         rows = gui.sync_rows({"slaves": [{"name": "io"}]}, pins.get, [], 1000000)
         self.assertEqual([r[0] for r in rows], [True, None])
 

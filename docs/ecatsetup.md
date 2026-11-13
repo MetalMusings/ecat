@@ -335,7 +335,9 @@ the master's pins (`ecat.0.*`):
 - whether all slaves are in OP;
 - distributed clocks: how many slaves use them, and whether the
   master's DC sync check failed for one (`dc-sync-failed`);
-- with `servo-thread-follows-ref-clock`, whether the servo thread is
+- which clock is the master (the Master page's "Who sets the time" says it
+  in words: the slaves follow the servo thread, or the servo thread follows
+  the reference clock); with `servo-thread-follows-ref-clock`, whether the servo thread is
   locked to the reference clock (`dc-phased`, `pll-err`);
 - where SYNC0 is (`shift-time`) and the turn-around (`turnaround-cycles`):
   2 is what drive profiles count on; with `sync0-shift-ns: auto` it says

@@ -577,10 +577,15 @@ class MasterView(QWidget):
         self.ref_cycles = QSpinBox()
         self.ref_cycles.setRange(0, 1000000)
         self.ref_cycles.valueChanged.connect(self.edited)
-        dform.addRow("Reference clock sync every (cycles)", self.ref_cycles)
-        self.follows = QCheckBox("The servo thread follows the reference clock")
-        self.follows.toggled.connect(self.edited)
-        dform.addRow(self.follows)
+        self.clock = QuietCombo()
+        self.clock.addItem(self.CLOCK_SLAVES, False)
+        self.clock.addItem(self.CLOCK_THREAD, True)
+        self.clock.currentIndexChanged.connect(self.edited)
+        dform.addRow("Who sets the time", self.clock)
+        self.clock_hint = label("", "hint", wrap=True)
+        dform.addRow("", self.clock_hint)
+        self.ref_cycles_label = QLabel("Reference clock sync every (cycles)")
+        dform.addRow(self.ref_cycles_label, self.ref_cycles)
         shift = QHBoxLayout()
         self.shift_auto = QCheckBox("auto")
         self.shift_auto.setToolTip("SYNC0 where the turn-around from output to status is the same "
@@ -602,6 +607,23 @@ class MasterView(QWidget):
         lay.addWidget(self.dc)
         lay.addStretch(1)
 
+    CLOCK_SLAVES = "The slaves follow the servo thread (PC clock is the master)"
+    CLOCK_THREAD = "The servo thread follows the slaves (reference clock is the master)"
+
+    @property
+    def follows(self):
+        return bool(self.clock.currentData())
+
+    def _show_clock(self):
+        if self.follows:
+            text = ("The servo period is adjusted a little every cycle to keep its phase to SYNC0 "
+                    "(servo-thread-follows-ref-clock: true). Needed for the automatic SYNC0 shift.")
+        else:
+            text = ("The servo period stays as it is; the first DC slave's clock is steered to the "
+                    "PC clock and the other slaves follow it (servo-thread-follows-ref-clock: false). "
+                    "No automatic SYNC0 shift: set it by hand.")
+        self.clock_hint.setText(text)
+
     def _show_xdp(self):
         iface = self.interface.currentText().strip()
         if not iface:
@@ -618,9 +640,12 @@ class MasterView(QWidget):
 
     def _enable_dc(self):
         on = self.dc_on.isChecked()
-        for w in (self.ref_cycles, self.follows, self.shift_auto):
-            w.setEnabled(on)
-        self.shift.setEnabled(on and not self.shift_auto.isChecked())
+        self.clock.setEnabled(on)
+        self.ref_cycles.setEnabled(on and not self.follows)
+        self.ref_cycles_label.setEnabled(on and not self.follows)
+        self.shift_auto.setEnabled(on and self.follows)
+        self.shift.setEnabled(on and not (self.follows and self.shift_auto.isChecked()))
+        self._show_clock()
 
     def show_config(self):
         self.loading = True
@@ -636,7 +661,7 @@ class MasterView(QWidget):
         self.dc_on.setChecked(dc is not None)
         dc = dc or {}
         self.ref_cycles.setValue(int(dc.get("ref-clock-sync-cycles") or 0))
-        self.follows.setChecked(bool(dc.get("servo-thread-follows-ref-clock")))
+        self.clock.setCurrentIndex(1 if dc.get("servo-thread-follows-ref-clock") else 0)
         shift = dc.get("sync0-shift-ns")
         self.shift_auto.setChecked(shift == "auto")
         self.shift.setValue(shift if isinstance(shift, int) else 0)
@@ -661,8 +686,9 @@ class MasterView(QWidget):
                 dc["ref-clock-sync-cycles"] = self.ref_cycles.value()
             else:
                 dc.pop("ref-clock-sync-cycles", None)
-            dc["servo-thread-follows-ref-clock"] = self.follows.isChecked()
-            dc["sync0-shift-ns"] = "auto" if self.shift_auto.isChecked() else self.shift.value()
+            dc["servo-thread-follows-ref-clock"] = self.follows
+            dc["sync0-shift-ns"] = ("auto" if self.shift_auto.isChecked() and self.follows
+                                    else self.shift.value())
         else:
             m.pop("dc", None)
         self._enable_dc()
@@ -2652,6 +2678,9 @@ def sync_rows(cfg, get, offsets, period):
         phased = get("dc-phased") == "TRUE"
         rows.append((phased, "The servo thread follows the reference clock%s (pll-err %s ns)"
                      % ("" if phased else ": not locked yet", get("pll-err") or "?")))
+    else:
+        rows.append((True, "The slaves follow the servo thread (the servo period is not adjusted; "
+                     "pll-err %s ns is only measured)" % (get("pll-err") or "?")))
     try:
         shift = int(get("shift-time") or 0)
     except ValueError:
