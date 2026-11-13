@@ -73,6 +73,51 @@ def plan(cfg=None, sys_net=SYS_NET, kernel_device=KERNEL_MASTER_DEVICE):
     return Plan(commands, notes)
 
 
+def master_status(text):
+    """What `ethercat-uspace master` says: {"mac", "link", "slaves", "active"}
+    (None for what it does not say)."""
+    import re
+    m = re.search(r"^\s*Main:\s+([0-9a-f]{2}(?::[0-9a-f]{2}){5})", text, re.M | re.I)
+    link = re.search(r"^\s*Link:\s+(UP|DOWN)", text, re.M | re.I)
+    n = re.search(r"^\s*Slaves:\s+(\d+)", text, re.M)
+    active = re.search(r"^\s*Active:\s+(\w+)", text, re.M)
+    return {"mac": m.group(1).lower() if m else None,
+            "link": link.group(1).upper() == "UP" if link else None,
+            "slaves": int(n.group(1)) if n else None,
+            "active": active.group(1).lower() == "yes" if active else None}
+
+
+def stale_reason(status, cfg=None, sys_net=SYS_NET):
+    """Why a running master is not the one the file wants, or "": it has no
+    link, sees no slaves, or runs on another network card than the file's
+    `master.interface`. A master a program has activated (LinuxCNC) is never
+    called stale: it is in use."""
+    if not status or status.get("active"):
+        return ""
+    nic = ((cfg or {}).get("master") or {}).get("interface")
+    mac = status.get("mac")
+    if nic and mac and "/" not in str(nic):
+        try:
+            with open(os.path.join(sys_net, str(nic), "address")) as f:
+                want = f.read().strip().lower()
+        except OSError:
+            want = ""
+        if want and want != mac:
+            return "runs on another network card (%s) than the file's %s (%s)" % (mac, nic, want)
+    if status.get("link") is False:
+        return "has no link on its network card"
+    if status.get("slaves") == 0:
+        return "sees no slaves"
+    return ""
+
+
+def restart_plan(cfg=None, sys_net=SYS_NET, kernel_device=KERNEL_MASTER_DEVICE):
+    """The plan of `plan`, with the running master stopped first."""
+    p = plan(cfg, sys_net, kernel_device)
+    stop = [os.path.abspath(shutil.which(tool.TOOL) or tool.TOOL), "stop"]
+    return Plan([stop] + p.commands, p.notes)
+
+
 def argv(command, noninteractive):
     return ["sudo"] + (["-n"] if noninteractive else []) + command
 

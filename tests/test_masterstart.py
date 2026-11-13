@@ -21,6 +21,59 @@ class Tty:
         return self.tty
 
 
+MASTER_TEXT = """Master0
+  Phase: Idle
+  Active: no
+  Slaves: 6
+  Ethernet devices:
+    Main: e8:ea:6a:09:88:2b (attached)
+      Link: UP
+"""
+
+
+class StaleTest(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.net = d.name
+        for nic, mac in (("enp1s0", "e8:ea:6a:09:88:2b"), ("enp2s0", "aa:bb:cc:dd:ee:ff")):
+            os.mkdir(os.path.join(d.name, nic))
+            with open(os.path.join(d.name, nic, "address"), "w") as f:
+                f.write(mac + "\n")
+
+    def reason(self, text=MASTER_TEXT, nic="enp1s0"):
+        cfg = {"master": {"interface": nic}} if nic else None
+        return masterstart.stale_reason(masterstart.master_status(text), cfg, self.net)
+
+    def test_status(self):
+        self.assertEqual(masterstart.master_status(MASTER_TEXT), {
+            "mac": "e8:ea:6a:09:88:2b", "link": True, "slaves": 6, "active": False})
+
+    def test_a_good_master_is_not_stale(self):
+        self.assertEqual(self.reason(), "")
+        self.assertEqual(self.reason(nic=None), "")
+
+    def test_no_link_no_slaves_or_another_card(self):
+        self.assertIn("no link", self.reason(MASTER_TEXT.replace("Link: UP", "Link: DOWN")))
+        self.assertIn("no slaves", self.reason(MASTER_TEXT.replace("Slaves: 6", "Slaves: 0")))
+        why = self.reason(nic="enp2s0")
+        self.assertIn("another network card", why)
+        self.assertIn("enp2s0", why)
+
+    def test_a_master_in_use_is_never_stale(self):
+        text = MASTER_TEXT.replace("Active: no", "Active: yes").replace("Slaves: 6", "Slaves: 0")
+        self.assertEqual(self.reason(text, nic="enp2s0"), "")
+
+    def test_a_card_that_does_not_exist_here_says_nothing(self):
+        self.assertEqual(self.reason(nic="nope0"), "")
+
+    def test_restart_stops_first_and_starts_on_the_files_card(self):
+        p = masterstart.restart_plan({"master": {"interface": "enp1s0"}}, sys_net=self.net,
+                                     kernel_device=os.path.join(self.net, "none"))
+        self.assertEqual([c[1] for c in p.commands], ["stop", "start"])
+        self.assertEqual(p.commands[1][2:], ["--", "-i", "enp1s0"])
+
+
 class PlanTest(unittest.TestCase):
     def setUp(self):
         d = tempfile.TemporaryDirectory()

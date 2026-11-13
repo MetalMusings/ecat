@@ -644,6 +644,14 @@ when `ETHERCAT_USPACE_NO_PROMPT=1` is set (ecatsetup sets it when it calls
 the tool). With the kernel master loaded it shows
 `sudo systemctl stop ethercat` first, as above.
 
+A master that runs but does not fit is offered a restart: it has no link,
+sees no slaves, or sits on another network card than the file's
+`master.interface` (found by comparing the card's MAC address with the one the
+master reports). The dialog shows `ethercat-uspace stop` followed by the start
+command, and nothing runs until you answer Yes. A master that a program has
+activated (LinuxCNC) is never called stale: it is in use. The offer comes once
+per session.
+
 The window never runs as root and never asks for a password: it runs
 `sudo -n`. If sudo needs a password, the window tells you to run the command
 in a terminal. The command line runs plain `sudo`, which asks by itself.

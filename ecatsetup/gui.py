@@ -4201,6 +4201,7 @@ class MainWindow(QMainWindow):
         self.current = None     # the chosen slave's position, MASTER_ITEM, or None
         self.messages_by_slave = {}
         self.master_offer_off = False       # "Don't ask again this session"
+        self.master_restart_asked = False   # a master that does not fit was offered a restart
         self.master_just_started = False    # a failed read after a start is not offered again
         self.test_timer = QTimer(self)
         self.test_timer.setInterval(200)
@@ -4564,6 +4565,51 @@ class MainWindow(QMainWindow):
 
         self.run("Starting the master...", work, done)
 
+    def offer_master_restart(self):
+        """The master that runs has no link, sees no slaves or sits on another
+        network card than the file's: show the commands and restart it on the
+        file's card if the user confirms. Once a session, never while LinuxCNC
+        runs or a test is on, and never for a master a program has activated."""
+        if self.busy or self.test is not None or self.master_restart_asked \
+                or masterstart.linuxcnc_running():
+            return
+        try:
+            why = masterstart.stale_reason(
+                masterstart.master_status(tool.run("master")), self.session.cfg)
+        except tool.ToolError:
+            return
+        if not why:
+            return
+        self.master_restart_asked = True
+        p = masterstart.restart_plan(self.session.cfg)
+        box = QMessageBox(self)
+        box.setWindowTitle(TITLE)
+        box.setIcon(QMessageBox.Question)
+        box.setText("The master that runs %s. Restart it?" % why)
+        box.setInformativeText("\n".join(p.notes + ([""] if p.notes else []) + [
+            masterstart.text(p), "",
+            "The window itself does not run as root; sudo must work without a password "
+            "here, or you run the commands in a terminal."]))
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.No)
+        if box.exec_() != QMessageBox.Yes:
+            return
+
+        def work(progress):
+            progress("Restarting the master...")
+            return masterstart.run(p, noninteractive=True)
+
+        def done(result):
+            ok, message = result
+            if not ok:
+                self.set_messages([(RED, "", message.splitlines())])
+                self.status(message.splitlines()[0])
+                return
+            self.master_just_started = True
+            self.read_bus()
+
+        self.run("Restarting the master...", work, done)
+
     # -- actions
 
     def read_bus(self):
@@ -4575,6 +4621,7 @@ class MainWindow(QMainWindow):
             self.master_just_started = False
             self.status("Read %d slaves" % len(bus))
             self.check(extra=notes)
+            QTimer.singleShot(0, self.offer_master_restart)
         self.run("Reading the bus...", lambda progress: self.session.read_bus(progress), done)
 
     def update_from_bus(self):

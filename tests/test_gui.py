@@ -1119,6 +1119,39 @@ class TestSignalNameInTheBox(WindowBase):
         self.assertEqual(integrate.nets(s.cfg), [])
 
 
+class TestStaleMaster(WindowBase):
+    """A master with no slaves (or no link, or on another card) is offered a restart."""
+
+    STALE = "Master0\n  Active: no\n  Slaves: 0\n  Ethernet devices:\n    Main: e8:ea:6a:09:88:2b (attached)\n      Link: DOWN\n"
+
+    def test_offered_once_and_restarted_on_yes(self):
+        from ecatsetup import masterstart
+        w = self.window()
+        ran = []
+        with mock.patch.object(tool, "run", return_value=self.STALE), \
+                mock.patch.object(masterstart, "linuxcnc_running", return_value=False), \
+                mock.patch.object(gui.QMessageBox, "exec_", return_value=gui.QMessageBox.Yes) as ask, \
+                mock.patch.object(w, "run", lambda what, fn, done: ran.append(what)):
+            w.offer_master_restart()
+            self.assertEqual(ran, ["Restarting the master..."])
+            self.assertEqual(ask.call_count, 1)
+            # asked once a session
+            w.offer_master_restart()
+            self.assertEqual(ask.call_count, 1)
+
+    def test_a_good_master_or_none_asks_nothing(self):
+        from ecatsetup import masterstart
+        w = self.window()
+        good = "Master0\n  Active: no\n  Slaves: 6\n  Ethernet devices:\n    Main: e8:ea:6a:09:88:2b\n      Link: UP\n"
+        for out in (good, tool.ToolError("no master")):
+            with mock.patch.object(tool, "run", side_effect=[out] if isinstance(out, Exception) else None,
+                                   return_value=None if isinstance(out, Exception) else out), \
+                    mock.patch.object(masterstart, "linuxcnc_running", return_value=False), \
+                    mock.patch.object(gui.QMessageBox, "exec_") as ask:
+                w.offer_master_restart()
+                self.assertFalse(ask.called)
+
+
 class TestNoStrayWindows(WindowBase):
     """A label with no parent that is shown becomes a small empty window of its own for as
     long as it takes to put it into a layout: it showed as a flash on the screen."""
