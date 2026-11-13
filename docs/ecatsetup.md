@@ -718,7 +718,8 @@ net x-amp-fault x.drv-fault => joint.0.amp-fault-in
 ```
 
 and `index-enable` both ways if the drive homes by itself (`modes:
-[hm]`). The scale is counts per machine unit. The choice is kept in
+[hm]`; then `HOME_USE_INDEX = YES` must be set in the joint's INI section, which
+the INI check says if it is not). The scale is counts per machine unit. The choice is kept in
 `ethercat.yaml` (see [file format](component.md#linuxcnc)).
 
 When your HAL files already connect a joint to a drive, the program

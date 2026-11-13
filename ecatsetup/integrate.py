@@ -419,6 +419,13 @@ def joint_checks(ini_path, cfg, max_counts=None):
             if ini_get(e, sec, key) is None:
                 out.append("[%s]%s is not set: LinuxCNC's default is used; set it for the "
                            "machine (in machine units)" % (sec, key))
+        if "hm" in (((drives(cfg).get(j.get("slave")) or {}).get("cia402") or {}).get("modes") or []):
+            use = str(resolve(ini_get(e, sec, "HOME_USE_INDEX", "NO"), e) or "NO").strip().upper()
+            if use not in ("YES", "TRUE", "1"):
+                out.append("[%s]HOME_USE_INDEX is not YES: %s homes the joint through its "
+                           "index-enable handshake, which motion only uses when the joint homes "
+                           "on an index (HOME_USE_INDEX = YES, HOME_SEARCH_VEL = 0)"
+                           % (sec, j.get("slave")))
         try:
             v = float(resolve(ini_get(e, sec, "MAX_VELOCITY"), e))
         except (TypeError, ValueError):

@@ -778,6 +778,25 @@ class TestJointChecks(Folder):
                             for n in integrate.joint_checks(self.ini, c)))
 
 
+class TestHomingIni(Folder):
+    def test_drive_homing_needs_home_use_index(self):
+        c = cfg()
+        integrate.set_joint(c, 0, "x", 100.0)
+        base = INI + "FERROR = 1\nMIN_FERROR = 1\n"
+        self.write("machine.ini", base)
+        self.assertEqual(integrate.joint_checks(self.ini, c), [])
+        # a drive that homes the joint (modes: [hm]) needs the index homing
+        c["slaves"][0]["cia402"]["modes"] = ["hm"]
+        notes = integrate.joint_checks(self.ini, c)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("[JOINT_0]HOME_USE_INDEX is not YES", notes[0])
+        for value in ("YES", "yes", "1", "TRUE"):
+            self.write("machine.ini", base + "HOME_USE_INDEX = %s\n" % value)
+            self.assertEqual(integrate.joint_checks(self.ini, c), [], value)
+        self.write("machine.ini", base + "HOME_USE_INDEX = NO\n")
+        self.assertEqual(len(integrate.joint_checks(self.ini, c)), 1)
+
+
 class TestParams(Folder):
     """linuxcnc.params: slave parameters given a value in ethercat.hal."""
 
