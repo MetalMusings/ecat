@@ -1102,3 +1102,32 @@ class TestNoStrayWindows(WindowBase):
         self.assertEqual([x for x in shown if not x.startswith("MainWindow")], [])
 
 
+class TestProcessDataColumns(WindowBase):
+    """Scale, Offset, Bit pins and Invert are shown where an entry uses them, or when asked."""
+
+    def test_unused_columns_are_hidden_until_asked_for(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        cols = (page.SCALE, page.OFFSET, page.SPLIT, page.INVERT)
+        used = {c: any(page.pd.item(r, c).text() for r in range(page.pd.rowCount())) for c in cols}
+        self.assertEqual({c: page.pd.isColumnHidden(c) for c in cols}, {c: not u for c, u in used.items()})
+        self.assertTrue(any(page.pd.isColumnHidden(c) for c in cols), "the fake bus uses them all")
+        page.pd_more.setChecked(True)
+        self.assertFalse(any(page.pd.isColumnHidden(c) for c in cols))
+        page.pd_more.setChecked(False)
+        self.assertEqual({c: page.pd.isColumnHidden(c) for c in cols}, {c: not u for c, u in used.items()})
+
+    def test_a_bit_field_shows_its_bit_pins(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        row = next(r for r in range(page.pd.rowCount())
+                   if page.pd.item(r, page.PIN).flags() & gui.Qt.ItemIsEditable
+                   and page.pd.item(r, page.PIN).text() and page._entry(r).get("bits", 1) > 1
+                   and page.pd.cellWidget(r, page.HALTYPE) is not None)
+        if not page.pd.isColumnHidden(page.SPLIT):
+            page.pd_more.setChecked(False)
+            page.pd.setColumnHidden(page.SPLIT, True)
+        page.pd.cellWidget(row, page.HALTYPE).setCurrentText(page.BIT_FIELD)
+        self.assertFalse(page.pd.isColumnHidden(page.SPLIT))

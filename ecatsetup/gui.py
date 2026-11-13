@@ -1087,6 +1087,11 @@ class SlaveView(QWidget):
         pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
                                   "without one; entries the profile handles have no pins.")
         self.pd = table(self.PD_COLUMNS, self.PIN)
+        self.pd_more = QCheckBox("All columns")
+        self.pd_more.setToolTip("Scale, Offset, Bit pins and Invert are shown when an entry uses "
+                                "them; tick this to see them all, to set one")
+        self.pd_more.toggled.connect(self.pd_more_toggled)
+        pd.head.addWidget(self.pd_more)
         self.pd.itemChanged.connect(self.pd_edited)
         self.pd.cellDoubleClicked.connect(self.pd_double_clicked)
         pd.add(self.pd)
@@ -1383,9 +1388,23 @@ class SlaveView(QWidget):
             for pi, pdo in enumerate(pd.get(direction) or []):
                 for ei, e in enumerate(pdo.get("entries") or []):
                     self._pd_row(s, direction, pdo, pi, e, ei)
+        self.fit_pd_columns()
+        self.loading = False
+
+    def fit_pd_columns(self):
+        """The columns that few entries use are shown where one does (or when asked
+        for): a narrow window shows the rest of the row."""
+        for c in (self.SCALE, self.OFFSET, self.SPLIT, self.INVERT):
+            used = any(self.pd.item(r, c) is not None and self.pd.item(r, c).text()
+                       for r in range(self.pd.rowCount()))
+            self.pd.setColumnHidden(c, not (used or self.pd_more.isChecked()))
         fit_columns(self.pd, stretch=self.PIN, wide=(self.SPLIT,))
         fit_table(self.pd)
-        self.loading = False
+
+    def pd_more_toggled(self, _on):
+        s = self.win.session.slave(self.position)
+        if s is not None and not self.loading:
+            self.show_process_data(s)
 
     @staticmethod
     def _use(e):
@@ -1626,6 +1645,7 @@ class SlaveView(QWidget):
         if col != self.PIN or row >= len(self.pd_rows):
             return
         if "split" in self._entry(row):
+            self.pd.setColumnHidden(self.SPLIT, False)
             self.pd.setCurrentCell(row, self.SPLIT)
             self.pd.editItem(self.pd.item(row, self.SPLIT))
 
@@ -1715,6 +1735,7 @@ class SlaveView(QWidget):
         self.pd.item(row, self.INVERT).setText(self._invert_text(e))
         self.loading = False
         self._refresh_row(row, e)
+        self.fit_pd_columns()
         self.win.changed()
 
     def st_edited(self, it):

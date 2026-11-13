@@ -125,7 +125,10 @@ Choosing a slave shows:
   *Copy the INI lines*. The choice goes to Settings. Switching modes is
   built and unit-tested but not yet tried on a drive
   ([Changing modes](component.md#changing-modes));
-- **Process data**: every PDO entry with its pin name and HAL type. Clear
+- **Process data**: every PDO entry with its pin name and HAL type. The
+  columns Scale, Offset, Bit pins and Invert are shown only where an entry
+  uses them (the *All columns* box shows them all), so that the rows fit a
+  small window. Clear
   a pin name to map an entry without a pin; entries the profile handles
   are marked as such and get no pin. An entry of several bits, such as a
   drive's digital inputs (`0x60FD`), can get one `bit` pin per bit:
