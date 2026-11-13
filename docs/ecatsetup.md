@@ -127,6 +127,7 @@ Choosing a slave shows:
   built and unit-tested but not yet tried on a drive
   ([Changing modes](component.md#changing-modes));
 - **Process data**: every PDO entry with its pin name and HAL type. The
+  first column gives the direction and the PDO (`out 0x1600`). The
   columns Scale, Offset, Bit pins and Invert are shown only where an entry
   uses them (the *All columns* box shows them all), so that the rows fit a
   small window. Clear
@@ -154,6 +155,14 @@ Choosing a slave shows:
   command is an error and `--check` refuses it; one that only looks like a
   command, by its name, write-only access or 0x1010/0x1011, is a
   warning). *Read present values* fills the *Now* column from the slave.
+  For a CiA 402 drive *Suggest following-error window* adds the drive's
+  own following-error window (the quirk file's object, such as the ECT60's
+  `0x2022`, else `0x6065`) as an ordinary setting: twice the joint's `FERROR`
+  from the INI file, in the joint's counts (the Joints card gives the
+  scale), so that LinuxCNC's own following error trips first and the drive
+  is the second line of defence. The status line says how it was worked
+  out, or why nothing was suggested (no joint, no INI file or `FERROR`, a
+  drive with several axes). A setting already there is updated.
   *Values in hex* shows the values and *Now* as `0x` hex, as wide as the
   type (the SDO card's *Hex* box is the same setting); you can type a value
   in either form, `255` or `0xFF`, and the file keeps the number;
@@ -1112,8 +1121,10 @@ late` at that moment is the thread stopping. With a master running,
 `0x1001:00 aborted`, abort message `0x06020000` ("This object does not
 exist in the object directory"), for a slave that has no such object:
 these are optional diagnostic objects (the diagnosis history and the
-error register), which EtherCAT Setup's slave diagnosis reads from every
-slave it examines (`ethercat diag` and an upload of `0x1001`), also
+error register). EtherCAT Setup's slave diagnosis reads them (`ethercat diag`
+and an upload of `0x1001`) only from a slave whose object list has them,
+so it no longer causes these messages; if the master has not read the list
+yet (it is empty), it asks as before, so they can still appear, also
 while LinuxCNC runs. A `working counter incomplete` or
 `zero` of tens of milliseconds at each climb back to OP is known. After
 the cable the master scans the whole bus again before it configures the

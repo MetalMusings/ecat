@@ -324,7 +324,7 @@ class TestWindow(WindowBase):
         self.assertNotIn("pin", e)
         self.assertNotIn("hal-type", e)
         self.assertEqual(e["split"], ["%s-%d" % (base, i) for i in range(min(bits, 32))])
-        self.assertEqual(page.pd.item(row, 5).text(), "split")
+        self.assertEqual(page.pd.item(row, page.USE).text(), "split")
         page.pd.cellWidget(row, page.HALTYPE).setCurrentText("uint")
         self.assertEqual(e["pin"], base)
         self.assertEqual(e["hal-type"], "uint")
@@ -777,6 +777,33 @@ class TestWindow(WindowBase):
         page.st.selectRow(row)
         page.remove_setting()
         self.assertEqual(len(w.session.slave(0)["settings"]), n)
+
+    def test_suggest_following_error_window(self):
+        def page_visible(w, pos):
+            w.select_slave(pos)
+            w.slave_page.show_settings(w.session.slave(pos))
+            return w.slave_page.ferror_button.isVisibleTo(w.slave_page)
+
+        w = self.window()
+        s = w.session.slave(0)
+        self.assertFalse(page_visible(w, 0))          # not a drive: no button
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp"}
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
+        self.assertTrue(page_visible(w, 0))
+        page = w.slave_page
+        ini = os.path.join(self.dir.name, "m.ini")
+        open(ini, "w").write("[EMCMOT]\nSERVO_PERIOD = 1000000\n[JOINT_0]\nFERROR = 0.5\n")
+        w.session.ini_path = ini
+        page.suggest_following_error()                # no joint yet: says so, adds nothing
+        self.assertFalse(any(x["object"] in ("0x6065:00", "0x2022:00") for x in s.get("settings") or []))
+        from ecatsetup import integrate
+        integrate.set_joint(w.session.cfg, 0, config.axes(s)[0], 100.0)
+        page.suggest_following_error()
+        page.suggest_following_error()                # again: updates, no duplicate
+        found = [x for x in s["settings"] if x["object"] in ("0x6065:00", "0x2022:00")]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["value"], 100)
 
     def test_settings_picker_and_guidance(self):
         w = self.window()

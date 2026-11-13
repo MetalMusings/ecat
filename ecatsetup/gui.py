@@ -860,9 +860,9 @@ class ObjectDelegate(QStyledItemDelegate):
 class SlaveView(QWidget):
     """One slave on the Bus page."""
 
-    PD_COLUMNS = ["Dir", "PDO", "Object", "Name", "Type", "Use", "HAL pin", "HAL type",
+    PD_COLUMNS = ["PDO", "Object", "Name", "Type", "Use", "HAL pin", "HAL type",
                   "Scale", "Offset", "Bit pins", "Invert"]
-    PIN, HALTYPE, SCALE, OFFSET, SPLIT, INVERT = 6, 7, 8, 9, 10, 11
+    USE, PIN, HALTYPE, SCALE, OFFSET, SPLIT, INVERT = 4, 5, 6, 7, 8, 9, 10
     SET_COLUMNS = ["Object", "Name", "Type", "Value", "Now"]
 
     def __init__(self, win):
@@ -1119,6 +1119,13 @@ class SlaveView(QWidget):
         buttons.addWidget(add)
         buttons.addWidget(remove)
         buttons.addWidget(self.read_now_button)
+        self.ferror_button = QPushButton("Suggest following-error window")
+        self.ferror_button.setToolTip(
+            "For a CiA 402 drive: add the drive's following-error window as a setting, "
+            "twice the joint's FERROR in the joint's counts, so that LinuxCNC's own "
+            "following error trips first and the drive is the second line of defence")
+        self.ferror_button.clicked.connect(self.suggest_following_error)
+        buttons.addWidget(self.ferror_button)
         self.hex_box = QCheckBox("Values in hex")
         self.hex_box.setToolTip("Show the values (and what the slave has now) as 0x hex. You can "
                                 "type a value in either form: 255 or 0xFF")
@@ -1423,12 +1430,12 @@ class SlaveView(QWidget):
             name = ""
         use = self._use(e)
         fixed = use in ("profile", "gap")
-        cells = ["out" if direction == "outputs" else "in", pdo.get("pdo"), e.get("object"), name,
-                 "%s %s" % (e.get("type", ""), e.get("bits")), use]
+        cells = ["%s %s" % ("out" if direction == "outputs" else "in", pdo.get("pdo")),
+                 e.get("object"), name, "%s %s" % (e.get("type", ""), e.get("bits")), use]
         for c, v in enumerate(cells):
             self.pd.setItem(r, c, item(v, colour=GREY if v in ("profile", "gap") else None,
-                                       font=mono() if c in (1, 2) else None,
-                                       tip=str(v) if v and c == 3 else None))
+                                       font=mono() if c in (0, 1) else None,
+                                       tip=str(v) if v and c == 2 else None))
         pin_text = e.get("pin", "")
         if use == "profile":
             pin_text = "handled by the %s" % ("CiA 402 profile" if s.get("profile") == "cia402"
@@ -1498,6 +1505,7 @@ class SlaveView(QWidget):
             self.st.setItem(r, 4, item(now, font=mono(), colour=GREY))
         fit_columns(self.st, stretch=1)
         fit_table(self.st, minimum=1)
+        self.ferror_button.setVisible(s.get("profile") == "cia402")
         self.show_setting_problems(s)
         self.loading = False
 
@@ -1652,7 +1660,7 @@ class SlaveView(QWidget):
 
     def _refresh_row(self, row, e):
         self.loading = True
-        self.pd.item(row, 5).setText(self._use(e))
+        self.pd.item(row, self.USE).setText(self._use(e))
         pin_item = self.pd.item(row, self.PIN)
         split_item = self.pd.item(row, self.SPLIT)
         for it, on in ((pin_item, "split" not in e), (split_item, "pin" not in e)):
@@ -1792,6 +1800,31 @@ class SlaveView(QWidget):
         self.show_settings(s)
         self.st.setCurrentCell(self.st.rowCount() - 1, 0)
         self.st.editItem(self.st.item(self.st.rowCount() - 1, 0))
+        self.win.changed()
+
+    def suggest_following_error(self):
+        """Add (or update) the drive's following-error window as a setting."""
+        s = self.win.session.slave(self.position)
+        if s is None:
+            return
+        got = integrate.following_error_suggestion(self.win.session.ini_path,
+                                                   self.win.session.cfg, s)
+        if "object" not in got:
+            self.win.status("No following-error window suggested: %s" % got["why"])
+            return
+        settings = s.setdefault("settings", [])
+        old = next((st for st in settings if st.get("object") == got["object"]), None)
+        if old is None:
+            old = {"object": got["object"]}
+            settings.append(old)
+        index, sub = config.parse_obj(got["object"])
+        d = self.win.session.dictionary(self.position)
+        name = d.name(index, sub)
+        if name:
+            old["name"] = name
+        old.update(type=got["type"], value=got["value"])
+        self.show_settings(s)
+        self.win.status("%s = %d (%s)" % (got["object"], got["value"], got["why"]))
         self.win.changed()
 
     def choose_settings(self):

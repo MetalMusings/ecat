@@ -447,6 +447,45 @@ def joint_checks(ini_path, cfg, max_counts=None):
     return out
 
 
+FERROR_MARGIN = 2.0     # the drive's window is this many times LinuxCNC's FERROR
+
+
+def following_error_suggestion(ini_path, cfg, slave):
+    """A following-error window for a CiA 402 drive's settings, as
+    {"object": "0x6065:00", "type": "UINT", "value": counts, "why": text}, or
+    {"why": text} when none can be worked out.
+
+    The drive is the second line of defence: its window is FERROR_MARGIN times
+    the joint's FERROR (machine units) in the joint's counts, so that LinuxCNC's
+    own following error trips first. The object is the quirk file's
+    `limits: following-error`, else 0x6065 (as the drive test)."""
+    from . import drivetest, propose, quirks
+    names = config.axes(slave)
+    if len(names) != 1:
+        return {"why": "the drive has several axes: set their following-error windows by hand"}
+    joint = next((j for j in joints(cfg) if j.get("slave") == names[0]), None)
+    if joint is None:
+        return {"why": "no joint is connected to %s (Joints card)" % names[0]}
+    if not ini_path:
+        return {"why": "the INI file is not known: choose it first"}
+    e = read_ini(ini_path)
+    sec = "JOINT_%d" % joint["joint"]
+    try:
+        ferror = float(resolve(ini_get(e, sec, "FERROR"), e))
+    except (TypeError, ValueError):
+        return {"why": "[%s]FERROR is not set in the INI file" % sec}
+    where = quirks.limits(slave).get("following-error")
+    if isinstance(where, str):
+        return {"why": "this drive's own object is not used: %s" % where}
+    index, sub, tool_type = where or drivetest.STANDARD_LIMITS["following-error"]
+    scale = abs(float(joint.get("scale") or 1.0))
+    value = int(round(ferror * scale * FERROR_MARGIN))
+    return {"object": "0x%04X:%02X" % (index, sub),
+            "type": propose.COE_TYPES.get(tool_type, tool_type.upper()),
+            "value": max(value, 1),
+            "why": "%g x [%s]FERROR %g x scale %g" % (FERROR_MARGIN, sec, ferror, scale)}
+
+
 def check_at_start(cfg):
     """linuxcnc.check-hal-at-start: run the HAL check when LinuxCNC starts."""
     return ((cfg or {}).get("linuxcnc") or {}).get("check-hal-at-start") is True

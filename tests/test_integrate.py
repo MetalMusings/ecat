@@ -777,6 +777,33 @@ class TestJointChecks(Folder):
         self.assertTrue(any("SERVO_PERIOD is not set" in n
                             for n in integrate.joint_checks(self.ini, c)))
 
+    def test_following_error_suggestion(self):
+        c = cfg()
+        x = c["slaves"][0]
+        integrate.set_joint(c, 0, "x", 100.0)
+        self.write("machine.ini", INI + "MAX_VELOCITY = 50\nFERROR = 0.5\n")
+        # the ECT60's quirk file names its own object (pulses, uint32)
+        got = integrate.following_error_suggestion(self.ini, c, x)
+        self.assertEqual((got["object"], got["type"], got["value"]), ("0x2022:00", "UDINT", 100))
+        self.assertIn("[JOINT_0]FERROR 0.5", got["why"])
+        # another drive: the standard object
+        x["identity"] = {"vendor": "0x00000001", "product": "0x00000001"}
+        got = integrate.following_error_suggestion(self.ini, c, x)
+        self.assertEqual((got["object"], got["value"]), ("0x6065:00", 100))
+
+    def test_following_error_suggestion_says_why_not(self):
+        c = cfg()
+        x = c["slaves"][0]
+        self.write("machine.ini", INI + "MAX_VELOCITY = 50\n")
+        self.assertIn("no joint", integrate.following_error_suggestion(self.ini, c, x)["why"])
+        integrate.set_joint(c, 0, "x", 100.0)
+        got = integrate.following_error_suggestion(self.ini, c, x)
+        self.assertNotIn("object", got)
+        self.assertIn("FERROR is not set", got["why"])
+        self.assertIn("INI file is not known", integrate.following_error_suggestion(None, c, x)["why"])
+        x["cia402"]["axes"] = ["a", "b"]
+        self.assertIn("several axes", integrate.following_error_suggestion(self.ini, c, x)["why"])
+
 
 class TestHomingIni(Folder):
     def test_drive_homing_needs_home_use_index(self):

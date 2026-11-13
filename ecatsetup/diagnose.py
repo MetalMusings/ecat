@@ -10,7 +10,7 @@ LinuxCNC.
 import time
 from dataclasses import dataclass, field
 
-from . import tool
+from . import coe, tool
 
 AL_STATES = {1: "INIT", 2: "PREOP", 3: "BOOT", 4: "SAFEOP", 8: "OP"}
 
@@ -215,11 +215,18 @@ def examine(positions, seconds=2.0):
         for p in range(4):
             r.ports.append(Port(p, dl[p]["link"], now[p],
                                 {k: (now[p][k] - then[p][k]) % 256 for k in now[p]}))
-        diag = _try(lambda: tool.run("diag", "-p", pos))
+        # ask only for objects the slave lists: the master logs an abort for the
+        # others. An empty listing (no CoE, or not read yet) asks as before.
+        objects = coe.Dictionary(_try(lambda: tool.sdos(pos)) or "").objects
+
+        def listed(index):
+            return not objects or index in objects
+        diag = _try(lambda: tool.run("diag", "-p", pos)) if listed(0x10F3) else None
         if diag and "does not provide" not in diag:
             r.history = diag.strip().splitlines()
-        r.error_register = tool.upload(pos, 0x1001, 0, "uint8")
-        dt = tool.upload(pos, 0x1000, 0, "uint32")
+        if listed(0x1001):
+            r.error_register = tool.upload(pos, 0x1001, 0, "uint8")
+        dt = tool.upload(pos, 0x1000, 0, "uint32") if listed(0x1000) else None
         if dt is not None and dt & 0xFFFF == 402:
             c = r.cia402 = Cia402()
             c.statusword = tool.upload(pos, 0x6041, 0, "uint16")

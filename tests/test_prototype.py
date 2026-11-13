@@ -915,13 +915,18 @@ class FakeBus:
         self.regs, self.sdos, self.later, self.reads = regs, sdos, later or {}, 0
         self.slave_line = slave_line
         self.verbose = "State: PREOP\nFlag: E\n"
+        self.listing = ""       # the slave's `ethercat sdos` output
+        self.asked = []         # (index, "upload" or "diag"): what was asked of the slave
 
     def run(self, *args, binary=False):
         if args[0] == "slaves" and "-v" in args:
             return self.verbose
         if args[0] == "slaves":
             return self.slave_line + "\n"
+        if args[0] == "sdos":
+            return self.listing
         if args[0] == "diag":
+            self.asked.append((0x10F3, "diag"))
             return "Slave does not provide a diagnosis history (0x10F3).\n"
         if args[0] == "reg_read":
             address, length = int(args[3], 16), int(args[4])
@@ -934,6 +939,7 @@ class FakeBus:
         raise AssertionError(args)
 
     def upload(self, pos, index, subindex, dtype):
+        self.asked.append((index, "upload"))
         return self.sdos.get(index)
 
 
@@ -966,6 +972,29 @@ class TestDiagnose(unittest.TestCase):
         self.assertNotIn("->", text)
         # an old count at its limit is not a problem, but it hides whether it still grows
         self.assertIn("Note: phy at its limit (255+)", text)
+
+    def test_objects_the_slave_does_not_list_are_not_asked_for(self):
+        # the master logs an abort for each: only ask for what the dictionary has
+        regs = {0x0130: 0x08, 0x0110: 0x10}
+        bus = FakeBus(regs, {0x1001: 0})
+        bus.listing = 'SDO 0x1000, "Device Type"\n  0x1000:00, r-r-r-, uint32, 32 bit, "Device Type"\n'
+        self.run_diagnose(bus)
+        self.assertEqual(bus.asked, [(0x1000, "upload")])
+
+    def test_listed_objects_are_asked_for(self):
+        regs = {0x0130: 0x08, 0x0110: 0x10}
+        bus = FakeBus(regs, {0x1001: 0})
+        bus.listing = "".join('SDO 0x%04x, "x"\n  0x%04x:00, r-r-r-, uint32, 32 bit, "x"\n' % (i, i)
+                              for i in (0x1000, 0x1001, 0x10F3))
+        self.run_diagnose(bus)
+        self.assertEqual(sorted(bus.asked), [(0x1000, "upload"), (0x1001, "upload"),
+                                             (0x10F3, "diag")])
+
+    def test_an_empty_listing_asks_as_before(self):
+        bus = FakeBus({0x0130: 0x08, 0x0110: 0x10}, {})
+        self.run_diagnose(bus)
+        self.assertEqual(sorted(bus.asked), [(0x1000, "upload"), (0x1001, "upload"),
+                                             (0x10F3, "diag")])
 
     def test_a_count_that_is_not_at_its_limit_has_no_note(self):
         regs = {0x0130: 0x08, 0x0110: 0x10, 0x0301: 254}
