@@ -738,7 +738,11 @@ Each step is useful on its own; the order may change as parts are tried.
    since test mode moves drives with them.
 5. **HAL and LinuxCNC integration**: `ethercat.hal`, INI changes, the start
    check.
-6. **Later**: ESI download links, user comments per device.
+6. **Later**: ESI download links, user comments per device; optional: a
+   test plan generated for each configuration (a Test page card or
+   `--test-plan`), the steps of "Trying the configuration in LinuxCNC"
+   ([ecatsetup.md](ecatsetup.md)) with the file's own slave names, scales
+   and pins, and only the parts the configuration has.
 
 Where it stands (2026-11-09): steps 1-3 are done (`ecatsetup` on the
 command line, `ethercat.yaml`, the `ecat` component, which runs the

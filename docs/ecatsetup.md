@@ -960,6 +960,100 @@ machine: the bus in OP, the thread in the same order, the POSTGUI file's
 three axes and moving as with the original configuration. After LinuxCNC
 exited, the drives' `0x603F` was 0.
 
+### Trying the configuration in LinuxCNC
+
+The steps for the first run of a written configuration in LinuxCNC, with
+the machine in front of you. They suit most configurations; leave out what
+yours does not have (a spindle encoder, an I/O terminal).
+
+**Before starting**
+
+1. *Check the HAL files* (or `ecatsetup --check-hal <machine>.ini`), and
+   read the *HAL & LinuxCNC* page's *Still to connect*: what is left open
+   or simulated is deliberate or not yet done.
+2. Make sure the master is running and sees the slaves (`ethercat-uspace
+   slaves`, all in PREOP), and that nothing else uses the NIC (the kernel
+   master stopped).
+3. Lower the joints' `MAX_VELOCITY` (for example to 5 mm/s) and keep the
+   drives' power switch, or the machine's E-stop, within reach. Drive
+   limits (`settings`, such as the ECT60's following-error window `0x2022`)
+   are not needed for the first run, but they are the drive's own
+   protection: see the *Settings* card.
+4. In a second terminal follow the event log while you test:
+   `scripts/ecat-events-follow` (it reads `/dev/shm/ecat-events`).
+   `ecatsetup --events` prints it afterwards. The master's own `[ERR]`
+   lines come in the terminal that started LinuxCNC; keep them.
+
+**Start LinuxCNC.** In the log: `ecat loaded`, `master activated`, all
+slaves PREOP, then OP about a second later, `SYNC0 shift ... us,
+turn-around 2 cycles`. After that no warnings or errors. Anything else is
+a reason to stop and look before switching the machine on.
+
+**Joints** (machine on, homed as the configuration says; with
+`HOME_SEARCH_VEL = 0` the machine homes where it stands)
+
+1. Jog each joint 10 mm and measure it: the direction and the length
+   follow the scale (`pos-scale`, counts per mm).
+2. When the joints stand still, `halcmd getp <drive>.fault-reason` is 0 on
+   every drive.
+
+**A spindle encoder** (the spindle need not be connected; turn it by
+hand)
+
+1. Watch `<slave>.enc.pos` and `raw-count`: one turn of the spindle is
+   1.0 in `pos` (negate `pos-scale` if it is backwards), and
+   `status-of-input-a` and `-b` change as you turn.
+2. Set the index handshake through its signal (the pin is connected, so
+   use `sets`, not `setp`): `halcmd sets <signal> 1`, where the signal is
+   the one `spindle.0.index-enable` is on, then turn the spindle at least
+   one turn past the index. `pos` becomes 0 there and the pin goes back
+   to 0.
+3. `halcmd setp <slave>.enc.reset 1` sets `pos` to 0 without the index;
+   set it back to 0.
+
+**Faults** (the axes still, the machine on; the event log in view)
+
+1. *The bus cable pulled* between the master and the first slave, for a
+   few seconds, and put back. Expect, within a millisecond, `working
+   counter zero` and `the profile shut the drive down: fault-reason 2`
+   for every drive; then all slaves OFFLINE, and a second later `link
+   DOWN`. LinuxCNC shows an amplifier fault on the joints. After the
+   cable is back: `link up`, and all slaves in OP again about ten seconds
+   later. The drives stay shut down until the machine is switched off and
+   on (the drive's `enable` has to drop first); then `fault-reason` is 0
+   again.
+2. *E-stop in software.* Where LinuxCNC's E-stop goes through a signal
+   into `iocontrol.0.emc-enable-in` (a real input, or a constant such as
+   `sets estop-ok 1` in your own HAL file), set the signal to 0 with
+   `halcmd sets` and back to 1. The GUI's own E-stop button does the same
+   from LinuxCNC. LinuxCNC enters E-stop, the drives' `enable` drops, and
+   the bus stays in OP: there is no event in the log, because nothing
+   went wrong with the bus. The machine's physical E-stop is tried
+   separately, where it cuts only the drives' power and not the
+   computer's.
+
+**Ending.** Close LinuxCNC. The log has `ecat unloading` and `stop guard:
+done, outputs zero, slaves in PREOP` (50 to 60 ms); one `servo thread
+late` at that moment is the thread stopping. With a master running,
+`0x603F` is 0 on every drive.
+
+**What is harmless.** The master prints `SDO upload 0x10F3:01 aborted` or
+`0x1001:00 aborted`, abort message `0x06020000` ("This object does not
+exist in the object directory"), for a slave that has no such object:
+these are optional diagnostic objects. A `working counter incomplete` or
+`zero` of tens of milliseconds at each climb back to OP is known. After
+the cable the slaves need about ten seconds to come back (see the fault
+tests in [development.md](development.md)); the drives are shut down
+meanwhile.
+
+Tried 2026-11-13 on a copy of LinuxCNC's `sim.axis` lathe (two ECT60 in
+CSP, an EL5101 spindle encoder, an EL1008 and an EL2008), with the user at
+the machine: everything above except the physical E-stop. All six slaves
+in OP in a second, SYNC0 shift 555 us with a turn-around of two cycles,
+both joints 10 mm as measured, the encoder and its index by hand, the
+cable pulled (the drives shut down in a millisecond, all in OP 11 s after
+the cable was back), the software E-stop, and a clean stop.
+
 ## Event log and report
 
 When something unexpected happens in LinuxCNC, the cause has often passed
