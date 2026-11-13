@@ -1071,9 +1071,9 @@ error register), which EtherCAT Setup's slave diagnosis reads from every
 slave it examines (`ethercat diag` and an upload of `0x1001`), also
 while LinuxCNC runs. A `working counter incomplete` or
 `zero` of tens of milliseconds at each climb back to OP is known. After
-the cable the slaves need about ten seconds to come back (see the fault
-tests in [development.md](development.md)); the drives are shut down
-meanwhile.
+the cable the master scans the whole bus again before it configures the
+slaves, which takes about ten seconds (measured, see the fault tests in
+[development.md](development.md)); the drives are shut down meanwhile.
 
 Tried 2026-11-13 on a copy of LinuxCNC's `sim.axis` lathe (two ECT60 in
 CSP, an EL5101 spindle encoder, an EL1008 and an EL2008), with the user at
