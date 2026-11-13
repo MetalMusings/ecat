@@ -159,6 +159,11 @@ Choosing a slave shows:
   The dictionary is the slave's own with the ESI file's ranges added; with
   no slave read, the ESI file's alone. `ecatsetup --check FILE --esi DIR`
   prints the same problems from the ESI files;
+
+  ![Add settings: the dictionary picker](images/gui-settings-picker.png)
+
+  ![The Settings card after Add](images/gui-settings.png)
+
 - **Settings** (continued): *Remove setting* removes the selected rows;
 - **Notes from the proposal**.
 
