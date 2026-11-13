@@ -2207,9 +2207,14 @@ class TroubleshootPage(QWidget):
                 "port, or the device on its other end." % (", ".join(map(str, grew)), r.seconds))
             self.cable.set_tone("red")
         else:
+            full = sorted({"%d %s" % (p.number, k) for p in r.ports for k in p.saturated})
             self.cable_verdict.setText(
                 "No errors grew in %g s; counts since power-on can be old." % r.seconds +
-                (" Port 1 is open: this is the last slave." if last else ""))
+                (" Port 1 is open: this is the last slave." if last else "") +
+                ((" The counts at their limit (255+: port %s) cannot show whether the fault is "
+                  "still there: write to the counter's register (0x0300, 0x0310 for lost "
+                  "links) or power the slave off, then look again." % ", ".join(full))
+                 if full else ""))
             self.cable.set_tone(None)
 
         # history

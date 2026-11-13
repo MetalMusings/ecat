@@ -964,6 +964,14 @@ class TestDiagnose(unittest.TestCase):
         self.assertEqual(found, 0)
         self.assertIn("phy 255+", text)
         self.assertNotIn("->", text)
+        # an old count at its limit is not a problem, but it hides whether it still grows
+        self.assertIn("Note: phy at its limit (255+)", text)
+
+    def test_a_count_that_is_not_at_its_limit_has_no_note(self):
+        regs = {0x0130: 0x08, 0x0110: 0x10, 0x0301: 254}
+        found, text = self.run_diagnose(FakeBus(regs, {}))
+        self.assertEqual(found, 0)
+        self.assertNotIn("at its limit", text)
 
     def test_error_acknowledged_by_the_master(self):
         regs = {0x0130: 0x02, 0x0110: 0x10}                # PREOP, no error flag, no code

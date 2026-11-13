@@ -173,6 +173,9 @@ Diagnosis of the slaves on the bus: *Examine again* / *Examine all*. For
 the chosen slave the page shows a series of steps (each ok, warning or
 failed), what the slave says (AL state and status code), the cable and
 link (port error counters), the slave's own message history (0x10F3), and
+A port counter that has reached 255 is marked: it cannot show whether the fault is
+still there, so the diagnosis says to write the counter (0x0300 for rx and phy
+errors, 0x0310 for lost links) or power the slave off, and run it again.
 the **Event log**: what the `ecat` component recorded while LinuxCNC ran
 ([event log](#event-log-and-report)), optionally only for this slave and the master.
 

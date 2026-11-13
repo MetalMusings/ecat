@@ -157,6 +157,12 @@ class Port:
         return [k for k in ("rx", "phy", "lost") if self.delta[k]]
 
     @property
+    def saturated(self):
+        """Counters that have run to their limit (255): since then they cannot
+        show whether the fault is still there."""
+        return [k for k in ("rx", "phy", "lost") if self.now[k] == 255]
+
+    @property
     def shown(self):
         return self.link or any(self.now.values())
 
@@ -296,6 +302,11 @@ def diagnose(positions, seconds=2.0, out=print):
                        seconds))
             elif port.delta["fwd"]:
                 out("    -> forwarded errors increased: the fault is before this slave")
+            if port.saturated:
+                out("    Note: %s at its limit (255+): it cannot show whether the fault is still "
+                    "there. Write to the counter's register (0x0300 for rx and phy errors, "
+                    "0x0310 for lost links) or power the slave off, then run this again"
+                    % " and ".join(port.saturated))
 
         # the slave's own messages
         if r.history:
