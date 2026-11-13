@@ -793,9 +793,14 @@ EtherCAT Setup and replace the simulation with the bus:
 - **POSTGUI files.** A line there that connects a pin `ethercat.hal` now
   connects is commented out when that pin exists before the GUI (a
   slave's, or a component a HALFILE loads). The simulation's writer on it
-  (the GUI's `qtplasmac_sim.arc_ok`) is left unconnected, with a note; the
-  GUI's readers (an LED) get a line of their own that puts them back on
-  the signal (`net sim:arc-ok => qtplasmac_sim.led  #ecatsetup: added`).
+  gives way like any other simulated writer. The simulation panel itself,
+  QtPlasmaC's `qtplasmac_sim`, is taken out when you write: its `loadusr` line
+  and every line with one of its pins are commented out with `#ecatsetup: `,
+  and what else was on those signals (the simulated torch's
+  `net plasmac:torch-on => sim-torch.start`) stays on a line of its own marked
+  `#ecatsetup: added`. The simulated E-stop chain has no special treatment:
+  connect `iocontrol.0.emc-enable-in` to an input like any pin, and the
+  simulated writer on its signal gives way; the chain's other lines stay.
   A pin only the GUI has cannot be connected in `ethercat.hal`, which
   runs before the GUI: that is refused.
 - **What is still simulated** is noted when writing: `simulated_home.hal`

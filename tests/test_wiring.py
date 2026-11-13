@@ -136,11 +136,32 @@ class TestWiring(unittest.TestCase):
         self.assertNotIn("qtplasmac_sim", main)
         self.assertIn(("sim_postgui.hal", 3, "net sim:arc-ok      qtplasmac_sim.arc_ok  =>  db_arc-ok.in"),
                       p.commented)
-        self.assertTrue(any("qtplasmac_sim.arc_ok no longer connected" in n for n in p.notes), p.notes)
+        self.assertTrue(any("simulation panel" in n for n in p.notes), p.notes)
         integrate.apply(p)
-        self.assertIn(integrate.COMMENT + "net sim:arc-ok", self.read("sim_postgui.hal"))
-        # the simulation's torch still listens to the signal, after the GUI
-        self.assertIn("net plasmac:torch-on   =>  qtplasmac_sim.torch_on", self.read("sim_postgui.hal"))
+        post = self.read("sim_postgui.hal")
+        self.assertIn(integrate.COMMENT + "net sim:arc-ok", post)
+        # the panel is gone: its loading line and every line with its pins are commented out;
+        # the simulated torch keeps listening to the real signal
+        self.assertIn(integrate.COMMENT + "loadusr -Wn qtplasmac_sim", post)
+        self.assertIn(integrate.COMMENT + "net plasmac:torch-on   =>  qtplasmac_sim.torch_on", post)
+        self.assertIn("net plasmac:torch-on => sim-torch.start" + integrate.ADDED, post)
+        self.assertEqual([l for l in post.splitlines()
+                          if "qtplasmac_sim" in l and not l.startswith(integrate.COMMENT)], [])
+
+    def test_the_estop_is_an_ordinary_signal(self):
+        # no special case: the real input takes the signal, the simulated writer (the
+        # estop_not of the simulated chain) gives way, and the chain's other lines stay
+        c = cfg()
+        wiring.connect(c, self.rows(c)["iocontrol.0.emc-enable-in"], "io.in-1")
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        main = next(ch.new for ch in p.changes if ch.path.endswith(integrate.MAIN_FILE))
+        self.assertIn("net sim:estop-out io.in-1 => iocontrol.0.emc-enable-in", main)
+        self.assertNotIn("estop_not", main)
+        sim = next(ch.new for ch in p.changes if ch.path.endswith("sim.hal"))
+        self.assertIn(integrate.COMMENT + "net sim:estop-out estop_not.out => iocontrol.0.emc-enable-in", sim)
+        self.assertIn("net sim:estop-raw estop_or.out  => estop_not.in", sim)
+        self.assertNotIn(integrate.COMMENT + "net sim:estop-raw", sim)
 
     def test_the_old_writer_goes_by_the_arrows(self):
         # a writer whose name says nothing (not .out): the arrow says it writes
@@ -154,7 +175,7 @@ class TestWiring(unittest.TestCase):
         self.assertIn("net sim:homesw io.in-2 => joint.0.home-sw-in", main)
         self.assertNotIn("sim-sw.state", main)
 
-    def test_a_gui_pin_reading_the_signal_is_not_moved_before_the_gui(self):
+    def test_the_simulation_panel_is_taken_out_with_its_leds(self):
         self.write("sim_postgui.hal", POSTGUI.replace("=>  db_arc-ok.in", "=>  db_arc-ok.in qtplasmac_sim.led"))
         c = cfg()
         wiring.connect(c, self.rows(c)["plasmac.arc-ok-in"], "io.in-1")
@@ -162,10 +183,11 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(p.errors, [])
         main = next(ch.new for ch in p.changes if ch.path.endswith(integrate.MAIN_FILE))
         self.assertNotIn("qtplasmac_sim", main)
-        # the GUI's LED reads the signal after the GUI is up
+        # the panel is taken out, its LED with it
         post = next(ch.new for ch in p.changes if ch.path.endswith("sim_postgui.hal"))
-        self.assertIn("net sim:arc-ok => qtplasmac_sim.led" + integrate.ADDED, post)
-        self.assertTrue(any("qtplasmac_sim.arc_ok no longer connected" in n for n in p.notes))
+        self.assertNotIn("qtplasmac_sim.led" + integrate.ADDED, post)
+        self.assertEqual([l for l in post.splitlines()
+                          if "qtplasmac_sim" in l and not l.startswith(integrate.COMMENT)], [])
 
     def test_another_slave_pin_takes_the_place(self):
         c = cfg()

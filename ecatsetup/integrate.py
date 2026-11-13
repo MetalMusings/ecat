@@ -303,6 +303,14 @@ def read_hal(path, ini_path=None):
     return read_text(path)
 
 
+# panels that only simulate the machine's inputs (QtPlasmaC's): Apply takes them out
+SIM_PANELS = ("qtplasmac_sim",)
+
+
+def _panel_pin(x):
+    return x.split(".", 1)[0] in SIM_PANELS
+
+
 ADDED = "  " + COMMENT + "added"    # the end of a line an earlier plan put in
 
 
@@ -1132,6 +1140,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         return (is_own(cfg, pin) or pin.split(".", 1)[0] in CORE_PREFIXES
                 or any(pin.startswith(inst + ".") for inst in early))
 
+    panel_gone = False
     for path in hal_files:
         current = text_of(path)
         text = original(current)
@@ -1148,6 +1157,19 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                 why = True
             elif len(t) == 3 and t[1] == "=" and t[0] in scale_pins:
                 why = True
+            elif t[0] in ("loadusr", "loadrt") and any(x in SIM_PANELS for x in t[1:]):
+                why = True
+                panel_gone = True
+            elif t[0] == "net" and len(t) > 1 and not (managed_pins & set(net_pins(t)[1])) \
+                    and any(_panel_pin(x) for x in net_pins(t)[1]):
+                # the simulation panel is taken out: what else is on the signal stays
+                why = True
+                panel_gone = True
+                keep = [x for x in t if not _panel_pin(x)]
+                while keep and keep[-1] in ARROWS:
+                    keep.pop()
+                if len(keep) > 2:
+                    after[b] = " ".join(keep) + ADDED + "\n"
             elif t[0] == "net" and len(t) > 1:
                 name, pins = net_pins(t)
                 if managed_pins & set(pins):
@@ -1162,8 +1184,11 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                     if path in postgui:
                         # the GUI's own readers stay on the signal, after the GUI
                         # is up; a writer gives way to the real pin
-                        rest = [x for x in pins if x not in managed_pins and x not in wrote]
-                        dropped += [x for x in wrote if x not in managed_pins]
+                        rest = [x for x in pins if x not in managed_pins and x not in wrote
+                                and not _panel_pin(x)]
+                        panel_gone = panel_gone or any(_panel_pin(x) for x in pins)
+                        dropped += [x for x in wrote if x not in managed_pins
+                                    and not _panel_pin(x)]
                         if rest:
                             # the signal ethercat.hal connects the pin to
                             ours = [x for x in pins if x in managed_pins]
@@ -1229,6 +1254,11 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             if back:
                 parts.append("%d back as you wrote %s" % (back, "it" if back == 1 else "them"))
             p.changes.append(FileChange(path, "change", current, new, ", ".join(parts)))
+
+    if panel_gone:
+        p.notes.append("The simulation panel (%s) is taken out: its lines are commented out "
+                       "with %s, what else was on its signals stays" % (
+                           ", ".join(SIM_PANELS), COMMENT.strip()))
 
     # signal names: the user's where there was one
     letters = {j: letter for j, letter, _ in ini_joints(ini_path)}
