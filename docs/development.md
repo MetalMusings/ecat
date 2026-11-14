@@ -1276,3 +1276,111 @@ Packaging and docs:
    migrated; tried at the machine with the user.
 5. Branch `0.11.x` from ecat-v0.11; packaging and docs (12-14); release.
 6. turner to 2.10 when the above is stable.
+
+## Devices we do not have
+
+Plan, nothing of it built (2026-11-14). New functions (EL6021 serial, EoE)
+and devices that should work but do not need a device on a bus to develop
+and try against. There are four ways to get one, in this order: the first
+that suffices is used.
+
+### 1. A capture from the user
+
+The user runs `ecatsetup --capture` (to be built) and sends the file. It
+holds what is needed to make a fake of the device for the tests: the SII,
+the CoE dictionary with present values, the PDO assignment, the ESI used,
+the report (configuration, diagnosis, event log with the master's
+messages) and a few seconds of the frames on the wire in SAFEOP and in OP
+(pcap, readable in Wireshark). From it the C tests' `fake.c` and the
+Python tests' fake bus (today from `tests/data/easercat7000.sii` and
+`-sdos.txt`) get a device of that kind, so that most of the code and its
+tests are written without the device. The device itself is still needed
+for the final try. The capture holds bus data only: no user names, home
+folders or other files.
+
+### 2. The device is sent here
+
+The user sends the device (and what it talks to, such as a serial device
+behind an EL6021) and gets it back. Tried on turner or on this machine as
+any other device. For a single terminal or a small module this is the
+cheapest and the first choice; buying one is another (an EL6021, an
+EoE-capable slave such as an EL6601/EL6614 are not expensive used).
+
+### 3. Remote access to a test computer at the user's
+
+For what cannot be sent: large or expensive drives, a combination of
+devices that misbehaves only together, a device in use.
+
+The user's part (a user who wants a missing function supports it with
+this):
+
+- a computer for the test only, not a LinuxCNC computer in use;
+- the device on a bench with its power supply (24 V), a coupler if it is
+  a terminal (EK1100), cables, and what it talks to;
+- someone at it during the session, for wiring and for anything that
+  moves.
+
+The computer (a mini-PC or an old desktop):
+
+| | Required | Recommended |
+|---|---|---|
+| CPU | x86-64, boots from USB (UEFI with Secure Boot works: Debian's signed shim and RT kernel) | Intel N100 or better; an old desktop of the last ten years does |
+| Memory | 4 GB | 8 GB |
+| Network | two ports: one for EtherCAT, one for the internet (or Wi-Fi for the internet) | Intel for EtherCAT (i210/i211 igb, i225/i226 igc, e1000e): tried with the master. Many N100 mini-PCs have two i226. In an old desktop: an Intel PCIe card (i210, a few hundred SEK). Other chips may work: the stick's check says |
+| USB stick | 16 GB, USB 3 | 32 GB |
+| Latency | measured by the stick at start and saved; I/O tests at 1 ms tolerate a lot | |
+
+The stick: a live image of Debian 13 with the RT kernel, LinuxCNC 2.10
+run-in-place at the pinned commit, the userspace master, ecat and EtherCAT
+Setup of the release, tcpdump, stress-ng, latency-histogram, and a help
+script. Built in CI (live-build or mkosi) and released beside ecat. It
+never mounts the computer's disks (a promise to write in the
+instructions, and the image is built without automounting). A partition
+`ECATLOG` on the stick keeps captures, logs and the session's recording
+across restarts; the user can read it.
+
+The help script, started by the user from the desktop:
+
+1. checks the network cards: which one has a slave behind it (the master
+   is started on it), which one reaches the internet;
+2. runs a short latency measurement and `ecatsetup --capture`, saved in
+   `ECATLOG`;
+3. starts the session: an outgoing SSH connection to the jump server with
+   a reverse tunnel (`ssh -R`), so nothing is opened in the user's router
+   or firewall; shows a session code and a Stop button;
+4. records the session in a terminal log (`script`) in `ECATLOG`;
+5. Stop, or pulling the internet cable, ends it.
+
+The jump server (run by the maintainer, needed seldom): a small VPS with
+OpenSSH only. Per session a key of its own, valid for that session only,
+and the tunnel reaches only the stick's SSH port, not the user's network.
+From here it is then `ssh <session>` as with turner; the window by
+`ssh -X` or Xpra when needed, most work on the command line (`--propose`,
+`--diagnose`, halrun, the I/O test).
+
+Rules for a session:
+
+- Nothing moves without the user at the device with a working emergency
+  stop, as at our own machines. Hold-to-enable from afar is not
+  hold-to-enable: the stick's drive test is off unless the user turns it
+  on locally.
+- The user is asked to connect the internet port to a guest network, as
+  the stick reaches the network it is on.
+- Agreed beforehand what is to be tried, and afterwards what was found;
+  the capture and the log stay with the user too.
+
+### 4. Not chosen
+
+- A container or a program on the user's own LinuxCNC computer: needs
+  raw access to the network card and RT, and touches a system in use.
+- Tailscale or similar: works, but a third service to trust and an
+  account for the user; a reverse SSH tunnel needs nothing but OpenSSH.
+  Kept as the fallback if the jump server becomes a burden.
+
+### Order of work
+
+1. `ecatsetup --capture` and a fake device built from a capture (useful at
+   once, also for ordinary bug reports).
+2. When a user needs it: the live image, the help script, the jump
+   server; tried first on turner or a borrowed computer as if it were a
+   stranger's.

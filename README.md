@@ -29,7 +29,7 @@ ecat has two parts:
 | [Getting started](docs/getting-started.md) | What gets installed, and how to try ecat step by step without disturbing your setup, from the safest. Start here. |
 | [EtherCAT Setup](docs/ecatsetup.md) | The window, bringing up a new slave, the test mode, writing into LinuxCNC, the event log and report, quirk files, and the command line. |
 | [The ecat component](docs/component.md) | Using the component in HAL, the `ethercat.yaml` file format, and what drives (cia402), encoder channels, analog and stepper terminals and modular devices give you. |
-| [Developing ecat](docs/development.md) | Building and testing, the design draft, what the prototype found on a real bus, and the plan for fault tests at a machine. |
+| [Developing ecat](docs/development.md) | Building and testing, the design draft, what the prototype found on a real bus, the plan for fault tests at a machine, and how to get at devices we do not have. |
 
 ## Install
 
