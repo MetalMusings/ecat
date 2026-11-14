@@ -748,7 +748,10 @@ tool shell without a controlling terminal, its `rtapi_app` exited at once.
 
 Tried on the plasma cutter's three ECT60 drives on 2026-11-10, with the
 user at the machine (100 counts/mm on X and Y; the test configuration
-had the drives' `0x607D`, `0x607F` as settings):
+had the drives' `0x607D` as settings). The ECT60 has no `0x607F`; since
+2026-11-14 PP needs only `0x607D:01` and `:02`, and `0x607F` where the drive
+has it. PP was tried again from the window on X that day, steps of 1 and
+5 mm, with the component of that day:
 
 - **PP** works on X, Y and Z, steps of 1 and 5 mm in both directions,
   after two findings, both in the profile ([cia402](component.md#the-cia402-profile)): the

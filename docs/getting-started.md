@@ -137,7 +137,9 @@ file as `.bak`. [writing into LinuxCNC](ecatsetup.md#writing-the-configuration-i
 the check of your HAL files works.
 
 **4. The test mode.** It runs the `ecat` component in `halrun` without
-LinuxCNC and shows the slaves' pins live. The kernel master and LinuxCNC
+LinuxCNC and shows the slaves' pins live. Its servo period is the INI
+file's `SERVO_PERIOD`; to try slaves without a machine configuration, type
+it on the *Master* page (1 ms until then). The kernel master and LinuxCNC
 must be stopped, and the free-running master hands the bus over to the
 test; afterwards start the kernel master again as above. Inputs and
 outputs of I/O slaves can be read and set; a drive does not move until
