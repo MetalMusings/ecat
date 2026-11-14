@@ -488,6 +488,20 @@ def check_file(path, esi_paths=()):
     problems, notes = compare_bus(cfg, positions)
     for m in problems + notes:
         print("Bus: %s" % m)
+    # DC settings against what each slave can do (warnings only)
+    from . import dcinfo, esi
+    devices = esi.load_dirs(esi_paths) if esi_paths else []
+    for s in cfg.get("slaves") or []:
+        if s.get("position") not in positions:
+            continue
+        try:
+            d = dcinfo.read(s["position"], devices)
+            if not session.same_kind(s, tool.slave_info(s["position"])):
+                continue
+        except tool.ToolError:
+            continue
+        for level, text in dcinfo.problems(s, d):
+            print("%s: slave %s (%s): %s" % (level.capitalize(), s["position"], s.get("name"), text))
     bad = len(problems)
     if not bad:
         print("Bus: matches the file")

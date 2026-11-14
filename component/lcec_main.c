@@ -157,9 +157,43 @@ static void sigsegv_handler(int sig);
 #include <stdlib.h>
 #include <string.h>
 #include <sys/fsuid.h>
+#include <stdarg.h>
+#include <time.h>
 #include <unistd.h>
 
 static int lcec_uspace_initialized = 0;
+
+// The master's messages go to the flight recorder (while it is open) and
+// to rtapi_print, as the library's own default printed them on stderr. The
+// library calls this from the servo thread too (datagram timeouts, working
+// counter changes): it only formats, copies and queues; rtapi_print queues
+// messages of other threads than the main one without blocking.
+static ecat_events_t *lcec_log_events = NULL;  // atomic; NULL: no recorder
+static int lcec_log_users = 0;                 // callbacks inside the recorder
+static const char *const lcec_log_levels[] = {"EMERG", "ALERT", "CRIT", "ERR", "WARN", "NOTICE", "INFO", "DEBUG"};
+
+static void lcec_uspace_log(int level, const char *fmt, va_list ap) {
+  char msg[ECAT_TEXT_LEN + 64];
+  ecat_events_t *log;
+
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  if (level <= ECAT_TEXT_LEVEL_MAX) {
+    __atomic_add_fetch(&lcec_log_users, 1, __ATOMIC_SEQ_CST);
+    log = __atomic_load_n(&lcec_log_events, __ATOMIC_SEQ_CST);
+    if (log != NULL) ecat_events_text(log, level, msg);
+    __atomic_sub_fetch(&lcec_log_users, 1, __ATOMIC_SEQ_CST);
+  }
+  rtapi_print("[%s] %s", level >= 0 && level <= 7 ? lcec_log_levels[level] : "?", msg);
+}
+
+/// @brief Let the master's messages go to a flight recorder, or to none (NULL).
+///
+/// Before the recorder is unmapped: returns once no callback uses the old one.
+static void lcec_log_to(ecat_events_t *log) {
+  struct timespec ts = {0, 100000};
+  __atomic_store_n(&lcec_log_events, log, __ATOMIC_SEQ_CST);
+  while (__atomic_load_n(&lcec_log_users, __ATOMIC_SEQ_CST) > 0) nanosleep(&ts, NULL);
+}
 
 /// @brief Path of the IPC socket for the ethercat tool, or NULL for none.
 ///
@@ -472,7 +506,7 @@ static ec_master_t *lcec_request_master(lcec_master_t *master) {
           "userspace master: another master serves the ethercat tool on %s; this one runs without it\n", socket_path);
       socket_path = NULL;
     }
-    int ret = ecrt_lib_init(NULL, socket_path);
+    int ret = ecrt_lib_init(lcec_uspace_log, socket_path);
     if (ret >= 0 && socket_path != NULL) {
       lcec_uspace_socket_access(socket_path, user);
     }
@@ -911,6 +945,9 @@ int rtapi_app_main(void) {
         int n = 0;
         for (slave = master->first_slave; slave != NULL; slave = slave->next) n++;
         ecat_events_add(master->events, ECAT_EV_START, -1, n, 0);
+#ifdef EC_USPACE_MASTER
+        lcec_log_to(master->events);
+#endif
       }
     }
     // request ethercat master
@@ -1097,6 +1134,9 @@ int rtapi_app_main(void) {
 fail2:
   rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure, clearing config\n");
   lcec_clear_config();
+#ifdef EC_USPACE_MASTER
+  lcec_log_to(NULL);  // the recorder stays mapped (and in the file) for reading
+#endif
 fail1:
   rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "exiting\n");
   hal_exit(lcec_comp_id);
@@ -1138,11 +1178,17 @@ void rtapi_app_exit(void) {
 #endif
   }
 
+  // the recorder stays mapped until the master is released: its messages
+  // while it shuts down are kept too (only the first master has one)
+  ecat_events_t *events = first_master != NULL ? first_master->events : NULL;
   for (master = first_master; master != NULL; master = master->next) {
-    ecat_events_close(master->events);  // the file stays, for reading afterwards
     master->events = NULL;
   }
   lcec_clear_config();
+#ifdef EC_USPACE_MASTER
+  lcec_log_to(NULL);  // after ecrt_lib_cleanup(): no callback comes any more
+#endif
+  ecat_events_close(events);  // the file stays, for reading afterwards
 #ifdef LCEC_HAVE_GUARD
   if (lcec_guard_module >= 0) {
     rtapi_exit(lcec_guard_module);

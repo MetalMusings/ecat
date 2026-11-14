@@ -110,9 +110,11 @@ Choosing a slave shows:
   would improve the proposal (usually an ESI file). *Choose ESI files...*
   and *Save as quirk file...* (what you chose, kept for the device, see
   [quirk files](#quirk-files)) are here;
-- **Operation and sync**: the PDO assignment, `configure-pdos`, DC SYNC0
-  and its shift, and for a drive the CiA 402 modes (below), *Propose again*
-  and the homing card ([cia402](component.md#the-cia402-profile));
+- **Operation and sync**: the PDO assignment, `configure-pdos`, the Sync
+  choice (free run, one of the slave's DC modes, or DC mode with user settings; see
+  [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift,
+  and for a drive the CiA 402 modes (below), *Propose again* and the homing
+  card ([cia402](component.md#the-cia402-profile));
 - **CiA 402 modes**, for a drive: *Mode of operation* is the mode the
   drive starts in and runs in. Under *Can also switch to* you tick the
   modes it may switch to while it runs, with the pin `opmode-cmd`: for
@@ -191,8 +193,17 @@ link (port error counters), the slave's own message history (0x10F3), and
 A port counter that has reached 255 is marked: it cannot show whether the fault is
 still there, so the diagnosis says to write the counter (0x0300 for rx and phy
 errors, 0x0310 for lost links) or power the slave off, and run it again.
-the **Event log**: what the `ecat` component recorded while LinuxCNC ran
-([event log](#event-log-and-report)), optionally only for this slave and the master.
+**Messages from the master**: what the master said about this slave while
+`ecat` ran (the I/O test or LinuxCNC), such as "Slave seems not to support
+distributed clocks!", and the **Event log**: what the `ecat` component recorded
+while LinuxCNC ran ([event log](#event-log-and-report)), optionally only for this
+slave and the master.
+
+A slave that stopped short of OP with the master's error flag but no AL
+status code is shown as "The master stopped bringing the slave up": the
+master gave up configuring it (a DC setting the slave cannot take, an SDO it
+refuses), or the slave refused and the master's acknowledgement cleared its
+code. The master's messages say which.
 
 For a running machine the page opens with a short flow: *Save report...*
 (a file to attach when you ask for help), then *Watch LinuxCNC (read only)*.
@@ -352,6 +363,47 @@ has not been tried at a machine yet.
 See [Inputs and outputs](#inputs-and-outputs) for the connection pins in
 general, and [encoder channels](component.md#encoder-channels) for every
 pin of the channel (`velocity`, `counts`, `reset`, the external latch).
+
+### Distributed clocks
+
+What a slave can do with distributed clocks (DC) comes from four sources,
+shown under the Sync choice on the slave's page:
+
+| Source | What it says |
+|---|---|
+| The slave's EtherCAT chip (as `ethercat slaves -v` reports it) | "DC clock, 64 bit" (or 32): it has a system time and can take SYNC0, which does not say the device uses it. "Delay measurement only" or "no DC": it cannot take SYNC0 at all. |
+| The ESI file of the slave's revision | Its operation modes (`Dc/OpMode`): free run, and DC modes with the AssignActivate they need (an EL5101: DC 0x0320, DCIN 0x0320). No `Dc` element: no DC mode. |
+| The slave's SII (EEPROM), category DC | The same modes, from the slave itself; a missing category is a weaker "no". Without an ESI file of the slave's revision these are the ones offered. |
+| CoE `0x1C32`/`0x1C33` (slaves with CoE) | `:04` the synchronisation types supported (free run, SM synchronous, DC), `:05` the minimum cycle time. A value above 100 ms is not believed (an ECT60 says 3.9 s). |
+
+The Sync choice offers *Free run (no DC)*, each DC mode of the slave (with
+its AssignActivate and SYNC0 factor), and *DC mode with user settings*: any
+AssignActivate, typed in the field beside it. Nothing is forbidden. With
+the bus read, the page, the check list and `ecatsetup --check FILE` (with a
+master running) warn:
+
+- DC is on, but the chip has no DC clock: the slave will not reach OP
+  with DC (an EL2008: the master says "Slave seems not to support
+  distributed clocks!" and "Failed to set DC cycle times", and the slave
+  stays in PREOP with no AL status code);
+- DC is on, but the slave describes no DC mode (an EL1008: its chip has
+  DC, it reaches OP and does not use SYNC0);
+- the AssignActivate is not one of the slave's DC modes;
+- DC is on, but CoE `0x1C3x:04` lists no DC mode;
+- DC is off, but the slave lists only DC modes (it may refuse OP, AL
+  0x0027);
+- the servo period is shorter than the slave's minimum cycle time;
+- (a note) the SII and the ESI file differ in their DC modes.
+
+Without the bus nothing is said: the file alone does not tell what the
+slave can do.
+
+Tried on turner's bus (2026-11-14): EK1100, EL1008 and EL2008 have no DC
+mode in SII or ESI, the EL2008's chip only measures delays; the EL5101's
+SII, ESI and CoE agree (DC 0x0320, minimum cycle 66 us); the ECT60's SII
+has DC 0x0300 and free run. With DC 0x0300 on the EL1008 and EL2008,
+`--check` warned for both, the EL2008 stayed in PREOP and the EL1008 went
+to OP, as described above.
 
 ### Synchronisation, in the test mode
 
@@ -1237,14 +1289,22 @@ The component records, with the time to the millisecond:
 | stop guard | The servo thread stopped: the guard takes the slaves to PREOP, and says whether they got there (or it gave up, with the states they were left in); or the servo thread runs again. |
 | servo thread late | The guard sent a cycle for a servo thread more than a quarter period late (at most one line a second, with the number left out). |
 | SYNC0 shift | `sync0-shift-ns: auto` chose a shift, with the turn-around in cycles. |
+| master: ... | The master's own messages (its log, up to level info), such as "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!" or an SDO abort while it configures a slave. Shown between the events at their time; one repeated right after itself is shown once, with the count. |
 
 Slave states are read once a second, as for the component's state pins;
 the working counter, drive faults and the guard every cycle.
 
-The log holds the last 4096 events in `/dev/shm/ecat-events`; the run
-before is kept as `/dev/shm/ecat-events.prev`. Both are gone after the
-computer restarts. Writing an event costs a few memory stores in the
-servo thread.
+The log holds the last 4096 events and the master's last 512 messages in
+`/dev/shm/ecat-events`; the run before is kept as
+`/dev/shm/ecat-events.prev`. Both are gone after the computer restarts.
+Writing an event costs a few memory stores in the servo thread. The
+master's messages from before the log opens (the bus scan at the start)
+are not in it. A log written by an older `ecat` (before 0.16) has no
+messages of the master; it is still read.
+
+The master's messages also go to `ecat`'s output, as before: the terminal
+of `halrun`, the I/O test's `halrun.log`, or LinuxCNC's print file (stdout;
+the master's own default before was stderr).
 
 After a cable break the master reads the whole bus again and every slave is
 offline for a while, and the working counter shows zero or incomplete while the
@@ -1258,8 +1318,11 @@ To see it:
   refreshed every 2 s; *This run* or *The run before*, and *Only this
   slave*;
 - on the command line: `ecatsetup --events` (this or the last run),
-  `ecatsetup --events prev`; `ecatsetup --diagnose` ends with the last 20
-  events.
+  `ecatsetup --events prev`; `ecatsetup --diagnose` shows each slave's
+  messages from the master (from the latest run that has any) and ends with
+  the last 20 events;
+- in a terminal: `scripts/ecat-events-follow`, events and the master's
+  messages as they come.
 
 ### The report
 

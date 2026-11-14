@@ -11,7 +11,7 @@ import shutil
 
 import yaml
 
-from . import coe as coe_mod, config, esi, guidance, importxml, integrate, lcecxml, netif, propose, \
+from . import coe as coe_mod, config, dcinfo, esi, guidance, importxml, integrate, lcecxml, netif, propose, \
     quirks, sii as sii_mod, tool, update
 
 
@@ -59,6 +59,7 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
         modes = tool.upload(pos, 0x6502, 0, "uint32")
     dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
+    p.dc_info.sync = dcinfo.read_sync(pos, coe)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
         for n in range(getattr(p, "axes", 1)):
@@ -124,6 +125,17 @@ def compare_bus(cfg, positions, slave_info=None):
     for pos in sorted(positions - {s["position"] for s in cfg.get("slaves") or []}):
         notes.append("slave %d is not in the file" % pos)
     return problems, notes
+
+
+def same_kind(s, info):
+    """Whether the slave on the bus (info) is the kind the file's slave s is
+    for (vendor and product; True if the file does not say)."""
+    ident = (s or {}).get("identity") or {}
+    try:
+        want = (int(str(ident["vendor"]), 16), int(str(ident["product"]), 16))
+    except (KeyError, ValueError):
+        return True
+    return (info.get("vendor_id"), info.get("product_code")) == want
 
 
 class BusSlave:
@@ -338,6 +350,23 @@ class Session:
                 for level, text in found:
                     out.append((level, "slave %s (%s): setting %s: %s"
                                 % (s["position"], s.get("name"), st.get("object"), text)))
+        return out
+
+    def dc_info(self, position):
+        """What the slave at a position can do with DC (dcinfo.DcInfo), or
+        None if the bus was not read or another kind of slave is there."""
+        b = self.bus.get(position)
+        if b is None or not same_kind(self.slave(position), b.info):
+            return None
+        return getattr(b.proposal, "dc_info", None)
+
+    def dc_problems(self):
+        """[(level, text)] about the slaves' DC settings against what each
+        slave read from the bus can do: "warning" or "note"."""
+        out = []
+        for s in (self.cfg or {}).get("slaves") or []:
+            for level, text in dcinfo.problems(s, self.dc_info(s.get("position")), self.period):
+                out.append((level, "slave %s (%s): %s" % (s["position"], s.get("name"), text)))
         return out
 
     def object_name(self, position, index, subindex):

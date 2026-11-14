@@ -23,17 +23,31 @@ from ecatsetup import events  # noqa: E402
 N = 8
 
 
-def write_log(path, records, nxt=None, pid=999999, n=N):
+def write_log(path, records, nxt=None, pid=999999, n=N, texts=(), version=None, tn=4):
     """A recorder file: records [(index, type, slave, a, b)]; a record's
-    seq is its index + 1, unless the index is negative (being written)."""
-    data = bytearray(events.HEADER.size + n * events.RECORD.size)
+    seq is its index + 1, unless the index is negative (being written).
+    texts [(index, level, text)] are the master's messages (version 2)."""
+    version = version or events.VERSION
+    size = events.HEADER.size + n * events.RECORD.size
+    if version >= 2:
+        size += events.TEXT_HEADER.size + tn * events.TEXT.size
+    data = bytearray(size)
     nxt = nxt if nxt is not None else max(i for i, *_ in records) + 1
-    events.HEADER.pack_into(data, 0, events.MAGIC, events.VERSION, n, events.RECORD.size,
+    events.HEADER.pack_into(data, 0, events.MAGIC, version, n, events.RECORD.size,
                             1_700_000_000_000_000_000, nxt, 1000000, pid, b"/c/ethercat.yaml")
     for i, typ, slave, a, b in records:
         seq = 0 if i < 0 else i + 1
         events.RECORD.pack_into(data, events.HEADER.size + (abs(i) % n) * events.RECORD.size,
                                 seq, 1_700_000_001_000_000_000 + abs(i), typ, slave, a, b, 0)
+    if version >= 2:
+        at = events.HEADER.size + n * events.RECORD.size
+        tnext = max([i for i, *_ in texts] or [-1]) + 1
+        events.TEXT_HEADER.pack_into(data, at, tnext, tn, events.TEXT.size)
+        at += events.TEXT_HEADER.size
+        for i, level, text in texts:
+            # a message 500 ns after the first event: after the events of a short test
+            events.TEXT.pack_into(data, at + (i % tn) * events.TEXT.size, i + 1,
+                                  1_700_000_001_000_000_500 + i, level, 0, text.encode())
     with open(path, "wb") as f:
         f.write(data)
 
@@ -130,6 +144,74 @@ class TestRead(unittest.TestCase):
         self.assertTrue(out[2].endswith("ERROR link DOWN: cable, or the first slave's power"))
 
 
+DC_WARN = "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!"
+DC_ERR = "EtherCAT ERROR 0-2: Failed to set DC cycle times: No response."
+
+
+class TestMasterMessages(unittest.TestCase):
+    """The master's own messages, kept from version 2."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.path = os.path.join(self.dir.name, "ev")
+
+    def test_read(self):
+        write_log(self.path, [(0, events.START, -1, 4, 0)],
+                  texts=[(0, 6, "EtherCAT 0: Domain 0: Working counter changed to 2/12."),
+                         (1, 4, DC_WARN), (2, 3, DC_ERR)])
+        log = events.read(self.path)
+        self.assertEqual([t.text for t in log.texts][1:], [DC_WARN, DC_ERR])
+        self.assertEqual([t.slave for t in log.texts], [None, 2, 2])
+        self.assertEqual([t.severity for t in log.texts], ["info", "warn", "error"])
+        self.assertEqual(log.texts_total, 3)
+
+    def test_slave_numbers(self):
+        for text, pos in (("EtherCAT ERROR 0-12: x", 12), ("EtherCAT 0-3: Changed to OP.", 3),
+                          ("EtherCAT WARNING 0-main-4: x", 4), ("EtherCAT 0: Scanning bus.", None),
+                          ("Device enp1s0 opened", None)):
+            self.assertEqual(events.Text(0, 0, 6, text).slave, pos, text)
+
+    def test_wrapped(self):
+        # six written into four places: 2..5 are there
+        write_log(self.path, [(0, events.START, -1, 4, 0)],
+                  texts=[(i, 3, "EtherCAT ERROR 0-1: %d" % i) for i in range(6)], tn=4)
+        log = events.read(self.path)
+        self.assertEqual([t.index for t in log.texts], [2, 3, 4, 5])
+        out = []
+        events.report(log, out=out.append)
+        self.assertIn("(2 older messages of the master were overwritten)", out)
+
+    def test_repeats_are_folded(self):
+        T = events.Text
+        f = events.folded([T(0, 0, 3, DC_ERR), T(1, 0, 3, DC_ERR), T(2, 0, 4, DC_WARN),
+                           T(3, 0, 3, DC_ERR)])
+        self.assertEqual([n for _, n in f], [2, 1, 1])
+        self.assertEqual(events.text_line(*f[0]), "master: %s (2 times)" % DC_ERR)
+
+    def test_version_1_has_none(self):
+        write_log(self.path, [(0, events.START, -1, 4, 0)], version=1)
+        log = events.read(self.path)
+        self.assertIsNone(log.texts)
+        self.assertEqual(len(log.events), 1)
+
+    def test_report_in_time_order(self):
+        write_log(self.path, [(0, events.START, -1, 4, 0)], texts=[(0, 4, DC_WARN)])
+        out = []
+        events.report(events.read(self.path), out=out.append)
+        self.assertIn("ecat loaded", out[1])
+        self.assertTrue(out[2].endswith("WARN  master: " + DC_WARN), out[2])
+
+    def test_slave_messages_from_the_latest_run_that_has_some(self):
+        write_log(self.path + ".prev", [(0, events.START, -1, 4, 0)], texts=[(0, 4, DC_WARN)])
+        write_log(self.path, [(0, events.START, -1, 4, 0)], texts=[(0, 6, "EtherCAT 0-1: x")])
+        paths = (self.path, self.path + ".prev")
+        path, said = events.slave_messages(2, paths)
+        self.assertEqual((path, [t.text for t, _ in said]), (self.path + ".prev", [DC_WARN]))
+        self.assertEqual(events.slave_messages(1, paths)[0], self.path)
+        self.assertEqual(events.slave_messages(5, paths), (None, []))
+
+
 class TestReport(unittest.TestCase):
     def test_build(self):
         from ecatsetup import config, report, tool
@@ -191,6 +273,18 @@ class TestCard(unittest.TestCase):
                 self.assertEqual(t.item(0, 2).text(), "link DOWN: cable, or the first slave's power")
                 self.assertEqual(t.item(1, 1).text(), "ERROR")
                 self.assertIn("ecat ran since", page.events_info.text())
+                # the master's messages among the events, newest first
+                write_log(path, [(0, events.START, -1, 4, 0)], texts=[(0, 4, DC_WARN), (1, 3, DC_ERR)])
+                page.show_events()
+                self.assertEqual(t.rowCount(), 3)
+                self.assertEqual(t.item(0, 2).text(), "master: " + DC_ERR)
+                self.assertEqual(t.item(0, 1).text(), "ERROR")
+                self.assertEqual(t.item(1, 1).text(), "WARN")
+                # only this slave and the master: messages of other slaves left out
+                w.current = 1
+                page.events_slave.setChecked(True)
+                self.assertEqual(t.rowCount(), 1)
+                page.events_slave.setChecked(False)
                 page.events_run.setItemData(1, path + ".none")
                 page.events_run.setCurrentIndex(1)
                 self.assertEqual(t.rowCount(), 0)

@@ -94,6 +94,32 @@ static void test_events_changes(void) {
   CHECK_EQ(last(0)->type, ECAT_EV_DC_SYNC);
 }
 
+static void test_events_text(void) {
+  char long_text[400];
+  int i;
+  ecat_events_init(&L, NULL);
+  CHECK_EQ((int)L.texts_n, ECAT_TEXTS_N);
+  CHECK_EQ((int)L.text_size, 240);
+  ecat_events_text(&L, 4, "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!\n");
+  CHECK_EQ((int)L.text_next, 1);
+  CHECK_EQ((int)L.tx[0].seq, 1);
+  CHECK_EQ(L.tx[0].level, 4);
+  CHECK(!strcmp(L.tx[0].text, "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!"));
+  CHECK(L.tx[0].time_ns >= L.start_ns);
+  // a long one is cut and stays terminated
+  memset(long_text, 'x', sizeof(long_text) - 1);
+  long_text[sizeof(long_text) - 1] = 0;
+  ecat_events_text(&L, 3, long_text);
+  CHECK_EQ((int)strlen(L.tx[1].text), ECAT_TEXT_LEN - 1);
+  // a shorter one after it leaves nothing of the old text
+  for (i = 0; i < ECAT_TEXTS_N - 1; i++) ecat_events_text(&L, 6, "x");
+  ecat_events_text(&L, 6, "short");
+  CHECK_EQ((int)L.tx[1].seq, ECAT_TEXTS_N + 2);
+  CHECK(!strcmp(L.tx[1].text, "short"));
+  CHECK_EQ(L.tx[1].text[ECAT_TEXT_LEN - 2], 0);
+  ecat_events_text(NULL, 3, "nothing");  // no recorder: nothing
+}
+
 static void test_events_file(void) {
   char path[64];
   ecat_events_t *f;
@@ -121,4 +147,5 @@ static void test_events_file(void) {
   unlink(path);
 }
 
-RUN_TESTS("events", test_events_ring, test_events_limited, test_events_changes, test_events_file)
+RUN_TESTS("events", test_events_ring, test_events_limited, test_events_changes, test_events_text,
+          test_events_file)

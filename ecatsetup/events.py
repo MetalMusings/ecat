@@ -5,9 +5,14 @@ memory-mapped file (component/ecat_events.h), /dev/shm/ecat-events, and
 the previous run's as /dev/shm/ecat-events.prev. They can be read while
 LinuxCNC runs and after it has stopped. The layout here must match
 ecat_events.h (VERSION).
+
+From version 2 the file also keeps the master's own messages (its log,
+such as "EtherCAT WARNING 0-2: Slave seems not to support distributed
+clocks!"), up to level info, in a second ring after the events.
 """
 
 import os
+import re
 import struct
 import time
 from dataclasses import dataclass
@@ -16,9 +21,15 @@ from . import diagnose
 
 PATH = os.environ.get("ECAT_EVENTS") or "/dev/shm/ecat-events"
 MAGIC = 0x56454345
-VERSION = 1
+VERSION = 2
+VERSIONS = (1, 2)       # version 1 has no messages
 HEADER = struct.Struct("<IIIIQQII256s")
 RECORD = struct.Struct("<QQHhIII")
+TEXT_HEADER = struct.Struct("<QII")      # after the events: next, count, record size
+TEXT_LEN = 216
+TEXT = struct.Struct("<QQiI%ds" % TEXT_LEN)
+# syslog levels of the master's messages
+LEVELS = {0: "error", 1: "error", 2: "error", 3: "error", 4: "warn"}
 
 START, ACTIVATED, STOP = 1, 2, 3
 LINK, MASTER_AL, RESPONDING, WC = 10, 11, 12, 13
@@ -53,6 +64,29 @@ class Event:
     b: int
 
 
+# "EtherCAT ERROR 0-2: ...", "EtherCAT WARNING 0-main-2: ...", "EtherCAT 0-2: ..."
+_SLAVE_TEXT = re.compile(r"EtherCAT(?: [A-Z]+)? \d+-(?:[A-Za-z]+-)?(\d+): ")
+
+
+@dataclass
+class Text:
+    """One of the master's messages."""
+    index: int
+    time: float         # seconds since the epoch
+    level: int          # syslog level: 3 error, 4 warning, 6 info
+    text: str
+
+    @property
+    def slave(self):
+        """The position of the slave it is about, or None."""
+        m = _SLAVE_TEXT.match(self.text)
+        return int(m.group(1)) if m else None
+
+    @property
+    def severity(self):
+        return LEVELS.get(self.level, "info")
+
+
 @dataclass
 class Log:
     path: str
@@ -62,6 +96,8 @@ class Log:
     config: str
     total: int          # events written since the start
     events: list        # [Event], oldest first; the oldest may have been overwritten
+    texts: list = None  # [Text], the master's messages, oldest first (None: version 1)
+    texts_total: int = 0
 
     @property
     def lost(self):
@@ -88,7 +124,7 @@ def read(path=PATH):
     if len(data) < HEADER.size:
         raise EventsError("%s is too short" % path)
     magic, version, n, size, start, nxt, period, pid, config = HEADER.unpack_from(data)
-    if magic != MAGIC or version != VERSION or size != RECORD.size:
+    if magic != MAGIC or version not in VERSIONS or size != RECORD.size:
         raise EventsError("%s is not an event log of this version (%d)" % (path, VERSION))
     if len(data) < HEADER.size + n * size:
         raise EventsError("%s is too short" % path)
@@ -97,8 +133,71 @@ def read(path=PATH):
         seq, t, typ, slave, a, b, _ = RECORD.unpack_from(data, HEADER.size + (i % n) * size)
         if seq == i + 1:
             events.append(Event(i, t / 1e9, typ, slave, a, b))
-    return Log(path, start / 1e9, period, pid, config.split(b"\0", 1)[0].decode(errors="replace"),
-               nxt, events)
+    log = Log(path, start / 1e9, period, pid, config.split(b"\0", 1)[0].decode(errors="replace"),
+              nxt, events)
+    if version >= 2:
+        log.texts, log.texts_total = _texts(data, HEADER.size + n * size, path)
+    return log
+
+
+def _texts(data, at, path):
+    """The master's messages of a version 2 file, from offset at."""
+    if len(data) < at + TEXT_HEADER.size:
+        raise EventsError("%s is too short" % path)
+    nxt, n, size = TEXT_HEADER.unpack_from(data, at)
+    at += TEXT_HEADER.size
+    if size != TEXT.size or len(data) < at + n * size:
+        raise EventsError("%s is not an event log of this version (%d)" % (path, VERSION))
+    out = []
+    for i in range(max(0, nxt - n), nxt):
+        seq, t, level, _, raw = TEXT.unpack_from(data, at + (i % n) * size)
+        if seq == i + 1:
+            out.append(Text(i, t / 1e9, level, raw.split(b"\0", 1)[0].decode(errors="replace")))
+    return out, nxt
+
+
+def folded(texts):
+    """[(Text, times)]: a message repeated right after itself is shown once."""
+    out = []
+    for t in texts:
+        if out and out[-1][0].text == t.text and out[-1][0].level == t.level:
+            out[-1][1] += 1
+        else:
+            out.append([t, 1])
+    return [(t, n) for t, n in out]
+
+
+def text_line(t, times=1):
+    """A master's message as shown: the text, and how often it came."""
+    return "master: %s%s" % (t.text, " (%d times)" % times if times > 1 else "")
+
+
+def slave_texts(log, position):
+    """The master's messages about one slave, oldest first, folded."""
+    return folded([t for t in (log.texts or []) if t.slave == position])
+
+
+def slave_messages(position, paths=None):
+    """The master's messages about a slave from the latest run that has any:
+    (path, [(Text, times)]); (None, []) if no run has any."""
+    for path in paths or (PATH, PATH + ".prev"):
+        try:
+            found = slave_texts(read(path), position)
+        except EventsError:
+            continue
+        if found:
+            return path, found
+    return None, []
+
+
+def merged(log, events=None, texts=None):
+    """Events and the master's messages in time order: [("event", Event) or
+    ("text", (Text, times))]."""
+    evs = log.events if events is None else events
+    tx = folded(log.texts or []) if texts is None else texts
+    rows = [(e.time, 0, e.index, ("event", e)) for e in evs]
+    rows += [(t.time, 1, t.index, ("text", (t, n))) for t, n in tx]
+    return [r[3] for r in sorted(rows, key=lambda r: r[:3])]
 
 
 def _al(state):
@@ -212,13 +311,21 @@ def report(log, names=None, out=print, last=None):
         log.period_ns // 1000 if log.period_ns else "?"))
     if log.lost > 0:
         out("(%d older events were overwritten)" % log.lost)
-    events = log.events[-last:] if last else log.events
+    if log.texts is not None and log.texts_total > len(log.texts):
+        out("(%d older messages of the master were overwritten)"
+            % (log.texts_total - len(log.texts)))
+    rows = merged(log)
+    rows = rows[-last:] if last else rows
     texts = annotate(log.events, names)
-    for e in events:
-        sev, msg = texts[e.index]
-        out("%s %-5s %s" % (stamp(e.time), {"info": "", "warn": "WARN", "error": "ERROR"}[sev],
-                            msg))
-    if not events:
+    marks = {"info": "", "warn": "WARN", "error": "ERROR"}
+    for kind, x in rows:
+        if kind == "event":
+            sev, msg = texts[x.index]
+            out("%s %-5s %s" % (stamp(x.time), marks[sev], msg))
+        else:
+            t, n = x
+            out("%s %-5s %s" % (stamp(t.time), marks[t.severity], text_line(t, n)))
+    if not rows:
         out("(no events)")
 
 

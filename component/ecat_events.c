@@ -26,6 +26,8 @@ void ecat_events_init(ecat_events_t *log, const char *config) {
   log->record_size = sizeof(ecat_event_t);
   log->start_ns = ecat_events_now();
   log->pid = (uint32_t)getpid();
+  log->texts_n = ECAT_TEXTS_N;
+  log->text_size = sizeof(ecat_text_t);
   if (config != NULL) snprintf(log->config, sizeof(log->config), "%s", config);
 }
 
@@ -78,6 +80,26 @@ void ecat_events_add(ecat_events_t *log, int type, int slave, uint32_t a, uint32
   e->b = b;
   e->pad = 0;
   __atomic_store_n(&e->seq, i + 1, __ATOMIC_RELEASE);
+}
+
+void ecat_events_text(ecat_events_t *log, int level, const char *text) {
+  uint64_t i;
+  ecat_text_t *t;
+  size_t n;
+
+  if (log == NULL || text == NULL) return;
+  // the servo thread and the master's own threads may all write
+  i = __atomic_fetch_add(&log->text_next, 1, __ATOMIC_ACQ_REL);
+  t = &log->tx[i % ECAT_TEXTS_N];
+  __atomic_store_n(&t->seq, 0, __ATOMIC_RELEASE);
+  t->time_ns = ecat_events_now();
+  t->level = level;
+  t->pad = 0;
+  n = strnlen(text, ECAT_TEXT_LEN - 1);
+  while (n > 0 && (text[n - 1] == '\n' || text[n - 1] == '\r')) n--;
+  memcpy(t->text, text, n);
+  memset(t->text + n, 0, ECAT_TEXT_LEN - n);
+  __atomic_store_n(&t->seq, i + 1, __ATOMIC_RELEASE);
 }
 
 void ecat_events_add_limited(ecat_events_t *log, ecat_events_limit_t *lim, int type, int slave, uint32_t a) {

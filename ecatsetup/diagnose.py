@@ -209,14 +209,20 @@ def examine(positions, seconds=2.0):
         name, flagged = slaves.get(pos, ("", False))
         state, err, code = al_status(pos)
         r = Report(pos, name, flagged, state, err, code, seconds=seconds)
+        info = _try(lambda: tool.slave_info(pos)) or {}
         if flagged and not err and state != 8:
-            r.last_code = tool.slave_info(pos).get("al_status_code")
+            r.last_code = info.get("al_status_code")
         dl, now, then = dl_status(pos), counters(pos), first[pos]
         for p in range(4):
             r.ports.append(Port(p, dl[p]["link"], now[p],
                                 {k: (now[p][k] - then[p][k]) % 256 for k in now[p]}))
-        # ask only for objects the slave lists: the master logs an abort for the
-        # others. An empty listing (no CoE, or not read yet) asks as before.
+        # a slave without CoE is not asked at all, and one with CoE only for the
+        # objects it lists: the master logs an error for each other request
+        # ("Slave does not support CoE!", an abort). An empty listing (not
+        # read yet) asks as before.
+        if info.get("coe") is False:
+            reports.append(r)
+            continue
         objects = coe.Dictionary(_try(lambda: tool.sdos(pos)) or "").objects
 
         def listed(index):
@@ -289,9 +295,9 @@ def diagnose(positions, seconds=2.0, out=print):
                 if hint:
                     out("    -> %s" % hint)
             else:
-                out("    -> the slave refused a state change and the master stopped it; acknowledging"
-                    " the error cleared the slave's code, so it is only in the master's log"
-                    " (\"AL status message 0x....\")")
+                out("    -> no AL status code: the master gave up bringing the slave up (such as a "
+                    "DC setting it cannot take), or the slave refused and acknowledging the error "
+                    "cleared its code; the master's messages say which")
 
         # links and error counters
         for port in r.ports:
@@ -329,6 +335,16 @@ def diagnose(positions, seconds=2.0, out=print):
             problems += n
             for line in lines:
                 out("  " + line)
+
+        # what the master said about it while ecat ran (the flight recorder)
+        from . import events
+        path, said = events.slave_messages(r.position)
+        if said:
+            out("  Messages from the master%s:" % (" (the run before)" if path.endswith(".prev")
+                                                   else ""))
+            for t, n in said[-10:]:
+                out("    %s %s%s" % (events.stamp(t.time), t.text,
+                                     " (%d times)" % n if n > 1 else ""))
         out("")
     for line in lost_link_notes(reports):
         out(line)

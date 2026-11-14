@@ -36,13 +36,17 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QSpinBox, QStackedWidget, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
+from . import (config, dcinfo, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
                integrate, lcnc_env, masterstart,
                netif, pindocs, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
 RED, AMBER, GREEN, GREY = QColor("#b42318"), QColor("#9a5b00"), QColor("#1a7f37"), QColor("#6b7280")
+# the Sync row's choices besides the slave's DC modes
+DC_FREE, DC_OWN = "free", "own"
+CLOCK_FIELD = {"64": "DC, 64 bit", "32": "DC, 32 bit", "delay": "delay measurement only (no SYNC0)",
+               "none": "no DC"}
 _SLAVE_REF = re.compile(r"^slave (\d+)\b")
 MASTER_ITEM = -1
 
@@ -1022,18 +1026,21 @@ class SlaveView(QWidget):
         op.add(self.configure_pdos)
         sync = QHBoxLayout()
         sync.addWidget(label("Sync:"))
-        self.dc = QCheckBox("DC SYNC0")
-        self.dc.toggled.connect(self.general_edited)
-        sync.addWidget(self.dc)
+        self.dc_mode = QuietCombo()
+        self.dc_mode.setToolTip(
+            "Free run, one of the slave's DC modes (from its ESI file or SII, with the "
+            "AssignActivate it needs), or DC mode with user settings: any AssignActivate, typed "
+            "in the field. A choice the slave does not describe gets a warning, nothing is "
+            "forbidden.")
+        self.dc_mode.activated.connect(self.dc_mode_chosen)
+        sync.addWidget(self.dc_mode, 1)
         self.assign = QLineEdit()
         self.assign.setMaximumWidth(90)
         self.assign.setMinimumWidth(70)
         self.assign.setPlaceholderText("0x0300")
         self.assign.setToolTip(
-            "AssignActivate: which sync signals the slave uses, in hex. 0x0300 (SYNC0) is common for "
-            "DC sync; 0x0000 means free run, the same as leaving DC SYNC0 off. The value is "
-            "device-specific: take it from the ESI file's OpMode (AssignActivate) or the "
-            "slave's manual.")
+            "AssignActivate: which sync signals the slave uses, in hex, such as 0x0300 (SYNC0). "
+            "Typed here only with \"DC mode with user settings\"; a mode sets it.")
         self.assign.textEdited.connect(self.general_edited)
         sync.addWidget(self.assign)
         self.sync0_cycles = QSpinBox()
@@ -1048,8 +1055,10 @@ class SlaveView(QWidget):
         self.sync0_shift.setSuffix(" ns")
         self.sync0_shift.valueChanged.connect(self.general_edited)
         sync.addWidget(self.sync0_shift)
-        sync.addStretch(1)
         op.add(sync)
+        self.dc_hint = op.add(label("", "hint", wrap=True))
+        self.dc_warn = op.add(label("", wrap=True))
+        self.dc_warn.setStyleSheet("color: #9a5b00;")
         op.lay.addStretch(1)
         two.addWidget(op, 1)
         lay.addLayout(two)
@@ -1207,7 +1216,8 @@ class SlaveView(QWidget):
         self.fields["Vendor"].setText(hx(ident.get("vendor") or info.get("vendor_id")))
         self.fields["Product"].setText(hx(ident.get("product") or info.get("product_code")))
         self.fields["Revision"].setText(hx(ident.get("revision") or info.get("revision")))
-        self.fields["Clock"].setText("DC" if info.get("dc") else "no DC" if b else "-")
+        self.fields["Clock"].setText(CLOCK_FIELD.get(info.get("dc_clock"), "DC" if info.get("dc") else
+                                                     "no DC") if b else "-")
         bus_ident = ""
         try:
             want = (int(str(ident.get("vendor")), 16), int(str(ident.get("product")), 16),
@@ -1235,13 +1245,15 @@ class SlaveView(QWidget):
             text.setText(t)
         self.esi_button.setVisible(bool(p) and not p.esi_path)
 
-        editable = (self.cia402, self.pdo_set, self.configure_pdos, self.dc, self.pd, self.st)
+        editable = (self.cia402, self.pdo_set, self.configure_pdos, self.dc_mode, self.pd, self.st)
         for w in editable:
             w.setEnabled(s is not None)
         if s is None:
             self.again.setEnabled(False)
             for w in (self.assign, self.sync0_cycles, self.sync0_shift):
                 w.setEnabled(False)
+            self.dc_hint.setText("")
+            self.dc_warn.hide()
             self.pd.setRowCount(0)
             self.st.setRowCount(0)
             self.notes.hide()
@@ -1275,14 +1287,7 @@ class SlaveView(QWidget):
             self.pdo_set.addItem(name, name)
         self.again.setEnabled(b is not None and not win.busy)
 
-        dc = s.get("dc")
-        self.dc.setChecked(dc is not None)
-        dc = dc or {}
-        self.assign.setText(str(dc.get("assign-activate", "")))
-        self.sync0_cycles.setValue(int(dc.get("sync0-cycles") or 1))
-        self.sync0_shift.setValue(int(dc.get("sync0-shift-ns") or 0))
-        for w in (self.assign, self.sync0_cycles, self.sync0_shift):
-            w.setEnabled(self.dc.isChecked())
+        self.show_dc(s)
         notes = list(p.notes) if p else []
         self.notes.setVisible(bool(notes))
         self.notes_text.setText("\n".join(notes))
@@ -1290,6 +1295,63 @@ class SlaveView(QWidget):
         self.show_process_data(s)
         self.show_settings(s)
         self.show_homing(s)
+
+    # -- distributed clocks
+
+    def show_dc(self, s):
+        """The Sync row: free run, the slave's DC modes, or DC mode with user settings
+        (any AssignActivate); what the slave says about DC under it."""
+        d = self.win.session.dc_info(self.position)
+        dc = s.get("dc")
+        self.dc_mode.clear()
+        self.dc_mode.addItem("Free run (no DC)", DC_FREE)
+        for m in (d.dc_modes() if d else []):
+            self.dc_mode.addItem("DC mode %s · %s" % (m.label(), m.source), m)
+        self.dc_mode.addItem("DC mode with user settings", DC_OWN)
+        self.dc_mode.setItemData(self.dc_mode.count() - 1,
+                                 "Any AssignActivate, typed in the field", Qt.ToolTipRole)
+        if dc is None:
+            i = 0
+        else:
+            assign = dcinfo.parse_assign(dc.get("assign-activate", ""))
+            i = next((k for k in range(1, self.dc_mode.count() - 1)
+                      if self.dc_mode.itemData(k).assign == assign), self.dc_mode.count() - 1)
+        self.dc_mode.setCurrentIndex(i)
+        dc = dc or {}
+        self.assign.setText(str(dc.get("assign-activate", "")))
+        self.sync0_cycles.setValue(int(dc.get("sync0-cycles") or 1))
+        self.sync0_shift.setValue(int(dc.get("sync0-shift-ns") or 0))
+        self.enable_dc_fields()
+        self.dc_hint.setText("Distributed clocks, as the slave describes them: " +
+                             "; ".join(d.lines()) if d else
+                             "Read the bus to see which DC modes the slave has.")
+        self.show_dc_warnings(s)
+
+    def enable_dc_fields(self):
+        choice = self.dc_mode.currentData()
+        on = self.dc_mode.isEnabled()
+        self.assign.setEnabled(on and choice == DC_OWN)
+        for w in (self.sync0_cycles, self.sync0_shift):
+            w.setEnabled(on and choice != DC_FREE)
+
+    def show_dc_warnings(self, s):
+        found = dcinfo.problems(s, self.win.session.dc_info(self.position), self.win.session.period)
+        self.dc_warn.setText("\n".join(("Warning: " if lv == "warning" else "Note: ") + t
+                                        for lv, t in found))
+        self.dc_warn.setVisible(bool(found))
+
+    def dc_mode_chosen(self, *_):
+        if self.loading:
+            return
+        m = self.dc_mode.currentData()
+        if isinstance(m, dcinfo.Mode):
+            self.assign.setText("0x%04X" % m.assign)
+            self.loading = True
+            self.sync0_cycles.setValue(max(int(m.sync0_factor or 1), 1))
+            self.loading = False
+        elif m == DC_OWN and not self.assign.text().strip():
+            self.assign.setFocus()
+        self.general_edited()
 
     OPMODE_NUMBER = {"pp": 1, "pv": 3, "csp": 8, "csv": 9}
 
@@ -1569,15 +1631,16 @@ class SlaveView(QWidget):
             else:
                 c.pop("zero-at-start", None)
         s["configure-pdos"] = self.configure_pdos.isChecked()
-        if self.dc.isChecked():
+        choice = self.dc_mode.currentData()
+        if choice != DC_FREE:
             dc = s.setdefault("dc", {})
             dc["assign-activate"] = self.assign.text().strip()
             dc["sync0-cycles"] = self.sync0_cycles.value()
             dc["sync0-shift-ns"] = self.sync0_shift.value()
         else:
             s.pop("dc", None)
-        for w in (self.assign, self.sync0_cycles, self.sync0_shift):
-            w.setEnabled(self.dc.isChecked())
+        self.enable_dc_fields()
+        self.show_dc_warnings(s)
         self.show_homing(s)
         self.win.changed()
 
@@ -2078,12 +2141,20 @@ class TroubleshootPage(QWidget):
         self.history.add(self.history_table)
         self.history_none = self.history.add(label("", "hint", wrap=True))
         body.addWidget(self.history)
+        self.master_says = Card("Messages from the master", "Oldest first: what the master said "
+                                "about this slave while ecat ran (the I/O test or LinuxCNC), "
+                                "from the event log.")
+        self.master_table = table(["Time", "Message"], 1)
+        self.master_says.add(self.master_table)
+        self.master_none = self.master_says.add(label("", "hint", wrap=True))
+        body.addWidget(self.master_says)
         lay.addWidget(self.body)
 
         # the flight recorder: events of the bus while LinuxCNC ran
         self.events = Card("Event log", "What the ecat component recorded: link, states, "
-                                        "working counter, drive faults, the stop guard. It is "
-                                        "kept after LinuxCNC stops; the run before is kept too.")
+                                        "working counter, drive faults, the stop guard, and the "
+                                        "master's own messages (\"master: ...\"). It is kept "
+                                        "after LinuxCNC stops; the run before is kept too.")
         er = QHBoxLayout()
         self.events_run = QuietCombo()
         self.events_run.addItem("This run (or the last)", events.PATH)
@@ -2134,23 +2205,32 @@ class TroubleshootPage(QWidget):
             return
         names = events.names_of(self.win.session.cfg)
         shown = log.events
+        said = events.folded(log.texts or [])
         pos = self.win.current if isinstance(self.win.current, int) else None
         if self.events_slave.isChecked() and pos is not None:
             shown = [e for e in shown if e.slave in (-1, pos)]
-        self.events_info.setText("ecat %s since %s, %s%s" % (
+            said = [(x, n) for x, n in said if x.slave in (None, pos)]
+        self.events_info.setText("ecat %s since %s, %s%s%s" % (
             "runs" if log.running else "ran", events.stamp(log.start), log.config or "?",
-            "; %d older events were overwritten" % log.lost if log.lost > 0 else ""))
-        rows = list(reversed(shown[-200:]))
+            "; %d older events were overwritten" % log.lost if log.lost > 0 else "",
+            "" if log.texts is not None else "; this ecat is older and does not record the "
+            "master's messages"))
+        rows = list(reversed(events.merged(log, shown, said)[-200:]))
         t = self.events_table
         t.setRowCount(len(rows))
         colours = {"info": None, "warn": QColor("#b26a00"), "error": QColor("#c62828")}
+        marks = {"info": "", "warn": "WARN", "error": "ERROR"}
         texts = events.annotate(log.events, names)
-        for r, e in enumerate(rows):
-            sev, msg = texts[e.index]
-            t.setItem(r, 0, item(events.stamp(e.time), font=mono()))
-            t.setItem(r, 1, item({"info": "", "warn": "WARN", "error": "ERROR"}[sev],
-                                 colour=colours[sev]))
-            t.setItem(r, 2, item(msg, colour=colours[sev]))
+        for r, (kind, x) in enumerate(rows):
+            if kind == "event":
+                sev, msg = texts[x.index]
+                when = x.time
+            else:
+                sev, msg, when = x[0].severity, events.text_line(*x), x[0].time
+            t.setItem(r, 0, item(events.stamp(when), font=mono()))
+            t.setItem(r, 1, item(marks[sev], colour=colours[sev]))
+            t.setItem(r, 2, item(msg, colour=colours[sev] if kind == "event" else colours[sev] or GREY,
+                                 font=mono() if kind == "text" else None))
         fit_table(t, minimum=1)
 
     def fill_slaves(self):
@@ -2203,9 +2283,11 @@ class TroubleshootPage(QWidget):
                 "the master acknowledged the error."))
             self.says.set_tone("red")
         elif r.flagged and r.state != 8:
-            self.headline.setText("The slave refused a state change")
-            self.explain.setText("The master acknowledged the error, which cleared the slave's "
-                                 "code; it is only in the master's log (\"AL status message\").")
+            self.headline.setText("The master stopped bringing the slave up")
+            self.explain.setText("The slave reports no AL status code: either the master gave up "
+                                 "configuring it (such as a DC setting the slave cannot take) or "
+                                 "the slave refused and acknowledging the error cleared its code. "
+                                 "The master's messages below say which.")
             self.says.set_tone("red")
         else:
             self.headline.setText("No error reported (AL status 0x%04X)" % r.code)
@@ -2271,6 +2353,24 @@ class TroubleshootPage(QWidget):
         self.history_none.setText("" if r.history else
                                   "The slave keeps no diagnosis history (0x10F3).")
         self.history_none.setVisible(not r.history)
+
+        # the master's messages about it
+        path, said = events.slave_messages(pos)
+        self.master_table.setRowCount(0)
+        for t, n in said[-30:]:
+            row = self.master_table.rowCount()
+            self.master_table.insertRow(row)
+            colour = {"error": RED, "warn": AMBER}.get(t.severity)
+            self.master_table.setItem(row, 0, item(events.stamp(t.time), font=mono()))
+            self.master_table.setItem(row, 1, item(t.text + (" (%d times)" % n if n > 1 else ""),
+                                                   colour=colour, font=mono()))
+        fit_table(self.master_table)
+        self.master_table.setVisible(bool(said))
+        self.master_none.setText(
+            ("From the run before (%s)." % path if path and path.endswith(".prev") else "")
+            if said else "The master said nothing about this slave in the last two runs of ecat "
+            "(its messages are recorded by ecat 0.16 and later).")
+        self.master_none.setVisible(not said or bool(path and path.endswith(".prev")))
 
 
 # -- the Test page
@@ -5003,7 +5103,11 @@ class MainWindow(QMainWindow):
         for m in errors + problems:
             by_slave.setdefault(slave_of(m), []).append(m)
         self.messages_by_slave = by_slave
-        groups = [(RED, "Error: ", errors), (RED, "Bus: ", problems), (GREY, "Bus: ", notes),
+        # DC settings the slaves do not describe: warned about, not errors
+        dc = self.session.dc_problems()
+        groups = [(RED, "Error: ", errors), (RED, "Bus: ", problems),
+                  (AMBER, "Warning: ", [t for lv, t in dc if lv == "warning"]),
+                  (GREY, "Bus: ", notes), (GREY, "Note: ", [t for lv, t in dc if lv == "note"]),
                   (GREY, "", list(extra))]
         if not quiet:
             if self.session.cfg is not None and not errors and not problems:

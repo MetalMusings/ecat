@@ -9,6 +9,11 @@
 //  in the servo thread. The file layout is read by ecatsetup/events.py;
 //  keep the two in step (ECAT_EVENTS_VERSION).
 //
+//  Beside the events, a second ring keeps the master's own messages (its
+//  log, such as "Slave seems not to support distributed clocks!"), which
+//  the component receives through its log callback (lcec_main.c). Version
+//  2 added it.
+//
 
 #ifndef _ECAT_EVENTS_H_
 #define _ECAT_EVENTS_H_
@@ -17,8 +22,11 @@
 
 #define ECAT_EVENTS_PATH "/dev/shm/ecat-events"
 #define ECAT_EVENTS_MAGIC 0x56454345u  // "ECEV"
-#define ECAT_EVENTS_VERSION 1
+#define ECAT_EVENTS_VERSION 2
 #define ECAT_EVENTS_N 4096             // records in the ring
+#define ECAT_TEXTS_N 512               // the master's messages kept
+#define ECAT_TEXT_LEN 216              // characters of a message kept
+#define ECAT_TEXT_LEVEL_MAX 6          // messages up to this syslog level (6 info; 7 debug is left out)
 
 // Event types; a and b as noted. slave is the slave's position, -1 for
 // the master.
@@ -52,6 +60,15 @@ typedef struct {
   uint32_t pad;
 } ecat_event_t;
 
+// One of the master's messages.
+typedef struct {
+  uint64_t seq;       // index + 1 once written; 0 while being written
+  uint64_t time_ns;   // wall clock (CLOCK_REALTIME)
+  int32_t level;      // syslog level: 3 error, 4 warning, 5 notice, 6 info
+  uint32_t pad;
+  char text[ECAT_TEXT_LEN];  // without the trailing newline, NUL-terminated
+} ecat_text_t;
+
 typedef struct {
   uint32_t magic;
   uint32_t version;
@@ -63,6 +80,11 @@ typedef struct {
   uint32_t pid;
   char config[256];      // the configuration file
   ecat_event_t ev[ECAT_EVENTS_N];
+  // version 2: the master's messages
+  uint64_t text_next;    // index of the next message (atomic)
+  uint32_t texts_n;      // ECAT_TEXTS_N
+  uint32_t text_size;    // sizeof(ecat_text_t)
+  ecat_text_t tx[ECAT_TEXTS_N];
 } ecat_events_t;
 
 /// Rate limit for frequent events: at most one per second, counting the
@@ -82,6 +104,10 @@ void ecat_events_init(ecat_events_t *log, const char *config);
 
 /// Add an event. log may be NULL (no recorder).
 void ecat_events_add(ecat_events_t *log, int type, int slave, uint32_t a, uint32_t b);
+
+/// Add one of the master's messages (a trailing newline is dropped, a long
+/// one cut). Safe in the servo thread. log may be NULL.
+void ecat_events_text(ecat_events_t *log, int level, const char *text);
 
 /// Add an event at most once a second; b becomes the number left out since.
 void ecat_events_add_limited(ecat_events_t *log, ecat_events_limit_t *lim, int type, int slave, uint32_t a);

@@ -914,7 +914,7 @@ class FakeBus:
     def __init__(self, regs, sdos, later=None, slave_line="0  0:0  OP  +  Some Drive"):
         self.regs, self.sdos, self.later, self.reads = regs, sdos, later or {}, 0
         self.slave_line = slave_line
-        self.verbose = "State: PREOP\nFlag: E\n"
+        self.verbose = "State: PREOP\nFlag: E\nMailboxes:\n  Supported protocols: CoE, FoE\n"
         self.listing = ""       # the slave's `ethercat sdos` output
         self.asked = []         # (index, "upload" or "diag"): what was asked of the slave
 
@@ -944,12 +944,36 @@ class FakeBus:
 
 
 class TestDiagnose(unittest.TestCase):
-    def run_diagnose(self, bus):
+    def run_diagnose(self, bus, said=()):
+        from ecatsetup import events
         lines = []
         with mock.patch.object(diagnose.tool, "run", bus.run), \
-                mock.patch.object(diagnose.tool, "upload", bus.upload):
+                mock.patch.object(diagnose.tool, "upload", bus.upload), \
+                mock.patch.object(events, "slave_messages",
+                                  lambda pos: (events.PATH, list(said)) if said else (None, [])):
             found = diagnose.diagnose([0], seconds=0, out=lines.append)
         return found, "\n".join(lines)
+
+    def test_a_slave_without_coe_is_not_asked(self):
+        # an EL2008 has no mailbox: each request would be "Slave does not support CoE!"
+        bus = FakeBus({0x0130: 0x08, 0x0110: 0x10}, {})
+        bus.verbose = "State: OP\nFlag: +\nDL information:\n  Distributed clocks: yes, delay " \
+            "measurement only\nGeneral:\n"
+        self.run_diagnose(bus)
+        self.assertEqual(bus.asked, [])
+
+    def test_the_masters_messages_about_the_slave(self):
+        from ecatsetup import events
+        said = [(events.Text(0, 1.7e9, 4, "EtherCAT WARNING 0-0: Slave seems not to support "
+                                          "distributed clocks!"), 1),
+                (events.Text(1, 1.7e9, 3, "EtherCAT ERROR 0-0: Failed to set DC cycle times: "
+                                          "No response."), 3)]
+        regs = {0x0130: 0x02, 0x0110: 0x10}
+        _, text = self.run_diagnose(FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO"), said)
+        self.assertIn("Messages from the master:", text)
+        self.assertIn("Slave seems not to support distributed clocks!", text)
+        self.assertIn("Failed to set DC cycle times: No response. (3 times)", text)
+        self.assertIn("the master gave up bringing the slave up", text)
 
     def test_state_error_cable_and_drive_fault(self):
         regs = {0x0130: 0x14, 0x0134: 0x1D,          # SAFEOP + error, invalid output configuration
@@ -1006,7 +1030,7 @@ class TestDiagnose(unittest.TestCase):
         regs = {0x0130: 0x02, 0x0110: 0x10}                # PREOP, no error flag, no code
         found, text = self.run_diagnose(FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO"))
         self.assertEqual(found, 1)
-        self.assertIn("only in the master's log", text)
+        self.assertIn("the master's messages say which", text)
 
     def test_error_code_kept_by_the_master(self):
         regs = {0x0130: 0x02, 0x0110: 0x10}

@@ -10,7 +10,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from . import quirks
+from . import dcinfo, quirks
 
 # CiA 402 objects that the drive profile handles itself (no HAL pin); the
 # profile gives them its own pins (component/devices/ecat_cia402.c).
@@ -99,6 +99,7 @@ class Proposal:
     dc_sync0_factor: int = None
     dc_shift: int = None
     dc_source: str = ""
+    dc_info: object = None      # dcinfo.DcInfo: what the slave can do with DC
     esi_path: str = ""
     settings: list = field(default_factory=list)   # writable vendor objects
     encoders: list = field(default_factory=list)   # (name, status index) of encoder channels
@@ -419,22 +420,23 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
             os.path.basename(quirks.of((p.vendor_id, p.product_code))["path"])))
     p.pdos = pdos
 
-    # Distributed clocks: an ESI operation mode, else the SII's.
-    modes = []
-    if esi_dev and esi_dev.dc_modes:
-        modes = [(m.name, m.assign_activate, m.sync0_factor, m.shift0, "ESI") for m in esi_dev.dc_modes]
-    elif sii.dc_modes:
-        modes = [(m.name, m.assign_activate, m.sync0_cycle_factor, m.shift_time0, "SII")
-                 for m in sii.dc_modes]
+    # Distributed clocks: the modes of an ESI file of the slave's revision,
+    # else the SII's, else an ESI file's of another revision (dcinfo.py).
+    p.dc_info = d = dcinfo.build(info, sii, esi_dev, esi_exact)
+    modes = d.modes()
     # The first mode is the slave's default: a drive lists DC first, an I/O
     # terminal free run ("Synchron"), with DC as an option.
-    if modes and modes[0][1]:
-        name, p.dc_assign, p.dc_sync0_factor, p.dc_shift, src = modes[0]
-        p.dc_source = "%s mode \"%s\"" % (src, name)
-    elif any(m[1] for m in modes):
+    if modes and modes[0].dc and d.can_sync is not False:
+        m = modes[0]
+        p.dc_assign, p.dc_sync0_factor, p.dc_shift = m.assign, m.sync0_factor, m.shift
+        p.dc_source = "%s mode \"%s\"" % (m.source, m.name)
+    elif modes and modes[0].dc:
+        p.notes.append("the slave lists DC modes, but its EtherCAT chip has no DC clock; DC "
+                       "not used")
+    elif d.dc_modes():
         p.notes.append("DC is optional (%s modes: %s); not used by default"
-                       % (modes[0][4], ", ".join(m[0] for m in modes)))
-    elif info.get("dc") and p.profile == 402:
+                       % (modes[0].source, ", ".join(m.name for m in modes)))
+    elif d.can_sync and p.profile == 402:
         p.notes.append("the drive supports DC but describes no DC mode; it may need one")
 
     # Settings: writable vendor objects, for the user to choose.

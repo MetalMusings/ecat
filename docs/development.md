@@ -716,7 +716,17 @@ but by the time the user looks, the fault has often passed.
 - **A flight recorder in the component**: a ring buffer of time-stamped
   events (AL state changes, working counter drops, drive faults with
   `0x603F`, DC sync, late cycles, the stop guard stepping in), read
-  afterwards by the window and `ecatsetup --diagnose`.
+  afterwards by the window and `ecatsetup --diagnose`. Since version 2 of
+  its file (2026-11-14) it also keeps the master's own messages: `ecat`
+  gives `ecrt_lib_init()` a log callback (`lcec_uspace_log` in
+  `lcec_main.c`) that copies each message up to level info into a second
+  ring (`ecat_events_text()`, lock-free like the events, since the library
+  calls it from the servo thread too) and prints it with `rtapi_print`.
+  The pointer to the recorder is set when it opens and cleared after
+  `ecrt_lib_cleanup()`, with a count of callbacks inside it, so that no
+  callback writes into an unmapped file. Before, the library printed the
+  messages on stderr only, where LinuxCNC's start script loses them (a
+  temporary file removed at exit).
 - **Save report**: one file with `ethercat.yaml`, the diagnosis, the
   event log, versions and the relevant INI lines, to attach to a forum
   post.

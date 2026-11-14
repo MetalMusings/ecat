@@ -288,7 +288,7 @@ An entry with neither `pin` nor `split` is mapped but has no pin.
 
 | Key | Meaning |
 |---|---|
-| `assign-activate` | The slave's AssignActivate word, from its ESI file or SII, such as `"0x0300"`. |
+| `assign-activate` | The slave's AssignActivate word, from its ESI file or SII, such as `"0x0300"`. EtherCAT Setup offers the slave's own DC modes and warns about a value the slave does not describe, or a slave whose chip cannot take SYNC0 ([Distributed clocks](ecatsetup.md#distributed-clocks)). |
 | `sync0-cycles` | SYNC0 period in servo periods. |
 | `sync0-shift-ns` | The slave's own SYNC0 shift. |
 

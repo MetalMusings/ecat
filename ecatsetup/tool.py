@@ -49,10 +49,31 @@ def master_mac():
     return m.group(1).lower() if m else None
 
 
+def dc_clock(text):
+    """What a slave's EtherCAT chip can do for distributed clocks, from
+    "slaves -v": "64" or "32" (a system time: it can be synchronised),
+    "delay" (it only stamps passing frames, for measuring the delays: no
+    SYNC0), "none", or None if the text does not say."""
+    m = re.search(r"^\s*Distributed clocks:\s*(.*)$", text, re.M)
+    if not m:
+        return None
+    v = m.group(1).strip().lower()
+    if v.startswith("no"):
+        return "none"
+    if "delay" in v:
+        return "delay"
+    m = re.search(r"(32|64) bit", v)
+    return m.group(1) if m else None
+
+
 def slave_info(pos):
     """Identity and state from "slaves -v" for one slave."""
     text = run("slaves", "-v", "-p", pos)
-    info = {"position": pos, "dc": "Distributed clocks: yes" in text}
+    clock = dc_clock(text)
+    m = re.search(r"^\s*Supported protocols:\s*(.*)$", text, re.M)
+    # dc: the chip has a system time (it can take DC sync); coe: it has CoE
+    info = {"position": pos, "dc": clock in ("32", "64"), "dc_clock": clock,
+            "coe": bool(m and re.search(r"\bCoE\b", m.group(1)))}
     for key, pattern in (("vendor_id", r"Vendor Id:\s+(0x[0-9a-f]+)"),
                          ("product_code", r"Product code:\s+(0x[0-9a-f]+)"),
                          ("revision", r"Revision number:\s+(0x[0-9a-f]+)"),
