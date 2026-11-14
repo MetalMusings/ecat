@@ -603,6 +603,7 @@ static void test_cia402_pp(void) {
   CHECK_EQ(count(lcecConfTypeSdoConfig), 3);
   // the drive plans the move: it must have its limits
   CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN), "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02");
+  CHECK(strstr(fake_msgs, "add them to the settings, type DINT") != NULL);
   CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN) "  settings:\n  - {object: '0x607D:01', type: DINT, value: -1}\n",
       "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02");
   // 0x607F where the drive has it: not required (the ECT60 has none)

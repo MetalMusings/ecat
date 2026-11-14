@@ -336,8 +336,12 @@ class TestPropose(unittest.TestCase):
         self.assertEqual(config.check(pv), [])
         # PP needs the positions and the drive's limits as settings
         pp = drive({"mode": "pp"})
-        self.assertEqual(sorted(e.split(": ", 1)[1] for e in config.check(pp)), [
-            "cia402 mode pp needs the setting 0x607D:01", "cia402 mode pp needs the setting 0x607D:02"])
+        found = sorted(e.split(": ", 1)[1] for e in config.check(pp))
+        self.assertEqual(len(found), 2)
+        self.assertTrue(found[0].startswith("cia402 mode pp needs the setting 0x607D:01: add it to the settings, "
+                                            "type DINT, with the lowest position"))
+        self.assertTrue(found[1].startswith("cia402 mode pp needs the setting 0x607D:02: add it to the settings, "
+                                            "type DINT, with the highest position"))
         # 0x607F only where the drive has it (the ECT60 has none): not an error
         pp["slaves"][0]["settings"] = [{"object": "0x607D:01", "type": "DINT", "value": -1},
                                        {"object": "0x607D:02", "type": "DINT", "value": 1}]

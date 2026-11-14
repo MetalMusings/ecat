@@ -858,7 +858,9 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     for (a = 0; a < c->n_axes; a++) {
       if ((c->cia402_all & (1u << 1)) && (c->pp_limits[a] & 3) != 3) {
         unsigned o = a * ECAT_CIA402_AXIS_OFFSET;
-        error(c, "cia402 mode pp needs the settings 0x%04X:01 and 0x%04X:02 (software position limits)",
+        error(c, "cia402 mode pp needs the settings 0x%04X:01 and 0x%04X:02 (software position limits): "
+                 "add them to the settings, type DINT, with the lowest and highest position the drive "
+                 "may move to, in counts",
               0x607D + o, 0x607D + o);
       }
     }

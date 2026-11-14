@@ -484,8 +484,11 @@ def check(cfg):
             for a in range(n_axes):
                 for i, sub, _ in PP_REQUIRED:
                     if (i + a * AXIS_OFFSET, sub) not in set_objects:
-                        err("%s: cia402 mode pp needs the setting %s"
-                            % (where, obj(i + a * AXIS_OFFSET, sub)))
+                        err("%s: cia402 mode pp needs the setting %s: add it to the settings, type DINT, "
+                            "with the %s position the drive may move to, in counts (the drive plans PP "
+                            "moves within its software position limits; its present value, read in "
+                            "the SDO card, is a start)"
+                            % (where, obj(i + a * AXIS_OFFSET, sub), "lowest" if sub == 1 else "highest"))
     from . import fromlcec
     return errors + check_joints(cfg) + check_nets(cfg) + check_params(cfg) + \
         fromlcec.check(cfg)
