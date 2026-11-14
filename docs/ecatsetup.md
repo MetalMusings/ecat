@@ -95,9 +95,11 @@ to propose from.
 
 The **Master** page (on the right) holds the network interface, the
 transport, the servo period (taken from the INI file once you have chosen
-one) and **Distributed clocks**: whether to use them, how often the
-reference clock is synchronised, whether the servo thread follows it, and
-the global shift time (`auto` lets the component find it; see
+one) and **Distributed clocks**: whether to use them, *Who sets the time*
+(the slaves follow the servo thread, or the servo thread follows the
+reference clock, which is recommended; the fields of the other choice are
+greyed out), how often the reference clock is synchronised, and the global
+shift time (`auto` lets the component find it; see
 [file format](component.md#the-configuration-file)).
 
 ![Bus: a slave](images/gui-slave.png)
