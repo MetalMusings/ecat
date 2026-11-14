@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 COLS = ["send-offset", "pll-err", "td", "all-op", "dc-phased", "reset-count"]
 
 
-def make_yaml(base, mode, shift, out):
+def make_yaml(base, mode, shift, out, ref_sync=None, no_dc=()):
     import yaml
     with open(base) as f:
         cfg = yaml.safe_load(f)
@@ -55,6 +55,12 @@ def make_yaml(base, mode, shift, out):
     dc["servo-thread-follows-ref-clock"] = (mode == "follows")
     dc["sync0-shift-ns"] = "auto" if (mode == "follows" and shift == "auto") else \
         (300000 if shift == "auto" else int(shift))
+    if ref_sync is not None:
+        dc["ref-clock-sync-cycles"] = ref_sync
+    for s in cfg.get("slaves") or []:
+        # without DC the slave cannot be the reference clock: the next DC slave is
+        if s.get("position") in no_dc:
+            s.pop("dc", None)
     with open(out, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
 
@@ -205,6 +211,11 @@ def main():
     ap.add_argument("--shift", default="auto",
                     help="sync0-shift-ns: auto (follows only; slaves mode then uses 300000) or ns")
     ap.add_argument("--yaml", default=os.path.expanduser("~/ecat-test/run/ethercat.yaml"))
+    ap.add_argument("--ref-sync-cycles", type=int,
+                    help="master.dc.ref-clock-sync-cycles (default: as in --yaml)")
+    ap.add_argument("--no-dc", type=int, action="append", default=[], metavar="POS",
+                    help="run the slave at POS without DC (free run), so that the next DC slave "
+                    "is the reference clock; may be given more than once")
     ap.add_argument("--load", action="store_true", help="run stress-ng meanwhile (also with --attach)")
     ap.add_argument("--out")
     ap.add_argument("--analyze", metavar="FILE", help="only analyse an earlier samples file")
@@ -225,7 +236,7 @@ def main():
     if shutil.which("halrun") is None:
         sys.exit("halrun not found: . ~/src/linuxcnc-2.10/scripts/rip-environment first")
     yaml_path = os.path.join(out, "ethercat.yaml")
-    make_yaml(a.yaml, a.mode, a.shift, yaml_path)
+    make_yaml(a.yaml, a.mode, a.shift, yaml_path, a.ref_sync_cycles, a.no_dc)
     total = a.seconds * 1000000000 // a.period + 2000
     make_hal(os.path.join(out, "run.hal"), "ethercat.yaml", a.period, total, a.mode)
     sample = os.path.join(out, "sample.sh")

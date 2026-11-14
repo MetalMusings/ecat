@@ -821,6 +821,13 @@ class MasterView(QWidget):
         m["transport"] = self.transport.currentText()
         if self.dc_on.isChecked():
             dc = m.setdefault("dc", {})
+            if dc.get("servo-thread-follows-ref-clock", True) and not self.follows and \
+                    not 1 <= self.ref_cycles.value() <= config.REF_SYNC_MAX:
+                # the slaves follow the servo thread from now: they need the
+                # reference clock synchronised often (config.dc_warnings)
+                self.loading = True
+                self.ref_cycles.setValue(config.REF_SYNC_MAX)
+                self.loading = False
             if self.ref_cycles.value():
                 dc["ref-clock-sync-cycles"] = self.ref_cycles.value()
             else:

@@ -1075,6 +1075,40 @@ running: the bus recovers by itself, without a restart.
   start again from zero, so those show nothing: the event log is the
   record for them.
 
+## DC clock variants
+
+Measured 2026-11-14 on this machine (N100, igc, xdp-native; three ECT60 and
+the EaserCAT 7000, no motion, nothing enabled) with `scripts/dc-jitter-measure`
+in halrun, 120 s each (the first 20 s left out), base file the plasma
+cutter's 2.10 `ethercat.yaml` without 0x2010. Results in ~/dc-variants.
+`--ref-sync-cycles` and `--no-dc POS` were added to the script for this.
+`pll-err` is the phase between the thread's start and SYNC0; in `slaves`
+mode (`servo-thread-follows-ref-clock: false`) there is no PLL and its drift
+shows how the slaves' clock wanders against the thread.
+
+| Run | Variant | pll-err mean / stddev / range | first / last tenth | turn-around | Other |
+|---|---|---|---|---|---|
+| A | `true`, 500 us | -55 ns / 0.9 us / -23..+4 us | -64 / -70 ns | 2 (shift 262 us) | no PLL reset, no DC sync event |
+| B | `false`, `ref-clock-sync-cycles` 1 | -113 ns / 1.1 us / -28..+4 us | -119 / -79 ns | not measured (fixed shift 300 us) | |
+| C | `false`, 100 | +335 ns / 1.2 us / -33..+4 us | +400 / +410 ns | not measured | |
+| E | `false`, 1000 (as 2026-11-13) | -2.7 us / 8.1 us / -34..+12 us | -14.8 / -8.8 us | not measured | wanders |
+| D | `true`, 1 ms, X without DC: Y is the reference clock | -56 ns / 1.5 us / -30..+6 us | -81 / -44 ns | 2 (shift 517 us) | |
+
+Findings:
+
+- `true` works at 500 us as at 1 ms, and with another reference slave (Y
+  instead of X: both ECT60; the EaserCAT has no DC, so no other kind was
+  tried).
+- `false` depends on `ref-clock-sync-cycles`: with 1 or 100 the slaves'
+  clock stays within about a microsecond of the thread; with 1000 it
+  wanders by several microseconds in two minutes (on 2026-11-13, over ten
+  minutes and under load, through the whole period, and the DC sync check
+  failed). If `false` is used, sync the reference clock often (1 to 100
+  cycles). `true` stays the recommendation.
+- The minimum pll-err (about -30 us in every run) is the first cycles after
+  phasing, inside the analysed time; the p99 is a few microseconds.
+
+
 ## Automatic SYNC0 shift while the machine moves
 
 `sync0-shift-ns: auto` was tried with no motion only (turner, two cycles at

@@ -361,6 +361,28 @@ class TestPropose(unittest.TestCase):
         self.assertEqual(config.check(pp), [])
         self.assertEqual(pp["slaves"][0]["settings"][0], {"object": "0x607D:01", "type": "DINT", "value": -1000})
 
+    def test_dc_warnings(self):
+        def cfg(**dc):
+            return {"master": {"dc": dc}, "slaves": []}
+        self.assertEqual(config.dc_warnings({"master": {}}), [])
+        self.assertEqual(config.dc_warnings(cfg(**{"servo-thread-follows-ref-clock": True})), [])
+        self.assertEqual(config.dc_warnings(cfg(**{"servo-thread-follows-ref-clock": True,
+                                                   "ref-clock-sync-cycles": 1000})), [])
+        for n in (1, 100):
+            self.assertEqual(config.dc_warnings(cfg(**{"servo-thread-follows-ref-clock": False,
+                                                       "ref-clock-sync-cycles": n})), [], n)
+        for n in (None, 0, 101, 1000, "x", True):
+            dc = {"servo-thread-follows-ref-clock": False}
+            if n is not None:
+                dc["ref-clock-sync-cycles"] = n
+            w = config.dc_warnings(cfg(**dc))
+            self.assertEqual(len(w), 1, n)
+            self.assertIn("every 1 to 100 cycles", w[0])
+        # not set at all counts as false, as in the component
+        self.assertEqual(len(config.dc_warnings(cfg(**{"ref-clock-sync-cycles": 1000}))), 1)
+        # what EtherCAT Setup proposes is not warned about
+        self.assertEqual(config.dc_warnings(config.from_proposals([], None, "raw", None)), [])
+
     def test_kebab(self):
         self.assertEqual(propose.kebab("LowpassFilteredVoltage"), "lowpass-filtered-voltage")
         self.assertEqual(propose.kebab("Out_Unit1"), "out-unit1")

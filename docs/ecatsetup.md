@@ -104,7 +104,10 @@ transport, the servo period (taken from the INI file once you have chosen
 one) and **Distributed clocks**: whether to use them, *Who sets the time*
 (the slaves follow the servo thread, or the servo thread follows the
 reference clock, which is recommended; the fields of the other choice are
-greyed out), how often the reference clock is synchronised, and the global
+greyed out), how often the reference clock is synchronised (choosing "the
+slaves follow the servo thread" sets it to 100 cycles when it was more or
+unset; more than 100 is warned about, since the slaves' clock then wanders),
+and the global
 shift time (`auto` lets the component find it; see
 [file format](component.md#the-configuration-file)).
 

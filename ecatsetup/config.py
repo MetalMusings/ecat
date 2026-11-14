@@ -151,6 +151,28 @@ def from_proposals(proposals, interface=None, transport="raw", servo_period=None
     return {"ecat": FORMAT_VERSION, "master": master, "slaves": slaves}
 
 
+# master.dc.ref-clock-sync-cycles with servo-thread-follows-ref-clock: false:
+# at most this, and what the window sets when false is chosen. Measured
+# 2026-11-14 (docs/development.md "DC clock variants"): at 1 or 100 cycles
+# the slaves' clock stayed within about a microsecond of the servo thread,
+# at 1000 it wandered by microseconds within two minutes.
+REF_SYNC_MAX = 100
+
+
+def dc_warnings(cfg):
+    """Texts about the master's DC settings that work but are not advised."""
+    mdc = ((cfg or {}).get("master") or {}).get("dc")
+    if not isinstance(mdc, dict) or mdc.get("servo-thread-follows-ref-clock") is True:
+        return []
+    n = mdc.get("ref-clock-sync-cycles")
+    if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= REF_SYNC_MAX:
+        return []
+    return ["master.dc: with servo-thread-follows-ref-clock: false the reference clock should be "
+            "synchronised every 1 to %d cycles (ref-clock-sync-cycles is %s): less often, the "
+            "slaves' clock wanders against the servo thread. Or use "
+            "servo-thread-follows-ref-clock: true" % (REF_SYNC_MAX, "not set" if n is None else n)]
+
+
 class _Dumper(yaml.SafeDumper):
     pass
 

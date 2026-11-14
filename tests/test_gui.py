@@ -1000,6 +1000,23 @@ class TestWindow(WindowBase):
         labels = [lab.text() for lab in m.findChildren(gui.QLabel)]
         self.assertIn("Global shift time", labels)
         self.assertNotIn("SYNC0 shift", labels)
+        # the slaves follow the servo thread: the reference clock is synchronised often
+        m.dc_on.setChecked(True)
+        m.clock.setCurrentIndex(1)
+        m.ref_cycles.setValue(1000)
+        self.assertTrue(w.session.cfg["master"]["dc"]["servo-thread-follows-ref-clock"])
+        self.assertEqual(w.session.cfg["master"]["dc"]["ref-clock-sync-cycles"], 1000)
+        self.assertEqual(config.dc_warnings(w.session.cfg), [])
+        m.clock.setCurrentIndex(0)
+        self.assertFalse(w.session.cfg["master"]["dc"]["servo-thread-follows-ref-clock"])
+        self.assertEqual(m.ref_cycles.value(), 100)
+        self.assertEqual(w.session.cfg["master"]["dc"]["ref-clock-sync-cycles"], 100)
+        # chosen by the user afterwards: kept, and warned about
+        m.ref_cycles.setValue(1000)
+        self.assertEqual(w.session.cfg["master"]["dc"]["ref-clock-sync-cycles"], 1000)
+        self.assertTrue(any("every 1 to 100 cycles" in t for lv, t in w.session.dc_problems()))
+        m.ref_cycles.setValue(10)
+        self.assertEqual(config.dc_warnings(w.session.cfg), [])
 
     def test_message_selects_slave(self):
         w = self.window()
