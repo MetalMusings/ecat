@@ -26,9 +26,10 @@ import sys
 import time
 
 from PyQt5.QtCore import QLocale, QSize, QThread, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence, QPainter, QPen
+from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence, QPainter, QPalette, QPen
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QAction, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QAbstractItemView, QAction, QActionGroup, QApplication, QCheckBox, QComboBox, QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog,
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
@@ -50,80 +51,166 @@ CLOCK_FIELD = {"64": "DC, 64 bit", "32": "DC, 32 bit", "delay": "delay measureme
 _SLAVE_REF = re.compile(r"^slave (\d+)\b")
 MASTER_ITEM = -1
 
-STYLE = """
-QWidget { font-size: 13px; }
-QMainWindow, QWidget#page { background: #eef1f4; }
-QScrollArea { background: #eef1f4; border: none; }
-QFrame#header { background: #161b22; }
-QLabel#appTitle { font-size: 16px; font-weight: 600; color: #e6edf3; }
-QLabel#appSub { color: #9aa4b2; }
-QLabel#headerInfo { color: #c9d1d9; }
-QLabel#logo { border: 2px solid #79a8ff; border-radius: 6px; font-weight: 700; padding: 0px 4px;
-              color: #79a8ff; }
-QFrame#nav { background: white; border-bottom: 1px solid #d8dee4; }
-QFrame#nav QTabBar::tab { background: white; padding: 10px 16px; border: none;
-              border-bottom: 2px solid transparent; color: #4b5563; }
-QFrame#nav QTabBar::tab:selected { border-bottom: 2px solid #1f6feb; color: #111827; }
-QFrame#card { background: white; border: 1px solid #dde2e8; border-radius: 10px; }
-QFrame#card[tone="red"] { border: 1px solid #f1a7a0; background: #fff7f6; }
-QFrame#card[tone="amber"] { border: 1px solid #f2c46d; background: #fff8e8; }
-QFrame#card[tone="grey"] { background: #f6f7f9; }
-QLabel#cardTitle { color: #4b5563; font-weight: 600; font-size: 11px; letter-spacing: 1px; }
-QLabel#hint { color: #6b7280; }
-QLabel#axisBadge { background: #dbe8ff; color: #1f4fbf; font-weight: 700; font-size: 16px;
-                   border-radius: 6px; }
-QLabel#jointName { font-weight: 600; }
-QLabel#problemText { color: #b42318; }
-QLabel#bigTitle { font-size: 19px; font-weight: 600; color: #111827; }
-QLabel#fieldName { color: #6b7280; font-size: 11px; letter-spacing: 1px; }
-QLabel#value { font-family: monospace; font-size: 18px; }
-QLabel[pill="green"] { background: #dcf5e3; color: #1a7f37; }
-QLabel[pill="blue"] { background: #dbe8ff; color: #1f4fbf; }
-QLabel[pill="red"] { background: #fde2df; color: #b42318; }
-QLabel[pill="amber"] { background: #fdecc8; color: #8a5300; }
-QLabel[pill="grey"] { background: #eceff3; color: #4b5563; }
+# The window's colours by role; STYLE_TEMPLATE names them. The header bar is
+# dark in both modes. RED, AMBER, GREEN and GREY (table text, messages) follow
+# the mode too: apply_theme() changes those QColor objects in place.
+THEMES = {
+    "light": dict(
+        bg="#eef1f4", surface="white", line="#d8dee4", border="#dde2e8", rule="#e5e7eb",
+        text1="#111827", text2="#4b5563", text3="#6b7280", boxtext="#374151",
+        boxborder="#d0d6de", btnborder="#cdd3db", hover="#f3f5f8", disabled="#a0a7b2",
+        accent="#1f6feb", accentdis="#8fb2ee", selbg="#e7efff", selborder="#9dbcf5",
+        head="#161b22", headtext="#e6edf3", headsub="#9aa4b2", headinfo="#c9d1d9", logo="#79a8ff",
+        redtext="#b42318", redbg="#fde2df", redborder="#f1a7a0", redcard="#fff7f6",
+        ambertext="#8a5300", amberbg="#fdecc8", amberborder="#f2c46d", ambercard="#fff8e8",
+        greentext="#1a7f37", greenbg="#dcf5e3", onbg="#e6f6ea", ontext="#14532d",
+        holdpress="#b7e4c3", bluebg="#dbe8ff", bluetext="#1f4fbf", greybg="#eceff3",
+        greycard="#f6f7f9",
+        red="#b42318", amber="#9a5b00", green="#1a7f37", grey="#6b7280"),
+    "dark": dict(
+        bg="#0d1117", surface="#161b22", line="#30363d", border="#30363d", rule="#30363d",
+        text1="#e6edf3", text2="#9da7b3", text3="#8b949e", boxtext="#c9d1d9",
+        boxborder="#3d444d", btnborder="#3d444d", hover="#21262d", disabled="#6e7681",
+        accent="#1f6feb", accentdis="#1f3a64", selbg="#1c2d4a", selborder="#388bfd",
+        head="#010409", headtext="#e6edf3", headsub="#9aa4b2", headinfo="#c9d1d9", logo="#79a8ff",
+        redtext="#ff7b72", redbg="#3d1a1a", redborder="#8e2f2a", redcard="#25171a",
+        ambertext="#e3b341", amberbg="#3a2a0c", amberborder="#9e6a03", ambercard="#251f12",
+        greentext="#3fb950", greenbg="#12301c", onbg="#12301c", ontext="#7ee2a8",
+        holdpress="#1b4d2c", bluebg="#1c2d4a", bluetext="#79a8ff", greybg="#21262d",
+        greycard="#1b2028",
+        red="#ff7b72", amber="#e3b341", green="#3fb950", grey="#8b949e"),
+}
+THEME_NAMES = {"light": "Light", "dark": "Dark"}
+
+STYLE_TEMPLATE = """
+QWidget {{ font-size: 13px; }}
+QMainWindow, QWidget#page {{ background: {bg}; }}
+QScrollArea {{ background: {bg}; border: none; }}
+QFrame#header {{ background: {head}; }}
+QLabel#appTitle {{ font-size: 16px; font-weight: 600; color: {headtext}; }}
+QLabel#appSub {{ color: {headsub}; }}
+QLabel#headerInfo {{ color: {headinfo}; }}
+QLabel#logo {{ border: 2px solid {logo}; border-radius: 6px; font-weight: 700; padding: 0px 4px;
+              color: {logo}; }}
+QFrame#nav {{ background: {surface}; border-bottom: 1px solid {line}; }}
+QFrame#nav QTabBar::tab {{ background: {surface}; padding: 10px 16px; border: none;
+              border-bottom: 2px solid transparent; color: {text2}; }}
+QFrame#nav QTabBar::tab:selected {{ border-bottom: 2px solid {accent}; color: {text1}; }}
+QFrame#card {{ background: {surface}; border: 1px solid {border}; border-radius: 10px; }}
+QFrame#card[tone="red"] {{ border: 1px solid {redborder}; background: {redcard}; }}
+QFrame#card[tone="amber"] {{ border: 1px solid {amberborder}; background: {ambercard}; }}
+QFrame#card[tone="grey"] {{ background: {greycard}; }}
+QLabel#cardTitle {{ color: {text2}; font-weight: 600; font-size: 11px; letter-spacing: 1px; }}
+QLabel#hint {{ color: {text3}; }}
+QLabel#axisBadge {{ background: {bluebg}; color: {bluetext}; font-weight: 700; font-size: 16px;
+                   border-radius: 6px; }}
+QLabel#jointName {{ font-weight: 600; }}
+QLabel#problemText {{ color: {redtext}; }}
+QLabel#bigTitle {{ font-size: 19px; font-weight: 600; color: {text1}; }}
+QLabel#fieldName {{ color: {text3}; font-size: 11px; letter-spacing: 1px; }}
+QLabel#value {{ font-family: monospace; font-size: 18px; }}
+QLabel[pill="green"] {{ background: {greenbg}; color: {greentext}; }}
+QLabel[pill="blue"] {{ background: {bluebg}; color: {bluetext}; }}
+QLabel[pill="red"] {{ background: {redbg}; color: {redtext}; }}
+QLabel[pill="amber"] {{ background: {amberbg}; color: {ambertext}; }}
+QLabel[pill="grey"] {{ background: {greybg}; color: {text2}; }}
 QLabel[pill="green"], QLabel[pill="blue"], QLabel[pill="red"], QLabel[pill="amber"],
-QLabel[pill="grey"] { border-radius: 9px; padding: 2px 9px; font-weight: 600; font-size: 11px; }
-QLabel[box] { border: 1px solid #d0d6de; border-radius: 6px; padding: 6px 10px; color: #374151;
-              background: white; }
-QLabel[box="on"] { border: 1px solid #1a7f37; background: #e6f6ea; color: #14532d; font-weight: 600; }
-QLabel[box="fault"] { border: 1px solid #f1a7a0; color: #b42318; }
-QLabel[box="fault-on"] { border: 1px solid #b42318; background: #fde2df; color: #b42318;
-              font-weight: 600; }
-QPushButton { background: white; border: 1px solid #cdd3db; border-radius: 6px; padding: 5px 12px; }
-QPushButton:hover { background: #f3f5f8; }
-QPushButton:disabled { color: #a0a7b2; }
-QPushButton#primary { background: #1f6feb; color: white; border: 1px solid #1f6feb; font-weight: 600;
-              padding: 7px 16px; }
-QPushButton#primary:disabled { background: #8fb2ee; border-color: #8fb2ee; }
-QPushButton#savedirty { background: #d29922; color: #1b1f24; border: 1px solid #d29922;
-              font-weight: 700; padding: 7px 16px; }
-QPushButton#savedirty:disabled { background: #6e5a2a; border-color: #6e5a2a; color: #c9d1d9; }
-QPushButton#saveclean { background: transparent; color: #8b949e; border: 1px solid #30363d;
-              padding: 7px 16px; }
-QPushButton#danger { background: #b42318; color: white; border: 2px solid white; font-weight: 700;
-              padding: 6px 18px; }
-QPushButton#big { padding: 14px; font-size: 15px; font-weight: 600; }
-QPushButton#home-ok { color: white; background: #1a7f37; border: 2px solid #14532d;
-              border-radius: 6px; font-weight: 700; }
-QPushButton#home-failed { color: white; background: #b42318; border: 2px solid #7a1710;
-              border-radius: 6px; font-weight: 700; }
-QPushButton#hold { padding: 16px; font-size: 15px; font-weight: 600; color: #14532d;
-              background: #e6f6ea; border: 2px solid #1a7f37; border-radius: 8px; }
-QPushButton#hold:pressed { background: #b7e4c3; }
-QPushButton#hold:disabled { color: #9aa4b2; background: #f3f5f8; border-color: #d0d6de; }
-QToolButton#menu { color: #e6edf3; background: #161b22; border: 1px solid #3a434e;
-              border-radius: 6px; padding: 6px 12px; }
-QToolButton#menu::menu-indicator { image: none; width: 0px; }
-QListWidget#slaves { border: none; background: transparent; outline: none; }
-QListWidget#slaves::item { border-radius: 8px; margin: 2px 0px; border: 1px solid transparent; }
-QListWidget#slaves::item:selected { background: #e7efff; border: 1px solid #9dbcf5; }
-QListWidget#messages { border: none; background: transparent; }
-QTableWidget { border: none; gridline-color: #eceff3; background: white; }
-QHeaderView::section { background: white; border: none; border-bottom: 1px solid #dde2e8;
-              padding: 4px; color: #4b5563; font-weight: 600; }
-QPlainTextEdit#code { background: #161b22; color: #e6edf3; border-radius: 8px; padding: 6px; }
+QLabel[pill="grey"] {{ border-radius: 9px; padding: 2px 9px; font-weight: 600; font-size: 11px; }}
+QLabel[box] {{ border: 1px solid {boxborder}; border-radius: 6px; padding: 6px 10px; color: {boxtext};
+              background: {surface}; }}
+QLabel[box="on"] {{ border: 1px solid {greentext}; background: {onbg}; color: {ontext}; font-weight: 600; }}
+QLabel[box="fault"] {{ border: 1px solid {redborder}; color: {redtext}; }}
+QLabel[box="fault-on"] {{ border: 1px solid {redtext}; background: {redbg}; color: {redtext};
+              font-weight: 600; }}
+QPushButton {{ background: {surface}; border: 1px solid {btnborder}; border-radius: 6px; padding: 5px 12px; }}
+QPushButton:hover {{ background: {hover}; }}
+QPushButton:disabled {{ color: {disabled}; }}
+QPushButton#primary {{ background: {accent}; color: white; border: 1px solid {accent}; font-weight: 600;
+              padding: 7px 16px; }}
+QPushButton#primary:disabled {{ background: {accentdis}; border-color: {accentdis}; }}
+QPushButton#savedirty {{ background: #d29922; color: #1b1f24; border: 1px solid #d29922;
+              font-weight: 700; padding: 7px 16px; }}
+QPushButton#savedirty:disabled {{ background: #6e5a2a; border-color: #6e5a2a; color: #c9d1d9; }}
+QPushButton#saveclean {{ background: transparent; color: #8b949e; border: 1px solid #30363d;
+              padding: 7px 16px; }}
+QPushButton#danger {{ background: #b42318; color: white; border: 2px solid white; font-weight: 700;
+              padding: 6px 18px; }}
+QPushButton#big {{ padding: 14px; font-size: 15px; font-weight: 600; }}
+QPushButton#home-ok {{ color: white; background: #1a7f37; border: 2px solid #14532d;
+              border-radius: 6px; font-weight: 700; }}
+QPushButton#home-failed {{ color: white; background: #b42318; border: 2px solid #7a1710;
+              border-radius: 6px; font-weight: 700; }}
+QPushButton#hold {{ padding: 16px; font-size: 15px; font-weight: 600; color: {ontext};
+              background: {onbg}; border: 2px solid {greentext}; border-radius: 8px; }}
+QPushButton#hold:pressed {{ background: {holdpress}; }}
+QPushButton#hold:disabled {{ color: {disabled}; background: {hover}; border-color: {boxborder}; }}
+QToolButton#menu {{ color: #e6edf3; background: #161b22; border: 1px solid #3a434e;
+              border-radius: 6px; padding: 6px 12px; }}
+QToolButton#menu::menu-indicator {{ image: none; width: 0px; }}
+QListWidget#slaves {{ border: none; background: transparent; outline: none; }}
+QListWidget#slaves::item {{ border-radius: 8px; margin: 2px 0px; border: 1px solid transparent; }}
+QListWidget#slaves::item:selected {{ background: {selbg}; border: 1px solid {selborder}; }}
+QListWidget#messages {{ border: none; background: transparent; }}
+QTableWidget {{ border: none; gridline-color: {greybg}; background: {surface}; }}
+QHeaderView::section {{ background: {surface}; border: none; border-bottom: 1px solid {border};
+              padding: 4px; color: {text2}; font-weight: 600; }}
+QPlainTextEdit#code {{ background: {head}; color: {headtext}; border-radius: 8px; padding: 6px; }}
+QFrame#rule {{ color: {rule}; }}
+QLabel#warnText {{ color: {ambertext}; }}
 """
+
+
+def style(theme="light"):
+    return STYLE_TEMPLATE.format(**THEMES[theme])
+
+
+STYLE = style()
+_default_style = None   # (style name, palette) of the application before any mode
+_current = {"theme": "light"}
+
+
+def theme_setting():
+    """The mode saved in settings.yaml (`theme:`), light if none."""
+    t = settings.load().get("theme")
+    return t if t in THEMES else "light"
+
+
+def apply_theme(theme):
+    """The application's palette and the shared text colours for a mode. The
+    window's style sheet is set by MainWindow.set_theme."""
+    global _default_style
+    from PyQt5.QtWidgets import QStyleFactory  # noqa: F401 (only here)
+    app = QApplication.instance()
+    c = THEMES[theme]
+    _current["theme"] = theme
+    for colour, key in ((RED, "red"), (AMBER, "amber"), (GREEN, "green"), (GREY, "grey")):
+        colour.setNamedColor(c[key])
+    if _default_style is None:
+        _default_style = (app.style().objectName(), QPalette(app.palette()))
+    want = _default_style[0] if theme == "light" else "fusion"
+    if app.style().objectName().lower() != want.lower():
+        app.setStyle(QStyleFactory.create(want) or app.style())
+    if theme == "light":
+        app.setPalette(_default_style[1])     # as the window was before any mode
+        return
+    # a dark palette for what the style sheet does not cover (fields, combos,
+    # menus, dialogs); Fusion honours a palette fully
+    pal = QPalette()
+    roles = {QPalette.Window: c["bg"], QPalette.WindowText: c["text1"],
+             QPalette.Base: "#0d1117", QPalette.AlternateBase: c["surface"],
+             QPalette.Text: c["text1"], QPalette.Button: c["surface"],
+             QPalette.ButtonText: c["text1"], QPalette.BrightText: "#ffffff",
+             QPalette.ToolTipBase: c["surface"], QPalette.ToolTipText: c["text1"],
+             QPalette.Highlight: c["accent"], QPalette.HighlightedText: "#ffffff",
+             QPalette.Link: c["bluetext"], QPalette.LinkVisited: c["bluetext"],
+             QPalette.PlaceholderText: c["text3"], QPalette.Light: c["boxborder"],
+             QPalette.Midlight: c["border"], QPalette.Mid: c["border"],
+             QPalette.Dark: "#010409", QPalette.Shadow: "#000000"}
+    for role, value in roles.items():
+        pal.setColor(role, QColor(value))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        pal.setColor(QPalette.Disabled, role, QColor(c["disabled"]))
+    app.setPalette(pal)
 
 
 def mono():
@@ -494,7 +581,7 @@ class BusList(Card):
         self.add(self.list, 1)
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("color: #e5e7eb;")
+        line.setObjectName("rule")
         self.add(line)
         self.summary = self.add(label("", wrap=True))
         self.messages = QListWidget()
@@ -1096,7 +1183,7 @@ class SlaveView(QWidget):
         op.add(sync)
         self.dc_hint = op.add(label("", "hint", wrap=True))
         self.dc_warn = op.add(label("", wrap=True))
-        self.dc_warn.setStyleSheet("color: #9a5b00;")
+        self.dc_warn.setObjectName("warnText")
         op.lay.addStretch(1)
         two.addWidget(op, 1)
         lay.addLayout(two)
@@ -2272,7 +2359,7 @@ class TroubleshootPage(QWidget):
         rows = list(reversed(events.merged(log, shown, said)[-200:]))
         t = self.events_table
         t.setRowCount(len(rows))
-        colours = {"info": None, "warn": QColor("#b26a00"), "error": QColor("#c62828")}
+        colours = {"info": None, "warn": AMBER, "error": RED}
         marks = {"info": "", "warn": "WARN", "error": "ERROR"}
         texts = events.annotate(log.events, names)
         for r, (kind, x) in enumerate(rows):
@@ -2522,7 +2609,10 @@ class Plot(QWidget):
     one strip each with its own scale."""
 
     SECONDS = 10.0
-    COLOURS = {"position": "#2563eb", "following error": "#b42318", "velocity": "#1a7f37"}
+    @property
+    def COLOURS(self):
+        return {"position": THEMES[_current["theme"]]["bluetext"] if _current["theme"] == "dark"
+                else "#2563eb", "following error": RED.name(), "velocity": GREEN.name()}
 
     def __init__(self):
         super().__init__()
@@ -3665,7 +3755,7 @@ class HalPage(QWidget):
         self.axes.add(self.no_ini)
         # LinuxCNC writes the .expanded file again at every start
         self.expanded_warning = self.axes.add(label(wrap=True))
-        self.expanded_warning.setStyleSheet("color: #b26a00;")
+        self.expanded_warning.setObjectName("warnText")
         self.expanded_warning.hide()
         self.rows_box = QVBoxLayout()
         self.axes.lay.addLayout(self.rows_box)
@@ -3967,7 +4057,7 @@ class HalPage(QWidget):
         t.setRowCount(len(found))
         t.setVisible(bool(found))
         for r, f in enumerate(sorted(found, key=lambda f: (f.severity != "error", f.file, f.line))):
-            colour = QColor("#c62828") if f.severity == "error" else QColor("#b26a00")
+            colour = RED if f.severity == "error" else AMBER
             t.setItem(r, 0, item("ERROR" if f.severity == "error" else "WARN", colour=colour))
             t.setItem(r, 1, item("%s:%d" % (f.file, f.line) if f.line else f.file, font=mono()))
             t.setItem(r, 2, item(f.text, colour=colour, tip=f.text))
@@ -4114,7 +4204,7 @@ class HalPage(QWidget):
             sorted(p for p in halpins.pins(cfg) if p.startswith("ecat."))
         t.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            colour = None if r.decided else QColor("#c62828")
+            colour = None if r.decided else RED
             t.setItem(i, 0, item(r.pin, font=mono(), colour=colour,
                                  tip=None if r.decided else "No new pin chosen yet"))
             t.setItem(i, 1, item(", ".join("%s:%d" % u for u in r.uses)))
@@ -4262,8 +4352,8 @@ class HalPage(QWidget):
         self.wiring_text.setText(text)
         t.setRowCount(len(self.wiring_rows))
         for i, r in enumerate(self.wiring_rows):
-            colour = (QColor("#2e7d32") if r.status == "connected" else
-                      QColor("#b26a00") if r.status == "simulated" else QColor("#c62828"))
+            colour = (GREEN if r.status == "connected" else
+                      AMBER if r.status == "simulated" else RED)
             arrow = {"in": "\u2192 LinuxCNC", "out": "LinuxCNC \u2192", "io": "\u2194"}[r.way]
             doc = pindocs.info(r.pin)
             t.setItem(i, 0, item(r.pin, font=mono(), tip="%s (%s)%s" % (
@@ -4673,7 +4763,9 @@ class MainWindow(QMainWindow):
         self.heartbeat.timeout.connect(self.tick)
         QApplication.instance().applicationStateChanged.connect(self.app_state)
         self.resize(1440, 940)
-        self.setStyleSheet(STYLE)
+        self.theme = theme_setting()
+        apply_theme(self.theme)
+        self.setStyleSheet(style(self.theme))
 
         central = QWidget()
         lay = QVBoxLayout(central)
@@ -4757,8 +4849,39 @@ class MainWindow(QMainWindow):
         self.a_watch = act("Watch LinuxCNC that runs (read only)", self.start_watch)
         self.a_test_stop = act("Stop the test or the watching", self.stop_test)
         menu.addSeparator()
+        look = menu.addMenu("Appearance")
+        group = QActionGroup(self)
+        self.a_theme = {}
+        for key, name in THEME_NAMES.items():
+            a = QAction(name, self, checkable=True)
+            a.setChecked(key == self.theme)
+            a.triggered.connect(lambda _=False, k=key: self.set_theme(k))
+            group.addAction(a)
+            look.addAction(a)
+            self.a_theme[key] = a
+        menu.addSeparator()
         act("Quit", self.close, QKeySequence.Quit)
         self.header.menu_button.setMenu(menu)
+
+    def set_theme(self, theme, save=True):
+        """Light or dark mode, at once, and kept in settings.yaml."""
+        if theme not in THEMES:
+            return
+        self.theme = theme
+        apply_theme(theme)
+        self.setStyleSheet(style(theme))
+        if theme in getattr(self, "a_theme", {}):
+            self.a_theme[theme].setChecked(True)
+        if save:
+            try:
+                data = settings.load()
+                data["theme"] = theme
+                settings.save(data)
+            except OSError as e:
+                self.status("Could not save the mode: %s" % e)
+        # table text and messages take the new colours when drawn again
+        self.refresh()
+        self.update()
 
     # -- state shown
 

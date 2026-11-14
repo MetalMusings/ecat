@@ -65,6 +65,10 @@ While a test or a watch runs, a red **STOP** button appears there too.
 The **File** menu holds Open, Import lcec XML, Save, Save as, Rescan the
 bus, Update from bus, Check, Add ESI files, Start the I/O test, Watch
 LinuxCNC that runs (read only), and Stop the test or the watching.
+Under **Appearance** you choose a **Light** or **Dark** window; it changes
+at once and is kept in `~/.config/ecatsetup/settings.yaml` (`theme: light`
+or `theme: dark`) for the next start. Light is the default, and the
+screenshots in this document show it.
 
 Five tabs, in the order you normally use them: **Start**, **Bus**,
 **Slave status**, **Test**, **HAL & LinuxCNC**.

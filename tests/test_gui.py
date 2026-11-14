@@ -257,6 +257,37 @@ class WindowBase(BusTest):
 
 
 
+class TestTheme(WindowBase):
+    def test_dark_and_back(self):
+        """The mode changes the style sheet, the shared colours and the palette
+        at once, is kept in settings.yaml and read at the next start."""
+        d = tempfile.mkdtemp()
+        with mock.patch.dict(os.environ, {"ECATSETUP_SETTINGS": os.path.join(d, "s.yaml")}):
+            w = self.window()
+            self.addCleanup(gui.apply_theme, "light")
+            self.assertEqual(w.theme, "light")
+            self.assertIn("#eef1f4", w.styleSheet())
+            w.a_theme["dark"].trigger()
+            self.assertEqual(w.theme, "dark")
+            self.assertIn(gui.THEMES["dark"]["bg"], w.styleSheet())
+            self.assertNotIn("#eef1f4", w.styleSheet())
+            self.assertEqual(gui.RED.name(), gui.THEMES["dark"]["red"])
+            self.assertEqual(self.app.palette().color(gui.QPalette.Window).name(),
+                             gui.THEMES["dark"]["bg"])
+            self.assertEqual(gui.settings.load()["theme"], "dark")
+            w2 = self.window()
+            self.assertEqual(w2.theme, "dark")
+            self.assertTrue(w2.a_theme["dark"].isChecked())
+            w2.a_theme["light"].trigger()
+            self.assertEqual(gui.RED.name(), gui.THEMES["light"]["red"])
+            self.assertEqual(gui.settings.load()["theme"], "light")
+
+    def test_every_token_in_both(self):
+        self.assertEqual(set(gui.THEMES["light"]), set(gui.THEMES["dark"]))
+        for t in gui.THEMES:
+            gui.style(t)    # every name in the template has a colour
+
+
 class TestWindow(WindowBase):
     def test_start_page(self):
         from ecatsetup import tasks

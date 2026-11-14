@@ -1,6 +1,6 @@
 """EtherCAT Setup's own settings, kept between runs:
 ~/.config/ecatsetup/settings.yaml (or $ECATSETUP_SETTINGS). For now the
-folders of ESI files the user has given."""
+folders of ESI files the user has given and the window's mode (`theme:` light|dark)."""
 
 import os
 
