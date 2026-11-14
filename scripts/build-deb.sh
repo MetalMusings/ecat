@@ -74,9 +74,7 @@ step "Tests"
 make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER check 2>&1 | grep -v -e '^Compiling' -e '^Linking' -e 'warning:' -e 'varning:'
 
 step "Component"
-# LinuxCNC's libraries are in /usr/lib where the package is installed, also
-# when it was built against a run-in-place tree.
-make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER LINUXCNC_LIBDIR=/usr/lib \
+make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER \
     >"$WORK/component.log" 2>&1 || { tail -30 "$WORK/component.log"; exit 1; }
 
 step "Package tree"

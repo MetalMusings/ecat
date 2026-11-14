@@ -1264,9 +1264,11 @@ EtherCAT Setup (`ecatsetup/`):
 Packaging and docs:
 
 12. DONE: `scripts/build-deb.sh`: `Depends: linuxcnc-uspace (>= 1:2.10~)`,
-    version 0.12 (the break), and `LINUXCNC_LIBDIR=/usr/lib` so that
-    `ecat.so`'s run path is not the run-in-place tree's (tried here against
-    the run-in-place build).
+    version 0.12 (the break). (Up to 0.16 also `LINUXCNC_LIBDIR=/usr/lib`
+    for the run path to liblinuxcnchal; since then `ecat.so` is not linked to
+    that library at all: HAL and RTAPI come from hal_lib.so and rtapi_app, as
+    for LinuxCNC's own modules. The rip archive's ecat.so had the CI tree's
+    run path and worked only where LinuxCNC 2.9 was installed too.)
 13. `.github/workflows/deb.yml`: there are no 2.10 packages for Debian 12 or
     13 (buildbot.linuxcnc.org is gone), so the job builds LinuxCNC from
     source at the pinned commit without GUIs and manual pages (cached) and

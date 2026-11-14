@@ -25,9 +25,6 @@ USPACE_ETHERCAT ?= /opt/linuxcnc-ethercat-uspace
 # directory, while the run-time path (rpath) stays USPACE_ETHERCAT.
 USPACE_SYSROOT ?=
 USPACE_BUILD := $(USPACE_SYSROOT)$(USPACE_ETHERCAT)
-# Where LinuxCNC's libraries are at run time (rpath). Not the build's own
-# directory when ecat is built against a run-in-place LinuxCNC for a package.
-LINUXCNC_LIBDIR ?=
 
 COMP ?= $(shell which halcompile)
 ifeq (, $(COMP))
@@ -54,13 +51,17 @@ all: ecat.so
 
 -include $(objs:.o=.d)
 
+# Not linked to liblinuxcnchal: like LinuxCNC's own modules, ecat.so takes HAL
+# and RTAPI from hal_lib.so and rtapi_app, which are loaded when rtapi_app
+# loads it. A link to the library made ecat.so look for it in the build tree's
+# directory (rpath), which a run-in-place install or the CI build does not
+# have; 0.12-0.16 then found it only where LinuxCNC 2.9 was still installed.
 ecat.so: $(objs)
 	@echo Linking $@
 	@ld -d -r -o $@.tmp $(objs)
 	@objcopy -j .rtapi_export -O binary $@.tmp $@.sym
 	@(echo '{ global : '; tr -s '\0' < $@.sym | xargs -r0 printf '%s;\n' | grep .; echo 'local : * ; };') > $@.ver
 	@$(CC) -shared -Bsymbolic -Wl,--version-script,$@.ver -o $@ $(objs) -lm \
-	  -L$(LIBDIR) -Wl,-rpath,$(or $(LINUXCNC_LIBDIR),$(LIBDIR)) -llinuxcnchal \
 	  -L$(USPACE_BUILD)/lib -Wl,-rpath,$(USPACE_ETHERCAT)/lib -l:libethercat.so.2 \
 	  $(YAML_LIBS) -lpthread -lrt
 	@chmod -x $@
