@@ -175,4 +175,5 @@ interface in the file, or a network card without XDP (use the transport
 `raw`). The
 list of the usual symptoms and what they come from is on the
 *Troubleshoot* page of the window, and `ecatsetup --diagnose` reports
-per slave why it is not in OP.
+per slave why it is not in OP. [Troubleshooting a
+slave](ecatsetup.md#troubleshooting-a-slave) goes through it step by step.

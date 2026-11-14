@@ -23,6 +23,8 @@ Contents:
 - [Bringing up a new slave](#bringing-up-a-new-slave): where a proposal
   comes from, ESI files, [a spindle encoder](#a-spindle-encoder-el5101),
   synchronisation;
+- [Troubleshooting a slave](#troubleshooting-a-slave): five questions, and
+  the steps to answer them;
 - [Test mode](#test-mode): I/O, SDOs, moving a drive, homing;
 - [Writing the configuration into LinuxCNC](#writing-the-configuration-into-linuxcnc);
 - [Event log and report](#event-log-and-report): what to send when asking
@@ -438,6 +440,122 @@ whether the slaves are in OP.
 and settings as a quirk file of your own, for the device's vendor and
 product. The next slave of the same device is proposed with them, on
 this machine or, with the file shared, on another ([quirk files](#quirk-files)).
+
+## Troubleshooting a slave
+
+A slave that does not work, in five questions, each answered by something
+in EtherCAT Setup. None of it changes the slave, except the test in
+point 4, which is a deliberate act:
+
+1. **Is it there, and is it the one the file expects?** The bus list, and
+   the line under it that compares the bus with the configuration.
+2. **Why is it not in OP?** *Examine* on the *Slave status* page (or
+   `ecatsetup --diagnose`): the slave's AL state and status code in plain
+   words, and the master's own messages about it.
+3. **Is the cable or the connector at fault?** The port error counters,
+   watched while you look, and the lost links, which point at the cable
+   between two slaves.
+4. **Does it do what it should in OP?** The I/O test: inputs live,
+   outputs set by hand, SDOs read, a drive's CiA 402 state chain, and
+   the synchronisation card.
+5. **What happened while LinuxCNC ran, and who can help?** The event log,
+   *Watch LinuxCNC*, the symptoms list, and a report, or a capture of the
+   bus for a developer who does not have the device.
+
+The steps below go through them in order. Stop at the first one that
+explains the fault.
+
+### Step 1: the slave on the bus
+
+1. A master must run. With LinuxCNC stopped, EtherCAT Setup offers to start
+   one ([starting the master](#starting-the-master)); with LinuxCNC running,
+   it reads through LinuxCNC's master. The kernel master must not have the
+   network card at the same time (`sudo systemctl stop ethercat`).
+2. Look at the bus list on the *Bus* page. A slave that is missing, and
+   every slave after it, has no power, or the cable before it is broken:
+   check the power and the cable at the last slave that is listed.
+3. The line under the list says whether the bus matches the configuration:
+   the same devices at the same positions. A slave added, moved or
+   replaced is named there; *Update the file from the bus* brings the
+   file in line and says what changed. LinuxCNC's start check says the
+   same in its log when `ecat` loads (`master.start-check`).
+
+### Step 2: why it is not in OP
+
+1. On the *Slave status* page, choose the slave and press *Examine again*
+   (or *Examine all*; on the command line `ecatsetup --diagnose`, which
+   asks for no SDOs of slaves without CoE). It reads, and changes nothing.
+2. Read the AL state and status code. The page gives the code's meaning
+   and what usually lies behind it. The common ones:
+
+   | Code | Usually | What to do |
+   |---|---|---|
+   | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*Propose again*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). |
+   | 0x0026, 0x0043 | A setting (start-up SDO) was refused, or does not fit the others. | Read the master's messages for the object; check it in the Settings card (*Read present values*), take it out and try again. |
+   | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period. | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings. |
+   | 0x001B | Sync manager watchdog: the process data stopped. | LinuxCNC or the test stopped, or the servo thread missed cycles: see the event log. |
+   | 0x0020, 0x0060, 0x0011 | The slave needs a power cycle, reset itself, or follows an earlier error. | Power the slave off and on; restart the master. |
+
+3. "The master stopped bringing the slave up" (the master's error flag, no
+   status code) means the master gave up while configuring it. The
+   **Messages from the master** under it say why, for example "Slave seems
+   not to support distributed clocks!" or an SDO abort for a setting.
+4. Check the file: the check list on the *Bus* page, or
+   `ecatsetup --check ethercat.yaml` with a master running, also warns
+   about DC settings the slave cannot take.
+
+### Step 3: cable and connectors
+
+1. *Examine* watches the error counters of each port for 2 s
+   (`--seconds` for longer). Counters that grow while you watch point at
+   the cable or connector on that port: move the cable, look at the plug,
+   try another cable.
+2. Lost links are counted per port since power-on; the diagnosis names
+   the cable between two slaves that was disconnected or lost power. A
+   cable pulled on purpose counts too.
+3. A counter at 255 cannot grow any more. The page says so; power the slave
+   off and on, and examine it again.
+4. Faults that come and go show in the event log as a slave going offline,
+   the working counter incomplete, or a link down, with the time.
+
+### Step 4: in OP, with the I/O test
+
+1. Stop LinuxCNC. On the *Test* page, *Start the I/O test* runs the
+   configuration in `halrun` and takes the slaves to OP ([test mode](#test-mode)).
+2. **Inputs**: change the signal (a switch, a sensor) and watch the pin.
+   **Outputs**: set one, and see the device react. Make sure nothing
+   wired to the outputs can do harm.
+3. **SDO**: read objects the slave's manual names (status, error codes,
+   measured values). *Write* refuses commands, process data and a drive's
+   CiA 402 objects.
+4. A drive: the **CiA 402 state chain** shows its state and status word,
+   and what is missing to reach "Operation enabled". Moving it needs the
+   user at the machine ([moving a drive](#moving-a-drive)).
+5. **Synchronisation**: all slaves in OP, DC in use, whether the master's
+   DC sync check failed, the turn-around (2 cycles is the aim), and how
+   much the frame's send time varies.
+6. A slave that works in the test but not in LinuxCNC: compare the HAL
+   files with the configuration (the *HAL check* card on the *HAL &
+   LinuxCNC* page, or `ecatsetup --check-hal machine.ini`).
+
+### Step 5: while LinuxCNC runs, and asking for help
+
+1. Faults that only come in LinuxCNC: the **event log** on the *Slave
+   status* page (*Only this slave and the master*) shows what the
+   component recorded, kept after LinuxCNC stops, with the run before.
+   `scripts/ecat-events-follow` follows it live in a terminal.
+2. *Watch LinuxCNC (read only)* shows the pins of a running LinuxCNC;
+   repeat what went wrong and see which value changes first.
+3. **Symptoms**, at the bottom of the *Slave status* page, lists what is
+   seen in LinuxCNC, what it usually comes from and where to look.
+4. To ask for help: *Save report...* ([the report](#the-report)) and a few
+   words on what you saw. For a device the developer does not have, add
+   *Save capture...* ([a capture of the bus](#a-capture-of-the-bus)),
+   preferably taken while the I/O test runs, so that it holds the frames
+   of the bus in OP.
+5. What you found and chose for a device (pin names, settings, a PDO set):
+   keep it as a quirk file ([keeping what you chose](#keeping-what-you-chose)),
+   so that the next slave of the same kind starts from it.
 
 ## Test mode
 

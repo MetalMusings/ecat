@@ -1335,6 +1335,41 @@ tests are written without the device. The device itself is still needed
 for the final try. The capture holds bus data only: no user names, home
 folders or other files.
 
+#### When a capture comes in
+
+1. **Look at it**: `ecatsetup --capture-info FILE.tar.gz` lists the slaves,
+   their states, whether there are frames, and the notes on what is
+   missing.
+2. **Read the report**: `tar xzf FILE.tar.gz report.md`. It has the
+   versions, the user's `ethercat.yaml` with its check, the diagnosis and
+   the event log with the master's messages. The fault often shows there
+   already.
+3. **See it as the user does**: `ecatsetup --from-capture FILE.tar.gz -p N`
+   (the proposal for the slave), with `--diagnose`, or `--check theirs.yaml`
+   for their file; `--gui` opens the window on it (no writes, no test
+   mode).
+4. **If settings or a quirk file are enough**: correct them in the window,
+   save a quirk file and send it, or their corrected `ethercat.yaml`, back.
+   No code.
+5. **If code is needed**:
+   - Python (proposal, check, window): put the capture, without the
+     vendor's ESI file, in `tests/data/` and write tests with
+     `capture.Replay(...).install()`, as `TestRecordedBus` in
+     `tests/test_capture.py` does;
+   - C (a profile): `ecatsetup --capture-c FILE --c-name NAME --c-cycles 20
+     > component/tests/captured_NAME.h`, tests in `test_captured.c` with
+     `fake_capture_slave()`, `fake_capture_inputs()` and
+     `fake_capture_output()`, and the header added to
+     `test_checked_in_headers_are_current` in `tests/test_capturec.py`;
+   - mutation-check the new tests, as always.
+6. **Frames missing, or only from PREOP**: ask for a new capture taken
+   while the I/O test runs, so that the bus is in OP.
+7. **The try**: the user runs the new version and sends a new capture or
+   report. Remote access (way 3) only if that is not enough.
+8. **Privacy**: the capture holds the user's `ethercat.yaml` and INI lines.
+   Do not commit their configuration, and take the vendor's ESI file out
+   before anything goes into the repository.
+
 ### 2. The device is sent here
 
 The user sends the device (and what it talks to, such as a serial device
