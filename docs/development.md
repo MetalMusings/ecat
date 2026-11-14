@@ -1232,6 +1232,16 @@ no `0x607F`): steps of 1 and 5 mm in both directions moved as expected
 event after the slaves reached OP.
 
 
+## Cutting with the arc on LinuxCNC 2.10
+
+2026-11-14, the plasma cutter with `~/linuxcnc/configs/QtPlasma-ecat402-210-zero`
+(QtPlasmaC; `sync0-shift-ns: auto`, `zero-at-start` on X and Y instead of
+0x2010) and the ecat.so built that day (with the CSP hold fix): homed, then
+a test piece cut with the arc by the user: "everything worked". Event log:
+only the start (all in OP, SYNC0 shift 529 us, turn-around 2); after the
+cut no PLL reset, no DC sync check event, no drive fault.
+
+
 ## PV as a spindle in LinuxCNC
 
 Tried 2026-11-14 on the plasma cutter's X (ECT60) as `spindle.0` in
