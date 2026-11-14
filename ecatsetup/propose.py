@@ -34,6 +34,10 @@ CIA402_MODES = {
 # The settings a PP drive must have, since it plans its moves itself: the
 # software position limits and the maximum profile velocity.
 PP_LIMITS = [(0x607D, 1, "DINT"), (0x607D, 2, "DINT"), (0x607F, 0, "UDINT")]
+# Of those, what every PP drive must have as settings. 0x607F only where the
+# drive has it (the Rtelligent ECT60 has not): a warning with the dictionary.
+PP_REQUIRED = PP_LIMITS[:2]
+PP_MAX_VELOCITY = PP_LIMITS[2]
 # 0x6502 "supported drive modes", bit -> name.
 CIA402_MODE_BITS = {0: "PP", 1: "VL", 2: "PV", 3: "TQ", 5: "HM", 6: "IP",
                     7: "CSP", 8: "CSV", 9: "CST"}

@@ -12,7 +12,8 @@ import re
 import yaml
 
 from . import quirks
-from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS, ENCODER_INPUTS, ENCODER_OUTPUTS, PP_LIMITS
+from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS, ENCODER_INPUTS, ENCODER_OUTPUTS, PP_LIMITS, \
+    PP_REQUIRED
 
 FORMAT_VERSION = 1
 
@@ -478,9 +479,10 @@ def check(cfg):
             else:
                 err("%s: setting %s has neither value nor data" % (where, st.get("object")))
         if profile == "cia402" and "pp" in [(s.get("cia402") or {}).get("mode")] + other_modes:
-            # the drive plans PP moves itself: it must know its limits
+            # the drive plans PP moves itself: it must know its travel (0x607F,
+            # where the drive has it: session.setting_problems)
             for a in range(n_axes):
-                for i, sub, _ in PP_LIMITS:
+                for i, sub, _ in PP_REQUIRED:
                     if (i + a * AXIS_OFFSET, sub) not in set_objects:
                         err("%s: cia402 mode pp needs the setting %s"
                             % (where, obj(i + a * AXIS_OFFSET, sub)))

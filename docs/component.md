@@ -251,7 +251,7 @@ file each stopped the load with their own line.
 | `device` | Device name, for people. |
 | `identity` | `vendor`, `product`, and optionally `revision`. At start the component compares them with the bus. |
 | `profile` | `cia402` (CiA 402 drive), `mdp` (modular device, ETG.5001) or `generic`. |
-| `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01`, `0x607D:02` and `0x607F:00`). |
+| `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01` and `0x607D:02`, and `0x607F:00` where the drive has it). |
 | `modules` | For a modular device: the module idents it detected (`0xF050`) when it was read, to notice a change ([modular devices](#modular-devices)). The component does not read it. |
 | `cia402.axes` | For `cia402`: a drive with several axes in one slave (such as a two-axis ECT60x2): a list of 1 to 4 names, the axes' pin prefixes. Axis n uses the CiA 402 objects at index + n × 0x800 (`0x6040`, `0x6840`, `0x7040`, `0x7840`); see [cia402](#several-axes). Without it, the drive has one axis named after the slave. |
 | `cia402.zero-at-start` | For `cia402`: `true` makes positions count from where the drive stands when the bus first reaches OP, for drives that keep their position from an earlier run (see [cia402](#zero-at-start)). Default `false`. |
@@ -661,7 +661,10 @@ with `velo-scale` the drive's velocity units per revolution per second.
 With `mode: pp` the drive moves to a position on its own, with its own
 trajectory: for positioning that LinuxCNC does not do as a joint, such
 as a tool changer, an indexer, a stop or a loader. The drive must know
-its limits, so the file must set them in `settings`; EtherCAT Setup
+its travel, so the file must set `0x607D:01` and `0x607D:02` in
+`settings`; the maximum profile velocity `0x607F` too where the drive
+has it (the Rtelligent ECT60 has not: `--check` and the window warn
+when the drive has it and the file does not set it). EtherCAT Setup
 proposes the drive's present values:
 
 ```yaml
@@ -669,7 +672,7 @@ proposes the drive's present values:
   settings:
   - {object: '0x607D:01', type: DINT, value: -100000}   # software limit, min
   - {object: '0x607D:02', type: DINT, value: 100000}    # software limit, max
-  - {object: '0x607F:00', type: UDINT, value: 50000}    # max profile velocity
+  - {object: '0x607F:00', type: UDINT, value: 50000}    # max profile velocity, if the drive has it
 ```
 
 Acceleration and deceleration are `0x6083` and `0x6084`, also settings.

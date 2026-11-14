@@ -337,8 +337,20 @@ class TestPropose(unittest.TestCase):
         # PP needs the positions and the drive's limits as settings
         pp = drive({"mode": "pp"})
         self.assertEqual(sorted(e.split(": ", 1)[1] for e in config.check(pp)), [
-            "cia402 mode pp needs the setting 0x607D:01", "cia402 mode pp needs the setting 0x607D:02",
-            "cia402 mode pp needs the setting 0x607F:00"])
+            "cia402 mode pp needs the setting 0x607D:01", "cia402 mode pp needs the setting 0x607D:02"])
+        # 0x607F only where the drive has it (the ECT60 has none): not an error
+        pp["slaves"][0]["settings"] = [{"object": "0x607D:01", "type": "DINT", "value": -1},
+                                       {"object": "0x607D:02", "type": "DINT", "value": 1}]
+        self.assertEqual(config.check(pp), [])
+        from ecatsetup import coe, session
+        has = coe.Dictionary(); has.objects = {0x607D: "Software Position Limit", 0x607F: "Max Profile Velocity"}
+        hasnt = coe.Dictionary(); hasnt.objects = {0x607D: "Software Position Limit"}
+        self.assertEqual(session.pp_problems(pp["slaves"][0], hasnt), [])
+        self.assertEqual(len(session.pp_problems(pp["slaves"][0], has)), 1)
+        self.assertIn("0x607F", session.pp_problems(pp["slaves"][0], has)[0])
+        self.assertEqual(session.pp_problems(drive({"mode": "csp"})["slaves"][0], has), [])
+        pp["slaves"][0]["settings"].append({"object": "0x607F:00", "type": "UDINT", "value": 500})
+        self.assertEqual(session.pp_problems(pp["slaves"][0], has), [])
         p = propose.Proposal(0, 0xa88, 0xa880002, 0, 0, "ECT60", profile=402, mode="pp")
         p.pp_limits = {(0x607D, 1): -1000, (0x607D, 2): 1000, (0x607F, 0): 500}
         pp["slaves"][0]["settings"] = config.slave_from_proposal(p)["settings"]

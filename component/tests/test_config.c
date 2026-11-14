@@ -603,9 +603,12 @@ static void test_cia402_pp(void) {
   CHECK_EQ(count(lcecConfTypeSdoConfig), 3);
   // the drive plans the move: it must have its limits
   CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN), "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02");
-  CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN) "  settings:\n  - {object: '0x607D:01', type: DINT, value: -1}\n"
-                                            "  - {object: '0x607D:02', type: DINT, value: 1}\n",
-      "0x607F:00 (max profile velocity)");
+  CHECK_FAILS(CIA402("pp", CSP_OUT, CSP_IN) "  settings:\n  - {object: '0x607D:01', type: DINT, value: -1}\n",
+      "cia402 mode pp needs the settings 0x607D:01 and 0x607D:02");
+  // 0x607F where the drive has it: not required (the ECT60 has none)
+  CHECK_EQ(load(CIA402("pp", CSP_OUT, CSP_IN) "  settings:\n  - {object: '0x607D:01', type: DINT, value: -1}\n"
+                                              "  - {object: '0x607D:02', type: DINT, value: 1}\n"), 0);
+  CHECK_EQ(count(lcecConfTypeSdoConfig), 2);
   // and the positions
   CHECK_FAILS(CIA402("pp", P("0x6040:00", 16, "UINT"), P("0x6041:00", 16, "UINT")) PP_LIMITS, "needs 0x607A:00");
   // 0x6081 is the profile's, not a pin

@@ -350,6 +350,8 @@ class Session:
                 for level, text in found:
                     out.append((level, "slave %s (%s): setting %s: %s"
                                 % (s["position"], s.get("name"), st.get("object"), text)))
+            for text in pp_problems(s, self.dictionary(s["position"])):
+                out.append(("warning", "slave %s (%s): %s" % (s["position"], s.get("name"), text)))
         return out
 
     def dc_info(self, position):
@@ -372,6 +374,30 @@ class Session:
     def object_name(self, position, index, subindex):
         b = self.bus.get(position)
         return b.coe.name(index, subindex) if b and b.coe else ""
+
+
+def pp_problems(slave, dictionary):
+    """A cia402 drive with PP whose dictionary has the maximum profile
+    velocity (0x607F) that its settings do not set: texts. Not an error,
+    since a drive may not have the object (config.check needs 0x607D only)."""
+    c = slave.get("cia402") or {}
+    if slave.get("profile") != "cia402" or "pp" not in [c.get("mode")] + list(c.get("modes") or []):
+        return []
+    have = set()
+    for st in slave.get("settings") or []:
+        try:
+            i, sub = str(st.get("object")).split(":")
+            have.add((int(i, 16), int(sub, 16)))
+        except ValueError:
+            pass
+    out = []
+    index, sub, _ = propose.PP_MAX_VELOCITY
+    for a in range(len(c.get("axes") or []) or 1):
+        o = index + a * propose.AXIS_OFFSET
+        if dictionary and o in dictionary.objects and (o, sub) not in have:
+            out.append("cia402 mode pp: the drive has 0x%04X (max profile velocity) and the settings "
+                       "do not set it; the drive plans PP moves with its present value" % o)
+    return out
 
 
 def load_yaml_text(text):

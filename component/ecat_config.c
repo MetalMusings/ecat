@@ -41,7 +41,7 @@ typedef struct {
   unsigned int cia402_modes;  // the other modes it may switch to (bit n: mode n)
   unsigned int cia402_all;    // mode and modes
   int n_axes;         // the drive's axes (cia402.axes), 1 without
-  unsigned int pp_limits[ECAT_CIA402_MAX_AXES];  // per axis: settings 0x607D:01, 0x607D:02, 0x607F:00 seen (bits 0-2)
+  unsigned int pp_limits[ECAT_CIA402_MAX_AXES];  // per axis: settings 0x607D:01, 0x607D:02 seen (bits 0-1)
   unsigned int owned[ECAT_CIA402_MAX_AXES];      // per axis: which of the profile's objects it has (bits of cia402_objects)
   int n_enc;          // the slave's encoder channels
   uint16_t enc_index[MAX_ENCODERS];   // their status indexes
@@ -590,7 +590,6 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
 
     if (parse_object(c, object, &index, &subindex) < 0) continue;
     if ((ax = cia402_axis(c, index, 0x607D)) >= 0 && (subindex == 1 || subindex == 2)) c->pp_limits[ax] |= 1u << (subindex - 1);
-    if ((ax = cia402_axis(c, index, 0x607F)) >= 0 && subindex == 0) c->pp_limits[ax] |= 4;
     if (get(c, st, "value") != NULL) {
       const dtype_t *dt = find_dtype(get_str(c, st, "type"));
       if (dt == NULL) {
@@ -853,12 +852,14 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   memset(c->pp_limits, 0, sizeof(c->pp_limits));
   settings(c, b, get(c, s, "settings"), off);
   if (c->cia402) {
-    // the drive plans PP moves itself: it must know its limits
+    // the drive plans PP moves itself: it must know its travel. 0x607F
+    // (max profile velocity) is set where the drive has it; not every
+    // drive does (the Rtelligent ECT60), so it is not required here.
     for (a = 0; a < c->n_axes; a++) {
-      if ((c->cia402_all & (1u << 1)) && c->pp_limits[a] != 7) {
+      if ((c->cia402_all & (1u << 1)) && (c->pp_limits[a] & 3) != 3) {
         unsigned o = a * ECAT_CIA402_AXIS_OFFSET;
-        error(c, "cia402 mode pp needs the settings 0x%04X:01 and 0x%04X:02 (software position limits) "
-                 "and 0x%04X:00 (max profile velocity)", 0x607D + o, 0x607D + o, 0x607F + o);
+        error(c, "cia402 mode pp needs the settings 0x%04X:01 and 0x%04X:02 (software position limits)",
+              0x607D + o, 0x607D + o);
       }
     }
   }

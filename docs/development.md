@@ -1184,8 +1184,18 @@ the machine:
 
 Also found: the ECT60 has no `0x607F` (max profile velocity: "object does
 not exist"), which `cia402.mode: pp` requires as a setting
-(`ecat_config.c`, `config.py`). Open: how the PP test of 2026-11-10 got
-past it, and whether the requirement should depend on the drive.
+(`ecat_config.c`, `config.py`); the window refused PP for X. Changed the
+same day: `0x607D:01` and `:02` are required, `0x607F` only warned about
+when the drive's dictionary has it and the settings do not set it
+(`session.pp_problems`, in the window's setting problems and `--check`
+with the bus). How the PP test of 2026-11-10 got past the old rule is not
+known (its configuration is gone).
+
+PP again from the window after the change (2026-11-14, drive test on X,
+the new ecat.so, settings `0x607D:01/:02` = -2000000/2000000 on X and Y,
+no `0x607F`): steps of 1 and 5 mm in both directions moved as expected
+(the user's report), the last move ended 3 counts from its target, no
+event after the slaves reached OP.
 
 
 ## LinuxCNC 2.10
