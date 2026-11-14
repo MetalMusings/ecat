@@ -1395,8 +1395,10 @@ Capture on the plasma cutter's bus (2026-11-14, free-running master,
 PREOP, ESI folder given, no tcpdump): 4 slaves, 1029 tool calls in 73 s,
 42 kB; 21 of each ECT60's 271 readable objects refused an upload. Read back
 with `--from-capture`, the proposal, `--diagnose` and `--check` gave what
-they give against the bus. Not tried: frames (tcpdump), a bus in OP, the
-window from a capture.
+they give against the bus; the window (offscreen) read the four slaves
+from it. Frames, with tcpdump installed and the master on `raw`: 497 frames
+sent and 497 back in 3 s from the idle master, 76 kB. Not tried: a bus in
+OP, a master on `xdp-native`.
 
 On the plasma cutter (2026-11-10, halrun with the servo thread, no
 motion): the log showed the load, the activation 4 s later, the four
