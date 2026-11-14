@@ -19,6 +19,7 @@ changed file is kept as .bak.
 Nothing here uses Qt; plan() shows what apply() would write.
 """
 
+import functools
 import os
 import re
 import shutil
@@ -628,10 +629,16 @@ SIGNAL_RE = re.compile(r"[^\s#<=>][^\s#]{0,46}")
 PIN_RE = SIGNAL_RE
 
 
+_KNOWN_RE = []
+
+
+@functools.lru_cache(maxsize=8192)
 def known_pin(pin):
     """(HAL type, direction) of a LinuxCNC pin in KNOWN_PINS, or None."""
-    for pattern, t, d in KNOWN_PINS:
-        if re.fullmatch(pattern, pin):
+    if not _KNOWN_RE:
+        _KNOWN_RE.extend((re.compile(pattern), t, d) for pattern, t, d in KNOWN_PINS)
+    for pattern, t, d in _KNOWN_RE:
+        if pattern.fullmatch(pin):
             return t, d
     return None
 

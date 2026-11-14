@@ -13,11 +13,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from ecatsetup import settings  # noqa: E402
 
 
-class TestSettings(unittest.TestCase):
-    def setUp(self):
-        self.dir = tempfile.TemporaryDirectory()
-        self.old = os.environ.get("ECATSETUP_SETTINGS")
-        os.environ["ECATSETUP_SETTINGS"] = os.path.join(self.dir.name, "sub", "settings.yaml")
 # state (test lock, drive limits): never the user's own
 if "ECATSETUP_TEST_STATE" not in os.environ:
     # one folder for the whole run: the state, and every temporary file of the
@@ -25,6 +20,13 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
     os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = os.environ["TMPDIR"] = \
         __import__("tempfile").tempdir = __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
+
+
+class TestSettings(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.old = os.environ.get("ECATSETUP_SETTINGS")
+        os.environ["ECATSETUP_SETTINGS"] = os.path.join(self.dir.name, "sub", "settings.yaml")
 
     def tearDown(self):
         if self.old is None:

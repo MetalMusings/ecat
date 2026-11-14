@@ -26,7 +26,7 @@ import sys
 import time
 
 from PyQt5.QtCore import QLocale, QSize, QThread, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QFontDatabase, QKeySequence, QPainter, QPalette, QPen
+from PyQt5.QtGui import QBrush, QColor, QFont, QFontDatabase, QKeySequence, QPainter, QPalette, QPen
 from PyQt5.QtWidgets import (
     QAbstractItemView, QAction, QActionGroup, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox,
@@ -213,8 +213,14 @@ def apply_theme(theme):
     app.setPalette(pal)
 
 
+_MONO = []
+
+
 def mono():
-    return QFontDatabase.systemFont(QFontDatabase.FixedFont)
+    """The fixed-width font (looked up once: it is asked for in every table cell)."""
+    if not _MONO:
+        _MONO.append(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+    return QFont(_MONO[0])
 
 
 def slave_of(message):
@@ -3970,10 +3976,14 @@ class HalPage(QWidget):
 
     def refresh(self):
         s = self.win.session
+        if self.win.tabs.currentWidget() is not self:
+            # built when the page is shown (show_current): its pin table is
+            # the slowest part of the window to fill
+            return
         self.yaml.setPlainText(s.dumps())
         self.show_pins()
         self.show_params()
-        if self.win.tabs.currentWidget() is self:
+        if True:
             self.show_joints()
             self.show_lcec()
             self.show_wiring()

@@ -245,6 +245,12 @@ class WindowBase(BusTest):
         self.addCleanup(lambda: (s.__setattr__("saved", s.cfg), w.close()))
         return w
 
+    @staticmethod
+    def hal(w):
+        """The HAL & LinuxCNC page, shown: it is built only while shown."""
+        w.tabs.setCurrentWidget(w.hal_page)
+        return w.hal_page
+
     def rows(self, w):
         """(key, texts) of the bus list's entries."""
         lst = w.bus_page.list.list
@@ -323,7 +329,7 @@ class TestWindow(WindowBase):
         self.assertIs(w.bus_page.stack.currentWidget(), w.slave_page)
         self.assertGreater(w.slave_page.pd.rowCount(), 0)
         self.assertEqual(w.slave_page.title.text(), "Slave 1 · MetalMusings EaserCAT 7000")
-        self.assertIn("io-1", w.hal_page.yaml.toPlainText())
+        self.assertIn("io-1", self.hal(w).yaml.toPlainText())
         self.assertIn("Bus read · 2 slaves", w.header.status.text())
 
     def test_pdo_assignment_box(self):
@@ -363,7 +369,7 @@ class TestWindow(WindowBase):
                    and page.pd.item(r, page.PIN).text())
         page.pd.item(row, page.PIN).setText("bad pin")
         self.assertEqual(page._entry(row)["pin"], "bad pin")
-        self.assertIn("bad pin", w.hal_page.yaml.toPlainText())
+        self.assertIn("bad pin", self.hal(w).yaml.toPlainText())
         self.assertIn("1 problem", self.rows(w)[1][1])
         self.assertIn("except slave 0", w.bus_page.list.summary.text())
         self.assertTrue(w.session.dirty)
@@ -399,7 +405,7 @@ class TestWindow(WindowBase):
         from ecatsetup import integrate
         w = self.window()
         w.select_slave(0)
-        w.hal_page.refresh()
+        self.hal(w)
         boxes = [w.hal_page.pins.cellWidget(r, 5) for r in range(w.hal_page.pins.rowCount())]
         boxes = [b for b in boxes if b is not None and b.count() > 1]
         self.assertTrue(boxes)
@@ -437,7 +443,7 @@ class TestWindow(WindowBase):
         from PyQt5.QtWidgets import QCheckBox
         from ecatsetup import integrate, wiring
         w = self.window()
-        page = w.hal_page
+        page = self.hal(w)
         s = w.session
         pin = next(p for p, (ht, way) in sorted(integrate.slave_pins(s.cfg).items())
                    if ht == "bool" and way == "out" and integrate.pin_inverted(s.cfg, p) is False)
@@ -506,7 +512,7 @@ class TestWindow(WindowBase):
     def test_write_into_linuxcnc_own_files_asks_first(self):
         from unittest import mock
         w = self.window()
-        page = w.hal_page
+        page = self.hal(w)
         page.plan = mock.Mock(changes=[], edited=[], notes=[], warnings=["lathe.ini is in LinuxCNC's own files"])
         ini = os.path.join(self.dir.name, "m.ini")
         open(ini, "w").write("[EMC]\n")
@@ -532,7 +538,7 @@ class TestWindow(WindowBase):
         from unittest import mock
         from ecatsetup import integrate
         w = self.window()
-        page = w.hal_page
+        page = self.hal(w)
         page.plan = integrate.Plan(
             changes=[integrate.FileChange(os.path.join(self.dir.name, "sim.hal"), "new", "", "x",
                                           "sim.tcl as HAL, 2 lines commented out")],
@@ -554,7 +560,7 @@ class TestWindow(WindowBase):
     def test_the_ini_file_can_be_chosen_again(self):
         from unittest import mock
         w = self.window()
-        page = w.hal_page
+        page = self.hal(w)
         w.tabs.setCurrentWidget(page)
         page.refresh()
         self.assertIn("Choose the machine's INI file", page.ini_text.text())
@@ -624,7 +630,7 @@ class TestWindow(WindowBase):
         from unittest import mock
         from ecatsetup import integrate, wiring
         w = self.window()
-        page = w.hal_page
+        page = self.hal(w)
         ini = os.path.join(self.dir.name, "m.ini")
         open(ini, "w").write("[EMC]\n")
         w.session.ini_path = ini
@@ -781,7 +787,7 @@ class TestWindow(WindowBase):
         self.assertNotIn("zero-at-start", s["cia402"])
         page.zero_at_start.setChecked(True)
         self.assertIs(s["cia402"]["zero-at-start"], True)
-        self.assertIn("zero-at-start: true", w.hal_page.yaml.toPlainText())
+        self.assertIn("zero-at-start: true", self.hal(w).yaml.toPlainText())
 
     def test_master_start_asks_and_runs_only_on_yes(self):
         from ecatsetup import masterstart
@@ -879,7 +885,7 @@ class TestWindow(WindowBase):
     def test_a_selected_pin_shows_what_it_does_and_links(self):
         from ecatsetup import wiring
         w = self.window()
-        page = w.hal_page
+        page = self.hal(w)
         page.wiring_rows = [wiring.Row("plasmac.breakaway", "bool", "in", "open"),
                             wiring.Row("mycomp.0.in", "bool", "in", "open")]
         page.wiring.setRowCount(2)
@@ -1244,6 +1250,7 @@ class TestParameters(WindowBase):
         from ecatsetup import integrate  # noqa: F401
         w = self.window()
         w.session.cfg["slaves"][0]["encoders"] = [{"name": "enc", "index": "0x6010"}]
+        self.hal(w)
         w.refresh()
         return w
 
@@ -1255,9 +1262,9 @@ class TestParameters(WindowBase):
 
     def test_hidden_without_parameters_and_listed_with_them(self):
         w = self.window()
-        self.assertTrue(w.hal_page.params_card.isHidden())
+        self.assertTrue(self.hal(w).params_card.isHidden())
         w = self.encoder_window()
-        page = w.hal_page
+        page = self.hal(w)
         self.assertFalse(page.params_card.isHidden())
         slave = w.session.cfg["slaves"][0]["name"]
         pin = "%s.enc.pos-scale" % slave
@@ -1359,7 +1366,7 @@ class TestSignalNameInTheBox(WindowBase):
         self.addCleanup(p.stop)
         s = w.session
         s.cfg = tw.encoder_cfg()
-        page = w.hal_page
+        page = self.hal(w)
         page.ini = lambda: os.path.join(d.name, "machine.ini")
         page.refresh()
         box = gui.QComboBox()
@@ -1408,7 +1415,7 @@ class TestSignalNameInTheBox(WindowBase):
         p.start()
         self.addCleanup(p.stop)
         w.session.cfg = tw.encoder_cfg()
-        page = w.hal_page
+        page = self.hal(w)
         page.ini = lambda: os.path.join(d.name, "machine.ini")
         page.refresh()
         row = next(r for r in range(page.pins.rowCount())
@@ -1445,7 +1452,7 @@ class TestSignalNameInTheBox(WindowBase):
         self.addCleanup(p.stop)
         w.session.cfg = tw.encoder_cfg()
         fromlcec.set_choice(w.session.cfg, "lcec.0.3.enc-pos", "io.enc.pos")
-        page = w.hal_page
+        page = self.hal(w)
         page.ini = lambda: os.path.join(d.name, "machine.ini")
         page.refresh()
         row = next(r for r in range(page.pins.rowCount())

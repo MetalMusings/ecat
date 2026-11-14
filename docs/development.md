@@ -7,7 +7,9 @@ a machine.
 ## Build and test
 
 ```
-python3 -m unittest discover -s tests      # Python tests
+scripts/run-tests                          # Python tests, modules in parallel
+scripts/run-tests gui wiring               # only some modules
+python3 -m unittest discover -s tests      # Python tests, one process
 make -C component                          # ecat.so
 make -C component check                    # C unit tests
 scripts/build-deb.sh -w -o <dir>           # package from the working tree
@@ -26,6 +28,14 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
   records and the errors.
 - The window's tests run offscreen against a fake bus and are skipped
   without PyQt5.
+- `scripts/run-tests` runs each test module in a process of its own, as many
+  at a time as there are CPUs (`-j`), and lists every module with its time
+  and test count: about 30 s on an N100, against 45 s in one process. A
+  module that runs no tests counts as failed (two modules had tests that
+  never ran: one in pytest style, one with a block that cut its class).
+- The *HAL & LinuxCNC* page is built only while it is shown (its pin table
+  is the slowest part of the window to fill): a window test that reads it
+  shows it first (`WindowBase.hal(w)`).
 - `scripts/docs-screenshots [NAME ...]` takes the window's screenshots in
   `docs/images` again, offscreen against the same fake bus (no event log,
   English messages, only the quirk files that come with the program; the
