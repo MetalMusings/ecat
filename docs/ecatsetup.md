@@ -115,7 +115,9 @@ Choosing a slave shows:
   would improve the proposal (usually an ESI file). *Choose ESI files...*
   and *Save as quirk file...* (what you chose, kept for the device, see
   [quirk files](#quirk-files)) are here;
-- **Operation and sync**: the PDO assignment, `configure-pdos`, the Sync
+- **Operation and sync**: the PDO assignment (the box shows the ESI's
+  predefined assignment the file uses; choosing another proposes the slave
+  again with it, after asking), `configure-pdos`, the Sync
   choice (free run, one of the slave's DC modes, or DC mode with user settings; see
   [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift,
   and for a drive the CiA 402 modes (below), *Propose again* and the homing
@@ -306,7 +308,7 @@ matching) or – (not used):
 |---|---|
 | The slave's EEPROM (SII) | Identity, PDOs, sync managers; always read. |
 | The CoE dictionary | The names and types of settings, the drive's supported modes. Without it names come from the SII. |
-| An ESI file | Predefined PDO sets (*Propose again* offers them), DC modes, units and value names of settings. The line says which file matched and whether it is for the slave's revision; a file for another revision is used, with a warning to check what it gave. |
+| An ESI file | Predefined PDO sets (the *PDO assignment* box offers them), DC modes, units and value names of settings. The line says which file matched and whether it is for the slave's revision; a file for another revision is used, with a warning to check what it gave. |
 | Process data, DC, profile | Which of the above each came from. |
 | A quirk file | When one matches the device ([quirk files](#quirk-files)). |
 
@@ -344,7 +346,7 @@ has not been tried at a machine yet.
    Bit (MDP 511)*, and finds the channel: the notes say *encoder enc:
    channel 0x6010 ...*, and the counter and latch entries are marked
    *profile* under Process data. For a 32-bit counter choose *Standard 32
-   Bit (MDP 511)* under *PDO assignment*, then *Propose again*; the count
+   Bit (MDP 511)* under *PDO assignment* (the slave is proposed again with it); the count
    is extended to 64 bits either way. The DC settings and the way the
    terminal reaches OP come from the ESI file too: if the slave does not
    reach OP, the test mode names what it did not accept.
@@ -490,7 +492,7 @@ explains the fault.
 
    | Code | Usually | What to do |
    |---|---|---|
-   | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*Propose again*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). |
+   | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*PDO assignment*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). |
    | 0x0026, 0x0043 | A setting (start-up SDO) was refused, or does not fit the others. | Read the master's messages for the object; check it in the Settings card (*Read present values*), take it out and try again. |
    | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period. | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings. |
    | 0x001B | Sync manager watchdog: the process data stopped. | LinuxCNC or the test stopped, or the servo thread missed cycles: see the event log. |
@@ -1137,6 +1139,11 @@ that only a simulation wrote or read give way (the status bar says which),
 and a signal that a real pin already writes is not joined by a second writer:
 the window tells you instead. For a handshake pin (`index-enable`) all the
 signal's pins are joined.
+A pin that your HAL files already connect (by hand, or by the *From lcec*
+card) shows that signal and its other pins in grey, with the file and line
+in the tooltip; it is changed there, not here, since a connection here would
+put the pin on a second signal. A pin chosen on the *From lcec* card is shown
+the same way before *Apply* writes it into the HAL files.
 Pins of other components, such as `not.0.in` or
 `plasmac.arc-voltage-in`, can be typed too; the component must be loaded
 by a HALFILE, since `ethercat.hal` comes after them. `ethercat.hal` then

@@ -295,6 +295,34 @@ class TestWindow(WindowBase):
         self.assertIn("io-1", w.hal_page.yaml.toPlainText())
         self.assertIn("Bus read · 2 slaves", w.header.status.text())
 
+    def test_pdo_assignment_box(self):
+        # the box shows the ESI's predefined assignment the file uses, and choosing
+        # another one proposes the slave again with it (the user's EL5101 on turner)
+        w = self.window()
+        p = w.session.bus[1].proposal
+        pd = w.session.slave(1)["process-data"]
+        used = sorted((pdo["sm"], int(pdo["pdo"], 16))
+                      for pdo in pd.get("outputs", []) + pd.get("inputs", []))
+        p.pdo_sets = ["Standard 16 Bit", "Standard 32 Bit"]
+        p.pdo_set_pdos = {"Standard 16 Bit": [(3, 0x1A03)], "Standard 32 Bit": used}
+        w.select_slave(1)
+        box = w.slave_page.pdo_set
+        self.assertEqual(box.currentData(), "Standard 32 Bit")
+        self.assertEqual(box.currentText(), "PDO assignment: Standard 32 Bit")
+        with mock.patch.object(w, "propose_again") as again:
+            box.setCurrentIndex(box.findData("Standard 32 Bit"))
+            box.activated.emit(box.currentIndex())
+            again.assert_not_called()                       # the one in use: nothing to do
+            box.setCurrentIndex(box.findData("Standard 16 Bit"))
+            box.activated.emit(box.currentIndex())
+            again.assert_called_once()
+            self.assertEqual(again.call_args[0][0], 1)
+            self.assertEqual(again.call_args[0][2], "Standard 16 Bit")
+        # an edited mapping is none of them
+        pd.setdefault("inputs", []).append({"pdo": "0x1A07", "sm": 3, "entries": []})
+        self.assertIsNone(gui.pdo_set_in_use(w.session.slave(1), p))
+        self.assertIsNone(gui.pdo_set_in_use(w.session.slave(1), None))
+
     def test_edit_a_pin_and_see_an_error(self):
         w = self.window()
         w.select_slave(0)
@@ -1215,6 +1243,80 @@ class TestSignalNameInTheBox(WindowBase):
             page.pin_edited("io.enc.pos", box)
         self.assertTrue(info.called)
         self.assertEqual(integrate.nets(s.cfg), [])
+
+
+    def test_a_pin_the_hal_files_connect_is_shown(self):
+        # after From lcec the HAL files connect the encoder (Turner, 2026-11-14): the
+        # column showed nothing, as if the pins were free
+        from unittest import mock
+        from ecatsetup import integrate
+        sys.path.insert(0, os.path.dirname(__file__))
+        import test_wiring as tw
+        w = self.window()
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        hal = (tw.SPINDLE_SIM +
+               "#ecatsetup: net spindle-revs lcec.0.3.enc-pos\n"
+               "net spindle-revs io.enc.pos  #ecatsetup: added\n"
+               "net spindle-revs => spindle.0.revs\n")
+        for name, text in (("machine.ini", tw.SPINDLE_INI), ("spindle_sim.hal", hal)):
+            with open(os.path.join(d.name, name), "w") as f:
+                f.write(text)
+        lib = tempfile.TemporaryDirectory()
+        self.addCleanup(lib.cleanup)
+        p = mock.patch.object(integrate, "HALLIB", lib.name)
+        p.start()
+        self.addCleanup(p.stop)
+        w.session.cfg = tw.encoder_cfg()
+        page = w.hal_page
+        page.ini = lambda: os.path.join(d.name, "machine.ini")
+        page.refresh()
+        row = next(r for r in range(page.pins.rowCount())
+                   if page.pins.item(r, 2).text() == "io.enc.pos")
+        self.assertIsNone(page.pins.cellWidget(row, 5))         # not a box to type in
+        cell = page.pins.item(row, 5)
+        self.assertIn("spindle-revs", cell.text())
+        self.assertIn("spindle.0.revs", cell.text())
+        self.assertNotIn("io.enc.pos", cell.text())
+        self.assertFalse(cell.flags() & gui.Qt.ItemIsEditable)
+        self.assertIn("spindle_sim.hal:", cell.toolTip())
+        # a pin the HAL files do not connect keeps its box
+        free = next(r for r in range(page.pins.rowCount())
+                    if page.pins.item(r, 2).text() == "io.enc.velocity")
+        self.assertIsNotNone(page.pins.cellWidget(free, 5))
+
+    def test_a_pin_chosen_on_the_from_lcec_card_is_shown_before_apply(self):
+        # the choice is in linuxcnc.old-pins; the HAL files still have the lcec pin
+        from unittest import mock
+        from ecatsetup import fromlcec, integrate
+        sys.path.insert(0, os.path.dirname(__file__))
+        import test_wiring as tw
+        w = self.window()
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        hal = tw.SPINDLE_SIM + "net spindle-revs lcec.0.3.enc-pos => spindle.0.revs\n"
+        for name, text in (("machine.ini", tw.SPINDLE_INI), ("spindle_sim.hal", hal)):
+            with open(os.path.join(d.name, name), "w") as f:
+                f.write(text)
+        lib = tempfile.TemporaryDirectory()
+        self.addCleanup(lib.cleanup)
+        p = mock.patch.object(integrate, "HALLIB", lib.name)
+        p.start()
+        self.addCleanup(p.stop)
+        w.session.cfg = tw.encoder_cfg()
+        fromlcec.set_choice(w.session.cfg, "lcec.0.3.enc-pos", "io.enc.pos")
+        page = w.hal_page
+        page.ini = lambda: os.path.join(d.name, "machine.ini")
+        page.refresh()
+        row = next(r for r in range(page.pins.rowCount())
+                   if page.pins.item(r, 2).text() == "io.enc.pos")
+        self.assertIsNone(page.pins.cellWidget(row, 5))
+        cell = page.pins.item(row, 5)
+        self.assertTrue(cell.text().startswith("spindle-revs: "))
+        self.assertIn("spindle.0.revs", cell.text())
+        self.assertNotIn("lcec", cell.text())
+        self.assertIn("lcec.0.3.enc-pos", cell.toolTip())
+        self.assertIn("Apply", cell.toolTip())
 
 
 class TestStaleMaster(WindowBase):

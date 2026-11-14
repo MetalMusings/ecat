@@ -212,6 +212,37 @@ def use_point():
     QLocale.setDefault(c)
 
 
+def hal_connection_item(pin, uses, sigs):
+    """The Connected to cell of a slave pin that the user's HAL files connect: the
+    signal and its other pins, grey and read-only, the lines in the tooltip."""
+    parts = []
+    for sig in dict.fromkeys(u.signal for u in uses):
+        others = sorted(dict.fromkeys(p for p in sigs.get(sig, []) if p != pin))
+        parts.append("%s: %s" % (sig, " ".join(others)) if others else sig)
+    it = item("  ".join(parts), font=mono(), colour=GREY)
+    it.setToolTip("Connected in your HAL files:\n" + "\n".join(
+        "  %s:%d net %s" % (u.file, u.line, u.signal) for u in uses) +
+        "\nChange it there (or on the From lcec card); a connection here would put the pin "
+        "on a second signal.")
+    return it
+
+
+def pdo_set_in_use(slave, proposal):
+    """The name of the ESI's predefined PDO assignment the slave's process data is, or
+    None (the default, the slave's own or an edited one)."""
+    if not slave or not proposal or not proposal.pdo_set_pdos:
+        return None
+    pd = slave.get("process-data") or {}
+    have = []
+    for pdo in (pd.get("outputs") or []) + (pd.get("inputs") or []):
+        try:
+            have.append((int(pdo.get("sm")), int(str(pdo.get("pdo")), 16)))
+        except (TypeError, ValueError):
+            return None
+    have.sort()
+    return next((n for n, pdos in proposal.pdo_set_pdos.items() if pdos == have), None)
+
+
 class QuietCombo(QComboBox):
     """A combo box the mouse wheel does not change: scrolling a page over it must not
     pick a value (it once connected pins by itself); the wheel scrolls the page."""
@@ -1012,7 +1043,12 @@ class SlaveView(QWidget):
         op.add(self.cia402)
         again = QHBoxLayout()
         self.pdo_set = QuietCombo()
-        self.pdo_set.setToolTip("The ESI file's predefined PDO assignments")
+        self.pdo_set.setToolTip("The ESI file's predefined PDO assignments. Choosing one "
+                                "proposes the slave again with it (asks first).")
+        # long ESI names must not push the button off a small screen
+        self.pdo_set.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.pdo_set.setMinimumContentsLength(16)
+        self.pdo_set.activated.connect(self.pdo_set_chosen)
         again.addWidget(self.pdo_set, 1)
         self.again = QPushButton("Propose again")
         self.again.setToolTip("Read the slave and replace its process data, DC and settings with "
@@ -1032,6 +1068,8 @@ class SlaveView(QWidget):
             "AssignActivate it needs), or DC mode with user settings: any AssignActivate, typed "
             "in the field. A choice the slave does not describe gets a warning, nothing is "
             "forbidden.")
+        self.dc_mode.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.dc_mode.setMinimumContentsLength(16)       # long ESI names: see pdo_set
         self.dc_mode.activated.connect(self.dc_mode_chosen)
         sync.addWidget(self.dc_mode, 1)
         self.assign = QLineEdit()
@@ -1284,7 +1322,8 @@ class SlaveView(QWidget):
         self.pdo_set.addItem("PDO assignment: the ESI file's default" if p and p.pdo_sets
                              else "PDO assignment: the slave's own", None)
         for name in (p.pdo_sets if p else []):
-            self.pdo_set.addItem(name, name)
+            self.pdo_set.addItem("PDO assignment: " + name, name)
+        self.pdo_set.setCurrentIndex(max(self.pdo_set.findData(pdo_set_in_use(s, p)), 0))
         self.again.setEnabled(b is not None and not win.busy)
 
         self.show_dc(s)
@@ -1975,6 +2014,13 @@ class SlaveView(QWidget):
             del s["settings"][r]
         self.show_settings(s)
         self.win.changed()
+
+    def pdo_set_chosen(self, _index):
+        session = self.win.session
+        b = session.bus.get(self.position)
+        if self.pdo_set.currentData() != pdo_set_in_use(session.slave(self.position),
+                                                        b.proposal if b else None):
+            self.propose_again()
 
     def propose_again(self):
         self.win.propose_again(self.position, self.mode.currentData()
@@ -3935,15 +3981,16 @@ class HalPage(QWidget):
 
     def show_pins(self):
         s, ini = self.win.session, self.ini()
-        self.hal_signals, self.io_proposal, self.hal_uses = {}, {}, {}
+        self.hal_signals, self.io_proposal, self.hal_uses, self.hal_sigs = {}, {}, {}, {}
         if ini and s.cfg is not None:
             try:
                 self.hal_signals = integrate.signals(integrate.user_hal_files(ini), ini)
                 self.io_proposal = integrate.propose_nets(ini, s.cfg)
-                self.hal_uses = halcheck.uses(ini)[0]
+                self.hal_uses, self.hal_sigs = halcheck.uses(ini)
             except OSError:
                 pass
         own = integrate.slave_pins(s.cfg)
+        chosen = fromlcec.choices(s.cfg)
         offered = integrate.suggestions(ini)
         shown = set()
         self.pins.setRowCount(0)
@@ -3959,6 +4006,25 @@ class HalPage(QWidget):
             shown.add(pin)
             htype, way = own[pin]
             net = integrate.net_of(s.cfg, pin)
+            elsewhere = [u for u in self.hal_uses.get(pin, []) if u.signal and
+                         u.file not in (integrate.LOAD_FILE, integrate.MAIN_FILE)]
+            if net is None and elsewhere:
+                # connected by the HAL files as they are now (by hand, or by the From lcec
+                # card): shown, not edited here, since a net here would be a second signal
+                self.pins.setItem(r, 5, hal_connection_item(pin, elsewhere, self.hal_sigs))
+                continue
+            olds = sorted(o for o, n in chosen.items() if n == pin)
+            planned = {sig: sorted(chosen.get(x, x) or "" for x in pins if x not in olds)
+                       for sig, pins in self.hal_signals.items() if any(o in pins for o in olds)}
+            if net is None and planned:
+                # chosen on the From lcec card, in the HAL files once applied
+                it = item("  ".join("%s: %s" % (sig, " ".join(x for x in ps if x)) if any(ps)
+                                    else sig for sig, ps in sorted(planned.items())),
+                          font=mono(), colour=GREY)
+                it.setToolTip("Takes the place of %s (From lcec card); written into your HAL "
+                              "files by Apply, on this page." % ", ".join(olds))
+                self.pins.setItem(r, 5, it)
+                continue
             others = [x for x in (net or {}).get("pins", []) if x != pin]
             box = QuietCombo()
             box.setEditable(True)
@@ -5084,6 +5150,7 @@ class MainWindow(QMainWindow):
                 "proposal from the bus? Its name is kept; other changes made to it are lost "
                 "(until you save, the file is not changed)." % pos,
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            self.refresh(keep_page=True)     # the PDO assignment box back to the one in use
             return
         self.run("Reading slave %d..." % pos,
                  lambda progress: self.session.propose_again(pos, mode, pdo_set),

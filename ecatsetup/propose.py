@@ -95,6 +95,7 @@ class Proposal:
     pdos: list = field(default_factory=list)
     pdo_source: str = ""
     pdo_sets: list = field(default_factory=list)   # names of the ESI's predefined assignments
+    pdo_set_pdos: dict = field(default_factory=dict)   # name -> sorted [(sm, pdo index)]
     dc_assign: int = None
     dc_sync0_factor: int = None
     dc_shift: int = None
@@ -265,6 +266,8 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     chosen_set = None
     if esi_dev and esi_dev.pdo_sets:
         p.pdo_sets = [s.name for s in esi_dev.pdo_sets]
+        p.pdo_set_pdos = {s.name: sorted((sm, i) for sm, pdos in s.sms.items() for i in pdos)
+                          for s in esi_dev.pdo_sets}
         if pdo_set:
             chosen_set = next((s for s in esi_dev.pdo_sets if s.name.lower() == pdo_set.lower()), None)
             if chosen_set is None:
