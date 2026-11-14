@@ -1099,12 +1099,33 @@ all-op, dc-phased, pll-reset-count), added after `ecat.write-all`.
 4. While moving: start `scripts/dc-jitter-measure --attach --seconds 180
    --out ~/autoshift-move`, then home, jog X, Y and Z at full speed, and run a
    program without the arc (lines and arcs at 1000 and 3000 mm/min).
-5. Optionally the same with load (`stress-ng`, as `--load` in the script).
+5. Optionally the same with load: add `--load` (stress-ng for the run).
 
 **Passes when:** `turnaround-cycles` stays 2 and `shift-time` does not change
 (no "new shift" event), no `servo thread late`, no DC sync check event,
 no following error; `send-offset` stays within the window that the margins
 leave (its spread compared with the rest run), and no PLL reset.
+
+**Results** (2026-11-14, this machine: N100, igc, xdp-native, 1 ms, three
+ECT60 + EaserCAT 7000, LinuxCNC 2.10 run-in-place, the copy above with the
+0x2010 settings removed; `auto-shift-margin` and `auto-shift-input-margin`
+50 us). Load in row 3: stress-ng started by hand with the script's `--load`
+arguments (`--load` did nothing with `--attach` then; it does now).
+
+| Run | shift-time | turn-around | PLL resets | events | send-offset mean / p99.9 / max | pll-err stddev / max | td max |
+|---|---|---|---|---|---|---|---|
+| rest, 60 s | 524366, unchanged | 2 | 0 | 0 | 9.4 / 45.8 / 90.9 us | 1.6 / 7.2 us | 78 us |
+| moving, 180 s | 524366, unchanged | 2 | 0 | 0 | 11.3 / 67.1 / 145.6 us | 1.8 / 9.1 us | 137 us |
+| moving + stress-ng, 180 s | 524366, unchanged | 2 | 0 | 0 | 29.7 / 107.1 / 192.0 us | 4.0 / 17.6 us | 155 us |
+
+Passed: the shift was chosen once at start and kept, the turn-around stayed
+two cycles, no late servo thread, no DC sync check event, no PLL reset. The
+latest frame (192 us into the period, under load) is far from SYNC0 at
+524 us. One halsampler overrun line in each moving run (sampling only).
+Data in ~/autoshift-rest, ~/autoshift-move, ~/autoshift-move-load.
+The user saw the GUI's preview stutter a little during the runs (noted only;
+not investigated, nothing in the measurement points to the bus). 500 us not
+tried while moving.
 
 
 ## LinuxCNC 2.10

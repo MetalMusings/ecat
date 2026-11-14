@@ -141,6 +141,21 @@ def getp(pin):
     return r.stdout.strip() if r.returncode == 0 else "?"
 
 
+def start_load(seconds):
+    """stress-ng for the run (ends by itself 60 s after it), or None."""
+    if shutil.which("stress-ng") is None:
+        sys.exit("--load needs stress-ng")
+    return subprocess.Popen(
+        ["stress-ng", "--cpu", "4", "--vm", "2", "--vm-bytes", "20%", "--cache", "2", "--io", "1",
+         "--timeout", "%ds" % (seconds + 60)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def stop_load(stress):
+    if stress:
+        stress.terminate()
+        stress.wait()
+
+
 def attach(a):
     """Measure a running LinuxCNC through its own sampler channel."""
     from ecatsetup import events
@@ -158,10 +173,14 @@ def attach(a):
     before = {p: getp(p) for p in ATTACH_PINS}
     n = a.seconds * 1000000000 // a.period
     sf = os.path.join(out, "samples.txt")
-    print("sampling channel %d for %d s (%d samples) into %s; move the machine now"
-          % (a.channel, a.seconds, n, sf))
-    with open(sf, "w") as f:
-        subprocess.run(["halsampler", "-c", str(a.channel), "-n", str(n)], stdout=f)
+    stress = start_load(a.seconds) if a.load else None
+    print("sampling channel %d for %d s (%d samples)%s into %s; move the machine now"
+          % (a.channel, a.seconds, n, ", with load" if a.load else "", sf))
+    try:
+        with open(sf, "w") as f:
+            subprocess.run(["halsampler", "-c", str(a.channel), "-n", str(n)], stdout=f)
+    finally:
+        stop_load(stress)
     after = {p: getp(p) for p in ATTACH_PINS}
     for p in ATTACH_PINS:
         print("%-28s before %-10s after %s" % (p, before[p], after[p]))
@@ -186,7 +205,7 @@ def main():
     ap.add_argument("--shift", default="auto",
                     help="sync0-shift-ns: auto (follows only; slaves mode then uses 300000) or ns")
     ap.add_argument("--yaml", default=os.path.expanduser("~/ecat-test/run/ethercat.yaml"))
-    ap.add_argument("--load", action="store_true", help="run stress-ng meanwhile")
+    ap.add_argument("--load", action="store_true", help="run stress-ng meanwhile (also with --attach)")
     ap.add_argument("--out")
     ap.add_argument("--analyze", metavar="FILE", help="only analyse an earlier samples file")
     ap.add_argument("--attach", action="store_true",
@@ -214,22 +233,14 @@ def main():
         f.write('#!/bin/sh\nexec halsampler -n "$1" > "$2"\n')
     os.chmod(sample, 0o755)
 
-    stress = None
-    if a.load:
-        if shutil.which("stress-ng") is None:
-            sys.exit("--load needs stress-ng")
-        stress = subprocess.Popen(
-            ["stress-ng", "--cpu", "4", "--vm", "2", "--vm-bytes", "20%", "--cache", "2", "--io", "1",
-             "--timeout", "%ds" % (a.seconds + 60)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    stress = start_load(a.seconds) if a.load else None
     print("mode %s, %d s at %d ns%s, in %s" % (a.mode, a.seconds, a.period, ", with load" if a.load else "", out))
     t0 = time.time()
     try:
         with open(os.path.join(out, "halrun.log"), "w") as log:
             subprocess.run(["halrun", "-f", "run.hal"], cwd=out, stdout=log, stderr=subprocess.STDOUT)
     finally:
-        if stress:
-            stress.terminate()
-            stress.wait()
+        stop_load(stress)
     print("halrun ended after %.0f s; log: %s/halrun.log" % (time.time() - t0, out))
     # the end of the log has the `show pin` output
     try:
