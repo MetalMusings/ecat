@@ -572,7 +572,9 @@ The test does not start when the master's network interface is missing,
 does not exist on this computer, or is set to `xdp-native` on a driver
 that cannot do it (such as `r8169`): the Master page says why. If the
 component does not load, the test stops at once with the end of the
-`halrun` log.
+`halrun` log. A test's files (`ethercat.yaml`, `test.hal`, `halrun.log`) are
+in a folder `/tmp/ecatsetup-test-*`, kept until the next test starts, which
+removes the earlier ones.
 
 One test runs at a time, also with several EtherCAT Setup windows open:
 editing in several windows is fine, but a second window that starts a

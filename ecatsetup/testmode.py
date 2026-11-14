@@ -34,6 +34,8 @@ lock, so another window must not write them back meanwhile.
 
 import fcntl
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -45,6 +47,39 @@ HALCMD = os.environ.get("ECAT_HALCMD") or lcnc_env.program("halcmd")
 KERNEL_MASTER = "/dev/EtherCAT0"
 TEST_LOCK = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
                          "ecatsetup", "test.lock")
+
+
+RUN_PREFIX = "ecatsetup-test-"
+# a run's folder as tempfile.mkdtemp names it: the prefix and 8 characters
+# (the test suite's ecatsetup-test-state-... and the like are longer)
+_RUN_DIR = re.compile(r"^%s[a-z0-9_]{8}$" % re.escape(RUN_PREFIX))
+RUN_FILES = {"ethercat.yaml", "test.hal", "halrun.log"}
+
+
+def remove_old_runs(root=None):
+    """Remove the folders of earlier tests (their configuration, HAL file and
+    halrun log) from the temporary folder: only this user's, and only those
+    that hold nothing but a test's files. Called when a test starts, with the
+    test lock held, so the last run's log stays until the next test.
+    Returns how many were removed."""
+    root = root or tempfile.gettempdir()
+    removed = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for name in names:
+        path = os.path.join(root, name)
+        if not _RUN_DIR.match(name) or os.path.islink(path) or not os.path.isdir(path):
+            continue
+        try:
+            if os.stat(path).st_uid != os.getuid() or not set(os.listdir(path)) <= RUN_FILES:
+                continue
+            shutil.rmtree(path)
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def _lock_file():
@@ -301,7 +336,8 @@ class TestRun:
         if problem:
             raise TestError(problem)
         progress("2/5 Writing the test configuration")
-        self.dir = tempfile.mkdtemp(prefix="ecatsetup-test-")
+        remove_old_runs()
+        self.dir = tempfile.mkdtemp(prefix=RUN_PREFIX)
         cfg_path = os.path.join(self.dir, "ethercat.yaml")
         config.write(self.cfg, cfg_path)
         hal_path = os.path.join(self.dir, "test.hal")

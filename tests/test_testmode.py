@@ -19,8 +19,11 @@ os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-su
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 # state (test lock, drive limits): never the user's own
 if "ECATSETUP_TEST_STATE" not in os.environ:
-    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = \
-        __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
+    # one folder for the whole run: the state, and every temporary file of the
+    # tests and of what they start (TMPDIR); removed when the run ends
+    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = os.environ["TMPDIR"] = \
+        __import__("tempfile").tempdir = __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
+    __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 
 from ecatsetup import testmode  # noqa: E402
 
@@ -334,6 +337,38 @@ class TestTestMode(unittest.TestCase):
         pins = testmode.parse_pins("ecat real IN 0 lcec.0.E7000.Level-1\n\n")
         p = pins["lcec.0.E7000.Level-1"]
         self.assertEqual((p.type, p.dir, p.value), ("real", "IN", "0"))
+
+
+class TestOldRuns(unittest.TestCase):
+    """remove_old_runs: only earlier tests' folders, only with a test's files."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+
+    def make(self, name, files=("ethercat.yaml", "test.hal", "halrun.log")):
+        path = os.path.join(self.dir.name, name)
+        os.makedirs(path)
+        for f in files:
+            open(os.path.join(path, f), "w").close()
+        return path
+
+    def test_removes_runs_and_keeps_the_rest(self):
+        runs = [self.make("ecatsetup-test-ab_cd123"), self.make("ecatsetup-test-x1y2z3w4", ())]
+        state = self.make("ecatsetup-test-state-abcd1234")       # the test suite's
+        other = self.make("ecatsetup-test-abcd1234", ("ethercat.yaml", "notes.txt"))
+        mine = self.make("ecatsetup-capture-abcd1234")
+        os.symlink(runs[0] + "-target", os.path.join(self.dir.name, "ecatsetup-test-linklink"))
+        self.make("ecatsetup-test-ab_cd123-target")
+        self.assertEqual(testmode.remove_old_runs(self.dir.name), 2)
+        for p in runs:
+            self.assertFalse(os.path.exists(p))
+        for p in (state, other, mine, runs[0] + "-target"):
+            self.assertTrue(os.path.isdir(p), p)
+        self.assertTrue(os.path.islink(os.path.join(self.dir.name, "ecatsetup-test-linklink")))
+
+    def test_no_folder(self):
+        self.assertEqual(testmode.remove_old_runs(os.path.join(self.dir.name, "gone")), 0)
 
 
 if __name__ == "__main__":

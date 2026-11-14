@@ -16,8 +16,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 if "ECATSETUP_TEST_STATE" not in os.environ:
-    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = \
-        tempfile.mkdtemp(prefix="ecatsetup-test-state-")
+    # one folder for the whole run: the state, and every temporary file of the
+    # tests and of what they start (TMPDIR); removed when the run ends
+    os.environ["ECATSETUP_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = os.environ["TMPDIR"] = \
+        __import__("tempfile").tempdir = __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
+    __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 sys.path.insert(0, os.path.dirname(__file__))
 
 from ecatsetup import config, fromlcec, halcheck, integrate, lcecxml, wiring  # noqa: E402
