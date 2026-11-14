@@ -24,7 +24,7 @@
 set -euo pipefail
 
 PKG=linuxcnc-ecat
-BASE_VERSION=0.17
+BASE_VERSION=0.18
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
 MASTER_MIN=1.1
