@@ -1151,6 +1151,43 @@ Passed. Not tried: homing by the drive (`modes: [hm]`) with zero-at-start,
 which sets `pos-zero` back to 0; a drive that loses power between runs.
 
 
+## Changing modes (opmode-cmd) at the machine
+
+Tried 2026-11-14 on the plasma cutter's X (ECT60, 100 counts/mm), `ecat`
+in halrun with a copy of the configuration's `ethercat.yaml` where X has
+`cia402: {mode: pv, modes: [csp]}`, pins set with `halcmd`, the user at
+the machine:
+
+1. Not enabled: `opmode-cmd` 8 and 0: `opmode` and `opmode-display` 8, then
+   3, at once; nothing moved.
+2. Enabled in PV at 2 mm/s.
+3. `opmode-cmd` 8 while moving, `pos-cmd` far away. **Found:** the drive
+   stopped, changed to CSP and then crept on at 1.5 to 3 mm/s (204.5 to
+   212.9 mm, disabled by hand), no fault: while waiting for `pos-cmd` the
+   profile wrote the actual position as the target every cycle, and a
+   target that moves with the drive keeps it moving (the drive feeds the
+   target's velocity forward, or had not quite stopped). Fixed: the held
+   target is taken once, when the drive is in "Operation enabled" and in
+   CSP without following `pos-cmd`, and taken anew after homing and mode
+   changes; with the drive off it follows the actual position as before.
+   C test `test_mode_change_into_csp_holds_a_drive_that_moves` (a drive
+   model with feedforward; mutation-checked, as is the reset after
+   homing). Again with the fix: stopped and held (target 21702, actual
+   21705), no creep.
+4. `pos-cmd` brought to the drive and moved 3 mm and back in 0.02 mm steps:
+   followed, no fault.
+5. `opmode-cmd` 0: back to PV, ramped to `velocity-cmd` (2 mm/s), stopped
+   at 0.
+6. `opmode-cmd` 1 (PP, not in the file): shut down at once, `fault-reason`
+   7, recorded in the event log; stayed down with `opmode-cmd` 0 until
+   `enable` dropped.
+
+Also found: the ECT60 has no `0x607F` (max profile velocity: "object does
+not exist"), which `cia402.mode: pp` requires as a setting
+(`ecat_config.c`, `config.py`). Open: how the PP test of 2026-11-10 got
+past it, and whether the requirement should depend on the drive.
+
+
 ## LinuxCNC 2.10
 
 Investigated 2026-11-11 against LinuxCNC master 64fab5d412 (2026-11-10,

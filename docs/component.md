@@ -588,7 +588,10 @@ reports the new mode. An enabled drive changes in steps:
 2. The new mode is written to `0x6060`, and `0x6061` must follow within
    1 s (`fault-reason` 6).
 3. The new mode starts from the actual values: CSP follows `pos-cmd` only
-   once it is within 10 counts of the actual position, CSV `velocity-cmd`
+   once it is within 10 counts of the actual position (until then the
+   drive holds the position taken when it entered CSP, a fixed target:
+   writing the moving actual position would let a drive that still moves,
+   or feeds the target's velocity forward, run on), CSV `velocity-cmd`
    only once it is 0, PV ramps to `velocity-cmd`, and PP moves only on a
    new `pp-start`.
 

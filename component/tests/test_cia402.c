@@ -1377,6 +1377,10 @@ static struct {
   int home_left, homed;  // HM: cycles left homing, done
   int32_t home;          // HM: the position after homing
   unsigned sw, cw_old;
+  int ff;                // CSP: feeds the target's velocity forward (next = t + (t - t_old))
+  int32_t creep;         // CSP with ff: the velocity it still has when it enters CSP
+  int32_t t_old;         // CSP with ff: the target of the cycle before
+  int ff_mode;           // CSP with ff: the mode of the cycle before
 } mm;
 
 static const fake_entry_t mm_entries[] = {
@@ -1431,6 +1435,15 @@ static unsigned mm_cycle(void) {
   if (!mm.stuck) fake_set(S, 0x6061, 0, fake_get(S, 0x6060, 0));
   if (mm.sw != SW_ENABLED) {
     mm.vel = 0;
+  } else if (m == 8 && mm.ff) {
+    // a drive whose own command runs on at the target's velocity, entering
+    // CSP with the velocity mm.creep that its status did not show
+    int32_t t = (int32_t)fake_get(S, 0x607A, 0), next;
+    if (mm.ff_mode != 8) mm.t_old = mm.pos - mm.creep;
+    next = t + (t - mm.t_old);
+    mm.t_old = t;
+    mm.vel = next - mm.pos;
+    mm.pos = next;
   } else if (m == 8) {
     int32_t t = (int32_t)fake_get(S, 0x607A, 0);
     mm.vel = t - mm.pos;
@@ -1473,6 +1486,7 @@ static unsigned mm_cycle(void) {
     mm.pos += mm.vel;
   }
   mm.cw_old = cw;
+  mm.ff_mode = m;
   return cw;
 }
 
@@ -1643,6 +1657,35 @@ static void test_mode_change_into_csp_waits_for_the_command(void) {
     mm_run(1);
   }
   CHECK_EQ(mm.pos, at + 35);
+}
+
+static void test_mode_change_into_csp_holds_a_drive_that_moves(void) {
+  // Found on the plasma cutter (ECT60, 2026-11-14): changed from PV to CSP
+  // while still creeping, with pos-cmd far away, the drive ran on at that
+  // speed, because the profile wrote its actual position as the target
+  // every cycle. The held target is taken once.
+  int32_t at;
+  mm_drive(3, BIT(8));
+  mm.ff = 1;
+  mm.creep = 3;
+  PIN_BIT("m.enable") = 1;
+  PIN_FLOAT("m.velocity-cmd") = 50;
+  mm_run(20);
+  PIN_FLOAT("m.velocity-cmd") = 0;
+  mm_run(10);
+  PIN_FLOAT("m.pos-cmd") = 0;
+  PIN_S32("m.opmode-cmd") = 8;
+  mm_run(10);
+  CHECK_EQ(mm_mode(), 8);
+  at = mm.pos;
+  mm_run(200);
+  CHECK_EQ(mm.pos, at);
+  CHECK_EQ(mm.vel, 0);
+  CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
+  // pos-cmd brought to it: followed
+  PIN_FLOAT("m.pos-cmd") = at + 5;
+  mm_run(2);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), at + 5);
 }
 
 static void test_zero_at_start_mode_change_into_csp(void) {
@@ -2115,6 +2158,7 @@ RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test
     test_pp_start_waits_for_the_mode, test_pp_bad_command, test_opmode_cmd_only_with_more_modes,
     test_opmode_cmd_not_in_the_file, test_opmode_cmd_is_64_bits, test_mode_change_while_disabled, test_mode_change_halts_first, test_mode_change_waits_for_the_answer,
     test_mode_change_from_csp_holds_the_position, test_mode_change_into_csp_waits_for_the_command,
+    test_mode_change_into_csp_holds_a_drive_that_moves,
     test_mode_change_into_csv_waits_for_zero, test_mode_change_not_taken, test_mode_change_drive_does_not_stop,
     test_mode_change_asked_back, test_homing_halts_pv_first, test_homing_halts_pp_first,
     test_homing_pv_drive_does_not_stop, test_homing_csp_waits_for_the_command,

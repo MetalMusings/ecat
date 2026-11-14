@@ -294,6 +294,8 @@ typedef struct {
   long long mc_ns;
   int mc_cycles;
   int sync;             // after a mode change: not following the command yet
+  int holding;          // CSP, running but not following pos-cmd: hold is the target
+  int32_t hold;         // the position taken once when holding began, counts
   int can_home;         // mode hm is allowed
   int hs;               // HS_*
   long long hs_ns;      // time in this homing step
@@ -1100,10 +1102,26 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
   }
   run = run && !d->sync;
   if (d->target_position_o.mapped) {
+    // A drive in "Operation enabled" and in CSP that is not to follow
+    // pos-cmd (waiting for it after a mode change or homing, stopping for
+    // a mode change) holds the position taken once, when holding began.
+    // Writing the actual position every cycle would let a drive that is
+    // still moving, or that feeds the target's velocity forward, run on
+    // at that speed: its target would move with it.
+    int in_csp = (!homing_now && (d->mc == MC_SWITCH ? d->mc_to : d->active) == MODE_CSP) &&
+                 (!d->modes_display_o.mapped || hal_get_sint(d->opmode_display) == MODE_CSP);
+    int hold_here = !run && d->state == ST_OPERATION_ENABLED && in_csp;
+    if (!hold_here) d->holding = 0;
     if (run && d->active == MODE_CSP) {
       hal_set_sint(d->drv_target_position, to_drive(d, clamp_s32(hal_get_real(d->pos_cmd) * scale_or_one(hal_get_real(d->pos_scale)))));
     } else if (run && d->active == MODE_PP && d->pp != PP_IDLE) {
       hal_set_sint(d->drv_target_position, d->pp_set);
+    } else if (hold_here) {
+      if (!d->holding) {
+        d->holding = 1;
+        d->hold = hal_get_sint(d->drv_actual_position);
+      }
+      hal_set_sint(d->drv_target_position, d->hold);
     } else {
       hal_set_sint(d->drv_target_position, hal_get_sint(d->drv_actual_position));
     }
