@@ -13,6 +13,7 @@
 
 #include "../devices/ecat_cia402.h"
 #include "captured_plasma.h"
+#include "captured_plasma_op.h"
 #include "fake.h"
 
 #define PERIOD 1000000L  // ns
@@ -53,6 +54,28 @@ static void test_cia402_on_the_ect60_layout(void) {
   CHECK_EQ(PIN_S32("x.cia-state"), 4);
 }
 
+/// Fed the inputs the ECT60s sent in OP (not enabled), the profile writes
+/// what it wrote on the bus then: Shutdown, CSP, the actual position held.
+static void test_cia402_writes_what_was_on_the_bus(void) {
+  int i, n;
+  for (i = 0; i < 3; i++) {
+    const fake_capture_slave_t *c = &plasma_op_slaves[i];
+    lcec_slave_t *s = fake_capture_slave("x", c, NULL);
+    CHECK_EQ(ecat_cia402_init(0, s), 0);
+    CHECK(c->n_cycles >= 10);
+    for (n = 0; n < c->n_cycles; n++) {
+      CHECK_EQ(fake_capture_inputs(s, c, n), 1);
+      s->proc_read(s, PERIOD);
+      s->proc_write(s, PERIOD);
+      if (n < 2) continue;  // the status words of the cycles before
+      CHECK_EQ(fake_get(s, 0x6040, 0), fake_capture_output(c, n, 0x6040, 0));
+      CHECK_EQ(fake_get(s, 0x6060, 0), fake_capture_output(c, n, 0x6060, 0));
+      CHECK_EQ(fake_get(s, 0x607A, 0), fake_capture_output(c, n, 0x607A, 0));
+    }
+    CHECK_EQ(PIN_S32("x.cia-state"), 2);
+  }
+}
+
 // A captured slave by hand: one output, two inputs, two cycles.
 static const fake_entry_t two_entries[] = {{0x7000, 1, 16}, {0x6000, 1, 8}, {0x6000, 2, 32}, FAKE_END};
 static const uint32_t two_values[] = {
@@ -78,4 +101,5 @@ static void test_replay_of_cycles(void) {
   CHECK_EQ(fake_capture_output(&none, 0, 0x7000, 1), -1);
 }
 
-RUN_TESTS("captured", test_every_captured_slave_can_be_made, test_cia402_on_the_ect60_layout, test_replay_of_cycles)
+RUN_TESTS("captured", test_every_captured_slave_can_be_made, test_cia402_on_the_ect60_layout,
+    test_cia402_writes_what_was_on_the_bus, test_replay_of_cycles)

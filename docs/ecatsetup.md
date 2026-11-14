@@ -1402,8 +1402,10 @@ PREOP, ESI folder given, no tcpdump): 4 slaves, 1029 tool calls in 73 s,
 with `--from-capture`, the proposal, `--diagnose` and `--check` gave what
 they give against the bus; the window (offscreen) read the four slaves
 from it. Frames, with tcpdump installed and the master on `raw`: 497 frames
-sent and 497 back in 3 s from the idle master, 76 kB. Not tried: a bus in
-OP, a master on `xdp-native`.
+sent and 497 back in 3 s from the idle master, 76 kB. In OP (ecat in
+halrun with the plasma cutter's configuration on `raw`, drives not
+enabled): 1029 calls, 1.2 MB of frames in 3 s, decoded into each slave's
+process data per cycle. Not tried: a master on `xdp-native`.
 
 On the plasma cutter (2026-11-10, halrun with the servo thread, no
 motion): the log showed the load, the activation 4 s later, the four

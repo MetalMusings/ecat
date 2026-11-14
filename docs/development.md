@@ -36,13 +36,17 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
   table. If the capture has frames of a bus in SAFEOP or OP, it adds the
   values of every entry for each cycle (at most 1000; 32 bits kept),
   read from the returned LRW/LRD/LWR datagrams through the slave's FMMU and
-  sync manager registers. `fake_capture_slave()` makes the slave, and
+  sync manager registers (`--c-cycles N` keeps fewer). `fake_capture_slave()` makes the slave, and
   `fake_capture_inputs()` puts a cycle's inputs into the process data.
   `fake_capture_output()` gives what the master sent, to compare with what a
   profile writes. `component/tests/test_captured.c` runs the cia402
   profile on the ECT60's own layout from `captured_plasma.h`, which comes
-  from `tests/data/capture-ect60-easercat.tar.gz` (PREOP: no cycles).
-  `tests/test_capturec.py` checks that the header is current.
+  from `tests/data/capture-ect60-easercat.tar.gz` (PREOP: no cycles), and
+  on the cycles of `captured_plasma_op.h` (`tests/data/capture-plasma-op.tar.gz`:
+  the plasma cutter in OP under ecat in halrun, drives not enabled, the
+  frames cut to 200; 20 cycles): fed the inputs the drives sent, the profile
+  writes the control word, mode and target position that were on the bus.
+  `tests/test_capturec.py` checks that both headers are current.
 - **The archive for a run-in-place LinuxCNC** (`scripts/build-rip-archive`, run
   after `. <linuxcnc>/scripts/rip-environment`; `-w` for the working tree):
   `ecat-rip-<version>-<distro>.tar.gz` with `ecat.so` (libyaml linked in,
@@ -1310,8 +1314,9 @@ call of the ethercat tool is recorded with its answer, and
 `tests/data/capture-ect60-easercat.tar.gz`, the plasma cutter's bus without
 its ESI file). C fakes from a capture are built too (`--capture-c`, see
 [Build and test](#build-and-test)). Not built: a button in the window.
-Not tried: frames of a bus in OP turned into cycles (tested with made-up
-frames only). It
+Tried 2026-11-14: a capture of the plasma cutter in OP (ecat in halrun,
+`raw` transport, no enable): 1000 cycles per slave decoded; target position
+equal to the actual position, control word Shutdown, CSP. It
 holds what is needed to make a fake of the device for the tests: the SII,
 the CoE dictionary with present values, the PDO assignment, the ESI used,
 the report (configuration, diagnosis, event log with the master's

@@ -16,7 +16,7 @@ from ecatsetup import capture, capturec  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 PLASMA = os.path.join(ROOT, "tests", "data", "capture-ect60-easercat.tar.gz")
-PLASMA_H = os.path.join(ROOT, "component", "tests", "captured_plasma.h")
+PLASMA_OP = os.path.join(ROOT, "tests", "data", "capture-plasma-op.tar.gz")
 
 PDOS = """SM0: PhysAddr 0x1000, DefaultSize  128, ControlRegister 0x26, Enable 1
 SM1: PhysAddr 0x1080, DefaultSize  128, ControlRegister 0x22, Enable 1
@@ -156,12 +156,24 @@ class TestHeader(unittest.TestCase):
         self.assertIn("x_0_entries, 5, 2, 0, NULL}", h)
         self.assertNotIn("_values", h)
 
-    def test_checked_in_header_is_current(self):
-        with open(PLASMA_H) as f:
-            self.assertEqual(f.read(), capturec.header(PLASMA, "plasma"),
-                             "regenerate: python3 -m ecatsetup --capture-c "
-                             "tests/data/capture-ect60-easercat.tar.gz --c-name plasma "
-                             "> component/tests/captured_plasma.h")
+    def test_checked_in_headers_are_current(self):
+        for cap, name, cycles in (("capture-ect60-easercat", "plasma", 1000),
+                                  ("capture-plasma-op", "plasma_op", 20)):
+            h = os.path.join(ROOT, "component", "tests", "captured_%s.h" % name)
+            with open(h) as f:
+                self.assertEqual(f.read(), capturec.header(
+                    os.path.join(ROOT, "tests", "data", cap + ".tar.gz"), name, cycles),
+                    "regenerate: python3 -m ecatsetup --capture-c tests/data/%s.tar.gz "
+                    "--c-name %s --c-cycles %d > %s" % (cap, name, cycles, h))
+
+    def test_op_capture_has_cycles(self):
+        _m, sl = capturec.slaves(capture.read(PLASMA_OP), limit=20)
+        self.assertEqual([len(s["cycles"]) for s in sl], [20, 20, 20, 20])
+        x = sl[0]
+        row = dict(zip([(e[0], e[1]) for e in x["entries"]], x["cycles"][0]))
+        # held at the actual position, CSP, Shutdown
+        self.assertEqual(row[(0x607A, 0)], row[(0x6064, 0)])
+        self.assertEqual((row[(0x6040, 0)], row[(0x6060, 0)], row[(0x6061, 0)]), (6, 8, 8))
 
 
 if __name__ == "__main__":

@@ -166,6 +166,8 @@ def main(argv=None):
                          "component's tests (component/tests)")
     ap.add_argument("--c-name", default="capture", metavar="NAME",
                     help="for --capture-c, the prefix of the C names")
+    ap.add_argument("--c-cycles", type=int, default=1000, metavar="N",
+                    help="for --capture-c, at most N cycles of process data per slave")
     ap.add_argument("--from-capture", metavar="FILE",
                     help="read the bus from a capture instead of the master (with the "
                          "proposal, --diagnose, --check, --gui); its ESI files are added")
@@ -201,7 +203,7 @@ def main(argv=None):
     if args.capture_c:
         from . import capture, capturec
         try:
-            sys.stdout.write(capturec.header(args.capture_c, args.c_name))
+            sys.stdout.write(capturec.header(args.capture_c, args.c_name, args.c_cycles))
         except capture.CaptureError as e:
             sys.exit(str(e))
         sys.exit(0)
