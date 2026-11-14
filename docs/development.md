@@ -1232,6 +1232,18 @@ no `0x607F`): steps of 1 and 5 mm in both directions moved as expected
 event after the slaves reached OP.
 
 
+## The master's messages in the window
+
+Tried 2026-11-14 on the plasma cutter's bus: during the window's I/O test an
+SDO read of an object the ECT60 does not have (`ethercat upload -p0 0x607F 0`)
+made the master log three ERROR lines for slave 0-0 (upload aborted, abort
+code 0x06020000, request failed). After the test, the *Slave status* page of
+X (slave 0) showed the three lines with their time in *Messages from the
+master*; Y (slave 1) showed none. The ordinary start-up lines ("Using slave 0
+as DC reference clock") are the master's own, not a slave's, and are not
+shown there.
+
+
 ## Cutting with the arc on LinuxCNC 2.10
 
 2026-11-14, the plasma cutter with `~/linuxcnc/configs/QtPlasma-ecat402-210-zero`
