@@ -26,6 +26,13 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
   records and the errors.
 - The window's tests run offscreen against a fake bus and are skipped
   without PyQt5.
+- `scripts/docs-screenshots [NAME ...]` takes the window's screenshots in
+  `docs/images` again, offscreen against the same fake bus (no event log,
+  English messages, only the quirk files that come with the program; the
+  HAL pages with a three-joint machine "mill" in a temporary folder). Take
+  them again when the window changes, look at them, and keep an unchanged
+  picture out of the commit (`gui-hal-apply` shows the temporary folder's
+  name).
 - **Fake slaves from a capture** ([A capture of the
   bus](ecatsetup.md#a-capture-of-the-bus)). In Python, `capture.Replay`
   answers the ethercat tool's calls from a capture

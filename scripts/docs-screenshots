@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Take the window's screenshots in docs/images again, offscreen, against
+the fake bus of the GUI tests (two EaserCAT 7000 slaves), with no event
+log, English messages and only the quirk files that come with the
+program. Usage:
+
+    scripts/docs-screenshots [--out DIR] [NAME ...]
+
+NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-test,
+gui-status, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply);
+without names all are taken. Look at them before committing: a change in
+the window can need another state than the one shown here.
+"""
+import argparse
+import errno
+import os
+import sys
+import tempfile
+from unittest import mock
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-status", "gui-settings",
+         "gui-settings-picker", "gui-hal", "gui-hal-apply"]
+
+# English system messages (strerror) and no display: set before anything loads
+if os.environ.get("LC_ALL") != "C":
+    os.environ["LC_ALL"] = os.environ["LANG"] = "C"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+sys.path.insert(0, ROOT)
+import test_gui  # noqa: E402  (sets the test environment: no user quirk files or settings)
+from ecatsetup import events, gui, session  # noqa: E402
+from PyQt5.QtWidgets import QApplication  # noqa: E402
+
+INI = """[EMC]
+MACHINE = mill
+[EMCMOT]
+SERVO_PERIOD = 1000000
+[KINS]
+JOINTS = 3
+KINEMATICS = trivkins coordinates=XYZ
+[TRAJ]
+COORDINATES = XYZ
+LINEAR_UNITS = mm
+[HAL]
+HALFILE = machine.hal
+[AXIS_X]
+[AXIS_Y]
+[AXIS_Z]
+[JOINT_0]
+TYPE = LINEAR
+SCALE = 1000
+[JOINT_1]
+TYPE = LINEAR
+SCALE = 1000
+[JOINT_2]
+TYPE = LINEAR
+SCALE = 1000
+"""
+
+HAL = """loadrt [KINS]KINEMATICS
+loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS
+addf motion-command-handler servo-thread
+addf motion-controller servo-thread
+"""
+
+
+def no_log(path, *a, **k):
+    """The event log as on a computer where ecat has not run."""
+    raise events.EventsError("no event log at %s (%s): ecat has not run since the computer "
+                             "started, or is older than this program"
+                             % (path, os.strerror(errno.ENOENT)))
+
+
+class Shots:
+    def __init__(self, out, wanted):
+        self.out, self.wanted = out, set(wanted)
+        self.app = QApplication.instance() or QApplication([])
+
+    def settle(self):
+        for _ in range(8):
+            self.app.processEvents()
+
+    def want(self, name):
+        return name in self.wanted
+
+    def save(self, widget, name):
+        if not self.want(name):
+            return
+        self.settle()
+        path = os.path.join(self.out, name + ".png")
+        if not widget.grab().save(path):
+            sys.exit("could not write %s" % path)
+        print("wrote", path)
+
+    def window(self, ini=None):
+        s = session.Session(ini_path=ini)
+        s.read_bus()
+        s.new()
+        w = gui.MainWindow(s)
+        w.check()
+        w.refresh()
+        w.resize(1300, 900)
+        w.show()
+        self.settle()
+        return w
+
+    def page(self, w, page, name, key=None):
+        w.show_tab(page)
+        if key is not None:
+            w.select(key)
+        w.status("Checked")
+        self.save(w, name)
+
+    @staticmethod
+    def close(w):
+        w.session.saved = w.session.cfg     # no question about unsaved changes
+        w.close()
+
+    def bus_pages(self):
+        w = self.window()
+        self.page(w, w.start_page, "gui-start")
+        self.page(w, w.trouble_page, "gui-status")     # no slave chosen yet
+        self.page(w, w.bus_page, "gui-bus", gui.MASTER_ITEM)
+        self.page(w, w.bus_page, "gui-slave", 0)
+        self.page(w, w.test_page, "gui-test")
+        if self.want("gui-settings") or self.want("gui-settings-picker"):
+            self.settings(w)
+        self.close(w)
+
+    def settings(self, w):
+        """The Settings card of slave 0 with one setting, and the picker."""
+        w.show_tab(w.bus_page)
+        w.select(0)
+        view = next(v for v in w.findChildren(gui.QWidget)
+                    if hasattr(v, "add_entries") and hasattr(v, "st"))
+        slave = w.session.slave(0)
+        d = w.session.dictionary(0)
+        view.add_entries(slave, [d.entries[(0x2000, 1)]], False)
+        self.settle()
+        card = view.st.parentWidget()
+        while not isinstance(card, gui.Card):
+            card = card.parentWidget()
+        card.resize(916, card.sizeHint().height())
+        self.save(card, "gui-settings")
+        dlg = gui.SettingPicker(view, slave, d, set())
+        dlg.show()
+        dlg.filter.setText("i2c")
+        dlg.table.selectRow(0)
+        self.save(dlg, "gui-settings-picker")
+        dlg.close()
+
+    def hal_pages(self):
+        """HAL & LinuxCNC for a three-joint machine "mill" in a temporary folder."""
+        if not (self.want("gui-hal") or self.want("gui-hal-apply")):
+            return
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "mill")
+            os.makedirs(folder)
+            for name, text in (("machine.ini", INI), ("machine.hal", HAL)):
+                with open(os.path.join(folder, name), "w") as f:
+                    f.write(text)
+            w = self.window(os.path.join(folder, "machine.ini"))
+            w.session.path = os.path.join(folder, "ethercat.yaml")
+            w.refresh()
+            self.page(w, w.hal_page, "gui-hal")
+            for area in w.hal_page.findChildren(gui.QScrollArea)[:1]:
+                area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+            w.status("Checked")
+            self.save(w, "gui-hal-apply")
+            self.close(w)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--out", default=os.path.join(ROOT, "docs", "images"),
+                    help="folder to write to (default: docs/images)")
+    ap.add_argument("names", nargs="*", metavar="NAME", help="which (default: all)")
+    args = ap.parse_args()
+    unknown = [n for n in args.names if n not in NAMES]
+    if unknown:
+        sys.exit("unknown: %s (known: %s)" % (", ".join(unknown), ", ".join(NAMES)))
+    os.makedirs(args.out, exist_ok=True)
+    mock.patch.object(events, "read", no_log).start()
+    for p in test_gui.FakeTool((0, 1)).patches():
+        p.start()
+    shots = Shots(args.out, args.names or NAMES)
+    shots.bus_pages()
+    shots.hal_pages()
+
+
+if __name__ == "__main__":
+    main()
