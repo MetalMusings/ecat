@@ -208,6 +208,9 @@ code. The master's messages say which.
 
 For a running machine the page opens with a short flow: *Save report...*
 (a file to attach when you ask for help), then *Watch LinuxCNC (read only)*.
+*Save capture...*, beside *Save report...* at the top, records the whole
+bus for a developer who does not have the device ([A capture of the
+bus](#a-capture-of-the-bus)).
 At the bottom, **Symptoms** lists what is seen in LinuxCNC, what it usually
 comes from and what to do.
 
@@ -1354,13 +1357,17 @@ machine's configuration: look it through before posting it.
 ### A capture of the bus
 
 When a device does not work and the developer does not have one, a
-capture gives them the device as the program sees it:
+capture gives them the device as the program sees it. *Save capture...* on
+the *Slave status* page, beside *Save report...*, or
 
 ```
 ecatsetup --capture [FILE] --esi <ESI folder> [--ini <machine>.ini]
 ```
 
-writes `ecat-capture-<date>-<time>.tar.gz`. A master must be running
+writes `ecat-capture-<date>-<time>.tar.gz`. The window uses its ESI
+folders, configuration and INI file, shows the progress in the status bar
+and what the file holds when it is done. To have the frames of a bus in
+OP, save the capture while the I/O test runs (or LinuxCNC). A master must be running
 (`sudo ethercat-uspace start`, or LinuxCNC with `ecat`; it is offered when
 none answers). It reads, and keeps with their answers:
 
@@ -1405,7 +1412,9 @@ from it. Frames, with tcpdump installed and the master on `raw`: 497 frames
 sent and 497 back in 3 s from the idle master, 76 kB. In OP (ecat in
 halrun with the plasma cutter's configuration on `raw`, drives not
 enabled): 1029 calls, 1.2 MB of frames in 3 s, decoded into each slave's
-process data per cycle. Not tried: a master on `xdp-native`.
+process data per cycle. *Save capture...* in the window (offscreen, the
+same bus in OP under halrun): 88 s, the progress slave by slave, the same
+contents and frames. Not tried: a master on `xdp-native`.
 
 On the plasma cutter (2026-11-10, halrun with the servo thread, no
 motion): the log showed the load, the activation 4 s later, the four

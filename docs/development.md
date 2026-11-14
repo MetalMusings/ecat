@@ -1313,7 +1313,7 @@ call of the ethercat tool is recorded with its answer, and
 `capture.Replay` answers them again (`--from-capture`, and the tests:
 `tests/data/capture-ect60-easercat.tar.gz`, the plasma cutter's bus without
 its ESI file). C fakes from a capture are built too (`--capture-c`, see
-[Build and test](#build-and-test)). Not built: a button in the window.
+[Build and test](#build-and-test)), and *Save capture...* in the window.
 Tried 2026-11-14: a capture of the plasma cutter in OP (ecat in halrun,
 `raw` transport, no enable): 1000 cycles per slave decoded; target position
 equal to the actual position, control word Shutdown, CSP. It

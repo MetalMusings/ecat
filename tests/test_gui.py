@@ -1122,6 +1122,51 @@ class TestParameters(WindowBase):
             self.assertEqual(self.cell(page, pin).text(), "", text)
 
 
+class TestSaveCapture(WindowBase):
+    def test_writes_a_capture_of_the_fake_bus(self):
+        from ecatsetup import capture
+        w = self.window()
+        path = os.path.join(self.dir.name, "c.tar.gz")
+        real = tool.run
+
+        def run(*args, binary=False):     # the fake bus, as the tool's calls
+            a = [str(x) for x in args]
+            if a[0] == "slaves" and "-v" not in a:
+                return "0  0:0  PREOP  +  EaserCAT 7000\n1  0:1  PREOP  +  EaserCAT 7000\n"
+            if a[0] == "sii_read":
+                return self.tool.sii_data if binary else ""
+            if a[0] == "sdos":
+                return self.tool.sdo_text
+            if a[0] == "slaves":
+                return ("Vendor Id:       0xd0bed1d0\nProduct code:    0x00007000\n"
+                        "Revision number: 0x00000002\nState: PREOP\n")
+            if a[0] == "upload":
+                return "0x0001 1\n"
+            raise tool.ToolError("not on the fake bus")
+        for p in self.tool.patches():   # the capture records tool.run itself
+            p.stop()
+        shown = []
+        with mock.patch.object(tool, "run", run), \
+                mock.patch.object(gui.QFileDialog, "getSaveFileName", return_value=(path, "")), \
+                mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))), \
+                mock.patch.object(capture.report, "build", return_value="# report\n"), \
+                mock.patch.object(capture, "pcap", return_value=(None, "not here")), \
+                mock.patch.object(gui.QMessageBox, "information",
+                                  lambda *a, **k: shown.append(a[2])):
+            w.trouble_page.capture.click()
+        self.assertIs(tool.run, real)
+        self.assertEqual([s["position"] for s in capture.Replay(path).manifest["slaves"]], [0, 1])
+        self.assertIn("Wrote %s" % path, shown[0])
+        self.assertIn("note: no frames: not here", shown[0])
+
+    def test_cancelled(self):
+        w = self.window()
+        with mock.patch.object(gui.QFileDialog, "getSaveFileName", return_value=("", "")), \
+                mock.patch.object(w, "run") as run:
+            w.trouble_page.capture.click()
+        run.assert_not_called()
+
+
 class TestSignalNameInTheBox(WindowBase):
     """Typing a HAL signal's name in "Connected to" connects the pins on it."""
 

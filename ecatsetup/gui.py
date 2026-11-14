@@ -2078,6 +2078,14 @@ class TroubleshootPage(QWidget):
                                "event logs. Only reads; nothing is sent anywhere.")
         self.report.clicked.connect(win.save_report)
         row.addWidget(self.report)
+        self.capture = QPushButton("Save capture...")
+        self.capture.setToolTip(
+            "For a device the developer does not have: one file with every slave's identity, "
+            "SII, object dictionary and values, PDOs and registers, the report, the ESI "
+            "descriptions and, if tcpdump may run as root, a few seconds of frames. Takes about "
+            "a minute; only reads. Run it during the I/O test to have the frames of a bus in OP.")
+        self.capture.clicked.connect(win.save_capture)
+        row.addWidget(self.capture)
         lay.addLayout(row)
 
         flow = Card("Something seems wrong in a running machine",
@@ -5176,6 +5184,34 @@ class MainWindow(QMainWindow):
         def done(p):
             self.status("Wrote %s; look it through before posting it" % p)
         self.run("Writing the report...", work, done)
+
+    def save_capture(self):
+        """Write a capture of the bus for a developer (capture.py)."""
+        from . import capture
+        s = self.session
+        base = os.path.dirname(os.path.abspath(s.ini_path or s.path or os.path.expanduser("~/x")))
+        path, _ = QFileDialog.getSaveFileName(self, "Save capture - %s" % TITLE,
+                                              os.path.join(base, capture.default_name()),
+                                              "Capture (*.tar.gz);;All files (*)")
+        if not path:
+            return
+        cfg_path = s.path if s.path and os.path.exists(s.path) else None
+        ini_path = s.ini_path if s.ini_path and os.path.exists(s.ini_path) else None
+
+        def work(progress):
+            progress("Capturing the bus (about a minute)...")
+            notes = capture.record(path, s.esi_paths, cfg_path, ini_path, progress=progress)
+            return path, notes
+
+        def done(result):
+            p, notes = result
+            self.status("Wrote %s" % p)
+            text = "\n".join(capture.describe(p))
+            QMessageBox.information(
+                self, TITLE, "Wrote %s.\n\n%s\n\nIt holds bus data, the configuration and the "
+                "INI lines the report holds, and no other files. Look it through before sending "
+                "it." % (p, text))
+        self.run("Capturing the bus...", work, done)
 
     # -- the I/O test
 

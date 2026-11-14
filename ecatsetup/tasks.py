@@ -24,7 +24,9 @@ TASKS = [
       ("Read the bus, and look at where the proposal comes from.", "scan", "Rescan the bus"),
       ("Check its process data, pins, sync and settings.", "bus", "Bus"),
       ("Run it and watch the synchronisation.", "test", "Test"),
-      ("Keep what you chose as a quirk file for the device.", "bus", "Bus")]),
+      ("Keep what you chose as a quirk file for the device.", "bus", "Bus"),
+      ("If it does not work, save a capture of the bus for the developer: the device as the "
+       "program sees it.", "status", "Slave status")]),
     ("Using a slave by hand",
      "Reading and setting I/O, moving a drive, trying homing, with no LinuxCNC.",
      [("Read the bus.", "scan", "Rescan the bus"),

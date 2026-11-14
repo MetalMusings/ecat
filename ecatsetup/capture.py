@@ -163,7 +163,7 @@ def pcap(interface, seconds, runner=subprocess.run):
 
 
 def record(path, esi_paths=(), cfg_path=None, ini_path=None, seconds=2.0, pcap_seconds=3.0,
-           values=True, progress=print, pcap_fn=pcap):
+           values=True, progress=print, pcap_fn=None):
     """Write a capture of the bus to path. Returns the notes (what is missing)."""
     rec = Recorder(tool.run)
     notes = []
@@ -233,7 +233,7 @@ def record(path, esi_paths=(), cfg_path=None, ini_path=None, seconds=2.0, pcap_s
     frames = None
     if pcap_seconds:
         progress("Frames on the wire for %g s" % pcap_seconds)
-        frames, why = pcap_fn(interface, pcap_seconds)
+        frames, why = (pcap_fn or pcap)(interface, pcap_seconds)
         if why:
             notes.append("no frames: " + why)
     if not devices:
