@@ -161,6 +161,11 @@ def main(argv=None):
                     help="for --capture, seconds of frames on the wire (0: none; needs "
                          "tcpdump and root)")
     ap.add_argument("--capture-info", metavar="FILE", help="show what a capture holds")
+    ap.add_argument("--capture-c", metavar="FILE",
+                    help="print a C header with fake slaves from a capture, for the "
+                         "component's tests (component/tests)")
+    ap.add_argument("--c-name", default="capture", metavar="NAME",
+                    help="for --capture-c, the prefix of the C names")
     ap.add_argument("--from-capture", metavar="FILE",
                     help="read the bus from a capture instead of the master (with the "
                          "proposal, --diagnose, --check, --gui); its ESI files are added")
@@ -193,6 +198,13 @@ def main(argv=None):
                     help="open the EtherCAT Setup window, with this configuration file if given")
     args = ap.parse_args(argv)
 
+    if args.capture_c:
+        from . import capture, capturec
+        try:
+            sys.stdout.write(capturec.header(args.capture_c, args.c_name))
+        except capture.CaptureError as e:
+            sys.exit(str(e))
+        sys.exit(0)
     if args.capture_info:
         sys.exit(capture_info(args.capture_info))
     if args.from_capture:

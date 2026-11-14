@@ -31,6 +31,31 @@ typedef struct {
 /// may be NULL). The bus is working. Forgets the pins of the slave before.
 lcec_slave_t *fake_slave(const char *name, const fake_entry_t *entries, const lcec_slave_modparam_t *modparams);
 
+/// A slave from a capture (ecatsetup --capture-c writes them): its
+/// identity, its process data entries as assigned on the bus (outputs
+/// first, gaps left out) and, if the capture had frames of a bus in SAFEOP
+/// or OP, each cycle's values of all entries (n_cycles rows of n_entries,
+/// at most 32 bits each).
+typedef struct {
+  int position;
+  uint32_t vendor_id, product_code, revision;
+  const char *name;
+  const fake_entry_t *entries;
+  int n_entries, n_outputs, n_cycles;
+  const uint32_t *values;
+} fake_capture_slave_t;
+
+/// fake_slave() with a captured slave's entries.
+lcec_slave_t *fake_capture_slave(const char *name, const fake_capture_slave_t *c, const lcec_slave_modparam_t *modparams);
+
+/// Put the inputs of captured cycle n (counted round) into the process
+/// data. Returns 0 if the capture has no cycles.
+int fake_capture_inputs(lcec_slave_t *slave, const fake_capture_slave_t *c, int n);
+
+/// The output the master sent in captured cycle n (counted round); -1 if
+/// the capture has no cycles or no such output entry.
+long long fake_capture_output(const fake_capture_slave_t *c, int n, uint16_t index, uint8_t subindex);
+
 /// The working counter is complete and the slave is in OP, or not.
 void fake_bus(lcec_slave_t *slave, int ok);
 

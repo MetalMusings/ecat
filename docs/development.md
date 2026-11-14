@@ -26,6 +26,23 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
   records and the errors.
 - The window's tests run offscreen against a fake bus and are skipped
   without PyQt5.
+- **Fake slaves from a capture** ([A capture of the
+  bus](ecatsetup.md#a-capture-of-the-bus)). In Python, `capture.Replay`
+  answers the ethercat tool's calls from a capture
+  (`tests/test_capture.py`). For C, `ecatsetup --capture-c CAPTURE --c-name
+  NAME > component/tests/captured_NAME.h` writes each slave's identity, its
+  process data entries as assigned on the bus (from `pdos`, outputs first,
+  gaps left out) as `fake_entry_t` lists, and a `fake_capture_slave_t`
+  table. If the capture has frames of a bus in SAFEOP or OP, it adds the
+  values of every entry for each cycle (at most 1000; 32 bits kept),
+  read from the returned LRW/LRD/LWR datagrams through the slave's FMMU and
+  sync manager registers. `fake_capture_slave()` makes the slave, and
+  `fake_capture_inputs()` puts a cycle's inputs into the process data.
+  `fake_capture_output()` gives what the master sent, to compare with what a
+  profile writes. `component/tests/test_captured.c` runs the cia402
+  profile on the ECT60's own layout from `captured_plasma.h`, which comes
+  from `tests/data/capture-ect60-easercat.tar.gz` (PREOP: no cycles).
+  `tests/test_capturec.py` checks that the header is current.
 - **The archive for a run-in-place LinuxCNC** (`scripts/build-rip-archive`, run
   after `. <linuxcnc>/scripts/rip-environment`; `-w` for the working tree):
   `ecat-rip-<version>-<distro>.tar.gz` with `ecat.so` (libyaml linked in,
@@ -1291,8 +1308,10 @@ The user runs `ecatsetup --capture` and sends the file
 call of the ethercat tool is recorded with its answer, and
 `capture.Replay` answers them again (`--from-capture`, and the tests:
 `tests/data/capture-ect60-easercat.tar.gz`, the plasma cutter's bus without
-its ESI file). Not built: C fakes in `fake.c` from a capture's PDOs and
-frames, a button in the window. It
+its ESI file). C fakes from a capture are built too (`--capture-c`, see
+[Build and test](#build-and-test)). Not built: a button in the window.
+Not tried: frames of a bus in OP turned into cycles (tested with made-up
+frames only). It
 holds what is needed to make a fake of the device for the tests: the SII,
 the CoE dictionary with present values, the PDO assignment, the ESI used,
 the report (configuration, diagnosis, event log with the master's

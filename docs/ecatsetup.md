@@ -1389,6 +1389,11 @@ without the devices, with the capture's ESI files added. Anything that
 writes (SDO downloads, test mode) cannot be answered from a capture and
 fails.
 
+For the component's C tests, `ecatsetup --capture-c FILE --c-name NAME`
+prints a header with the captured slaves as fakes: their process data
+layout and, from frames of a bus in OP, each cycle's values ([Developing
+ecat](development.md#build-and-test)).
+
 ### Tried (event log and report)
 
 Capture on the plasma cutter's bus (2026-11-14, free-running master,

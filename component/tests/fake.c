@@ -101,6 +101,29 @@ lcec_slave_t *fake_slave(const char *name, const fake_entry_t *entries, const lc
   return s;
 }
 
+lcec_slave_t *fake_capture_slave(const char *name, const fake_capture_slave_t *c, const lcec_slave_modparam_t *modparams) {
+  return fake_slave(name, c->entries, modparams);
+}
+
+int fake_capture_inputs(lcec_slave_t *slave, const fake_capture_slave_t *c, int n) {
+  const uint32_t *row;
+  int i;
+  if (c->n_cycles == 0) return 0;
+  row = c->values + (size_t)(n % c->n_cycles) * c->n_entries;
+  for (i = c->n_outputs; i < c->n_entries; i++) fake_set(slave, c->entries[i].index, c->entries[i].subindex, row[i]);
+  return 1;
+}
+
+long long fake_capture_output(const fake_capture_slave_t *c, int n, uint16_t index, uint8_t subindex) {
+  int i;
+  if (c->n_cycles == 0) return -1;
+  for (i = 0; i < c->n_outputs; i++) {
+    if (c->entries[i].index == index && c->entries[i].subindex == subindex)
+      return c->values[(size_t)(n % c->n_cycles) * c->n_entries + i];
+  }
+  return -1;
+}
+
 void fake_bus(lcec_slave_t *slave, int ok) {
   slave->master->domain_state.wc_state = ok ? EC_WC_COMPLETE : EC_WC_INCOMPLETE;
   slave->state.operational = ok ? 1 : 0;
