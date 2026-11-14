@@ -1198,6 +1198,38 @@ no `0x607F`): steps of 1 and 5 mm in both directions moved as expected
 event after the slaves reached OP.
 
 
+## PV as a spindle in LinuxCNC
+
+Tried 2026-11-14 on the plasma cutter's X (ECT60) as `spindle.0` in
+LinuxCNC 2.10 (AXIS), with the user at the machine. Configuration
+`~/linuxcnc/configs/sim-pv-spindle` (untracked): 2.10's `sim/axis/axis_mm.ini`
+with `sim_spindle_encoder.hal` replaced by ecat (`ethercat-load.hal` first,
+`ethercat.hal` last), X `cia402: {mode: pv}`, Y and Z not connected (stay
+disabled), `velo-scale` 100 (S60 = 1 mm/s), `[SPINDLE_0]` at most 300 rpm.
+`spindle.0.on` -> `enable`, `speed-out-rps` -> `velocity-cmd`, `velocity-fb`
+-> `speed-in`, `at-speed` -> `spindle.0.at-speed`, `drv-fault` ->
+`amp-fault-in`.
+
+1. M3 S60: forward at 1.03 mm/s (from `pos-fb`), `at-speed` true.
+2. M4 S60, then S120 while running: backwards, faster; M5 stops.
+3. A program (`M4 S60`, a feed move, `G4 P5`, `S120`, a feed move, `G4 P3`,
+   `M5`): 1.00 mm/s and 2.0 mm/s backwards, off at M5, no event.
+4. E-stop (F1, LinuxCNC's own) while running at 1 mm/s: `spindle.0.on` false,
+   the drive in "Ready to switch on" within one 47 ms sample, 0.02 mm after
+   the last moving sample, no event.
+
+Passed. Two findings:
+
+- The ECT60's velocity actual value (`0x606C`, `velocity-fb`) is of no use as
+  a speed: it jumps between about -5 and +5 mm/s, often 0, while the drive
+  runs evenly at 1 mm/s. For `spindle.0.speed-in` with this drive, derive the
+  speed from `pos-fb` (`ddt` and a `lowpass`).
+- The wait for `at-speed` could not be seen: the ECT60 reaches 1 mm/s in
+  about 1 ms (`0x6083` 100000 counts/s^2), so `at-speed` came within the
+  sample after `enable`. It was false until then. A slow ramp (`0x6083`)
+  would show the wait.
+
+
 ## LinuxCNC 2.10
 
 Investigated 2026-11-11 against LinuxCNC master 64fab5d412 (2026-11-10,
