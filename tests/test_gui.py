@@ -507,7 +507,7 @@ class TestWindow(WindowBase):
         from unittest import mock
         w = self.window()
         page = w.hal_page
-        page.plan = mock.Mock(changes=[], edited=[], warnings=["lathe.ini is in LinuxCNC's own files"])
+        page.plan = mock.Mock(changes=[], edited=[], notes=[], warnings=["lathe.ini is in LinuxCNC's own files"])
         ini = os.path.join(self.dir.name, "m.ini")
         open(ini, "w").write("[EMC]\n")
         w.session.ini_path = ini
@@ -527,6 +527,98 @@ class TestWindow(WindowBase):
         self.assertIn("Write here anyway?", asked[0])
         self.assertIn("LinuxCNC's own files", asked[0])
         self.assertFalse(os.path.exists(os.path.join(self.dir.name, "ethercat.yaml")))   # nothing written
+
+    def test_write_question_says_what_happens_to_each_file(self):
+        from unittest import mock
+        from ecatsetup import integrate
+        w = self.window()
+        page = w.hal_page
+        page.plan = integrate.Plan(
+            changes=[integrate.FileChange(os.path.join(self.dir.name, "sim.hal"), "new", "", "x",
+                                          "sim.tcl as HAL, 2 lines commented out")],
+            notes=["sim.tcl is turned into sim.hal: the Tcl run once"])
+        ini = os.path.join(self.dir.name, "m.ini")
+        open(ini, "w").write("[EMC]\n")
+        w.session.ini_path = ini
+        asked = []
+
+        def question(parent, title, text, *rest):
+            asked.append(text)
+            return gui.QMessageBox.Cancel
+        with mock.patch.object(gui.QMessageBox, "question", question):
+            page.write()
+        self.assertEqual(len(asked), 1)
+        self.assertIn("sim.hal: sim.tcl as HAL, 2 lines commented out", asked[0])
+        self.assertIn("- sim.tcl is turned into sim.hal", asked[0])
+
+    def test_the_ini_file_can_be_chosen_again(self):
+        from unittest import mock
+        w = self.window()
+        page = w.hal_page
+        w.tabs.setCurrentWidget(page)
+        page.refresh()
+        self.assertIn("Choose the machine's INI file", page.ini_text.text())
+        self.assertEqual(page.ini_button.text(), "INI file...")
+        ini = os.path.join(self.dir.name, "m.ini")
+        with open(ini, "w") as f:
+            f.write("[EMCMOT]\nSERVO_PERIOD = 500000\n")
+        with mock.patch.object(gui.QFileDialog, "getOpenFileName", lambda *a, **k: (ini, "")):
+            w.a_ini.trigger()
+        self.assertEqual(w.session.ini_path, ini)
+        self.assertEqual(w.session.period, 500000)
+        self.assertFalse(page.ini_row.isHidden())
+        self.assertIn(ini, page.ini_text.text())
+        self.assertIn("read again", page.ini_button.text())
+        # the same file again: read again
+        with open(ini, "w") as f:
+            f.write("[EMCMOT]\nSERVO_PERIOD = 1000000\n")
+        with mock.patch.object(gui.QFileDialog, "getOpenFileName", lambda *a, **k: (ini, "")):
+            page.ini_button.click()
+        self.assertEqual(w.session.period, 1000000)
+
+    def test_servo_period_typed_without_an_ini_file(self):
+        from unittest import mock
+        w = self.window()
+        w.select_slave(gui.MASTER_ITEM)
+        m = w.master_page
+        self.assertTrue(m.period.isEnabled())
+        self.assertEqual(m.period.value(), 1000)
+        self.assertIn("cycle 1 ms (default)", w.header.info.text())
+        m.period.setValue(500)
+        self.assertEqual(w.session.period, 500000)
+        self.assertIn("cycle 0.5 ms", w.header.info.text())
+        self.assertNotIn("default", w.header.info.text())
+        # an INI file with SERVO_PERIOD: its value, not editable
+        ini = os.path.join(self.dir.name, "m.ini")
+        with open(ini, "w") as f:
+            f.write("[EMCMOT]\nSERVO_PERIOD = 2000000\n")
+        w.set_ini(ini)
+        self.assertEqual(w.session.period, 2000000)
+        self.assertFalse(m.period.isEnabled())
+        self.assertEqual(m.period.value(), 2000)
+        self.assertIn("(from INI)", w.header.info.text())
+        # one without: the typed period stays and can be changed
+        with open(ini, "w") as f:
+            f.write("[EMC]\n")
+        w.set_ini(ini)
+        self.assertEqual(w.session.period, 2000000)
+        self.assertTrue(m.period.isEnabled())
+        self.assertIn("no SERVO_PERIOD", m.ini_label.text())
+        m.period.setValue(250)
+        self.assertEqual(w.session.period, 250000)
+        # the I/O test gets it
+        from ecatsetup import testmode
+        got = []
+
+        class Run:
+            def __init__(self, cfg, period):
+                got.append(period)
+                raise testmode.TestError("stop here")
+        with mock.patch.object(testmode, "TestRun", Run), \
+                mock.patch.object(gui.QMessageBox, "question", lambda *a, **k: gui.QMessageBox.Yes), \
+                mock.patch.object(gui.QMessageBox, "warning", lambda *a, **k: None):
+            w.start_test()
+        self.assertEqual(got, [250000])
 
     def test_a_handshake_row_offers_the_handshake_pins(self):
         from unittest import mock

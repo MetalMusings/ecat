@@ -1232,6 +1232,34 @@ no `0x607F`): steps of 1 and 5 mm in both directions moved as expected
 event after the slaves reached OP.
 
 
+## Window checks on a real screen and bus
+
+2026-11-14, the user at the screen, the plasma cutter's bus:
+
+- Settings picker on X: the drive's objects with their present values.
+- Process data of the EaserCAT 7000: the *Bit pins* column a fitting width.
+- I/O test started, stopped and the master started again: no empty window.
+- An INI file inside LinuxCNC's source tree: Write warned and asked again;
+  answered no, nothing written.
+- Apply on a copy of 2.10's QtPlasmaC sim (`sim_no_stepgen.tcl`): turned into
+  `sim_no_stepgen.hal`, the INI pointed to it, the .tcl untouched. The
+  question before writing listed only file names; it now lists each file with
+  what is done to it, and the plan's notes.
+- A signal name (`sim:joint0.homesw`) typed in *Connected to* of an
+  EaserCAT input: connected, the simulated writer dropped.
+- Master interface changed to another card, bus read again: the restart
+  question came (answered no).
+- `ecatsetup --report` with no master: offered to start it, then wrote the
+  report.
+
+Found while doing them and changed the same day: once an INI file was chosen,
+the HAL & LinuxCNC page had no way to choose another or read it again (only
+Bus > Master); the Joints card now always shows it with a button, and
+*File > Machine INI file...*. And the servo period can be typed on the Master
+page when there is no INI file (trying slaves without a machine
+configuration).
+
+
 ## The master's messages in the window
 
 Tried 2026-11-14 on the plasma cutter's bus: during the window's I/O test an

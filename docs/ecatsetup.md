@@ -101,7 +101,8 @@ to propose from.
 
 The **Master** page (on the right) holds the network interface, the
 transport, the servo period (taken from the INI file once you have chosen
-one) and **Distributed clocks**: whether to use them, *Who sets the time*
+one; without an INI file, or one without `SERVO_PERIOD`, typed in, 1 ms
+until then: enough to try slaves on their own with the I/O test) and **Distributed clocks**: whether to use them, *Who sets the time*
 (the slaves follow the servo thread, or the servo thread follows the
 reference clock, which is recommended; the fields of the other choice are
 greyed out), how often the reference clock is synchronised (choosing "the
@@ -256,7 +257,9 @@ already running and changes nothing.
 Writing the configuration into a LinuxCNC machine ([writing into LinuxCNC](#writing-the-configuration-into-linuxcnc)).
 One column, top to bottom in the order of the work:
 
-- **Joints**: choose the INI file, then the drive for each joint.
+- **Joints**: choose the INI file, then the drive for each joint. The
+  card always shows the INI file in use; its button chooses another one
+  or reads the same one again (also *File > Machine INI file...*).
   *Take over from the HAL files* reads what your HAL files already use;
 - **From lcec** (only for a configuration that uses lcec): every pin of
   lcec your HAL files use, with the ecat pin that takes its place, and the
@@ -883,7 +886,9 @@ The code is in `ecatsetup/masterstart.py`.
 EtherCAT Setup writes an `ethercat.yaml` into a LinuxCNC configuration,
 together with the HAL lines that load the `ecat` component and connect
 the joints to their drives. In the window this is the *HAL & LinuxCNC*
-page, *Write to <folder>*; on the command line:
+page, *Write to <folder>*, which asks first and lists each file with what
+is done to it (such as a `.tcl` HALFILE turned into `.hal`); on the
+command line:
 
 ```
 ecatsetup --apply ethercat.yaml --ini <machine>.ini

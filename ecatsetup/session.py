@@ -157,6 +157,9 @@ class Session:
         self.esi_devices = esi.load_dirs(self.esi_paths)
         self.ini_path = ini_path
         self.period = servo_period(ini_path) if ini_path else None
+        # True: period is the INI file's SERVO_PERIOD; False: typed in (or
+        # None), for trying slaves without a machine configuration
+        self.period_from_ini = self.period is not None
         self.mode = mode
         self.path = None        # the file the configuration came from, or is saved to
         self.cfg = None         # the configuration (the file's YAML structure)

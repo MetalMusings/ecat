@@ -617,7 +617,7 @@ class BusList(Card):
             n = len(win.messages_by_slave.get(None, []))
             rows.append((MASTER_ITEM, SlaveRow(
                 "", "Master", " · ".join(x for x in (m.get("interface"), m.get("transport"),
-                                                     "cycle " + period_text(s.period)) if x),
+                                                     "cycle " + period_text(s.period or 1000000)) if x),
                 "", "grey", ("%d error%s" % (n, "" if n == 1 else "s"), "red") if n else None)))
         file_slaves = {x.get("position"): x for x in (s.cfg or {}).get("slaves") or []}
         for pos in sorted(set(file_slaves) | set(s.bus)):
@@ -696,6 +696,17 @@ class MasterView(QWidget):
         self.xdp_hint = label("", "hint", wrap=True)
         form.addRow("", self.xdp_hint)
         ini = QHBoxLayout()
+        # typed in without an INI file (trying slaves without a machine
+        # configuration); the INI file's SERVO_PERIOD when there is one
+        self.period = QSpinBox()
+        self.period.setRange(50, 100000)
+        self.period.setSingleStep(250)
+        self.period.setSuffix(" us")
+        self.period.setValue(1000)
+        self.period.setToolTip("The servo thread's period for the I/O test and the checks, "
+                               "without an INI file. With one, its SERVO_PERIOD is used.")
+        self.period.valueChanged.connect(self.period_edited)
+        ini.addWidget(self.period)
         self.ini_label = label(wrap=True)
         ini.addWidget(self.ini_label, 1)
         choose = QPushButton("INI file...")
@@ -792,10 +803,12 @@ class MasterView(QWidget):
         m = (s.cfg or {}).get("master") or {}
         self.interface.setEditText(m.get("interface") or "")
         self.transport.setCurrentText(m.get("transport", "raw"))
+        self.period.setValue((s.period or 1000000) // 1000)
+        self.period.setEnabled(not s.period_from_ini)
         self.ini_label.setText(
-            "%d ns, from %s" % (s.period, s.ini_path) if s.period else
-            "unknown: choose the machine's INI file" if not s.ini_path else
-            "not found in %s" % s.ini_path)
+            "from %s" % s.ini_path if s.period_from_ini else
+            "typed in: no INI file chosen" if not s.ini_path else
+            "typed in: no SERVO_PERIOD in %s" % s.ini_path)
         dc = m.get("dc")
         self.dc_on.setChecked(dc is not None)
         dc = dc or {}
@@ -808,6 +821,13 @@ class MasterView(QWidget):
         self._show_xdp()
         self.setEnabled(s.cfg is not None)
         self.loading = False
+
+    def period_edited(self, value):
+        s = self.win.session
+        if self.loading or s.period_from_ini:
+            return
+        s.period = value * 1000
+        self.win.refresh(keep_page=True)
 
     def edited(self, *_):
         if self.loading or self.win.session.cfg is None:
@@ -840,6 +860,16 @@ class MasterView(QWidget):
         self._enable_dc()
         self._show_xdp()
         self.win.changed()
+
+
+def write_summary(yaml_name, plan):
+    """What the question before writing lists: each file with what is done
+    to it, then the plan's notes (a .tcl file turned into .hal, ...)."""
+    lines = ["%s: the bus" % yaml_name]
+    lines += ["%s: %s" % (c.name, c.what) if c.what else c.name for c in plan.changes]
+    if plan.notes:
+        lines += [""] + ["- " + n for n in plan.notes]
+    return "\n".join(lines)
 
 
 def source_rows(p, b):
@@ -3750,16 +3780,18 @@ class HalPage(QWidget):
         outer.addWidget(scroll(content))
 
         self.axes = Card("Joints", "Choose the drive for each joint.")
-        self.no_ini = QWidget()
-        nl = QHBoxLayout(self.no_ini)
+        # always shown: the INI file in use, and a button to choose another
+        # one or to read the same one again
+        self.ini_row = QWidget()
+        nl = QHBoxLayout(self.ini_row)
         nl.setContentsMargins(0, 0, 0, 0)
-        nl.addWidget(label("Choose the machine's INI file to connect its joints to drives.",
-                           "hint"))
-        choose = QPushButton("INI file...")
-        choose.clicked.connect(win.choose_ini)
-        nl.addWidget(choose)
-        nl.addStretch(1)
-        self.axes.add(self.no_ini)
+        self.ini_text = label("", "hint", wrap=True)
+        nl.addWidget(self.ini_text, 1)
+        self.ini_button = QPushButton("INI file...")
+        self.ini_button.setToolTip("Choose the machine's INI file, or the same one to read it again")
+        self.ini_button.clicked.connect(win.choose_ini)
+        nl.addWidget(self.ini_button)
+        self.axes.add(self.ini_row)
         # LinuxCNC writes the .expanded file again at every start
         self.expanded_warning = self.axes.add(label(wrap=True))
         self.expanded_warning.setObjectName("warnText")
@@ -4493,7 +4525,10 @@ class HalPage(QWidget):
 
     def show_joints(self):
         s, ini = self.win.session, self.ini()
-        self.no_ini.setVisible(ini is None)
+        self.ini_text.setText(
+            "INI file: %s" % ini if ini else
+            "Choose the machine's INI file to connect its joints to drives.")
+        self.ini_button.setText("Other INI file or read again..." if ini else "INI file...")
         expanded = bool(ini and ini.endswith(integrate.EXPANDED))
         self.expanded_warning.setVisible(expanded)
         if expanded:
@@ -4650,10 +4685,10 @@ class HalPage(QWidget):
             return
         d = os.path.dirname(os.path.abspath(ini))
         dest = os.path.join(d, self.yaml_name())
-        names = [self.yaml_name()] + [c.name for c in self.plan.changes]
         if QMessageBox.question(
                 self, TITLE, "Write these files in %s?\n\n%s\n\nEvery existing file is kept as "
-                ".bak. LinuxCNC must not run with this configuration now." % (d, "\n".join(names)),
+                ".bak. LinuxCNC must not run with this configuration now." % (
+                    d, write_summary(self.yaml_name(), self.plan)),
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
         if self.plan.warnings and QMessageBox.warning(
@@ -4851,6 +4886,7 @@ class MainWindow(QMainWindow):
         self.a_update = act("Update from bus", self.update_from_bus)
         self.a_check = act("Check", self.check)
         self.a_esi = act("Add ESI files...", self.add_esi)
+        self.a_ini = act("Machine INI file...", self.choose_ini)
         menu.addSeparator()
         self.a_test = act("Start the I/O test", self.start_test)
         self.a_watch = act("Watch LinuxCNC that runs (read only)", self.start_watch)
@@ -4973,8 +5009,9 @@ class MainWindow(QMainWindow):
             "new" if s.cfg else "none")
         self.header.info.setText("   ".join(x for x in (
             "config: %s%s" % (cfg_name, " *" if s.dirty else ""), m.get("interface"),
-            m.get("transport"), "cycle %s%s" % (period_text(s.period),
-                                                " (from INI)" if s.period else "")) if x))
+            m.get("transport"), "cycle %s%s" % (period_text(s.period or 1000000),
+                                                " (from INI)" if s.period_from_ini else
+                                                "" if s.period else " (default)")) if x))
         testing = self.test is not None
         if testing:
             if not self.header.status.text().startswith(("● TEST", "● WATCH")):
@@ -5731,7 +5768,11 @@ class MainWindow(QMainWindow):
                     os.path.basename(path), os.path.basename(src),
                     os.path.basename(src))) == QMessageBox.Yes:
             path = src
-        self.session.ini_path, self.session.period = path, servo_period(path)
+        period = servo_period(path)
+        self.session.ini_path = path
+        self.session.period_from_ini = period is not None
+        if period is not None:
+            self.session.period = period
         self.refresh(keep_page=True)
         self.bus_page.master.show_config()
 
