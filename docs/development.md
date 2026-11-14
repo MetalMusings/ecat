@@ -1279,14 +1279,20 @@ Packaging and docs:
 
 ## Devices we do not have
 
-Plan, nothing of it built (2026-11-14). New functions (EL6021 serial, EoE)
+Plan (2026-11-14); the capture (way 1) is built, the rest is not. New functions (EL6021 serial, EoE)
 and devices that should work but do not need a device on a bus to develop
 and try against. There are four ways to get one, in this order: the first
 that suffices is used.
 
 ### 1. A capture from the user
 
-The user runs `ecatsetup --capture` (to be built) and sends the file. It
+The user runs `ecatsetup --capture` and sends the file
+([A capture of the bus](ecatsetup.md#a-capture-of-the-bus)). Built: every
+call of the ethercat tool is recorded with its answer, and
+`capture.Replay` answers them again (`--from-capture`, and the tests:
+`tests/data/capture-ect60-easercat.tar.gz`, the plasma cutter's bus without
+its ESI file). Not built: C fakes in `fake.c` from a capture's PDOs and
+frames, a button in the window. It
 holds what is needed to make a fake of the device for the tests: the SII,
 the CoE dictionary with present values, the PDO assignment, the ESI used,
 the report (configuration, diagnosis, event log with the master's

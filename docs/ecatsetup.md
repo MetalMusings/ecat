@@ -26,7 +26,8 @@ Contents:
 - [Test mode](#test-mode): I/O, SDOs, moving a drive, homing;
 - [Writing the configuration into LinuxCNC](#writing-the-configuration-into-linuxcnc);
 - [Event log and report](#event-log-and-report): what to send when asking
-  for help;
+  for help, and [a capture of the bus](#a-capture-of-the-bus) for a device
+  the developer does not have;
 - [Quirk files](#quirk-files): keeping what you chose for a device;
 - [Which LinuxCNC](#which-linuxcnc): the run-in-place tree it works with;
 - [Command line](#command-line).
@@ -1350,7 +1351,52 @@ writes one Markdown file (`ethercat-report-<date>-<time>.md`) with:
 It only reads, and sends nothing anywhere. It holds file paths and the
 machine's configuration: look it through before posting it.
 
+### A capture of the bus
+
+When a device does not work and the developer does not have one, a
+capture gives them the device as the program sees it:
+
+```
+ecatsetup --capture [FILE] --esi <ESI folder> [--ini <machine>.ini]
+```
+
+writes `ecat-capture-<date>-<time>.tar.gz`. A master must be running
+(`sudo ethercat-uspace start`, or LinuxCNC with `ecat`; it is offered when
+none answers). It reads, and keeps with their answers:
+
+- the slave list, the master, the topology, the configuration and domains
+  the master holds;
+- for each slave: its identity and state, the SII, the CoE dictionary
+  with the value of every entry it answers for in its present state
+  (`--no-values` leaves them out), the PDO assignment, the ESC registers
+  0x0000-0x0FFF, and what a proposal reads;
+- the report (as `--report`, with the configuration and INI lines if
+  given);
+- the ESI description of each slave from the ESI folders given, only that
+  device, not the vendor's whole file;
+- a few seconds of the EtherCAT frames on the wire (`--frames-seconds`,
+  default 3; 0 for none), if `tcpdump` is installed and can run as root
+  (`sudo` without a password, or run the capture with `sudo`). A master
+  using `xdp-native` hides its frames from tcpdump.
+
+Reading takes time: about 20 s for a drive with 270 objects. Nothing is
+written to the slaves. `ecatsetup --capture-info FILE` shows what a capture
+holds.
+
+With `--from-capture FILE` the program reads the bus from a capture instead
+of the master: the proposal, `--diagnose`, `--check` and `--gui` work
+without the devices, with the capture's ESI files added. Anything that
+writes (SDO downloads, test mode) cannot be answered from a capture and
+fails.
+
 ### Tried (event log and report)
+
+Capture on the plasma cutter's bus (2026-11-14, free-running master,
+PREOP, ESI folder given, no tcpdump): 4 slaves, 1029 tool calls in 73 s,
+42 kB; 21 of each ECT60's 271 readable objects refused an upload. Read back
+with `--from-capture`, the proposal, `--diagnose` and `--check` gave what
+they give against the bus. Not tried: frames (tcpdump), a bus in OP, the
+window from a capture.
 
 On the plasma cutter (2026-11-10, halrun with the servo thread, no
 motion): the log showed the load, the activation 4 s later, the four
@@ -1524,6 +1570,8 @@ ecatsetup --diagnose
 ecatsetup --check-hal <machine>.ini
 ecatsetup --events [prev]
 ecatsetup --report --ini <machine>.ini
+ecatsetup --capture --esi <ESI folder>
+ecatsetup --from-capture ecat-capture-<time>.tar.gz --diagnose
 ecatsetup --apply ethercat.yaml --ini <machine>.ini
 ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
 ```
@@ -1552,6 +1600,9 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   missing to reach "Operation enabled".
 - `--events` shows the event log, and `--report` writes one file to
   attach when asking for help ([Event log and report](#event-log-and-report)).
+  `--capture` records the bus for a developer who does not have the
+  devices, and `--from-capture` reads the bus from such a file
+  ([A capture of the bus](#a-capture-of-the-bus)).
 - Other options: `--mode` chooses the mode proposed for CiA 402 drives,
   `-p` limits the proposal to some slaves, `--json` prints it as JSON,
   `--transport` and `--interface` set the master's for `--write`.

@@ -151,6 +151,19 @@ def main(argv=None):
                     help="write a report to attach when asking for help: versions, the "
                          "configuration (--check FILE or --ini), the INI lines, a diagnosis of "
                          "the bus and the event logs; FILE defaults to ethercat-report-<time>.md")
+    ap.add_argument("--capture", nargs="?", const="", metavar="FILE",
+                    help="write a capture of the bus to send to a developer: every slave's "
+                         "identity, SII, dictionary and values, registers, the report and a "
+                         "few seconds of frames; FILE defaults to ecat-capture-<time>.tar.gz")
+    ap.add_argument("--no-values", action="store_true",
+                    help="for --capture, leave out the object values (faster)")
+    ap.add_argument("--frames-seconds", type=float, default=3.0, metavar="S",
+                    help="for --capture, seconds of frames on the wire (0: none; needs "
+                         "tcpdump and root)")
+    ap.add_argument("--capture-info", metavar="FILE", help="show what a capture holds")
+    ap.add_argument("--from-capture", metavar="FILE",
+                    help="read the bus from a capture instead of the master (with the "
+                         "proposal, --diagnose, --check, --gui); its ESI files are added")
     ap.add_argument("--check-hal", nargs="?", const="", metavar="INI",
                     help="check the HAL files of a LinuxCNC configuration against its "
                          "ethercat.yaml: pins that do not exist, pins on two signals, two "
@@ -179,6 +192,13 @@ def main(argv=None):
     ap.add_argument("--gui", nargs="?", const="", metavar="FILE",
                     help="open the EtherCAT Setup window, with this configuration file if given")
     args = ap.parse_args(argv)
+
+    if args.capture_info:
+        sys.exit(capture_info(args.capture_info))
+    if args.from_capture:
+        use_capture(args)
+    if args.capture is not None:
+        sys.exit(write_capture(args))
 
     if args.gui is not None:
         try:
@@ -372,6 +392,62 @@ def write_report(args):
     with open(path, "w") as f:
         f.write(text)
     print("Wrote %s (%d lines). Look it through before posting it." % (path, text.count("\n")))
+    return 0
+
+
+def capture_info(path):
+    from . import capture
+    try:
+        print("\n".join(capture.describe(path)))
+    except capture.CaptureError as e:
+        print(e)
+        return 1
+    return 0
+
+
+def use_capture(args):
+    """Serve the bus from a capture file; its ESI files go to a temporary folder."""
+    import atexit
+    import shutil
+    import tempfile
+    from . import capture
+    try:
+        replay = capture.Replay(args.from_capture)
+    except capture.CaptureError as e:
+        sys.exit(str(e))
+    tmp = tempfile.mkdtemp(prefix="ecatsetup-capture-")
+    atexit.register(shutil.rmtree, tmp, True)
+    if replay.esi_dir(tmp):
+        args.esi.append(tmp)
+    replay.install()
+    print("Reading the bus from the capture %s (%s)" % (
+        args.from_capture, replay.manifest.get("time", "?")), file=sys.stderr)
+
+
+def write_capture(args):
+    """Write a capture file. Returns an exit code."""
+    from . import capture
+    if args.from_capture:
+        print("--capture reads the bus, not a capture")
+        return 2
+    path = args.capture or capture.default_name()
+    try:
+        tool.slave_positions()
+    except tool.ToolError:
+        masterstart.offer_terminal()
+    try:
+        notes = capture.record(path, args.esi, args.check, args.ini, seconds=args.seconds,
+                               pcap_seconds=args.frames_seconds, values=not args.no_values)
+    except capture.CaptureError as e:
+        print("No capture: %s" % e)
+        return 1
+    except tool.ToolError as e:
+        print("No capture: no master could be reached (%s). Start one with "
+              "`sudo ethercat-uspace start`, or run LinuxCNC." % str(e).strip())
+        return 1
+    print("\n".join(capture.describe(path)))
+    print("Wrote %s. It holds bus data, the configuration and INI lines the report "
+          "holds, and no other files." % path)
     return 0
 
 
