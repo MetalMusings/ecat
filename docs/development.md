@@ -1128,6 +1128,28 @@ not investigated, nothing in the measurement points to the bus). 500 us not
 tried while moving.
 
 
+## Zero at start in LinuxCNC
+
+Tried 2026-11-14 on the plasma cutter (LinuxCNC 2.10, QtPlasmaC, homing by
+switches in LinuxCNC) with a copy of the 2.10 configuration,
+`~/linuxcnc/configs/QtPlasma-ecat402-210-zero`: `cia402.zero-at-start: true`
+on X and Y (where the original wrote 0x2010), Z without it. The drives kept
+their power through every restart.
+
+1. Before, homed: X counts 14227 at joint 142.25, Y 17401 at 261.005.
+2. LinuxCNC restarted with the copy: `pos-zero` = the drive's counts (X 14229,
+   Y 17397), `pos-fb` and the joints 0; Z kept its counts (-1.555 mm).
+3. Enabled and homed (QtPlasmaC does not jog before homing): no following
+   error, no event. `pos-zero` unchanged by switch homing. The homed
+   coordinates agree with step 1: X moved 784 counts (7.84 mm) and the joint
+   7.82 mm, Y 1292 counts (19.38 mm) and the joint 19.38 mm.
+4. LinuxCNC restarted again: `pos-zero` taken anew (X 15009, Y 18690), `pos-fb`
+   0.
+
+Passed. Not tried: homing by the drive (`modes: [hm]`) with zero-at-start,
+which sets `pos-zero` back to 0; a drive that loses power between runs.
+
+
 ## LinuxCNC 2.10
 
 Investigated 2026-11-11 against LinuxCNC master 64fab5d412 (2026-11-10,
