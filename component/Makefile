@@ -41,7 +41,7 @@ CFLAGS_ECAT := $(EXTRA_CFLAGS) -Wall -I. -I$(USPACE_BUILD)/include -MMD -MP
 
 objs := lcec_main.o lcec_ethercat.o lcec_pins.o lcec_malloc.o lcec_lookup.o \
 	lcec_modparam.o lcec_devicelist.o lcec_autoshift.o ecat_config.o ecat_startcheck.o ecat_events.o devices/lcec_generic.o devices/ecat_cia402.o devices/ecat_encoder.o \
-	devices/ecat_serial.o devices/ecat_serial_core.o
+	devices/ecat_serial.o devices/ecat_serial_core.o devices/ecat_serial_bridge.o
 
 .PHONY: all install clean check
 all: ecat.so
@@ -70,7 +70,7 @@ ecat.so: $(objs)
 
 # Unit tests: a device's code with a fake of HAL, the master and lcec
 # (tests/fake.c), so that its read and write functions run without a bus.
-tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial
+tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial tests/test_serial_bridge
 tests/test_generic: tests/test_generic.o tests/fake.o devices/lcec_generic.o
 tests/test_cia402: tests/test_cia402.o tests/fake.o tests/fake_generic.o devices/ecat_cia402.o
 tests/test_encoder: tests/test_encoder.o tests/fake.o tests/fake_generic.o devices/ecat_encoder.o
@@ -81,12 +81,14 @@ tests/test_int64: tests/test_int64.o tests/fake.o tests/fake_generic.o
 tests/test_bits: tests/test_bits.o tests/fake.o tests/fake_generic.o
 tests/test_captured: tests/test_captured.o tests/fake.o tests/fake_generic.o devices/ecat_cia402.o
 tests/test_serial: tests/test_serial.o tests/sim_el60xx.o tests/fake.o tests/fake_generic.o devices/ecat_serial.o devices/ecat_serial_core.o
+tests/test_serial_bridge: tests/test_serial_bridge.o tests/sim_el60xx.o tests/fake.o tests/fake_generic.o devices/ecat_serial_bridge.o devices/ecat_serial_core.o
+tests/test_serial_bridge: TEST_LIBS = -lmodbus -lpthread
 tests/test_events: tests/test_events.o tests/fake.o tests/fake_generic.o ecat_events.o
 -include tests/*.d
 
 $(tests):
 	@echo Linking $@
-	@$(CC) -o $@ $^ -lm -lyaml
+	@$(CC) -o $@ $^ -lm -lyaml $(TEST_LIBS)
 
 check: $(tests)
 	@for t in $(tests); do $$t || exit 1; done

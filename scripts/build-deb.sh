@@ -15,7 +15,7 @@
 # clone, so uncommitted changes are not packaged. The package is built for the Debian
 # release and LinuxCNC that this machine has.
 #
-# Build dependencies: build-essential git dpkg-dev libyaml-dev
+# Build dependencies: build-essential git dpkg-dev libyaml-dev libmodbus-dev (C tests)
 #   LinuxCNC 2.10 (linuxcnc-uspace-dev, or a run-in-place build: source its
 #   scripts/rip-environment first; halcompile must be on the PATH), and
 #   linuxcnc-ethercat-uspace 1.1 or newer (its headers in

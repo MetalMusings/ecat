@@ -29,6 +29,7 @@
 #include "devices/ecat_cia402.h"
 #include "devices/ecat_encoder.h"
 #include "devices/ecat_serial.h"
+#include "devices/ecat_serial_bridge.h"
 #include "ecat_config.h"
 #include "ecat_startcheck.h"
 
@@ -1132,6 +1133,12 @@ int rtapi_app_main(void) {
     goto fail2;
   }
 
+  // the serial channels' ports on the computer
+  if (ecat_serial_bridge_start(ecat_serial_channels) != 0) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "the serial channels' ports could not be made\n");
+    goto fail2;
+  }
+
   rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "installed driver for %d slaves\n", slave_count);
   hal_ready(lcec_comp_id);
   return 0;
@@ -1139,6 +1146,7 @@ int rtapi_app_main(void) {
 fail2:
   rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure, clearing config\n");
   lcec_clear_config();
+  ecat_serial_free();
 #ifdef EC_USPACE_MASTER
   lcec_log_to(NULL);  // the recorder stays mapped (and in the file) for reading
 #endif
@@ -1166,6 +1174,9 @@ static void lcec_guard_event(lcec_master_t *master, int state, unsigned al_state
 void rtapi_app_exit(void) {
   lcec_master_t *master;
 
+  // no program can use the serial ports from here on
+  ecat_serial_bridge_stop();
+
   for (master = first_master; master != NULL; master = master->next) {
     ecat_events_add(master->events, ECAT_EV_STOP, -1, 0, 0);
   }
@@ -1190,6 +1201,7 @@ void rtapi_app_exit(void) {
     master->events = NULL;
   }
   lcec_clear_config();
+  ecat_serial_free();
 #ifdef EC_USPACE_MASTER
   lcec_log_to(NULL);  // after ecrt_lib_cleanup(): no callback comes any more
 #endif

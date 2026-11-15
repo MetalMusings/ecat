@@ -17,7 +17,8 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
 
 - The component needs LinuxCNC 2.10 (`linuxcnc-uspace-dev`, or a run-in-place
   build: `. <linuxcnc>/scripts/rip-environment` in the shell first, so that
-  `halcompile` is on the PATH), `libyaml-dev` and the master
+  `halcompile` is on the PATH), `libyaml-dev` (and `libmodbus-dev` for the
+  C tests: the serial channels' Modbus RTU test), and the master
   package's headers in `/opt/linuxcnc-ethercat-uspace/include`. Set
   `USPACE_ETHERCAT=` to use another master install. To install it from
   the checkout: `make -C component install`.
@@ -1361,8 +1362,18 @@ Built so far:
   (`halpins.SERIAL`); tests in test_serial.c (on a fake EL6021 slave) and
   test_config.c, test_prototype.py.
 
-Still to do: the pty bridge thread, Modbus RTU end to end against a
-simulated slave, EtherCAT Setup.
+- The ports (`devices/ecat_serial_bridge.c`): a pty per channel, the
+  file's port path a symbolic link to it (made as root, never replacing
+  anything but an old link to a pty), a thread that moves the bytes and
+  turns the program's baud rate and stop bits into new settings before it
+  passes on what the program wrote after them. `tests/test_serial_bridge.c`
+  runs a program on the port against the channel and the simulated
+  terminal in real time, and libmodbus (as mb2hal uses it) against a
+  simulated Modbus RTU slave on the terminal's wire: requests and answers
+  over several windows, the rate from the program (mutation-checked).
+
+Still to do: EtherCAT Setup (proposing a channel for an EL60xx, the port
+in the window), mb2hal in halrun, a capture from a real terminal.
 
 ## Start time: the XDP program stays on the card
 

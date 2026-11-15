@@ -43,4 +43,8 @@ typedef struct ecat_serial_channel {
 
 extern ecat_serial_channel_t *ecat_serial_channels;
 
+/// Free the channels (after the bridge has stopped and the servo thread no
+/// longer runs the functions).
+void ecat_serial_free(void);
+
 #endif

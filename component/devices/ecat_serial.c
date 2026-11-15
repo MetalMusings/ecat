@@ -32,6 +32,14 @@
 
 ecat_serial_channel_t *ecat_serial_channels = NULL;
 
+void ecat_serial_free(void) {
+  while (ecat_serial_channels != NULL) {
+    ecat_serial_channel_t *next = ecat_serial_channels->next;
+    free(ecat_serial_channels);
+    ecat_serial_channels = next;
+  }
+}
+
 typedef struct {
   ecat_serial_channel_t *ch;  // not in HAL memory: the bridge thread uses it
   unsigned int out_os, in_os;

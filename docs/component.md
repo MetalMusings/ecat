@@ -1143,10 +1143,10 @@ those are not handled here.
 
 ## Serial channels
 
-Status: being built (2026-11-15), not tried on a terminal: we have none.
-The handshake and the function are tested against a simulated terminal
-(component/tests/sim_el60xx.c); the serial port on the computer (below) is
-not built yet.
+Status: first version (2026-11-15), not tried on a terminal: we have none.
+The handshake, the function and the port are tested against a simulated
+terminal (component/tests/sim_el60xx.c), with libmodbus talking Modbus RTU
+through the port to a simulated slave.
 
 Beckhoff's serial terminals (EL6001 RS232, EL6002 two channels, EL6021
 RS422/RS485, EL6022 two channels) move bytes in windows of the process
@@ -1219,6 +1219,42 @@ settings. A slave can have up to 8 channels (an EL6022 has two).
 | `<slave>.<name>.baud` | uint out | the baud rate the terminal has |
 | `<slave>.<name>.settings-error` | bool out | the last change of settings could not be written |
 | `<slave>.<name>.port-open` | bool out | a program has the port open |
+
+### The port
+
+When `ecat` is loaded, each channel gets a pty, and its `port` becomes a
+symbolic link to it (`/dev/ttyECAT0 -> /dev/pts/3`; the pty belongs to the
+user LinuxCNC runs as); the link is removed when `ecat` is unloaded. A program opens
+the port as any serial port. For mb2hal:
+
+```ini
+[MB2HAL_INIT]
+...
+[TRANSACTION_00]
+LINK_TYPE=serial
+SERIAL_PORT=/dev/ttyECAT0
+SERIAL_BAUD=19200
+SERIAL_BITS=8
+SERIAL_PARITY=even
+SERIAL_STOP=1
+...
+```
+
+- The baud rate the program sets is written to the terminal before what
+  the program writes after it is sent; so are its stop bits. A rate the
+  terminal does not have is refused with a message, and the terminal
+  keeps its rate.
+- Parity and data bits come from `frame` in the file: a pty does not pass
+  them on. The terminal makes the parity on the wire itself. Give `frame`
+  the device's setting (mb2hal's `SERIAL_PARITY` and `SERIAL_BITS` must
+  say the same: nothing checks it yet). Modbus RTU often uses 8E1.
+- What the terminal receives while no program has the port open is
+  dropped.
+- A path that exists and is not a link to a pty (a real `/dev/ttyS0`, a
+  file) is never replaced: `ecat` does not load. A link left by an `ecat`
+  that did not stop is replaced.
+- Modem lines (RTS, DTR, CTS) are not on the port: the EL6021 has none,
+  and the EL6001 uses RTS/CTS itself when its setting says so.
 
 ### Behaviour (serial)
 
