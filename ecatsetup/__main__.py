@@ -27,7 +27,7 @@ from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F
 def entry_line(e, coe):
     name = (coe.name(e.index, e.subindex) if coe else "") or e.name
     what = {"profile": "(cia402 profile)", "encoder": "(encoder function)",
-            "gap": "(gap)"}.get(e.role, "%-28s %s" % (e.pin, e.hal_type))
+            "serial": "(serial function)", "gap": "(gap)"}.get(e.role, "%-28s %s" % (e.pin, e.hal_type))
     return "      0x%04X:%02X %3d  %-30s %-6s %s" % (e.index, e.subindex, e.bitlen, name[:30],
                                                     e.data_type, what)
 
@@ -101,7 +101,7 @@ def compare(p, coe, h, out):
                 else "one bit pin (%s), the other bits unused" % pins[0]
             w("    Pins: the XML file splits 0x%04X:%02X into %s; proposal: one %s pin \"%s\""
               % (k[1], k[2], used, e.hal_type or "-", e.pin or e.role))
-        elif e.role in ("profile", "encoder"):
+        elif e.role in ("profile", "encoder", "serial"):
             pass
         elif x.pin and x.pin != e.pin:
             w("    Pins: 0x%04X:%02X  XML \"%s\" (%s), proposal \"%s\" (%s)"

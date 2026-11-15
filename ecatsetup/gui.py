@@ -1678,7 +1678,11 @@ class SlaveView(QWidget):
                                        tip=str(v) if v and c == 2 else None))
         pin_text = e.get("pin", "")
         if use == "profile":
+            ser = next((c.get("name") for c in s.get("serial") or []
+                        if str(pdo.get("pdo")).upper() in (str(c.get("output-pdo")).upper(),
+                                                           str(c.get("input-pdo")).upper())), None)
             pin_text = "handled by the %s" % ("CiA 402 profile" if s.get("profile") == "cia402"
+                                              else "serial channel %s" % ser if ser
                                               else "encoder function")
         self.pd.setItem(r, self.PIN, item(pin_text, editable=not fixed and "split" not in e,
                                           colour=GREY if fixed else None,

@@ -94,7 +94,7 @@ def _entry(e):
         d["use"] = "gap"
         return d
     d["type"] = e.data_type
-    if e.role in ("profile", "encoder"):
+    if e.role in ("profile", "encoder", "serial"):
         d["use"] = "profile"
     elif getattr(e, "split", None):
         d["split"] = list(e.split)
@@ -129,6 +129,13 @@ def slave_from_proposal(p, name=None):
             s["cia402"]["axes"] = ["%s-%d" % (s["name"], n + 1) for n in range(p.axes)]
     if p.encoders:
         s["encoders"] = [{"name": n, "index": "0x%04X" % i} for n, i in p.encoders]
+    if getattr(p, "serial_channels", None):
+        # a port per channel: /dev/ttyECAT<position>, -<n> with several
+        s["serial"] = [{"name": n, "output-pdo": "0x%04X" % o, "input-pdo": "0x%04X" % i,
+                        "port": "/dev/ttyECAT%d" % p.position if len(p.serial_channels) == 1
+                        else "/dev/ttyECAT%d-%d" % (p.position, k + 1),
+                        "baud": 9600, "frame": "8N1"}
+                       for k, (n, o, i) in enumerate(p.serial_channels)]
     pd = {"outputs": [], "inputs": []}
     for c in p.pdos:
         pd["outputs" if c.direction == "rx" else "inputs"].append(

@@ -476,6 +476,43 @@ class TestEsi(unittest.TestCase):
             slave([counter], [{"name": "enc", "index": "0x6001"}]))))
         self.assertTrue(any("only for objects" in e for e in config.check(slave([counter], []))))
 
+    def test_a_serial_terminal_gets_a_serial_channel(self):
+        # an EL6021 as its SII or ESI gives it: PDOs 0x1602/0x1A02 (a control word), or
+        # the COM PDOs 0x1604/0x1A04 (the control bits one by one)
+        def word(index, word_name, data):
+            return [sii.PdoEntry(index, 1, word_name, "UINT", 16)] + [
+                sii.PdoEntry(index, i + 2, "%s %d" % (data, i), "USINT", 8) for i in range(22)]
+
+        def bits(index, word_name, names, data):
+            return ([sii.PdoEntry(index, i + 1, "%s__%s" % (word_name, n), "BOOL", 1)
+                     for i, n in enumerate(names)] + [sii.PdoEntry(0, 0, "", "", 8 - len(names)),
+                                                      sii.PdoEntry(index, 9, word_name + "__Length", "USINT", 8)]
+                    + [sii.PdoEntry(index, 0x11 + i, "%s %d" % (data, i), "USINT", 8) for i in range(22)])
+        for out_pdo, in_pdo, out_e, in_e in (
+                (0x1602, 0x1A02, word(0x3003, "Ctrl", "Data Out"), word(0x3103, "Status", "Data In")),
+                (0x1604, 0x1A04, bits(0x7000, "Ctrl", ["Transmit request", "Receive accepted", "Init request",
+                                                       "Send continues"], "Data Out"),
+                 bits(0x6000, "Status", ["Transmit accepted", "Receive request", "Init accepted", "Buffer full",
+                                         "Parity error", "Framing error", "Overrun error"], "Data In"))):
+            s = sii.Sii(2, 0x17853052, 0x00100000, 0, 0x04, name="EL6021")
+            s.pdos = [sii.Pdo(out_pdo, "rx", 2, "COM Outputs", True, False, out_e),
+                      sii.Pdo(in_pdo, "tx", 3, "COM Inputs", True, False, in_e)]
+            p = propose.propose({"position": 4, "dc": False}, s, coe.Dictionary())
+            self.assertEqual(p.serial_channels, [("port", out_pdo, in_pdo)])
+            self.assertEqual({e.role for pd in p.pdos for e in pd.entries} - {"gap"}, {"serial"})
+            self.assertTrue(any("serial port" in n for n in p.notes))
+            slave = config.slave_from_proposal(p)
+            self.assertEqual(slave["serial"], [{"name": "port", "output-pdo": "0x%04X" % out_pdo,
+                                                "input-pdo": "0x%04X" % in_pdo, "port": "/dev/ttyECAT4",
+                                                "baud": 9600, "frame": "8N1"}])
+            cfg = {"ecat": 1, "master": {}, "slaves": [slave]}
+            self.assertEqual(config.check(cfg), [])
+            self.assertIn("%s.port.state" % slave["name"], halpins.pins(cfg))
+        # a terminal of another kind is not one
+        s = sii.Sii(2, 0x1, 0, 0, 0, name="X")
+        s.pdos = [sii.Pdo(0x1600, "rx", 2, "Outputs", True, False, word(0x7000, "Value", "Data Out"))]
+        self.assertEqual(propose.propose({"position": 0, "dc": False}, s, coe.Dictionary()).serial_channels, [])
+
     def test_serial_rules(self):
         # as ecat_config.c (component/tests/test_config.c test_serial_errors)
         def entries(index, n=22):

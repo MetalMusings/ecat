@@ -1160,7 +1160,15 @@ entries `use: profile`): the output PDO is a control byte, an output
 length and the data bytes; the input PDO a status byte, an input length
 and the data bytes. On an EL6021 these are 0x1602/0x1A02 (the default: a
 16-bit control word and 22 data bytes) or 0x1604/0x1A04 (the same bytes,
-the control bits as single entries).
+the control bits as single entries); newer revisions choose them as
+"Standard 22 Byte (MDP 600)". The larger windows of "Standard 50 Word" and
+"Standard 98 Byte" are not handled (22 data bytes at most), nor the 3 and 5
+byte "Legacy" sets.
+
+EtherCAT Setup proposes a channel for each such pair of PDOs (one on an
+EL6001/EL6021, two on an EL6002/EL6022, named `port` or `port-1`,
+`port-2`), with the port `/dev/ttyECAT<position>` (`-1`, `-2`) at 9600
+8N1: set `baud` and `frame` to the device's.
 
 ### In the configuration file (serial)
 

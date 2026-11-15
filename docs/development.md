@@ -1372,8 +1372,16 @@ Built so far:
   simulated Modbus RTU slave on the terminal's wire: requests and answers
   over several windows, the rate from the program (mutation-checked).
 
-Still to do: EtherCAT Setup (proposing a channel for an EL60xx, the port
-in the window), mb2hal in halrun, a capture from a real terminal.
+- EtherCAT Setup proposes a channel for each pair of serial PDOs (an output
+  PDO starting with "Ctrl" and "Data Out 0", an input PDO with "Status" and
+  "Data In 0", of the same size): tried on Beckhoff's ESI file for the
+  EL6001, EL6002, EL6021 and EL6022 (all pass the check; the two-channel
+  terminals get two). The Process data card says "handled by serial
+  channel ...".
+
+Still to do: mb2hal in halrun against the simulated terminal, a warning
+when mb2hal's parity differs from the file's frame, a capture from a real
+terminal.
 
 ## Start time: the XDP program stays on the card
 

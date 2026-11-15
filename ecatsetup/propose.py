@@ -63,7 +63,7 @@ class Entry:
     bitlen: int
     name: str
     data_type: str
-    role: str            # "profile" (cia402), "encoder", "pin" or "gap"
+    role: str            # "profile" (cia402), "encoder", "serial", "pin" or "gap"
     pin: str = ""
     hal_type: str = ""
     scale: float = None  # float pins of integer entries: read raw * scale + offset,
@@ -108,6 +108,7 @@ class Proposal:
     esi_path: str = ""
     settings: list = field(default_factory=list)   # writable vendor objects
     encoders: list = field(default_factory=list)   # (name, status index) of encoder channels
+    serial_channels: list = field(default_factory=list)  # (name, output PDO, input PDO)
     axes: int = 1        # a CiA 402 drive's axes: the status word at 0x6041 + n * 0x800
     pp_limits: dict = field(default_factory=dict)  # PP: (index, subindex) -> the drive's value
     modules: list = None  # a modular device's detected modules (0xF050), or None
@@ -143,6 +144,30 @@ def encoder_owned(index, entries):
     return {(e.index, e.subindex) for e in entries
             if (e.index == index and e.subindex in ENCODER_INPUTS)
             or (e.index == index + 0x1000 and e.subindex in ENCODER_OUTPUTS)}
+
+
+# Serial channels (Beckhoff EL6001, EL6002, EL6021, EL6022): an output PDO
+# that starts with the control word ("Ctrl", or its bits "Ctrl__Transmit
+# request" ...) followed by "Data Out 0" ..., and an input PDO with the
+# status word and "Data In 0" .... The serial function handles both.
+SERIAL_MAX_DATA = 22
+
+
+def _serial_pdo(pd, word, data):
+    names = [_short(e.name) for e in pd.entries]
+    bits = sum(e.bitlen for e in pd.entries)
+    first = (pd.entries[0].name or "").split("__")[0].strip().lower() if pd.entries else ""
+    return (first == word and "%s 0" % data in names and bits % 8 == 0
+            and 24 <= bits <= 16 + 8 * SERIAL_MAX_DATA)
+
+
+def serial_channels(pdos):
+    """(output PDO, input PDO) pairs of serial channels, in order: the n-th
+    output PDO of the kind with the n-th input PDO of the same size."""
+    outs = [pd for pd in pdos if pd.direction == "rx" and _serial_pdo(pd, "ctrl", "data out")]
+    ins = [pd for pd in pdos if pd.direction == "tx" and _serial_pdo(pd, "status", "data in")]
+    return [(o, i) for o, i in zip(outs, ins)
+            if sum(e.bitlen for e in o.entries) == sum(e.bitlen for e in i.entries)]
 
 
 # Analog channels laid out as in ETG.5001 (Beckhoff EL3xxx/EL4xxx): a
@@ -331,6 +356,19 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         p.notes.append("encoder %s: channel 0x%04X, %d-bit counter; position, velocity, index "
                        "and latch pins from the encoder function" % (name, index, bits))
 
+    # Serial channels: the serial function handles their PDOs.
+    serial_pdos = set()
+    channels = serial_channels(pdos)
+    for n, (o, i) in enumerate(channels, 1):
+        name = "port" if len(channels) == 1 else "port-%d" % n
+        p.serial_channels.append((name, o.index, i.index))
+        serial_pdos |= {o.index, i.index}
+        p.notes.append("serial %s: PDOs 0x%04X/0x%04X, %d data bytes; a serial port on the "
+                       "computer from the serial function (set its baud rate and frame to the "
+                       "device's; RS485 needs half duplex, 0x%04X:06)"
+                       % (name, o.index, i.index, sum(e.bitlen for e in o.entries) // 8 - 2,
+                          0x8000 + 0x10 * (n - 1)))
+
     # A modular-device terminal read without its ESI file is in the layout the terminal
     # itself starts with, often the legacy one (an EL5101: 0x6000 Status, Value, Latch):
     # the encoder function needs the ETG.5001 layout, which the ESI file's predefined
@@ -366,6 +404,8 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                 e.role = "profile"
             elif (e.index, e.subindex) in enc_owned:
                 e.role = "encoder"
+            elif pd.index in serial_pdos:
+                e.role = "serial"
             elif p.profile == 402 and any(e.index - a * AXIS_OFFSET in CIA402_PINS
                                           for a in range(p.axes)):
                 a = next(a for a in range(p.axes) if e.index - a * AXIS_OFFSET in CIA402_PINS)
