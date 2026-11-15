@@ -1506,18 +1506,19 @@ With ecat in halrun (`eoe:` and one start-up SDO on the same slave):
 | | |
 |---|---|
 | All five slaves in OP | 2.2 s after `loadrt`, as without EoE |
-| ping, 56 bytes | 30 of 30, 10 ms on average |
-| ping, 1472 bytes | 28 of 30, 43 ms on average |
+| ping, 56 bytes | 30 of 30, 13 ms on average |
+| ping, 1472 bytes | 30 of 30, 51 ms on average |
 | The web page, 20 times | 20 of 20, 47 ms each |
 | ping 1000 bytes at 10 a second, and 40 SDO reads on four slaves meanwhile | no loss, no failed read |
 | ping 1000 bytes at 100 a second (more than gets through), 1500 frames | all answered, at 66 a second: about 0.5 Mbit/s each way |
+| 60 SDO reads on the EoE slave with EoE saturated | none failed, 35 ms each |
 | Afterwards | ping and SDO reads as before, the bus in OP all the time |
+| 200 pings of 1472 bytes from the moment the bus is in OP | all answered, the master's log empty |
 
-The two lost large pings came in the first seconds, with two "Fragmenting
-error" lines and a failed read of the slave's SDO dictionary in the
-master's log: probably the dictionary read and EoE in the same mailbox,
-where a second unread mail of one kind replaces the first (not looked into
-further).
+The table is from the master with every fix below. The first run lost two
+of thirty large pings and the read of the slave's SDO dictionary in the
+first seconds, and with EoE saturated a third of the SDO reads on that
+slave got no answer; the last three fixes in the list are what that was.
 
 `scripts/dc-jitter-measure --mode follows --seconds 60`, without EoE traffic
 and with ping at the rate EoE carries (ns):
@@ -1546,6 +1547,16 @@ What the test found, all fixed in the master fork:
 - SOES reads no mail while its own mail waits to be read. The master sent
   the next fragment a hundred times without reading that mail and then
   dropped the frame; under load every frame took 100 ms (2e7eb18b).
+- One place per reader for mails put aside was not enough: a fragment was
+  replaced by the next before it was read. Now eight in a row (c914c876).
+- The requests of the SDO dictionary and of upload segments gave up at
+  once when the slave had not emptied its mailbox yet (134647e2).
+- Two mailbox writes to the slave in one frame (an SDO request and an EoE
+  fragment): the chip takes both and the second replaces the first, so the
+  request is never answered. A frame capture showed it (two FPWR to 0x1000
+  in one frame, both with working counter 1). The master now keeps the
+  second for the next frame (31ad2ef2). This one is not about SOES: it
+  holds for any slave with EoE and SDO traffic at once.
 
 And two limits in the board's own ESC access code (not SOES's): a read of
 more than 128 bytes did nothing, and lengths were 8 bits wide. Small CoE
@@ -1559,8 +1570,6 @@ mails never met them; an Ethernet frame in a 512 byte mailbox does.
 - A window card for `eoe:` (the file can be edited by hand).
 - The EoE firmware as part of the card's own code: it lives in a work copy
   (`~/src/easercat-3000-eoe` on the plasma PC), not in MyOwnEtherCATDevice.
-- Several unread mails of one kind kept per slave (see the lost frames
-  above).
 - EoE in LinuxCNC (only halrun so far), and a device that was not made here.
 
 ## Start time: the XDP program stays on the card
