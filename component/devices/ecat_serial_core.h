@@ -83,6 +83,11 @@ typedef struct {
   uint16_t settings_index; // 0x8000 + 0x10 * channel
   ecat_ser_sdo_t sdo;
   uint8_t start_baud, start_frame;  // the values the file sets at start (0x8000:11 and :15)
+  /// "Enable send FIFO data continuous" (0x8000:04) is set: windows fill
+  /// the terminal's send buffer, which goes out as a whole at a rising edge
+  /// of CW.3 (SendContinuous); the terminal sets SW.2 when it is out, and
+  /// clears it when CW.3 drops. Set after ecat_ser_init().
+  int continuous;
 
   // ---- shared with the bridge thread ----
   ecat_ser_ring_t tx;  // host -> terminal (the bridge writes)
@@ -107,10 +112,14 @@ typedef struct {
   int sdo_step;                // 0: baud, 1: frame
   int sdo_busy;
   long long hold_ns;           // wait before writing settings: the terminal still sends
+  int cs_phase;                // continuous: 0 filling, 1 sending (SC set), 2 waiting for SW.2 to drop
+  int buffered;                // continuous: bytes in the terminal's send buffer
+  long long cs_left_ns;        // continuous: time left for the terminal to answer
   uint8_t last_sw;
   // counters
   uint64_t tx_bytes, rx_bytes;
   uint32_t parity_errors, framing_errors, overrun_errors, buffer_full, inits;
+  uint32_t bursts, burst_timeouts;  // continuous: buffers sent, and those the terminal did not confirm
 } ecat_ser_t;
 
 /// Set up a channel (zeroes it first).

@@ -1349,10 +1349,12 @@ corrected three things, now in the code: the terminal's 128-byte send
 buffer takes every window and loses what does not fit (the channel now
 sends no more than fits, reckoned from the baud rate: without it 3 tests
 lose data); SW.3 is the *receive* buffer full (0x8000:1A, 864); 7N2 (value
-8), 12000 and 14400 baud (values 14, 15) exist. Not used yet: "Enable send
-FIFO data continuous" (0x8000:04: the buffer, up to 128 bytes, goes out at
-a rising edge of CW.3, the terminal sets SW.2 when done, cleared with
-CW.3), explicit baud rate 0x8000:1B (EL6001 from firmware 11: any rate
+8), 12000 and 14400 baud (values 14, 15) exist. Built after it:
+`send-continuous` (0x8000:04: the buffer, up to 128 bytes, goes out at a
+rising edge of CW.3, the terminal sets SW.2 when done, cleared with CW.3;
+the channel fills the buffer while the program's bytes come, then sends;
+a time-out of twice the sending time plus 0.1 s if SW.2 never comes).
+Not used: explicit baud rate 0x8000:1B (EL6001 from firmware 11: any rate
 1000-115200), the reception pause of "transfer rate optimization"
 (0x8000:05, on by default: received bytes are passed on after a pause of
 about 16 bit times, so a Modbus answer comes in whole windows).
@@ -1397,9 +1399,8 @@ Built so far:
   other data bits or parity than the channel's frame, or a baud rate the
   terminals do not have (`halcheck.mb2hal_check`, mutation-checked).
 
-Still to do: send-continuous mode for Modbus frames over 22 bytes at
-115200 baud (see docs/component.md), mb2hal in halrun, a capture from a
-real terminal.
+Still to do: mb2hal in halrun, a capture from a real terminal (in
+particular of send-continuous: when exactly SW.2 drops).
 
 ## Start time: the XDP program stays on the card
 

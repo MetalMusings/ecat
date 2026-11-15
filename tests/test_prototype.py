@@ -545,7 +545,12 @@ class TestEsi(unittest.TestCase):
         fails("port must be a full path", [dict(ok, port="ttyECAT0")])
         fails("PDO 0x1603 is not in the outputs", [dict(ok, **{"output-pdo": "0x1603"})])
         fails("output-pdo (0x1600-0x17FF) and input-pdo", [dict(ok, **{"output-pdo": "0x1A02"})])
-        fails("are its baud and frame", [ok], settings=[{"object": "0x8000:11", "value": 6, "type": "USINT"}])
+        fails("are its baud, frame and send-continuous", [ok],
+              settings=[{"object": "0x8000:11", "value": 6, "type": "USINT"}])
+        fails("are its baud, frame and send-continuous", [ok],
+              settings=[{"object": "0x8000:04", "value": 1, "type": "BOOL"}])
+        self.assertEqual(errors([dict(ok, **{"send-continuous": True})]), [])
+        fails("send-continuous is true or false", [dict(ok, **{"send-continuous": "yes"})])
         pinned = slave([ok])
         e = pinned["slaves"][0]["process-data"]["outputs"][0]["entries"][4]
         del e["use"]

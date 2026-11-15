@@ -24,6 +24,8 @@
 #define ECAT_MP_SERIAL_PDOS 1      // u32: output PDO << 16 | input PDO
 #define ECAT_MP_SERIAL_PORT 2      // str: the port's path, such as /dev/ttyECAT0
 #define ECAT_MP_SERIAL_SETTINGS 3  // u32: settings index | baud value << 16 | frame value << 24
+#define ECAT_MP_SERIAL_FLAGS 4     // u32: bit 0 send-continuous
+#define ECAT_SER_SUB_CONTINUOUS 0x04
 
 /// Set up the slave's serial channels, if it has any, after its driver or
 /// profile and its encoder channels: their pins, SDO requests for settings

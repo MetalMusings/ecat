@@ -365,7 +365,8 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         serial_pdos |= {o.index, i.index}
         p.notes.append("serial %s: PDOs 0x%04X/0x%04X, %d data bytes; a serial port on the "
                        "computer from the serial function (set its baud rate and frame to the "
-                       "device's; RS485 needs half duplex, 0x%04X:06)"
+                       "device's; RS485 needs half duplex, 0x%04X:06; Modbus RTU above 38400 baud "
+                       "needs send-continuous: true, so that a frame goes out without a pause)"
                        % (name, o.index, i.index, sum(e.bitlen for e in o.entries) // 8 - 2,
                           0x8000 + 0x10 * (n - 1)))
 

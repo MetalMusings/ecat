@@ -63,6 +63,13 @@ struct sim_el60xx {
   uint8_t last_cw;
   int tx_pending;  // a request seen, not yet taken
   int tx_lost;     // bytes that did not fit in the send buffer
+  // "Enable send FIFO data continuous" (0x8000:04) as written, and in use
+  // since the last init: the buffer goes out at a rising edge of CW.3, SW.2
+  // says when it is out, until CW.3 drops
+  int obj_continuous, continuous, cs_sending, cs_done;
+  // pauses on the wire: the line ran dry with time to send more, and then
+  // sent again (a pause inside a Modbus RTU frame breaks it)
+  int dry, gaps;
 };
 
 /// A terminal with this many data bytes per window, these settings, and

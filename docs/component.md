@@ -1209,10 +1209,11 @@ EL6001/EL6021, two on an EL6002/EL6022, named `port` or `port-1`,
 | `port` | needed | the serial port's path, such as `/dev/ttyECAT0` |
 | `baud` | 9600 | at start: 300, 600, 1200 (EL6002, EL6022), 2400, 4800, 9600, 12000, 14400 (EL6001, EL6021 from firmware 07), 19200, 38400, 57600 or 115200 |
 | `frame` | 8N1 | data bits, parity, stop bits at start: 7E1, 7O1, 8N1, 8E1, 8O1, 7N2, 7E2, 7O2, 8N2, 8E2, 8O2 |
+| `send-continuous` | false | "Enable send FIFO data continuous" (0x8000:04): the terminal sends what the program wrote as a whole (up to 128 bytes), without a pause; for Modbus RTU above 38400 baud (below) |
 | `settings-index` | 0x8000 + 0x10 × channel | the channel's CoE settings object |
 
-The baud rate and data frame are written at start (as settings: so they
-are not also in `settings:`); the terminal's other settings, such as half
+The baud rate, data frame and send continuous are written at start (as
+settings: so they are not also in `settings:`); the terminal's other settings, such as half
 duplex for RS485 or "Enable send FIFO data continuous", are ordinary
 settings. A slave can have up to 8 channels (an EL6022 has two).
 
@@ -1225,6 +1226,7 @@ settings. A slave can have up to 8 channels (an EL6022 has two).
 | `<slave>.<name>.parity-errors`, `.framing-errors`, `.overrun-errors` | uint out | counted from the status bits |
 | `<slave>.<name>.buffer-full` | uint out | times the terminal's receive buffer was full (SW.3; what comes then is lost) |
 | `<slave>.<name>.baud` | uint out | the baud rate the terminal has |
+| `<slave>.<name>.burst-timeouts` | uint out | with `send-continuous`: buffers the terminal did not confirm in time (0x8000:04 not taken?); sending goes on |
 | `<slave>.<name>.settings-error` | bool out | the last change of settings could not be written |
 | `<slave>.<name>.port-open` | bool out | a program has the port open |
 
@@ -1283,10 +1285,15 @@ SERIAL_STOP=1
   per ms at 8N1) only just. A Modbus RTU frame longer than 22 bytes then
   goes out in windows; at 115200 baud there may be a short pause between
   them on the wire (the terminal sends what it has as soon as it has it).
-  "Enable send FIFO data continuous" (0x8000:04, sending the whole buffer
-  at a rising edge of control bit 3) would avoid that; the channel does
-  not use it yet. At 38400 baud and below the terminal's buffer does not
-  run empty within a frame.
+  `send-continuous: true` avoids that: the windows fill the terminal's
+  buffer without anything going out, and when the program's bytes are all
+  in (or 128 bytes), a rising edge of control bit 3 sends them as a whole;
+  the terminal sets status bit 2 when they are out, and the channel then
+  drops bit 3. A frame of more than 128 bytes goes out in parts. At 38400
+  baud and below the terminal's buffer does not run empty within a frame
+  either way. (Tested against the simulated terminal: at 115200 baud, 40
+  Modbus write requests of 49 bytes had 39 pauses without it, none with
+  it.)
 - New settings asked for while running are written once the bytes queued
   before them have left the terminal, followed by an init; after a power
   cycle of the slave, the master writes the file's settings, and the

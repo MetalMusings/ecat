@@ -76,7 +76,7 @@ SERIAL = [
     ("state", "uint", "out"), ("tx-bytes", "uint", "out"), ("rx-bytes", "uint", "out"),
     ("parity-errors", "uint", "out"), ("framing-errors", "uint", "out"),
     ("overrun-errors", "uint", "out"), ("buffer-full", "uint", "out"), ("baud", "uint", "out"),
-    ("settings-error", "bool", "out"), ("port-open", "bool", "out"),
+    ("burst-timeouts", "uint", "out"), ("settings-error", "bool", "out"), ("port-open", "bool", "out"),
 ]
 FUNCTIONS = ["ecat.read-all", "ecat.write-all"]
 

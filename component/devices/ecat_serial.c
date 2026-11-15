@@ -49,6 +49,7 @@ typedef struct {
   hal_uint_t tx_bytes, rx_bytes;
   hal_uint_t parity_errors, framing_errors, overrun_errors, buffer_full;
   hal_uint_t baud;
+  hal_uint_t burst_timeouts;
   hal_bool_t settings_error;
   hal_bool_t port_open;
 } chan_t;
@@ -68,6 +69,7 @@ static const lcec_pindesc_t pins[] = {
     {HAL_UINT, HAL_OUT, offsetof(chan_t, overrun_errors), "%s.%s.overrun-errors"},
     {HAL_UINT, HAL_OUT, offsetof(chan_t, buffer_full), "%s.%s.buffer-full"},
     {HAL_UINT, HAL_OUT, offsetof(chan_t, baud), "%s.%s.baud"},
+    {HAL_UINT, HAL_OUT, offsetof(chan_t, burst_timeouts), "%s.%s.burst-timeouts"},
     {HAL_BOOL, HAL_OUT, offsetof(chan_t, settings_error), "%s.%s.settings-error"},
     {HAL_BOOL, HAL_OUT, offsetof(chan_t, port_open), "%s.%s.port-open"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
@@ -164,6 +166,7 @@ static int channel_init(lcec_slave_t *slave, chan_t *c, int k) {
   }
   if ((c->ch = calloc(1, sizeof(*c->ch))) == NULL) return -ENOMEM;
   ecat_ser_init(&c->ch->core, n, settings_index, baud, frame, &sdo);
+  c->ch->core.continuous = mp_u32(slave, base + ECAT_MP_SERIAL_FLAGS) & 1;
   snprintf(c->ch->name, sizeof(c->ch->name), "%s.%s", slave->name, name);
   snprintf(c->ch->port, sizeof(c->ch->port), "%s", port);
   ecat_ser_frame_of(frame, &bits, &parity, &stop);
@@ -224,6 +227,7 @@ static void channel_cycle(lcec_slave_t *slave, chan_t *c, long period) {
   hal_set_uint(c->overrun_errors, s->overrun_errors);
   hal_set_uint(c->buffer_full, s->buffer_full);
   hal_set_uint(c->baud, ecat_ser_baud_of(s->cur_baud));
+  hal_set_uint(c->burst_timeouts, s->burst_timeouts);
   hal_set_bool(c->settings_error, atomic_load_explicit(&s->settings_failed, memory_order_relaxed));
   hal_set_bool(c->port_open, atomic_load_explicit(&c->ch->port_open, memory_order_relaxed));
 }

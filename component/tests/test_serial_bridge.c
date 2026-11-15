@@ -61,7 +61,7 @@ static void *servo_main(void *arg) {
 
 /// A channel at baud/frame from the file, its terminal, its port, the
 /// servo thread and the bridge.
-static int start(uint8_t baud, uint8_t frame) {
+static int start_with(uint8_t baud, uint8_t frame, int continuous) {
   ecat_ser_sdo_t sdo;
   int bits = 8, stop = 1;
   char parity = 'N';
@@ -72,6 +72,9 @@ static int start(uint8_t baud, uint8_t frame) {
   sim_el60xx_init(&T, 22, baud, frame, 128, 864);
   sdo = sim_el60xx_sdo(&T);
   ecat_ser_init(&CH->core, 22, 0x8000, baud, frame, &sdo);
+  // 0x8000:04: the master writes it at start, so the terminal has it
+  T.obj_continuous = T.continuous = continuous;
+  CH->core.continuous = continuous;
   ecat_ser_frame_of(frame, &bits, &parity, &stop);
   strcpy(CH->name, "com.port");
   strcpy(CH->port, port);
@@ -81,6 +84,8 @@ static int start(uint8_t baud, uint8_t frame) {
   pthread_create(&servo, NULL, servo_main, NULL);
   return ecat_serial_bridge_start(CH);
 }
+
+static int start(uint8_t baud, uint8_t frame) { return start_with(baud, frame, 0); }
 
 static void finish(void) {
   ecat_serial_bridge_stop();
@@ -194,6 +199,7 @@ static void test_two_stop_bits_from_the_program(void) {
 // ---- Modbus RTU: libmodbus against a simulated slave on the wire ----
 
 static uint16_t regs[64];
+static uint8_t rtu_baud = B_19200;  // the slave's rate
 static uint8_t rtu_in[300];
 static size_t rtu_n;
 static int rtu_frames, rtu_bad;
@@ -222,7 +228,7 @@ static void rtu_answer(sim_el60xx_t *t, uint8_t *r, size_t n) {
 static void rtu_wire(sim_el60xx_t *t, const uint8_t *bytes, size_t n, void *ctx) {
   size_t need;
   (void)ctx;
-  if (t->baud != B_19200 || t->frame != F_8E1) {
+  if (t->baud != rtu_baud || t->frame != F_8E1) {
     rtu_bad++;
     return;
   }
@@ -265,6 +271,7 @@ static void test_modbus_rtu_through_the_port(void) {
   for (i = 0; i < 64; i++) regs[i] = (uint16_t)(0x1000 + i);
   rtu_n = 0;
   rtu_frames = rtu_bad = 0;
+  rtu_baud = B_19200;
   // the file says 9600 8E1; mb2hal asks for 19200 (parity E as in the file)
   CHECK_EQ(start(B_9600, F_8E1), 0);
   T.wire = rtu_wire;
@@ -302,5 +309,40 @@ static void test_modbus_rtu_through_the_port(void) {
   finish();
 }
 
+#ifndef CONTINUOUS
+#define CONTINUOUS 1
+#endif
+static void test_modbus_rtu_at_115200_with_send_continuous(void) {
+  modbus_t *mb;
+  uint16_t got[40], set[20];
+  int i;
+  for (i = 0; i < 64; i++) regs[i] = (uint16_t)(0x3000 + i);
+  rtu_n = 0;
+  rtu_frames = rtu_bad = 0;
+  rtu_baud = B_115200;
+  // a frame over 22 bytes goes out without a pause
+  CHECK_EQ(start_with(B_115200, F_8E1, CONTINUOUS), 0);
+  T.wire = rtu_wire;
+  mb = modbus_new_rtu(port, 115200, 'E', 8, 1);
+  modbus_set_slave(mb, 1);
+  modbus_set_response_timeout(mb, 1, 0);
+  CHECK_EQ(modbus_connect(mb), 0);
+  for (i = 0; i < 20; i++) set[i] = (uint16_t)(0x4000 + i);
+  for (i = 0; i < 20; i++) {
+    if (modbus_write_registers(mb, 10, 20, set) != 20) break;  // 49 bytes: three windows, one burst
+    if (modbus_read_registers(mb, 0, 40, got) != 40) break;
+  }
+  CHECK_EQ(i, 20);
+  CHECK_EQ(got[29], 0x4013);
+  CHECK_EQ(T.gaps, 0);
+  CHECK_EQ(CH->core.burst_timeouts, 0);
+  CHECK(CH->core.bursts >= 40);
+  CHECK_EQ(rtu_bad, 0);
+  modbus_close(mb);
+  modbus_free(mb);
+  finish();
+}
+
 RUN_TESTS("serial bridge", test_port_is_a_link_to_a_pty, test_a_file_is_not_replaced,
-    test_loopback_and_the_programs_baud_rate, test_two_stop_bits_from_the_program, test_modbus_rtu_through_the_port)
+    test_loopback_and_the_programs_baud_rate, test_two_stop_bits_from_the_program, test_modbus_rtu_through_the_port,
+    test_modbus_rtu_at_115200_with_send_continuous)

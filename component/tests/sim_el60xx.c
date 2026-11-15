@@ -75,13 +75,24 @@ void sim_el60xx_step(sim_el60xx_t *t, const uint8_t *out, long period_ns) {
       t->tx.n = t->rx.n = 0;
       t->baud = t->obj_baud;
       t->frame = t->obj_frame;
+      t->continuous = t->obj_continuous;
+      t->cs_sending = t->cs_done = 0;
       t->sw = ECAT_SER_SW_INIT_ACCEPTED;
       t->tx_pending = 0;
       t->inits++;
     }
-  } else if (t->sw & ECAT_SER_SW_INIT_ACCEPTED) {
+  } else if ((t->sw & ECAT_SER_SW_INIT_ACCEPTED) && !t->cs_done) {
     t->sw &= (uint8_t)~ECAT_SER_SW_INIT_ACCEPTED;
   } else {
+    // continuous: a rising edge of CW.3 sends the buffer; SW.2 when it is
+    // out, cleared when CW.3 drops
+    if (t->continuous) {
+      if ((cw & ECAT_SER_CW_SEND_CONTINUOUS) && !(t->last_cw & ECAT_SER_CW_SEND_CONTINUOUS)) t->cs_sending = 1;
+      if (t->cs_done && !(cw & ECAT_SER_CW_SEND_CONTINUOUS)) {
+        t->cs_done = 0;
+        t->sw &= (uint8_t)~ECAT_SER_SW_INIT_ACCEPTED;
+      }
+    }
     // a window to send: the request bit toggled (an edge, not a
     // difference to the accepted bit: a request bit left at 1 through an
     // init makes the next request look like none, and sending stops,
@@ -106,7 +117,7 @@ void sim_el60xx_step(sim_el60xx_t *t, const uint8_t *out, long period_ns) {
   }
 
   // the wire
-  if (baud > 0) {
+  if (baud > 0 && (!t->continuous || t->cs_sending)) {
     uint8_t b[SIM_FIFO];
     size_t n;
     t->credit += (double)baud / char_bits(t->frame) * (double)period_ns * 1e-9;
@@ -114,7 +125,18 @@ void sim_el60xx_step(sim_el60xx_t *t, const uint8_t *out, long period_ns) {
     n = (size_t)t->credit;
     n = fifo_get(&t->tx, b, n);
     t->credit -= (double)n;
+    if (n > 0 && t->dry) t->gaps++;
+    // ran dry with time left: a pause, if more comes
+    t->dry = (n > 0 || t->dry) && t->tx.n == 0 && t->credit >= 1.0;
     if (n > 0 && t->wire != NULL) t->wire(t, b, n, t->wire_ctx);
+    if (t->continuous && t->tx.n == 0) {
+      t->cs_sending = 0;
+      t->cs_done = 1;
+      t->sw |= ECAT_SER_SW_INIT_ACCEPTED;
+      t->dry = 0;  // the burst is over: what comes next is another
+    }
+  } else if (t->continuous) {
+    t->credit = 0;
   }
 
   // SW.3: the receive buffer is full (0x8000:1A, its size by default)

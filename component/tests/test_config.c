@@ -807,7 +807,7 @@ static void test_serial(void) {
   LCEC_CONF_MODPARAM_T *mp;
   int i, found = 0;
   CHECK_EQ(load(el6021(SERIAL_OK, "", 0)), 0);
-  CHECK_EQ(SLAVE(0)->modParamCount, 4);
+  CHECK_EQ(SLAVE(0)->modParamCount, 5);
   CHECK_EQ(SLAVE(0)->pdoMappingCount, 0);  // no pins: all the function's
   for (i = 0; (mp = MODPARAM(i)) != NULL; i++) {
     switch (mp->id - ECAT_MP_SERIAL) {
@@ -815,17 +815,25 @@ static void test_serial(void) {
       case ECAT_MP_SERIAL_PDOS: CHECK_EQ(mp->value.u32, 0x16021A02); found |= 2; break;
       case ECAT_MP_SERIAL_PORT: CHECK(!strcmp(mp->value.str, "/dev/ttyECAT0")); found |= 4; break;
       case ECAT_MP_SERIAL_SETTINGS: CHECK_EQ(mp->value.u32, 0x8000 | 7 << 16 | 4 << 24); found |= 8; break;
+      case ECAT_MP_SERIAL_FLAGS: CHECK_EQ(mp->value.u32, 0); found |= 16; break;
       default: CHECK(0);
     }
   }
-  CHECK_EQ(found, 15);
-  // baud rate and data frame written at start
-  CHECK_EQ(count(lcecConfTypeSdoConfig), 2);
+  CHECK_EQ(found, 31);
+  // baud rate, data frame and send continuous written at start
+  CHECK_EQ(count(lcecConfTypeSdoConfig), 3);
+  CHECK(SDO(2)->index == 0x8000 && SDO(2)->subindex == 0x04 && SDO(2)->length == 1 && SDO(2)->data[0] == 0);
   CHECK(SDO(0)->index == 0x8000 && SDO(0)->subindex == 0x11 && SDO(0)->length == 1 && SDO(0)->data[0] == 7);
   CHECK(SDO(1)->index == 0x8000 && SDO(1)->subindex == 0x15 && SDO(1)->length == 1 && SDO(1)->data[0] == 4);
   // defaults: 9600 8N1
   CHECK_EQ(load(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT1}\n", "", 0)), 0);
   CHECK(SDO(0)->data[0] == 6 && SDO(1)->data[0] == 3);
+  CHECK_EQ(load(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT1, "
+                       "send-continuous: true}\n", "", 0)), 0);
+  CHECK(SDO(2)->subindex == 0x04 && SDO(2)->data[0] == 1);
+  for (i = 0; (mp = MODPARAM(i)) != NULL; i++) {
+    if (mp->id == ECAT_MP_SERIAL + ECAT_MP_SERIAL_FLAGS) CHECK_EQ(mp->value.u32, 1);
+  }
 }
 
 static void test_serial_errors(void) {
@@ -842,7 +850,9 @@ static void test_serial_errors(void) {
   CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1A02', input-pdo: '0x1A02', port: /dev/ttyECAT0}\n", "", 0),
       "output-pdo (0x1600-0x17FF) and input-pdo");
   CHECK_FAILS(el6021(SERIAL_OK, "  settings:\n  - {object: '0x8000:11', value: 6, type: USINT}\n", 0),
-      "are its baud and frame");
+      "are its baud, frame and send-continuous");
+  CHECK_FAILS(el6021(SERIAL_OK, "  settings:\n  - {object: '0x8000:04', value: 1, type: BOOL}\n", 0),
+      "are its baud, frame and send-continuous");
   // an entry of the channel's PDO with a pin
   {
     static char y[16384], rest[16384];

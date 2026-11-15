@@ -65,7 +65,7 @@ ENCODER_PINS = ("reset", "counts", "raw-count", "pos", "velocity", "ok", "index-
 # "<slave>.<channel>.", the baud rates and data frames of the terminals'
 # CoE 0x8000:11 and :15, the most channels per slave
 SERIAL_PINS = ("state", "tx-bytes", "rx-bytes", "parity-errors", "framing-errors", "overrun-errors",
-               "buffer-full", "baud", "settings-error", "port-open")
+               "buffer-full", "baud", "burst-timeouts", "settings-error", "port-open")
 # (Beckhoff's manual EL600x, EL602x: 300-1200 on the EL6002/EL6022, 12000
 # and 14400 on the EL6001/EL6021 from firmware 07)
 SERIAL_BAUDS = {300: 1, 600: 2, 1200: 3, 2400: 4, 4800: 5, 9600: 6, 12000: 14, 14400: 15,
@@ -74,7 +74,7 @@ SERIAL_FRAMES = {"7E1": 1, "7O1": 2, "8N1": 3, "8E1": 4, "8O1": 5, "7N2": 8, "7E
                  "8N2": 11, "8E2": 12, "8O2": 13}
 SERIAL_MAX_CHANNELS = 8
 SERIAL_MAX_DATA = 22
-SERIAL_SUB_BAUD, SERIAL_SUB_FRAME = 0x11, 0x15
+SERIAL_SUB_BAUD, SERIAL_SUB_FRAME, SERIAL_SUB_CONTINUOUS = 0x11, 0x15, 0x04
 
 
 def parse_obj(text):
@@ -413,6 +413,8 @@ def check(cfg):
             if str(ch.get("frame", "8N1")) not in SERIAL_FRAMES:
                 err("%s: serial channel %s: frame %r is not one of %s"
                     % (where, cname, ch.get("frame"), ", ".join(SERIAL_FRAMES)))
+            if ch.get("send-continuous", False) not in (True, False):
+                err("%s: serial channel %s: send-continuous is true or false" % (where, cname))
             for other in serial:
                 if other[0] == cname or other[1] == out or other[2] == inp or other[3] == settings_index:
                     err("%s: serial channel %s: its name, PDOs or settings-index are another channel's"
@@ -593,9 +595,11 @@ def check(cfg):
                 set_objects.add(parse_obj(st.get("object")))
                 for cname, _, _, settings_index in serial:
                     if parse_obj(st.get("object")) in ((settings_index, SERIAL_SUB_BAUD),
-                                                       (settings_index, SERIAL_SUB_FRAME)):
-                        err("%s: setting %s: the baud rate and data frame of serial channel %s are "
-                            "its baud and frame" % (where, st.get("object"), cname))
+                                                       (settings_index, SERIAL_SUB_FRAME),
+                                                       (settings_index, SERIAL_SUB_CONTINUOUS)):
+                        err("%s: setting %s: the baud rate, data frame and send continuous of serial "
+                            "channel %s are its baud, frame and send-continuous"
+                            % (where, st.get("object"), cname))
                 why = quirks.command(s, parse_obj(st.get("object"))[0])
                 if why:
                     err("%s: setting %s is a command, not a setting: %s"

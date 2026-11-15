@@ -54,6 +54,7 @@ typedef struct {
   int ser_bits[ECAT_MP_SERIAL_MAX_CHANNELS][2];       // the PDOs' bits (0: not in the process data)
   uint16_t ser_settings[ECAT_MP_SERIAL_MAX_CHANNELS]; // their settings indexes
   uint8_t ser_baud[ECAT_MP_SERIAL_MAX_CHANNELS], ser_frame[ECAT_MP_SERIAL_MAX_CHANNELS];  // at start
+  uint8_t ser_continuous[ECAT_MP_SERIAL_MAX_CHANNELS];  // send-continuous
   char ser_name[ECAT_MP_SERIAL_MAX_CHANNELS][LCEC_CONF_STR_MAXLEN];
 } ctx_t;
 
@@ -620,8 +621,10 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
     {
       int q;
       for (q = 0; q < c->n_ser; q++) {
-        if (index == c->ser_settings[q] && (subindex == ECAT_SER_SUB_BAUD || subindex == ECAT_SER_SUB_FRAME)) {
-          error(c, "setting %s: the baud rate and data frame of serial channel %s are its baud and frame", object, c->ser_name[q]);
+        if (index == c->ser_settings[q] &&
+            (subindex == ECAT_SER_SUB_BAUD || subindex == ECAT_SER_SUB_FRAME || subindex == ECAT_SER_SUB_CONTINUOUS)) {
+          error(c, "setting %s: the baud rate, data frame and send continuous of serial channel %s are its baud, frame "
+                   "and send-continuous", object, c->ser_name[q]);
         }
       }
     }
@@ -750,7 +753,7 @@ static LCEC_CONF_MODPARAM_T *modparam(ctx_t *c, buf_t *b, size_t slave_off, int 
 
 /// The slave's serial channels: [{name: com, output-pdo: '0x1604',
 /// input-pdo: '0x1A04', port: /dev/ttyECAT0, baud: 19200, frame: 8E1}, ...];
-/// four modParam records each (ecat_serial.h).
+/// five modParam records each (ecat_serial.h).
 static void serial_channels(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
   int i, j, n;
   c->n_ser = 0;
@@ -820,6 +823,9 @@ static void serial_channels(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_
     copy_str(mp->value.str, port);
     if ((mp = modparam(c, b, slave_off, base + ECAT_MP_SERIAL_SETTINGS, "serial.settings")) == NULL) return;
     mp->value.u32 = (uint32_t)settings_index | (uint32_t)baud_value << 16 | (uint32_t)frame_value << 24;
+    if ((mp = modparam(c, b, slave_off, base + ECAT_MP_SERIAL_FLAGS, "serial.flags")) == NULL) return;
+    mp->value.u32 = get_bool(c, e, "send-continuous", 0) ? 1 : 0;
+    c->ser_continuous[c->n_ser] = mp->value.u32 & 1;
     c->ser_pdo[c->n_ser][0] = out;
     c->ser_pdo[c->n_ser][1] = in;
     c->ser_bits[c->n_ser][0] = c->ser_bits[c->n_ser][1] = 0;
@@ -836,7 +842,7 @@ static void serial_channels(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_
 static void serial_settings(ctx_t *c, buf_t *b, size_t slave_off) {
   int k, j;
   for (k = 0; k < c->n_ser; k++) {
-    for (j = 0; j < 2; j++) {
+    for (j = 0; j < 3; j++) {
       LCEC_CONF_SDOCONF_T *sc = append(b, sizeof(*sc) + 1);
       if (sc == NULL) {
         error(c, "out of memory");
@@ -844,9 +850,9 @@ static void serial_settings(ctx_t *c, buf_t *b, size_t slave_off) {
       }
       sc->confType = lcecConfTypeSdoConfig;
       sc->index = c->ser_settings[k];
-      sc->subindex = j == 0 ? ECAT_SER_SUB_BAUD : ECAT_SER_SUB_FRAME;
+      sc->subindex = j == 0 ? ECAT_SER_SUB_BAUD : j == 1 ? ECAT_SER_SUB_FRAME : ECAT_SER_SUB_CONTINUOUS;
       sc->length = 1;
-      sc->data[0] = j == 0 ? c->ser_baud[k] : c->ser_frame[k];
+      sc->data[0] = j == 0 ? c->ser_baud[k] : j == 1 ? c->ser_frame[k] : c->ser_continuous[k];
       ((LCEC_CONF_SLAVE_T *)(b->data + slave_off))->sdoConfigLength += sizeof(*sc) + 1;
     }
   }

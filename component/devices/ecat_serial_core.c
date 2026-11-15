@@ -144,6 +144,8 @@ static void start_init(ecat_ser_t *s) {
   s->sdo_step = 0;  // used as the init phase: 0 request, 1 wait for the answer to go
   s->inflight = 0;
   s->out_len = 0;
+  s->cs_phase = 0;  // the init empties the terminal's buffers
+  s->buffered = 0;
 }
 
 /// Write the next setting that differs, or go on to the init.
@@ -216,17 +218,26 @@ static void init(ecat_ser_t *s, uint8_t sw) {
   }
 }
 
-static void ready(ecat_ser_t *s, uint8_t sw, const uint8_t *in, long period_ns) {
-  int accepted = !!(sw & ECAT_SER_SW_TRANSMIT_ACCEPTED) == !!(s->cw & ECAT_SER_CW_TRANSMIT_REQUEST);
-  uint32_t seq = atomic_load_explicit(&s->want_seq, memory_order_acquire);
-  int pending = seq != s->applying_seq;
-  unsigned long baud;
+/// Time to send n bytes at the terminal's settings, in ns (0 if unknown).
+static long long send_ns(ecat_ser_t *s, long long n) {
+  unsigned long baud = ecat_ser_baud_of(s->cur_baud);
+  return baud > 0 ? n * char_bits(s->cur_frame) * 1000000000LL / (long long)baud : 0;
+}
 
-  // sending
+static void send_window(ecat_ser_t *s, size_t room) {
+  size_t n = room > 0 ? ecat_ser_ring_get(&s->tx, s->out, room) : 0;
+  if (n > 0) {
+    s->out_len = (uint8_t)n;
+    s->cw ^= ECAT_SER_CW_TRANSMIT_REQUEST;
+    s->inflight = 1;
+  }
+}
+
+/// Sending, the terminal sending as it gets bytes.
+static void send_stream(ecat_ser_t *s, int accepted) {
   if (s->inflight && accepted) {
     s->tx_bytes += s->out_len;
-    baud = ecat_ser_baud_of(s->cur_baud);
-    if (baud > 0) s->hold_ns += (long long)s->out_len * char_bits(s->cur_frame) * 1000000000LL / (long long)baud;
+    s->hold_ns += send_ns(s, s->out_len);
     s->inflight = 0;
     s->out_len = 0;
   }
@@ -235,21 +246,78 @@ static void ready(ecat_ser_t *s, uint8_t sw, const uint8_t *in, long period_ns) 
     // whether or not it fits, and loses what does not. hold_ns is how
     // long it still sends what it has (counted from when it took it, so
     // rather too long than too short).
-    size_t room = (size_t)s->n_data, n;
-    baud = ecat_ser_baud_of(s->cur_baud);
-    if (baud > 0) {
-      long long bits = char_bits(s->cur_frame);
-      long long held = (s->hold_ns * (long long)baud + bits * 1000000000LL - 1) / (bits * 1000000000LL);
+    size_t room = (size_t)s->n_data;
+    long long per = send_ns(s, 1);
+    if (per > 0) {
+      long long held = (s->hold_ns + per - 1) / per;
       long long free_bytes = ECAT_SER_TX_BUFFER - held;
       if (free_bytes < 0) free_bytes = 0;
       if ((size_t)free_bytes < room) room = (size_t)free_bytes;
     }
-    n = room > 0 ? ecat_ser_ring_get(&s->tx, s->out, room) : 0;
-    if (n > 0) {
-      s->out_len = (uint8_t)n;
-      s->cw ^= ECAT_SER_CW_TRANSMIT_REQUEST;
-      s->inflight = 1;
-    }
+    send_window(s, room);
+  }
+}
+
+/// Sending in continuous mode: fill the buffer, then send it as a whole.
+static void send_continuous(ecat_ser_t *s, uint8_t sw, int accepted, long period_ns) {
+  if (s->inflight && accepted) {
+    s->tx_bytes += s->out_len;
+    s->buffered += s->out_len;
+    s->inflight = 0;
+    s->out_len = 0;
+  }
+  switch (s->cs_phase) {
+    case 0:
+      if (s->inflight || !accepted) break;
+      {
+        size_t room = (size_t)(ECAT_SER_TX_BUFFER - s->buffered);
+        if (room > (size_t)s->n_data) room = (size_t)s->n_data;
+        send_window(s, room);
+      }
+      // nothing more to give (all the program wrote, or the buffer is
+      // full): send the buffer
+      if (!s->inflight && s->buffered > 0) {
+        long long t = send_ns(s, s->buffered);
+        s->cw |= ECAT_SER_CW_SEND_CONTINUOUS;
+        s->cs_phase = 1;
+        s->hold_ns += t;
+        // the terminal confirms when it is out: allow twice that, and 0.1 s
+        s->cs_left_ns = 2 * t + 100000000LL;
+      }
+      break;
+    case 1:
+      s->cs_left_ns -= period_ns;
+      if ((sw & ECAT_SER_SW_INIT_ACCEPTED) || s->cs_left_ns <= 0) {
+        if (sw & ECAT_SER_SW_INIT_ACCEPTED) {
+          s->bursts++;
+        } else {
+          s->burst_timeouts++;  // not confirmed: go on (is 0x8000:04 set?)
+        }
+        s->cw &= (uint8_t)~ECAT_SER_CW_SEND_CONTINUOUS;
+        s->cs_phase = 2;
+        s->cs_left_ns = 100000000LL;
+      }
+      break;
+    default:
+      s->cs_left_ns -= period_ns;
+      if (!(sw & ECAT_SER_SW_INIT_ACCEPTED) || s->cs_left_ns <= 0) {
+        s->buffered = 0;
+        s->cs_phase = 0;
+      }
+      break;
+  }
+}
+
+static void ready(ecat_ser_t *s, uint8_t sw, const uint8_t *in, long period_ns) {
+  int accepted = !!(sw & ECAT_SER_SW_TRANSMIT_ACCEPTED) == !!(s->cw & ECAT_SER_CW_TRANSMIT_REQUEST);
+  uint32_t seq = atomic_load_explicit(&s->want_seq, memory_order_acquire);
+  int pending = seq != s->applying_seq;
+
+  // sending
+  if (s->continuous) {
+    send_continuous(s, sw, accepted, period_ns);
+  } else {
+    send_stream(s, accepted);
   }
 
   // receiving: only when the bytes fit, so that none are lost (the
@@ -265,7 +333,8 @@ static void ready(ecat_ser_t *s, uint8_t sw, const uint8_t *in, long period_ns) 
 
   // new settings: once all bytes queued before the request are sent and
   // the terminal has had the time to put them on the wire
-  if (pending && !s->inflight && ecat_ser_ring_used(&s->tx) == 0 && s->hold_ns <= 0) {
+  if (pending && !s->inflight && ecat_ser_ring_used(&s->tx) == 0 && s->hold_ns <= 0 && s->cs_phase == 0 &&
+      s->buffered == 0) {
     s->applying_seq = seq;
     s->to_baud = atomic_load(&s->want_baud);
     s->to_frame = atomic_load(&s->want_frame);
@@ -273,7 +342,6 @@ static void ready(ecat_ser_t *s, uint8_t sw, const uint8_t *in, long period_ns) 
     s->state = ECAT_SER_SETTINGS;
     next_setting(s);
   }
-  (void)period_ns;
 }
 
 void ecat_ser_cycle(ecat_ser_t *s, const uint8_t *in, uint8_t *out, int bus_ok, long period_ns) {
@@ -285,6 +353,8 @@ void ecat_ser_cycle(ecat_ser_t *s, const uint8_t *in, uint8_t *out, int bus_ok, 
   if (!bus_ok) {
     if (s->state != ECAT_SER_DOWN) {
       s->state = ECAT_SER_DOWN;
+      s->cs_phase = 0;
+      s->buffered = 0;
       s->inflight = 0;
       s->out_len = 0;
       s->sdo_busy = 0;

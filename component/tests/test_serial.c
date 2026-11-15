@@ -362,6 +362,86 @@ static void test_errors_are_counted(void) {
   CHECK_EQ(S.overrun_errors, 0);
 }
 
+// ---- send continuous (0x8000:04) ----
+
+static void continuous(int terminal_too) {
+  setup(B115200, F8N1);
+  T.obj_continuous = terminal_too;
+  S.continuous = 1;
+  CHECK(until_ready());
+}
+
+static void test_without_continuous_a_long_frame_pauses_at_115200(void) {
+  static uint8_t data[100], got[100];
+  setup(B115200, F8N1);
+  CHECK(until_ready());
+  pattern(data, sizeof(data), 10);
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  CHECK_EQ(collect(got, sizeof(got), 500), sizeof(got));
+  // 22 bytes every second cycle do not keep up: the line runs dry inside
+  // the frame (why continuous sending exists)
+  CHECK(T.gaps > 0);
+}
+
+static void test_continuous_sends_a_frame_whole(void) {
+  static uint8_t data[100], got[100];
+  continuous(1);
+  pattern(data, sizeof(data), 11);
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  CHECK_EQ(collect(got, sizeof(got), 500), sizeof(got));
+  CHECK(!memcmp(data, got, sizeof(data)));
+  CHECK_EQ(T.gaps, 0);
+  CHECK_EQ(T.tx_lost, 0);
+  CHECK_EQ(S.bursts, 1);
+  CHECK_EQ(S.burst_timeouts, 0);
+  CHECK_EQ(S.cw & ECAT_SER_CW_SEND_CONTINUOUS, 0);
+  // the next frame: another burst
+  ecat_ser_ring_put(&S.tx, data, 30);
+  CHECK_EQ(collect(got, 30, 500), 30);
+  CHECK_EQ(S.bursts, 2);
+}
+
+static void test_continuous_more_than_the_buffer(void) {
+  static uint8_t data[300], got[300];
+  continuous(1);
+  pattern(data, sizeof(data), 12);
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  CHECK_EQ(collect(got, sizeof(got), 1000), sizeof(got));
+  CHECK(!memcmp(data, got, sizeof(data)));
+  CHECK_EQ(T.tx_lost, 0);   // never more than 128 bytes in the buffer
+  CHECK_EQ(S.bursts, 3);    // 128, 128, 44
+}
+
+static void test_continuous_without_the_terminals_setting(void) {
+  static uint8_t data[50], got[50];
+  // 0x8000:04 not set in the terminal: it sends as it gets the bytes and
+  // never confirms; the channel goes on after its time-out
+  continuous(0);
+  pattern(data, sizeof(data), 13);
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  CHECK_EQ(collect(got, sizeof(got), 500), sizeof(got));
+  cycles(200);
+  CHECK_EQ(S.burst_timeouts, 1);
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  CHECK_EQ(collect(got, sizeof(got), 500), sizeof(got));
+  CHECK(!memcmp(data, got, sizeof(data)));
+}
+
+static void test_continuous_then_new_settings(void) {
+  static uint8_t data[60], got[60];
+  continuous(1);
+  pattern(data, sizeof(data), 14);
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  ask(B19200, F8N1);
+  CHECK(until_done());
+  CHECK_EQ(T.baud, B19200);
+  CHECK_EQ(S.bursts, 1);  // the bytes before went out first, as one
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  CHECK_EQ(collect(got, sizeof(got), 500), sizeof(got));
+  CHECK(!memcmp(data, got, sizeof(data)));
+  CHECK_EQ(T.gaps, 0);
+}
+
 // ---- the function on a slave (devices/ecat_serial.c) ----
 
 // No master in the tests: the SDO requests are not made (slave->config is
@@ -443,6 +523,8 @@ static void test_function_on_a_slave(void) {
   CHECK_EQ(ch->data_bits, 8);
   CHECK_EQ(ch->parity, 'E');
   CHECK_EQ(ch->core.n_data, 22);
+  CHECK_EQ(ch->core.continuous, 0);  // no flags modparam: off
+  CHECK_EQ(PIN_U32("com.port.burst-timeouts"), 0);
   for (i = 0; i < 50 && PIN_U32("com.port.state") != ECAT_SER_READY; i++) slave_cycle();
   CHECK_EQ(PIN_U32("com.port.state"), ECAT_SER_READY);
   CHECK_EQ(PIN_U32("com.port.baud"), 115200);
@@ -472,4 +554,6 @@ static void test_function_on_a_slave(void) {
 RUN_TESTS("serial", test_values, test_ring_wraps, test_starts_with_init, test_loopback,
     test_slow_baud_waits_for_the_terminal, test_slowest_rate_and_two_stop_bits, test_receive_waits_for_room, test_turn_around_1_and_3,
     test_new_baud_after_the_queued_bytes, test_toggles_restart_after_init, test_baud_and_frame,
-    test_settings_that_fail, test_bus_loss, test_errors_are_counted, test_function_on_a_slave)
+    test_settings_that_fail, test_bus_loss, test_errors_are_counted, test_without_continuous_a_long_frame_pauses_at_115200,
+    test_continuous_sends_a_frame_whole, test_continuous_more_than_the_buffer, test_continuous_without_the_terminals_setting,
+    test_continuous_then_new_settings, test_function_on_a_slave)
