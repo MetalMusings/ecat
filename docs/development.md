@@ -1340,11 +1340,15 @@ program once and leaves it on the card; the next master only binds its
 socket, and checks the link at once instead of after 1 s. After it, with
 master package 1.3+git20261115.3ee80d27 installed:
 
-| | before | after |
-|---|---|---|
-| free master start to the end of the bus scan | 3.45 s | 0.37 s |
-| halrun start to OP (free master running before, so with the handover) | 4.4 s from `ecat` loaded | 1.47 s |
-| free master again after halrun (the window's restart question) | ~3.5 s | 0.42 s |
+| | here before | here after | turner before | turner after |
+|---|---|---|---|---|
+| free master start (here: to the end of the bus scan; turner: the tool's `start` until it reports the slaves) | 3.45 s | 0.37 s | 2.93 s | 0.82 s |
+| halrun start to OP (free master running before, so with the handover) | 4.4 s from `ecat` loaded | 1.47 s | 3.82 s | 1.58-1.60 s |
+| free master again after halrun (the window's restart question) | ~3.5 s | 0.42 s | 2.92 s | 0.82 s |
+
+Turner: i3-7100, igb, six slaves, a copy of its own `ethercat.yaml`, halrun
+without motion, before = master 1.3, after = 1.3+git20261115.3ee80d27 (the
+first start after the install attaches the program: 2.92 s once).
 
 The raw transport works with the program on the card. `sudo ip link set
 dev <if> xdp off` removes it (a reboot does too). The restart question
