@@ -20,6 +20,7 @@
 /// @brief Initialization code for LinuxCNC-Ethercat
 
 #ifndef __KERNEL__
+#include <arpa/inet.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <stdio.h>
@@ -838,6 +839,49 @@ static ec_master_t *lcec_request_master(lcec_master_t *master) {
 /// thread's period is known (the first call of the read function, before the
 /// master is activated). The configuration gives a slave's SYNC0 cycle in servo
 /// periods; here it becomes nanoseconds.
+static void ecat_config_eoe(lcec_master_t *master) {
+#ifdef EC_HAVE_SET_IP
+  lcec_slave_t *slave;
+  for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+    LCEC_CONF_EOE_T *e = slave->eoe_conf;
+    struct in_addr a;
+    int err = 0;
+    if (e == NULL) continue;
+    if (e->given & LCEC_EOE_MAC) err |= ecrt_slave_config_eoe_mac_address(slave->config, e->mac);
+    if (e->given & LCEC_EOE_IP) {
+      a.s_addr = e->ip;
+      err |= ecrt_slave_config_eoe_ip_address(slave->config, a);
+    }
+    if (e->given & LCEC_EOE_MASK) {
+      a.s_addr = e->mask;
+      err |= ecrt_slave_config_eoe_subnet_mask(slave->config, a);
+    }
+    if (e->given & LCEC_EOE_GATEWAY) {
+      a.s_addr = e->gateway;
+      err |= ecrt_slave_config_eoe_default_gateway(slave->config, a);
+    }
+    if (e->given & LCEC_EOE_DNS) {
+      a.s_addr = e->dns;
+      err |= ecrt_slave_config_eoe_dns_address(slave->config, a);
+    }
+    if (e->given & LCEC_EOE_HOSTNAME) err |= ecrt_slave_config_eoe_hostname(slave->config, e->hostname);
+    if (err) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "slave %s.%s: cannot set the EoE parameters\n", master->name, slave->name);
+    } else {
+      rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "slave %s.%s: EoE parameters set (IP %s)\n", master->name, slave->name,
+          (e->given & LCEC_EOE_IP) ? inet_ntoa((struct in_addr){.s_addr = e->ip}) : "unchanged");
+    }
+  }
+#else
+  lcec_slave_t *slave;
+  for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+    if (slave->eoe_conf != NULL) {
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "slave %s.%s: this master has no EoE: eoe: is ignored\n", master->name, slave->name);
+    }
+  }
+#endif
+}
+
 static void ecat_config_dc(lcec_master_t *master) {
   lcec_slave_t *slave;
 
@@ -1421,6 +1465,7 @@ int lcec_parse_config(void) {
         slave->idn_config = idn_config;
         slave->modparams = modparams;
         slave->dc_conf = NULL;
+        slave->eoe_conf = NULL;
         slave->wd_conf = NULL;
 
         // update slave count
@@ -1456,6 +1501,15 @@ int lcec_parse_config(void) {
 
         // add to slave
         slave->dc_conf = dc;
+        break;
+
+      case lcecConfTypeEoe:
+        if (slave == NULL) {
+          rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave node for eoe config missing\n");
+          goto fail2;
+        }
+        slave->eoe_conf = (LCEC_CONF_EOE_T *)conf;
+        conf += sizeof(LCEC_CONF_EOE_T);
         break;
 
       case lcecConfTypeWatchdog:
@@ -2015,6 +2069,7 @@ void lcec_read_master(void *arg, long period) {
     master->app_time_period = period;
     if (master->events != NULL) master->events->period_ns = (uint32_t)period;
     ecat_config_dc(master);
+    ecat_config_eoe(master);
   }
 
   // Delayed activation: activate master on first read call

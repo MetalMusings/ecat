@@ -7,6 +7,7 @@
 //    (at your option) any later version.
 //
 
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -52,6 +53,7 @@ static int load(const char *yaml) {
       case lcecConfTypeMaster: off += sizeof(LCEC_CONF_MASTER_T); break;
       case lcecConfTypeSlave: off += sizeof(LCEC_CONF_SLAVE_T); break;
       case lcecConfTypeDcConf: off += sizeof(LCEC_CONF_DC_T); break;
+      case lcecConfTypeEoe: off += sizeof(LCEC_CONF_EOE_T); break;
       case lcecConfTypeSyncManager: off += sizeof(LCEC_CONF_SYNCMANAGER_T); break;
       case lcecConfTypePdo: off += sizeof(LCEC_CONF_PDO_T); break;
       case lcecConfTypePdoEntry: off += sizeof(LCEC_CONF_PDOENTRY_T); break;
@@ -92,6 +94,7 @@ static int count(LCEC_CONF_TYPE_T t) {
 #define COMPLEX(n) ((LCEC_CONF_COMPLEXENTRY_T *)nth(lcecConfTypeComplexEntry, n))
 #define MODPARAM(n) ((LCEC_CONF_MODPARAM_T *)nth(lcecConfTypeModParam, n))
 #define SDO(n) ((LCEC_CONF_SDOCONF_T *)nth(lcecConfTypeSdoConfig, n))
+#define EOE(n) ((LCEC_CONF_EOE_T *)nth(lcecConfTypeEoe, n))
 #define DC(n) ((LCEC_CONF_DC_T *)nth(lcecConfTypeDcConf, n))
 
 /// The configuration fails with a message containing msg.
@@ -392,6 +395,40 @@ static void test_slave_errors(void) {
   CHECK_FAILS(HEAD "- {position: 3, profile: ds402}\n- {position: x, name: t, profile: generic}\n", "name missing");
   CHECK(strstr(fake_msgs, "ds402") != NULL);
   CHECK(strstr(fake_msgs, "position: \"x\" is not a number") != NULL);
+}
+
+#define EOE_SLAVE(block) ("ecat: 1\nslaves:\n- position: 0\n  name: d\n  profile: generic\n  eoe: " block "\n")
+
+static void test_eoe(void) {
+  CHECK_EQ(load(EOE_SLAVE("{ip: 192.168.10.21/24, gateway: 192.168.10.1, dns: 8.8.8.8, hostname: drive-x, mac: '02:00:00:00:10:21'}")), 0);
+  CHECK_EQ(count(lcecConfTypeEoe), 1);
+  CHECK_EQ(EOE(0)->given, LCEC_EOE_IP | LCEC_EOE_MASK | LCEC_EOE_GATEWAY | LCEC_EOE_DNS | LCEC_EOE_HOSTNAME | LCEC_EOE_MAC);
+  CHECK_EQ(EOE(0)->ip, htonl(0xC0A80A15));
+  CHECK_EQ(EOE(0)->mask, htonl(0xFFFFFF00));
+  CHECK_EQ(EOE(0)->gateway, htonl(0xC0A80A01));
+  CHECK_EQ(EOE(0)->dns, htonl(0x08080808));
+  CHECK_EQ(EOE(0)->mac[0], 0x02);
+  CHECK_EQ(EOE(0)->mac[5], 0x21);
+  CHECK_EQ(strcmp(EOE(0)->hostname, "drive-x"), 0);
+  // the mask as an address, and only an address
+  CHECK_EQ(load(EOE_SLAVE("{ip: 10.0.0.5, mask: 255.255.0.0}")), 0);
+  CHECK_EQ(EOE(0)->given, LCEC_EOE_IP | LCEC_EOE_MASK);
+  CHECK_EQ(EOE(0)->mask, htonl(0xFFFF0000));
+  CHECK_EQ(load(EOE_SLAVE("{ip: 10.0.0.5}")), 0);
+  CHECK_EQ(EOE(0)->given, LCEC_EOE_IP);
+  // /0 and /32
+  CHECK_EQ(load(EOE_SLAVE("{ip: 10.0.0.5/32}")), 0);
+  CHECK_EQ(EOE(0)->mask, htonl(0xFFFFFFFFu));
+  // without eoe: no record
+  CHECK_EQ(load(io), 0);
+  CHECK_EQ(count(lcecConfTypeEoe), 0);
+  CHECK_FAILS(EOE_SLAVE("{gateway: 10.0.0.1}"), "eoe: needs ip");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.300}"), "eoe.ip: \"10.0.0.300\" is not an IPv4 address");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5/33}"), "prefix length");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5/24, mask: 255.255.255.0}"), "not both");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5, mask: 255.0.255.0}"), "is not a subnet mask");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5, mac: '02:00:00:00:10'}"), "eoe.mac");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5, hostname: ''}"), "eoe.hostname");
 }
 
 static void test_dc(void) {
@@ -871,6 +908,6 @@ static void test_serial_errors(void) {
 }
 
 RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
-    test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_settings,
+    test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders, test_serial, test_serial_errors)

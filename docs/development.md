@@ -1417,6 +1417,47 @@ Built so far:
 Still to do: a capture from a real terminal (in particular of
 send-continuous: when exactly SW.2 drops).
 
+## EoE
+
+Use case (the user, 2026-11-15): web pages for a drive's settings through
+the bus; 0.5 MB/s is fast enough. The test slave will be an EaserCAT board
+(SOES) with EoE and lwIP.
+
+### Done: the ecat side (2026-11-15)
+
+`eoe:` per slave in `ethercat.yaml` ([component.md](component.md#eoe)):
+`ecat_config.c` writes an `LCEC_CONF_EOE_T` record, `lcec_main.c` calls
+`ecrt_slave_config_eoe_*` beside `ecrt_slave_config_dc`. These calls need no
+IPC: the master's library runs inside `ecat.so`, so they only fill the slave
+configuration's request (the master sends it in the slave's configuration
+state machine; a failure there is an error line, not a stop). Checked by
+`config.check`/`--check` (the same rules as C), `eoe_warnings` (same address
+twice, gateway outside the subnet), the SII's EoE bit
+(`sii.has_eoe`, `Proposal.has_eoe`: a note in the proposal, a warning for an
+`eoe:` block on a slave without it). Unit tests in
+`component/tests/test_config.c` (`test_eoe`) and `tests/test_prototype.py`
+(`test_eoe_*`), mutation-checked. No HAL pins.
+
+### Not built
+
+- The data path. In LinuxCNC the master's EoE thread needs
+  `ecrt_master_callbacks()` after activation, which ecat registers only under
+  `__KERNEL__`, so EoE stops ("No EoE processing because of missing
+  callbacks!"). IgH's own way (the EoE thread sends between cycles under a
+  shared lock) risks priority inversion and a frame of up to ~120 us ahead of
+  the cyclic one. Proposal: in the fork, `ecrt_master_send()` takes the EoE
+  datagrams too (trylock, else next cycle), the callbacks stay empty and the
+  EoE thread only runs its state machines. The handoff between the EoE thread
+  and the servo thread (memory ordering) is the part to review carefully.
+- `host-ip`: ecat setting the host's address on the TAP device
+  (`eoe0s<position>`, recreated at each handover) from the same file.
+  Routing and bridging are documented, not configured.
+- A window card for `eoe:` (the file can be edited by hand).
+- A test slave: SOES with EoE on an EaserCAT board (the card's code and schema
+  are in `/mnt/server/src/MyOwnEtherCATDevice/Cards/EaserCAT-4000-THCAD-Reader`,
+  SOES in `/mnt/server/src/SOES`; work on copies).
+- Measuring the cyclic frame with EoE traffic (`scripts/dc-jitter-measure`).
+
 ## Start time: the XDP program stays on the card
 
 Measured 2026-11-15 on this machine (N100, igc, `xdp-native`, three ECT60

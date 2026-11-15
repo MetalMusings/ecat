@@ -338,6 +338,7 @@ typedef struct lcec_slave {
   ec_slave_config_t *config;                 ///< Configuration data.
   ec_slave_config_state_t state;             ///< Slave state.
   lcec_slave_dc_t *dc_conf;                  ///< Distributed Clock configuration.
+  LCEC_CONF_EOE_T *eoe_conf;                 ///< EoE settings (ethercat.yaml eoe:), NULL if none.
   lcec_slave_watchdog_t *wd_conf;            ///< Watchdog configuration.
   lcec_slave_preinit_t proc_preinit;         ///< Callback for pre-init, if any.
   lcec_slave_init_t proc_init;               ///< Callback for initializing device.

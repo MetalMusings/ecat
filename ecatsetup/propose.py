@@ -105,6 +105,7 @@ class Proposal:
     dc_shift: int = None
     dc_source: str = ""
     dc_info: object = None      # dcinfo.DcInfo: what the slave can do with DC
+    has_eoe: bool = False       # the SII lists the EoE mailbox protocol
     esi_path: str = ""
     settings: list = field(default_factory=list)   # writable vendor objects
     encoders: list = field(default_factory=list)   # (name, status index) of encoder channels
@@ -470,6 +471,10 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
 
     # Distributed clocks: the modes of an ESI file of the slave's revision,
     # else the SII's, else an ESI file's of another revision (dcinfo.py).
+    p.has_eoe = sii.has_eoe
+    if sii.has_eoe:
+        p.notes.append("This slave supports EoE (Ethernet over EtherCAT): an eoe: block in its entry gives it an "
+                       "IP address (docs/component.md)")
     p.dc_info = d = dcinfo.build(info, sii, esi_dev, esi_exact)
     modes = d.modes()
     # The first mode is the slave's default: a drive lists DC first, an I/O

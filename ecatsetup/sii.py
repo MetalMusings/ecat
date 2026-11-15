@@ -85,6 +85,10 @@ class Sii:
     def has_coe(self):
         return bool(self.mailbox_protocols & 0x04)
 
+    @property
+    def has_eoe(self):
+        return bool(self.mailbox_protocols & 0x02)
+
 
 def _string(strings, idx):
     """SII strings are numbered from 1; 0 means none."""

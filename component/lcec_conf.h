@@ -51,7 +51,8 @@ typedef enum {
   lcecConfTypeIdnDataRaw,
   lcecConfTypeInitCmds,
   lcecConfTypeComplexEntry,
-  lcecConfTypeModParam
+  lcecConfTypeModParam,
+  lcecConfTypeEoe
 } LCEC_CONF_TYPE_T;
 
 typedef enum {
@@ -109,6 +110,22 @@ typedef struct {
   uint32_t sync1Cycle;
   int32_t sync1Shift;
 } LCEC_CONF_DC_T;
+
+/// A slave's EoE (Ethernet over EtherCAT) settings: what the master tells the
+/// slave when it configures it. Addresses are in network byte order.
+#define LCEC_EOE_MAC 0x01
+#define LCEC_EOE_IP 0x02
+#define LCEC_EOE_MASK 0x04
+#define LCEC_EOE_GATEWAY 0x08
+#define LCEC_EOE_DNS 0x10
+#define LCEC_EOE_HOSTNAME 0x20
+typedef struct {
+  LCEC_CONF_TYPE_T confType;
+  unsigned int given;  ///< LCEC_EOE_* bits: which values the file has
+  uint8_t mac[6];
+  uint32_t ip, mask, gateway, dns;
+  char hostname[LCEC_CONF_STR_MAXLEN];
+} LCEC_CONF_EOE_T;
 
 typedef struct {
   LCEC_CONF_TYPE_T confType;

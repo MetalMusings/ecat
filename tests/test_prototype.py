@@ -513,6 +513,51 @@ class TestEsi(unittest.TestCase):
         s.pdos = [sii.Pdo(0x1600, "rx", 2, "Outputs", True, False, word(0x7000, "Value", "Data Out"))]
         self.assertEqual(propose.propose({"position": 0, "dc": False}, s, coe.Dictionary()).serial_channels, [])
 
+    def test_eoe_rules(self):
+        # as ecat_config.c (component/tests/test_config.c test_eoe)
+        def errs(**eoe):
+            return config.eoe_errors(eoe)
+        self.assertEqual(errs(ip="192.168.10.21/24", gateway="192.168.10.1", dns="8.8.8.8", hostname="drive-x",
+                              mac="02:00:00:00:10:21"), [])
+        self.assertEqual(errs(ip="10.0.0.5", mask="255.255.0.0"), [])
+        self.assertEqual(errs(ip="10.0.0.5/32"), [])
+        self.assertIn("needs ip", errs(gateway="10.0.0.1")[0])
+        self.assertIn("not an IPv4 address", errs(ip="10.0.0.300")[0])
+        self.assertIn("not an IPv4 address", errs(ip="10.0.0.5/33")[0])
+        self.assertIn("not both", errs(ip="10.0.0.5/24", mask="255.255.255.0")[0])
+        self.assertIn("not a subnet mask", errs(ip="10.0.0.5", mask="255.0.255.0")[0])
+        self.assertIn("not a subnet mask", errs(ip="10.0.0.5", mask="0.0.0.0")[0])
+        self.assertIn("eoe.mac", errs(ip="10.0.0.5", mac="02:00:00:00:10")[0])
+        self.assertIn("eoe.hostname", errs(ip="10.0.0.5", hostname="")[0])
+        self.assertIn("unknown key", errs(ip="10.0.0.5", host="x")[0])
+        cfg = {"ecat": 1, "master": {}, "slaves": [
+            {"position": 0, "name": "d", "profile": "generic", "identity": {"vendor": "0x2", "product": "0x1"},
+             "eoe": {"ip": "10.0.0.5", "bogus": 1}}]}
+        self.assertTrue(any("slave 0" in e and "bogus" in e for e in config.check(cfg)))
+
+    def test_eoe_warnings(self):
+        def slave(pos, **eoe):
+            return {"position": pos, "name": "s%d" % pos, "eoe": eoe}
+        self.assertEqual(config.eoe_warnings({"slaves": [slave(0, ip="10.0.0.5/24", gateway="10.0.0.1")]}), [])
+        w = config.eoe_warnings({"slaves": [slave(0, ip="10.0.0.5/24"), slave(1, ip="10.0.0.5", mask="255.255.255.0")]})
+        self.assertEqual(len(w), 1)
+        self.assertIn("also", w[0])
+        w = config.eoe_warnings({"slaves": [slave(0, ip="10.0.0.5/24", gateway="10.1.0.1")]})
+        self.assertEqual(len(w), 1)
+        self.assertIn("not in the slave's subnet", w[0])
+        # an invalid block is the check's business, not a warning
+        self.assertEqual(config.eoe_warnings({"slaves": [slave(0, ip="nonsense")]}), [])
+
+    def test_eoe_note_from_sii(self):
+        s = sii.Sii(2, 0x1, 0, 0, 0, name="X")
+        s.mailbox_protocols = 0x06
+        self.assertTrue(s.has_eoe)
+        s.mailbox_protocols = 0x04
+        self.assertFalse(s.has_eoe)
+        self.assertFalse(propose.propose({"position": 0, "dc": False}, s, coe.Dictionary()).has_eoe)
+        s.mailbox_protocols = 0x02
+        self.assertTrue(propose.propose({"position": 0, "dc": False}, s, coe.Dictionary()).has_eoe)
+
     def test_serial_half_duplex_note(self):
         s = {"position": 4, "name": "rs485", "identity": {"vendor": "0x00000002", "product": "0x17853052"},
              "serial": [{"name": "port", "output-pdo": "0x1604", "input-pdo": "0x1A04", "port": "/dev/ttyECAT4"}]}

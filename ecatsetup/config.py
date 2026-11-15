@@ -7,6 +7,7 @@ that the setup program writes; numbers that are EtherCAT identifiers
 read as they do in vendor documentation.
 """
 
+import ipaddress
 import re
 
 import yaml
@@ -193,6 +194,79 @@ def dc_warnings(cfg):
             "synchronised every 1 to %d cycles (ref-clock-sync-cycles is %s): less often, the "
             "slaves' clock wanders against the servo thread. Or use "
             "servo-thread-follows-ref-clock: true" % (REF_SYNC_MAX, "not set" if n is None else n)]
+
+
+EOE_KEYS = ("ip", "mask", "gateway", "dns", "hostname", "mac")
+
+
+def eoe_errors(eoe):
+    """Errors in a slave's eoe: block (the same rules as component/ecat_config.c)."""
+    if eoe is None:
+        return []
+    if not isinstance(eoe, dict):
+        return ["eoe: must be a mapping (ip, mask, gateway, dns, hostname, mac)"]
+    out = ["eoe: unknown key %r (ip, mask, gateway, dns, hostname, mac)" % k for k in eoe if k not in EOE_KEYS]
+
+    def addr(key, text, prefix=False):
+        try:
+            if prefix and "/" in str(text):
+                return ipaddress.IPv4Interface(str(text))
+            return ipaddress.IPv4Address(str(text))
+        except ValueError:
+            out.append("eoe.%s: %r is not an IPv4 address%s" % (key, text, " (such as 192.168.10.21/24)" if prefix else ""))
+        return None
+
+    if "ip" not in eoe:
+        out.append("eoe: needs ip (such as 192.168.10.21/24)")
+    else:
+        ip = addr("ip", eoe["ip"], True)
+        if ip is not None and "mask" in eoe and "/" in str(eoe["ip"]):
+            out.append("eoe: give the subnet as ip/prefix or as mask, not both")
+    if "mask" in eoe:
+        m = addr("mask", eoe["mask"])
+        if m is not None:
+            v = int(m)
+            if v == 0 or (~v & 0xFFFFFFFF) & ((~v & 0xFFFFFFFF) + 1):
+                out.append("eoe.mask: %r is not a subnet mask" % (eoe["mask"],))
+    for k in ("gateway", "dns"):
+        if k in eoe:
+            addr(k, eoe[k])
+    if "hostname" in eoe and not (isinstance(eoe["hostname"], str) and 0 < len(eoe["hostname"]) < 32):
+        out.append("eoe.hostname: %r is empty or longer than 31 characters" % (eoe["hostname"],))
+    if "mac" in eoe and not re.fullmatch(r"[0-9A-Fa-f]{1,2}(:[0-9A-Fa-f]{1,2}){5}", str(eoe["mac"])):
+        out.append("eoe.mac: %r is not a MAC address such as 02:00:00:00:10:21" % (eoe["mac"],))
+    return out
+
+
+def eoe_network(eoe):
+    """The slave's subnet from an eoe: block, an IPv4Interface, or None."""
+    try:
+        ip = str(eoe["ip"])
+        if "/" not in ip and eoe.get("mask"):
+            return ipaddress.IPv4Interface("%s/%s" % (ip, eoe["mask"]))
+        return ipaddress.IPv4Interface(ip)
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def eoe_warnings(cfg):
+    """Texts about EoE settings that are valid but probably wrong: the same
+    address twice, a gateway outside the slave's subnet."""
+    out, seen = [], {}
+    for s in (cfg or {}).get("slaves") or []:
+        eoe = s.get("eoe")
+        if not isinstance(eoe, dict) or eoe_errors(eoe):
+            continue
+        who = "slave %s (%s)" % (s.get("position"), s.get("name"))
+        net = eoe_network(eoe)
+        if net is None:
+            continue
+        if net.ip in seen:
+            out.append("%s: eoe ip %s is also %s's" % (who, net.ip, seen[net.ip]))
+        seen[net.ip] = who
+        if "gateway" in eoe and ipaddress.IPv4Address(str(eoe["gateway"])) not in net.network and net.network.prefixlen < 32:
+            out.append("%s: eoe gateway %s is not in the slave's subnet %s" % (who, eoe["gateway"], net.network))
+    return out
 
 
 # RS422/RS485 terminals (Beckhoff EL6021, EL6022): for two-wire RS485 they
@@ -624,6 +698,8 @@ def check(cfg):
                     int(str(aa), 16)
                 except ValueError:
                     err("%s: dc assign-activate %r is not a hex number, such as 0x0300" % (where, aa))
+        for e in eoe_errors(s.get("eoe")):
+            err("%s: %s" % (where, e))
         set_objects = set()
         for st in s.get("settings") or []:
             try:

@@ -568,6 +568,8 @@ def check_file(path, esi_paths=()):
         print("Warning: %s" % text)
     for text in config.serial_notes(cfg):
         print("Note: %s" % text)
+    for text in config.eoe_warnings(cfg):
+        print("Warning: %s" % text)
     if esi_paths:
         # settings against the ESI files' object dictionaries
         sess = session.Session(esi_paths)

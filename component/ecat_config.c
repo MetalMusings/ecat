@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
 #include <yaml.h>
 
 #include "devices/ecat_cia402.h"
@@ -858,6 +859,87 @@ static void serial_settings(ctx_t *c, buf_t *b, size_t slave_off) {
   }
 }
 
+/// An IPv4 address "a.b.c.d" or "a.b.c.d/n" (prefix length into *prefix, -1
+/// without), in network byte order into *out. Errors name the key.
+static int parse_ipv4(ctx_t *c, const char *key, const char *text, uint32_t *out, int *prefix) {
+  char buf[64], *slash;
+  struct in_addr a;
+  if (prefix) *prefix = -1;
+  if (text == NULL || strlen(text) >= sizeof(buf)) {
+    error(c, "eoe.%s: \"%s\" is not an IPv4 address", key, text ? text : "");
+    return -1;
+  }
+  strcpy(buf, text);
+  slash = strchr(buf, '/');
+  if (slash != NULL) {
+    char *end;
+    long n;
+    *slash++ = 0;
+    n = strtol(slash, &end, 10);
+    if (prefix == NULL || *end || end == slash || n < 0 || n > 32) {
+      error(c, "eoe.%s: \"%s\" is not an address with a prefix length such as 192.168.10.21/24", key, text);
+      return -1;
+    }
+    *prefix = (int)n;
+  }
+  if (inet_pton(AF_INET, buf, &a) != 1) {
+    error(c, "eoe.%s: \"%s\" is not an IPv4 address", key, text);
+    return -1;
+  }
+  *out = a.s_addr;
+  return 0;
+}
+
+/// eoe: ip (with or without /prefix), mask, gateway, dns, hostname, mac.
+static void eoe(ctx_t *c, buf_t *b, yaml_node_t *e) {
+  LCEC_CONF_EOE_T *ec;
+  const char *v;
+  int prefix = -1;
+  if (e == NULL) return;
+  ec = append(b, sizeof(*ec));
+  if (ec == NULL) {
+    error(c, "out of memory");
+    return;
+  }
+  ec->confType = lcecConfTypeEoe;
+  if ((v = get_str(c, e, "ip")) == NULL) {
+    error(c, "eoe: needs ip (such as 192.168.10.21/24)");
+  } else if (parse_ipv4(c, "ip", v, &ec->ip, &prefix) == 0) {
+    ec->given |= LCEC_EOE_IP;
+  }
+  if ((v = get_str(c, e, "mask")) != NULL) {
+    if (prefix >= 0) {
+      error(c, "eoe: give the subnet as ip/prefix or as mask, not both");
+    } else if (parse_ipv4(c, "mask", v, &ec->mask, NULL) == 0) {
+      uint32_t m = ntohl(ec->mask);
+      if ((~m & (~m + 1)) != 0 || m == 0) error(c, "eoe.mask: \"%s\" is not a subnet mask", v);
+      ec->given |= LCEC_EOE_MASK;
+    }
+  } else if (prefix >= 0) {
+    ec->mask = prefix == 0 ? 0 : htonl(0xffffffffu << (32 - prefix));
+    ec->given |= LCEC_EOE_MASK;
+  }
+  if ((v = get_str(c, e, "gateway")) != NULL && parse_ipv4(c, "gateway", v, &ec->gateway, NULL) == 0) ec->given |= LCEC_EOE_GATEWAY;
+  if ((v = get_str(c, e, "dns")) != NULL && parse_ipv4(c, "dns", v, &ec->dns, NULL) == 0) ec->given |= LCEC_EOE_DNS;
+  if ((v = get_str(c, e, "hostname")) != NULL) {
+    if (!*v || strlen(v) >= 32) error(c, "eoe.hostname: \"%s\" is empty or longer than 31 characters", v);
+    copy_str(ec->hostname, v);
+    ec->given |= LCEC_EOE_HOSTNAME;
+  }
+  if ((v = get_str(c, e, "mac")) != NULL) {
+    unsigned int m[6];
+    char extra;
+    if (sscanf(v, "%x:%x:%x:%x:%x:%x%c", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5], &extra) != 6 ||
+        (m[0] | m[1] | m[2] | m[3] | m[4] | m[5]) > 0xff) {
+      error(c, "eoe.mac: \"%s\" is not a MAC address such as 02:00:00:00:10:21", v);
+    } else {
+      int i;
+      for (i = 0; i < 6; i++) ec->mac[i] = (uint8_t)m[i];
+      ec->given |= LCEC_EOE_MAC;
+    }
+  }
+}
+
 static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   int a;
   yaml_node_t *ident = get(c, s, "identity");
@@ -976,6 +1058,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     dcc->sync0Cycle = get_int(c, dc, "sync0-cycles", 1);  // servo periods, see ecat_config.h
     dcc->sync0Shift = get_int(c, dc, "sync0-shift-ns", 0);
   }
+  eoe(c, b, get(c, s, "eoe"));
   process_data(c, b, get(c, s, "process-data"), (LCEC_CONF_SLAVE_T *)(b->data + off), off);
   if (c->cia402) {
     // what each allowed mode needs, and changing modes the mode objects

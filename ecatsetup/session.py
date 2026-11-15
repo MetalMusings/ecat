@@ -370,6 +370,12 @@ class Session:
         slave read from the bus can do: "warning" or "note"."""
         out = [("warning", t) for t in config.dc_warnings(self.cfg)]
         out += [("note", t) for t in config.serial_notes(self.cfg)]
+        out += [("warning", t) for t in config.eoe_warnings(self.cfg)]
+        for s in (self.cfg or {}).get("slaves") or []:
+            b = self.bus.get(s.get("position"))
+            if s.get("eoe") and b is not None and same_kind(s, b.info) and not getattr(b.proposal, "has_eoe", True):
+                out.append(("warning", "slave %s (%s): has an eoe: block, but its SII does not list the EoE "
+                            "mailbox protocol: the master cannot set its IP address" % (s["position"], s.get("name"))))
         for s in (self.cfg or {}).get("slaves") or []:
             for level, text in dcinfo.problems(s, self.dc_info(s.get("position")), self.period):
                 out.append((level, "slave %s (%s): %s" % (s["position"], s.get("name"), text)))

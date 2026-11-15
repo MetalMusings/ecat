@@ -261,6 +261,7 @@ file each stopped the load with their own line.
 | `configure-pdos` | `true`: the master writes the PDO assignment and mapping below to the slave; `false`: the slave's own mapping is used and the entries below are only located in it. |
 | `process-data` | `outputs` (master to slave) and `inputs` (slave to master): lists of PDOs. |
 | `dc` | Distributed clocks; leave out for none. |
+| `eoe` | An IP address and more for a slave that speaks Ethernet over EtherCAT; leave out for none (see [eoe](#eoe)). |
 | `settings` | SDOs written to the slave at start, in this order. |
 
 #### PDOs and entries
@@ -291,6 +292,39 @@ An entry with neither `pin` nor `split` is mapped but has no pin.
 | `assign-activate` | The slave's AssignActivate word, from its ESI file or SII, such as `"0x0300"`. EtherCAT Setup offers the slave's own DC modes and warns about a value the slave does not describe, or a slave whose chip cannot take SYNC0 ([Distributed clocks](ecatsetup.md#distributed-clocks)). |
 | `sync0-cycles` | SYNC0 period in servo periods. |
 | `sync0-shift-ns` | The slave's own SYNC0 shift. |
+
+#### eoe
+
+Slaves with an embedded web server (a drive, an IO-Link master, a
+gateway) speak Ethernet over EtherCAT. This block gives such a slave its
+address: the master sends it to the slave when it configures it, before
+the slave goes to SAFE-OP.
+
+```yaml
+- position: 2
+  name: x
+  eoe: {ip: 192.168.10.21/24, gateway: 192.168.10.1, hostname: drive-x}
+```
+
+| Key | Meaning |
+|---|---|
+| `ip` | The slave's IPv4 address, required, with the prefix length (`192.168.10.21/24`) or without. |
+| `mask` | The subnet mask (`255.255.255.0`), instead of the prefix length. Not both. |
+| `gateway`, `dns` | IPv4 addresses. |
+| `hostname` | At most 31 characters. |
+| `mac` | The slave's MAC address (`02:00:00:00:10:21`); the slave's own if left out. |
+
+`ecatsetup --check` and the window refuse an address that is not an IPv4
+address, a mask that is not a subnet mask, a MAC address or hostname that
+does not fit, and warn about the same address on two slaves and a gateway
+outside the slave's subnet. With the bus read, a slave whose SII does not
+list the EoE mailbox protocol is warned about, and a slave that has it gets
+a note in its proposal. A slave that does not take the parameters only gives
+an error line in the master's log: the bus starts anyway.
+
+This sets what the slave knows. The frames to and from it (a network
+device on the PC, `eoe0s<position>`) are the master's own EoE, which is
+[not yet usable in LinuxCNC](#not-yet-eoe).
 
 #### settings
 
@@ -1497,6 +1531,18 @@ or `and2` (HAL loads a component once).
 - Tried with unit tests only, not on a terminal.
 - Writing a joint to a stepper terminal is not in *HAL & LinuxCNC*;
   connect it in your HAL files as above.
+
+### Not yet (eoe)
+
+- The master's EoE needs callbacks that ecat does not register in
+  LinuxCNC, so with `ecat` loaded the network device does not carry
+  traffic ("No EoE processing because of missing callbacks!" in the
+  master's log). The plan (EoE datagrams in the cyclic frame, so that the
+  real-time thread is never held up) is in
+  [development.md](development.md#eoe).
+- Not tried on a slave: none of ours has EoE. The address is verified in
+  unit tests (`component/tests/test_config.c`, `tests/test_prototype.py`)
+  and the master's own code path in the master's simulator tests.
 
 ## Modular devices
 
