@@ -1324,6 +1324,40 @@ Passed. Two findings:
   would show the wait.
 
 
+## Serial channels (EL6001, EL6002, EL6021, EL6022)
+
+Being built (2026-11-15). Decided with the user: Modbus RTU to a VFD through
+mb2hal is a must, other serial use too; the channel shows up as a serial
+port (a pty with a stable name), so mb2hal and other programs need no
+changes; the baud rate follows the program (`tcsetattr`), parity and data
+bits come from `ethercat.yaml` (a pty does not pass them on: the Linux pty
+driver forces CS8 without parity; the terminal makes the parity on the wire
+itself); CUSE, which would pass them, is kept as a later swap. IgH's tty
+module is for the kernel master only.
+
+Sources, since we have no terminal: the ESI file (process data, CoE 0x8000
+"COM Settings" with its baud rate and data frame values), IgH's
+`examples/tty/serial.c`, and what others found on hardware (lcec commits
+04d397d, 1f50d45: after an init the terminal starts its toggles at 0, a
+request bit left at 1 stops sending; settings written while running are
+lost when the slave is power cycled). Beckhoff's manual is still to be read.
+
+Built so far:
+
+- `component/devices/ecat_serial_core.c`: the handshake (transmit
+  request/accepted, receive request/accepted, init), two lock-free byte
+  queues to and from the host side, settings while running (0x8000:11 and
+  :15 through SDO requests, written once the queued bytes have left the
+  terminal, then an init), error counters. No HAL, no master calls.
+- `component/tests/sim_el60xx.c`: a simulated terminal channel
+  (edge-triggered transmit request, buffers of 128 and 864 bytes, the wire
+  at the baud rate, turn-around 1-3 cycles, settings used from the next
+  init) and `tests/test_serial.c` (13 tests, mutation-checked).
+
+Still to do: the function in the component (`serial:` in the file, `use:
+profile`, pins), the pty bridge thread, Modbus RTU end to end against a
+simulated slave, EtherCAT Setup, docs/component.md.
+
 ## Start time: the XDP program stays on the card
 
 Measured 2026-11-15 on this machine (N100, igc, `xdp-native`, three ECT60
