@@ -9,7 +9,10 @@ spindle encoder: homing, jogging, cable pull and E-stop). EtherCAT Setup reads, 
 checks, updates and diagnoses a configuration in its window or from the
 command line, tests it (I/O, SDOs, moving a drive in small steps, homing),
 writes it into a LinuxCNC configuration, and watches a running LinuxCNC
-read only. Everything is built in steps, following the design draft.
+read only. Beckhoff's serial terminals (EL6001, EL6021, ...) give serial
+ports on the computer, for `mb2hal` and Modbus VFDs: built and tested
+against a simulated terminal, not yet on a real one. Everything is built
+in steps, following the design draft.
 
 ecat has two parts:
 
@@ -27,8 +30,8 @@ ecat has two parts:
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | What gets installed, and how to try ecat step by step without disturbing your setup, from the safest. Start here. |
-| [EtherCAT Setup](docs/ecatsetup.md) | The window, bringing up a new slave, the test mode, writing into LinuxCNC, the event log and report, quirk files, and the command line. |
-| [The ecat component](docs/component.md) | Using the component in HAL, the `ethercat.yaml` file format, and what drives (cia402), encoder channels, analog and stepper terminals and modular devices give you. |
+| [EtherCAT Setup](docs/ecatsetup.md) | The window, bringing up a new slave (with how-tos for a spindle encoder and a Modbus VFD on a serial terminal), the test mode, writing into LinuxCNC, the event log and report, quirk files, and the command line. |
+| [The ecat component](docs/component.md) | Using the component in HAL, the `ethercat.yaml` file format, and what drives (cia402), encoder channels, serial channels, analog and stepper terminals and modular devices give you. |
 | [Developing ecat](docs/development.md) | Building and testing, the design draft, what the prototype found on a real bus, the plan for fault tests at a machine, and how to get at devices we do not have. |
 
 ## Install

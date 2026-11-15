@@ -392,6 +392,106 @@ See [Inputs and outputs](#inputs-and-outputs) for the connection pins in
 general, and [encoder channels](component.md#encoder-channels) for every
 pin of the channel (`velocity`, `counts`, `reset`, the external latch).
 
+### A Modbus VFD on a serial terminal (EL6021)
+
+How to talk Modbus RTU to a VFD (or another Modbus device) over RS485
+through a Beckhoff EL6021 on the EtherCAT bus, with LinuxCNC's `mb2hal`,
+instead of a USB-RS485 adapter. The terminal's channel becomes a serial
+port on the computer, `/dev/ttyECAT4` for instance, and `mb2hal` uses it as
+it would use `/dev/ttyUSB0`. The same goes for the EL6001 (RS232) and the
+two-channel EL6002 and EL6022. Status: built from Beckhoff's manual and ESI
+files, tested against a simulated terminal with `mb2hal` in `halrun`
+(`scripts/serial-mb2hal-test`); not tried on a real terminal yet (see
+[serial channels](component.md#serial-channels)).
+
+What you need from the VFD's manual: its Modbus address (slave id), baud
+rate, parity and stop bits, and the registers for run/stop, the speed
+command and what you want to read back.
+
+1. **Wire it.** For two-wire RS485, the EL6021's transmit and receive
+   lines are connected to one another, as in Beckhoff's manual (EL600x,
+   EL602x, "Connection for RS485 transfer"), and to the VFD's A/B (or
+   D+/D-). The EL602x has no termination resistors of its own: put 120 Ω
+   at the two ends of the line.
+2. **Give it the ESI files** (*Add ESI files...*, the folder with
+   `Beckhoff EL6xxx.xml`) and **read the bus**. The proposal finds the
+   channel: the notes say *serial port: PDOs 0x1604/0x1A04, 22 data bytes;
+   a serial port on the computer ...*, and under Process data the
+   entries are *handled by the serial channel port*. The slave gets the
+   port `/dev/ttyECAT<position>` (an EL6022: `-1` and `-2`).
+3. **Set the port on the *Serial ports* card** of the slave's page:
+   - *Baud rate* and *Frame*: the VFD's (Modbus RTU is often 19200 8E1,
+     many VFDs ship with 9600 8N1). Parity and data bits are used as set
+     here, whatever `mb2hal` asks for: the port cannot pass them on.
+   - *RS485 (half duplex)*: tick it for two-wire RS485. Without it the
+     terminal also receives what it sends itself, and `mb2hal` reads its
+     own request back instead of the VFD's answer.
+   - *Send continuous*: tick it above 38400 baud, so that a request longer
+     than 22 bytes goes out without a pause (which would break it);
+     harmless below.
+   - *Port*: change the path if you like; it must not be the path of a
+     real port.
+
+   Save, and write into LinuxCNC (*Apply*), as for any slave.
+4. **Write mb2hal's file.** Copy the lines under the card (*Copy the
+   mb2hal lines*) into the first transaction of an mb2hal INI file in your
+   configuration folder, and add the transactions for your VFD (registers
+   and function codes from its manual; LinuxCNC's
+   `mb2hal_HOWTO.ini`, in its documentation, explains each key):
+
+   ```ini
+   [MB2HAL_INIT]
+   TOTAL_TRANSACTIONS=2
+   [TRANSACTION_00]
+   LINK_TYPE=serial
+   SERIAL_PORT=/dev/ttyECAT4
+   SERIAL_BAUD=19200
+   SERIAL_BITS=8
+   SERIAL_PARITY=even
+   SERIAL_STOP=1
+   MB_SLAVE_ID=1
+   MB_TX_CODE=fnct_06_write_single_register
+   FIRST_ELEMENT=8193
+   NELEMENTS=1
+   HAL_TX_NAME=vfd-cmd
+   [TRANSACTION_01]
+   MB_TX_CODE=fnct_03_read_holding_registers
+   FIRST_ELEMENT=12288
+   NELEMENTS=2
+   HAL_TX_NAME=vfd-status
+   ```
+
+   (The register numbers are an example; take yours from the VFD's
+   manual.) Start it from a HAL file of your own (`ecat`, which makes the
+   port, is loaded first, by `ethercat-load.hal`):
+   `loadusr -W mb2hal config=mb2hal.ini`, and connect
+   its pins (`mb2hal.vfd-cmd...`) to the spindle as for a USB adapter. The
+   [HAL check](#checking-the-hal-files) warns if `SERIAL_BITS` or
+   `SERIAL_PARITY` differ from the frame on the card.
+5. **Check it.** With LinuxCNC running (or the *Test* page's I/O test,
+   which loads `ecat` and so makes the port), these pins tell where it
+   stops:
+
+   | Pin | If |
+   |---|---|
+   | `<slave>.port.state` | 3 when the channel is ready; 0: no process data (the bus) |
+   | `<slave>.port.port-open` | true while `mb2hal` has the port open |
+   | `<slave>.port.tx-bytes` | counts up: requests go to the terminal |
+   | `<slave>.port.rx-bytes` | counts up: answers come back. Stays at 0: wiring, A/B swapped, the VFD's address, baud rate or parity, termination |
+   | `<slave>.port.parity-errors`, `framing-errors` | count up: the frame or baud rate differs from the VFD's |
+   | `<slave>.port.baud` | the rate the terminal has: `mb2hal`'s `SERIAL_BAUD` |
+   | `<slave>.port.settings-error` | true: the terminal did not take a rate `mb2hal` asked for |
+   | `<slave>.port.burst-timeouts` | counts up with *Send continuous*: the terminal did not confirm; untick it and tell us |
+
+   `mb2hal`'s own `mb2hal.<transaction>.num_errors` counts requests that
+   got no valid answer. When `rx-bytes` grows about as fast as `tx-bytes`
+   with half duplex off, the terminal hears itself: tick *RS485 (half
+   duplex)*.
+
+If you have a serial terminal, [a capture of the bus](#a-capture-of-the-bus)
+while `mb2hal` talks to the VFD helps to make the channel right for
+everyone (it has not met a real terminal yet).
+
 ### Distributed clocks
 
 What a slave can do with distributed clocks (DC) comes from four sources,
