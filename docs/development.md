@@ -1438,17 +1438,36 @@ twice, gateway outside the subnet), the SII's EoE bit
 `component/tests/test_config.c` (`test_eoe`) and `tests/test_prototype.py`
 (`test_eoe_*`), mutation-checked. No HAL pins.
 
+### Done: the master side (2026-11-15, fork f681704f, not released)
+
+Without `ecrt_master_callbacks()` (ecat's case in LinuxCNC), the fork's EoE
+thread now only runs the EoE state machines and its datagrams ride in ecat's
+cyclic frames: `ecrt_master_send()` takes them from the master's external
+queue (trylock, within the send interval's frame budget, else next cycle),
+`ecrt_master_receive()` brings the replies. The EoE thread never sends a
+frame and never holds up the servo thread. The handover is lock-free by the
+datagram's atomic state (QUEUED/SENT belong to the I/O side, which dequeues
+before the state store that hands a datagram back); EoE handlers cleared by a
+rescan in OP take their datagrams back first. Found and fixed on the way:
+EoE fragments were sized by the slave's send mailbox instead of its receive
+mailbox. Design and handover table: the fork's
+`docs/design/userspace-master.md`, "EoE After Activation". Test:
+`tests/test_sim_eoe_cyclic.c` (multi-fragment frames, no frame outside the
+cycle, process data complete, link loss with EoE in flight), mutation-checked.
+Needs a master release (uspace-v1.4) to reach the package. ecat itself
+needed no change.
+
 ### Not built
 
-- The data path. In LinuxCNC the master's EoE thread needs
-  `ecrt_master_callbacks()` after activation, which ecat registers only under
-  `__KERNEL__`, so EoE stops ("No EoE processing because of missing
-  callbacks!"). IgH's own way (the EoE thread sends between cycles under a
-  shared lock) risks priority inversion and a frame of up to ~120 us ahead of
-  the cyclic one. Proposal: in the fork, `ecrt_master_send()` takes the EoE
-  datagrams too (trylock, else next cycle), the callbacks stay empty and the
-  EoE thread only runs its state machines. The handoff between the EoE thread
-  and the servo thread (memory ordering) is the part to review carefully.
+- Mailbox sharing (found 2026-11-15): the master reads a slave's mailbox
+  for whichever protocol asks first, and drops a reply of another protocol
+  ("Other mailbox protocol response for eoe0s0"). The EoE handler polls the
+  mailbox all the time (in userspace the TAP device counts as open from its
+  creation), so CoE replies for the same slave are lost: start SDOs and SDO
+  requests to an EoE slave time out (seen in the simulator, also before the
+  cyclic change, and in upstream's way of running EoE). Needs replies kept
+  per protocol in the master, or EoE kept off the mailbox while another
+  protocol uses it.
 - `host-ip`: ecat setting the host's address on the TAP device
   (`eoe0s<position>`, recreated at each handover) from the same file.
   Routing and bridging are documented, not configured.

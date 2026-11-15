@@ -1534,12 +1534,13 @@ or `and2` (HAL loads a component once).
 
 ### Not yet (eoe)
 
-- The master's EoE needs callbacks that ecat does not register in
-  LinuxCNC, so with `ecat` loaded the network device does not carry
-  traffic ("No EoE processing because of missing callbacks!" in the
-  master's log). The plan (EoE datagrams in the cyclic frame, so that the
-  real-time thread is never held up) is in
-  [development.md](development.md#eoe).
+- The network device carries traffic only with a master that puts EoE in
+  the cyclic frames (the fork after uspace-v1.3; not released yet). With
+  1.3 and earlier, the master's log says "No EoE processing because of
+  missing callbacks!" and the device is silent.
+- SDOs to the same slave can time out while EoE runs: the master does not
+  yet keep mailbox replies apart per protocol
+  ([development.md](development.md#eoe)).
 - Not tried on a slave: none of ours has EoE. The address is verified in
   unit tests (`component/tests/test_config.c`, `tests/test_prototype.py`)
   and the master's own code path in the master's simulator tests.
