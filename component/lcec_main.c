@@ -28,6 +28,7 @@
 #include "devices/lcec_generic.h"
 #include "devices/ecat_cia402.h"
 #include "devices/ecat_encoder.h"
+#include "devices/ecat_serial.h"
 #include "ecat_config.h"
 #include "ecat_startcheck.h"
 
@@ -1036,6 +1037,10 @@ int rtapi_app_main(void) {
       }
       if (ecat_encoder_init(lcec_comp_id, slave) != 0) {
         rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure setting up the encoders of slave %s.%s\n", master->name, slave->name);
+        goto fail2;
+      }
+      if (ecat_serial_init(lcec_comp_id, slave) != 0) {
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failure setting up the serial channels of slave %s.%s\n", master->name, slave->name);
         goto fail2;
       }
 

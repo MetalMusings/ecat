@@ -61,6 +61,19 @@ def obj(index, subindex):
 ENCODER_PINS = ("reset", "counts", "raw-count", "pos", "velocity", "ok", "index-enable",
                 "latch-enable-pos", "latch-enable-neg", "latch-pos")
 
+# the serial function (component/devices/ecat_serial.c): pins after
+# "<slave>.<channel>.", the baud rates and data frames of the terminals'
+# CoE 0x8000:11 and :15, the most channels per slave
+SERIAL_PINS = ("state", "tx-bytes", "rx-bytes", "parity-errors", "framing-errors", "overrun-errors",
+               "buffer-full", "baud", "settings-error", "port-open")
+SERIAL_BAUDS = {300: 1, 600: 2, 1200: 3, 2400: 4, 4800: 5, 9600: 6, 19200: 7, 38400: 8,
+                57600: 9, 115200: 10}
+SERIAL_FRAMES = {"7E1": 1, "7O1": 2, "8N1": 3, "8E1": 4, "8O1": 5, "7E2": 9, "7O2": 10,
+                 "8N2": 11, "8E2": 12, "8O2": 13}
+SERIAL_MAX_CHANNELS = 8
+SERIAL_MAX_DATA = 22
+SERIAL_SUB_BAUD, SERIAL_SUB_FRAME = 0x11, 0x15
+
 
 def parse_obj(text):
     """"0x6040:00" -> (0x6040, 0)."""
@@ -262,7 +275,7 @@ def check(cfg):
     if not isinstance(slaves, list) or not slaves:
         return errors + ["slaves: none"]
 
-    positions, names, pins, axis_names = set(), set(), set(), set()
+    positions, names, pins, axis_names, ports = set(), set(), set(), set(), set()
     for i, s in enumerate(slaves):
         where = "slave %s" % s.get("position", "#%d" % i)
         pos, name = s.get("position"), s.get("name")
@@ -349,6 +362,57 @@ def check(cfg):
             for pin in ENCODER_PINS:
                 pins.add("%s.%s.%s" % (name, cname, pin))
 
+        # serial channels: output PDO, input PDO -> name; bits seen per PDO
+        serial = []  # (name, out, in, settings index)
+        ser = s.get("serial") or []
+        if not isinstance(ser, list):
+            err("%s: serial must be a list" % where)
+            ser = []
+        if len(ser) > SERIAL_MAX_CHANNELS:
+            err("%s: more than %d serial channels" % (where, SERIAL_MAX_CHANNELS))
+        for i, ch in enumerate(ser):
+            ch = ch if isinstance(ch, dict) else {}
+            cname = ch.get("name")
+            if not isinstance(cname, str) or not _NAME.match(cname):
+                err("%s: serial channel name %r is not valid" % (where, cname))
+                continue
+            try:
+                out, inp = int(str(ch.get("output-pdo")), 16), int(str(ch.get("input-pdo")), 16)
+            except ValueError:
+                out = inp = -1
+            if not (0x1600 <= out <= 0x17FF and 0x1A00 <= inp <= 0x1BFF):
+                err("%s: serial channel %s: output-pdo (0x1600-0x17FF) and input-pdo "
+                    "(0x1A00-0x1BFF) are needed" % (where, cname))
+                continue
+            port = ch.get("port")
+            if not isinstance(port, str) or not port.startswith("/") or len(port) >= 48:
+                err("%s: serial channel %s: port must be a full path shorter than 48 characters, "
+                    "such as /dev/ttyECAT0" % (where, cname))
+            elif port in ports:
+                err("%s: serial channel %s: port %s is another channel's" % (where, cname, port))
+            else:
+                ports.add(port)
+            try:
+                settings_index = int(str(ch.get("settings-index", "0x%04X" % (0x8000 + 0x10 * i))), 16)
+            except ValueError:
+                settings_index = -1
+            if not 0x8000 <= settings_index <= 0x8FF0:
+                err("%s: serial channel %s: settings-index must be 0x8000 to 0x8FF0" % (where, cname))
+            if ch.get("baud", 9600) not in SERIAL_BAUDS:
+                err("%s: serial channel %s: baud %r is not one of %s"
+                    % (where, cname, ch.get("baud"), ", ".join(str(b) for b in sorted(SERIAL_BAUDS))))
+            if str(ch.get("frame", "8N1")) not in SERIAL_FRAMES:
+                err("%s: serial channel %s: frame %r is not one of %s"
+                    % (where, cname, ch.get("frame"), ", ".join(SERIAL_FRAMES)))
+            for other in serial:
+                if other[0] == cname or other[1] == out or other[2] == inp or other[3] == settings_index:
+                    err("%s: serial channel %s: its name, PDOs or settings-index are another channel's"
+                        % (where, cname))
+            serial.append((cname, out, inp, settings_index))
+            for pin in SERIAL_PINS:
+                pins.add("%s.%s.%s" % (name, cname, pin))
+        serial_bits = {}  # PDO -> bits
+
         def encoder_of(o):
             if o[0] in encoders and o[1] in ENCODER_INPUTS:
                 return encoders[o[0]]
@@ -368,6 +432,30 @@ def check(cfg):
                     # the component would leave the second direction's PDOs out
                     err("%s: sm %d is used for outputs and inputs" % (where, sm))
                     sm_dir[sm] = "both"
+                try:
+                    pdo_index = int(str(pdo.get("pdo")), 16)
+                except ValueError:
+                    pdo_index = None
+                ser_ch = next((c for c in serial if pdo_index in (c[1], c[2])), None)
+                if ser_ch is not None and pdo_index != (ser_ch[1] if direction == "outputs" else ser_ch[2]):
+                    err("%s: serial channel %s: PDO 0x%04X is in the %s" % (where, ser_ch[0], pdo_index, direction))
+                    ser_ch = None
+                if ser_ch is not None:
+                    # all of it is the serial function's
+                    serial_bits[pdo_index] = 0
+                    for e in pdo.get("entries", []):
+                        bits = e.get("bits")
+                        serial_bits[pdo_index] += bits if isinstance(bits, int) else 0
+                        if e.get("use") == "gap":
+                            continue
+                        if e.get("use") != "profile" or "pin" in e or "split" in e:
+                            err("%s: %s: serial channel %s handles this PDO; give its entries use: profile"
+                                % (where, e.get("object"), ser_ch[0]))
+                        try:
+                            seen.add(parse_obj(e.get("object")))
+                        except ValueError as x:
+                            err("%s: %s" % (where, x))
+                    continue
                 for e in pdo.get("entries", []):
                     try:
                         o = parse_obj(e.get("object"))
@@ -389,8 +477,8 @@ def check(cfg):
                                 % (where, e["object"], encoder_of(o)))
                         owned.add(o)
                     elif e.get("use") == "profile":
-                        err("%s: %s: use: profile is only for objects of the cia402 profile or an "
-                            "encoder channel" % (where, e["object"]))
+                        err("%s: %s: use: profile is only for objects of the cia402 profile, an "
+                            "encoder channel or a serial channel's PDO" % (where, e["object"]))
                     if o in seen:
                         err("%s: %s mapped twice" % (where, e["object"]))
                     seen.add(o)
@@ -452,6 +540,16 @@ def check(cfg):
                         elif full in pins:
                             err("%s: pin %s used twice" % (where, full))
                         pins.add(full)
+        for cname, out, inp, settings_index in serial:
+            for pdo_index, direction in ((out, "outputs"), (inp, "inputs")):
+                bits = serial_bits.get(pdo_index)
+                if bits is None:
+                    err("%s: serial channel %s: PDO 0x%04X is not in the %s" % (where, cname, pdo_index, direction))
+                elif bits % 8 or not 24 <= bits <= 16 + 8 * SERIAL_MAX_DATA:
+                    err("%s: serial channel %s: PDO 0x%04X has %d bits; it needs a control (status) byte, "
+                        "a length byte and 1 to %d data bytes" % (where, cname, pdo_index, bits, SERIAL_MAX_DATA))
+            if out in serial_bits and inp in serial_bits and serial_bits[out] != serial_bits[inp]:
+                err("%s: serial channel %s: the output and input PDOs need the same size" % (where, cname))
         for index, cname in encoders.items():
             if (index, 0x11) not in owned:
                 err("%s: encoder %s needs 0x%04X:11 (counter value) in the process data"
@@ -484,6 +582,11 @@ def check(cfg):
         for st in s.get("settings") or []:
             try:
                 set_objects.add(parse_obj(st.get("object")))
+                for cname, _, _, settings_index in serial:
+                    if parse_obj(st.get("object")) in ((settings_index, SERIAL_SUB_BAUD),
+                                                       (settings_index, SERIAL_SUB_FRAME)):
+                        err("%s: setting %s: the baud rate and data frame of serial channel %s are "
+                            "its baud and frame" % (where, st.get("object"), cname))
                 why = quirks.command(s, parse_obj(st.get("object"))[0])
                 if why:
                     err("%s: setting %s is a command, not a setting: %s"

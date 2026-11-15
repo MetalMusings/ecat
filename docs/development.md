@@ -1354,9 +1354,15 @@ Built so far:
   at the baud rate, turn-around 1-3 cycles, settings used from the next
   init) and `tests/test_serial.c` (13 tests, mutation-checked).
 
-Still to do: the function in the component (`serial:` in the file, `use:
-profile`, pins), the pty bridge thread, Modbus RTU end to end against a
-simulated slave, EtherCAT Setup, docs/component.md.
+- The function in the component (`devices/ecat_serial.c`): `serial:` in
+  the file (`ecat_config.c` and `ecatsetup/config.py` check the same
+  rules), the two PDOs owned by the channel, the file's baud rate and frame
+  written at start, SDO requests for changes while running, pins
+  (`halpins.SERIAL`); tests in test_serial.c (on a fake EL6021 slave) and
+  test_config.c, test_prototype.py.
+
+Still to do: the pty bridge thread, Modbus RTU end to end against a
+simulated slave, EtherCAT Setup.
 
 ## Start time: the XDP program stays on the card
 

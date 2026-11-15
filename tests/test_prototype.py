@@ -21,7 +21,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
         __import__("tempfile").tempdir = __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 
-from ecatsetup import update, diagnose, coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
+from ecatsetup import halpins, update, diagnose, coe, config, esi, importxml, lcecxml, propose, sii  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
@@ -475,6 +475,48 @@ class TestEsi(unittest.TestCase):
         self.assertTrue(any("status index" in e for e in config.check(
             slave([counter], [{"name": "enc", "index": "0x6001"}]))))
         self.assertTrue(any("only for objects" in e for e in config.check(slave([counter], []))))
+
+    def test_serial_rules(self):
+        # as ecat_config.c (component/tests/test_config.c test_serial_errors)
+        def entries(index, n=22):
+            return ([{"object": "0x%04X:01" % index, "bits": 16, "type": "UINT", "use": "profile"}] +
+                    [{"object": "0x%04X:%02X" % (index, i + 2), "bits": 8, "type": "USINT", "use": "profile"}
+                     for i in range(n)])
+
+        def slave(serial, out_n=22, in_n=22, settings=None):
+            s = {"position": 0, "name": "com", "identity": {"vendor": "0x2", "product": "0x17853052"},
+                 "profile": "generic", "serial": serial,
+                 "process-data": {"outputs": [{"pdo": "0x1602", "sm": 2, "entries": entries(0x3003, out_n)}],
+                                  "inputs": [{"pdo": "0x1A02", "sm": 3, "entries": entries(0x3103, in_n)}]}}
+            if settings:
+                s["settings"] = settings
+            return {"ecat": 1, "master": {}, "slaves": [s]}
+        ok = {"name": "port", "output-pdo": "0x1602", "input-pdo": "0x1A02", "port": "/dev/ttyECAT0",
+              "baud": 19200, "frame": "8E1"}
+
+        def errors(*a, **k):
+            return config.check(slave(*a, **k))
+
+        def fails(text, *a, **k):
+            self.assertTrue(any(text in e for e in errors(*a, **k)), (text, errors(*a, **k)))
+        self.assertEqual(errors([ok]), [])
+        self.assertEqual(errors([{"name": "p", "output-pdo": "0x1602", "input-pdo": "0x1A02",
+                                  "port": "/dev/ttyECAT1"}]), [])
+        fails("the output and input PDOs need the same size", [ok], in_n=21)
+        fails("baud 14400 is not one of", [dict(ok, baud=14400)])
+        fails("frame '7N1' is not one of", [dict(ok, frame="7N1")])
+        fails("port must be a full path", [dict(ok, port="ttyECAT0")])
+        fails("PDO 0x1603 is not in the outputs", [dict(ok, **{"output-pdo": "0x1603"})])
+        fails("output-pdo (0x1600-0x17FF) and input-pdo", [dict(ok, **{"output-pdo": "0x1A02"})])
+        fails("are its baud and frame", [ok], settings=[{"object": "0x8000:11", "value": 6, "type": "USINT"}])
+        pinned = slave([ok])
+        e = pinned["slaves"][0]["process-data"]["outputs"][0]["entries"][4]
+        del e["use"]
+        e.update(pin="xx", **{"hal-type": "uint"})
+        self.assertTrue(any("serial channel port handles this PDO" in x for x in config.check(pinned)))
+        fails("a serial channel's PDO", [])
+        # the pins are the function's
+        self.assertIn("com.port.port-open", halpins.pins(slave([ok])))
 
     def test_sync_manager_rules(self):
         def slave(out_sm, in_sm):

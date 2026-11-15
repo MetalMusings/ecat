@@ -21,6 +21,7 @@
 
 #include "devices/ecat_cia402.h"
 #include "devices/ecat_encoder.h"
+#include "devices/ecat_serial.h"
 #include "lcec.h"
 
 #define ECAT_FORMAT_VERSION 1
@@ -48,6 +49,12 @@ typedef struct {
   unsigned int enc_owned[MAX_ENCODERS];  // which of enc_objects each has
   int enc_bits[MAX_ENCODERS];            // their counters' bits
   char enc_name[MAX_ENCODERS][LCEC_CONF_STR_MAXLEN];
+  int n_ser;          // the slave's serial channels
+  uint16_t ser_pdo[ECAT_MP_SERIAL_MAX_CHANNELS][2];   // their output and input PDOs
+  int ser_bits[ECAT_MP_SERIAL_MAX_CHANNELS][2];       // the PDOs' bits (0: not in the process data)
+  uint16_t ser_settings[ECAT_MP_SERIAL_MAX_CHANNELS]; // their settings indexes
+  uint8_t ser_baud[ECAT_MP_SERIAL_MAX_CHANNELS], ser_frame[ECAT_MP_SERIAL_MAX_CHANNELS];  // at start
+  char ser_name[ECAT_MP_SERIAL_MAX_CHANNELS][LCEC_CONF_STR_MAXLEN];
 } ctx_t;
 
 // ---- the cia402 profile's objects ----
@@ -315,7 +322,7 @@ static const dtype_t *find_dtype(const char *name) {
 // ---- process data ----
 
 /// Fill one PDO entry record (and complex records for "split"); count pins.
-static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned int *pins) {
+static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned int *pins, int ser) {
   LCEC_CONF_PDOENTRY_T *pe;
   yaml_node_t *split, *invert;
   const char *hal = get_str(c, e, "hal-type");
@@ -344,7 +351,18 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
   pe->subType = lcecPdoEntTypeSimple;
   pe->floatScale = 1.0;
   pe->floatOffset = 0.0;
-  if (use != NULL && !strcmp(use, "gap")) return;
+  if (use != NULL && !strcmp(use, "gap")) {
+    if (ser >= 0) c->ser_bits[ser][!output] += bits;
+    return;
+  }
+  // a serial channel's PDO: all of it is the function's
+  if (ser >= 0) {
+    if (use == NULL || strcmp(use, "profile") || pin != NULL || get(c, e, "split") != NULL) {
+      error(c, "%s: serial channel %s handles this PDO; give its entries \"use: profile\"", object, c->ser_name[ser]);
+    }
+    c->ser_bits[ser][!output] += bits;
+    return;
+  }
   // a drive's object, of axis ax (index + ax * 0x800)
   i = -1;
   ax = 0;
@@ -380,7 +398,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
     } else if (c->n_enc) {
       error(c, "%s: no encoder channel handles this object; give it a pin", object);
     } else {
-      error(c, "%s: \"use: profile\" needs profile cia402 or an encoder channel", object);
+      error(c, "%s: \"use: profile\" needs profile cia402, an encoder channel or a serial channel's PDO", object);
     }
     return;
   } else if (use != NULL) {
@@ -564,7 +582,17 @@ static void process_data(ctx_t *c, buf_t *b, yaml_node_t *pd, LCEC_CONF_SLAVE_T 
         pc->index = get_int(c, pdo, "pdo", 0);
         pc->pdoEntryCount = seq_len(entries);
         ((LCEC_CONF_SYNCMANAGER_T *)(b->data + sm_off))->pdoCount++;
-        for (k = 0; k < seq_len(entries); k++) pdo_entry(c, b, seq_item(c, entries, k), d == 0, &pins);
+        {
+          int ser = -1, q;
+          for (q = 0; q < c->n_ser; q++) {
+            if (c->ser_pdo[q][0] == pc->index || c->ser_pdo[q][1] == pc->index) ser = q;
+          }
+          if (ser >= 0 && c->ser_pdo[ser][d] != pc->index) {
+            error(c, "serial channel %s: PDO 0x%04X is in the %s", c->ser_name[ser], pc->index, dirs[d]);
+            ser = -1;
+          }
+          for (k = 0; k < seq_len(entries); k++) pdo_entry(c, b, seq_item(c, entries, k), d == 0, &pins, ser);
+        }
         s = (LCEC_CONF_SLAVE_T *)(b->data + slave_off);  // the buffer may have moved
         s->pdoCount++;
         s->pdoEntryCount += ((LCEC_CONF_PDO_T *)(b->data + pdo_off))->pdoEntryCount;
@@ -589,6 +617,14 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
     LCEC_CONF_SDOCONF_T *sc;
 
     if (parse_object(c, object, &index, &subindex) < 0) continue;
+    {
+      int q;
+      for (q = 0; q < c->n_ser; q++) {
+        if (index == c->ser_settings[q] && (subindex == ECAT_SER_SUB_BAUD || subindex == ECAT_SER_SUB_FRAME)) {
+          error(c, "setting %s: the baud rate and data frame of serial channel %s are its baud and frame", object, c->ser_name[q]);
+        }
+      }
+    }
     if ((ax = cia402_axis(c, index, 0x607D)) >= 0 && (subindex == 1 || subindex == 2)) c->pp_limits[ax] |= 1u << (subindex - 1);
     if (get(c, st, "value") != NULL) {
       const dtype_t *dt = find_dtype(get_str(c, st, "type"));
@@ -699,6 +735,123 @@ static void encoders(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
   }
 }
 
+static LCEC_CONF_MODPARAM_T *modparam(ctx_t *c, buf_t *b, size_t slave_off, int id, const char *name) {
+  LCEC_CONF_MODPARAM_T *mp = append(b, sizeof(*mp));
+  if (mp == NULL) {
+    error(c, "out of memory");
+    return NULL;
+  }
+  mp->confType = lcecConfTypeModParam;
+  mp->id = id;
+  copy_str(mp->name, name);
+  ((LCEC_CONF_SLAVE_T *)(b->data + slave_off))->modParamCount++;
+  return mp;
+}
+
+/// The slave's serial channels: [{name: com, output-pdo: '0x1604',
+/// input-pdo: '0x1A04', port: /dev/ttyECAT0, baud: 19200, frame: 8E1}, ...];
+/// four modParam records each (ecat_serial.h).
+static void serial_channels(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
+  int i, j, n;
+  c->n_ser = 0;
+  if (list == NULL || is_null(list)) return;
+  if (list->type != YAML_SEQUENCE_NODE) {
+    error(c, "serial must be a list");
+    return;
+  }
+  n = seq_len(list);
+  for (i = 0; i < n; i++) {
+    yaml_node_t *e = seq_item(c, list, i);
+    const char *name = get_str(c, e, "name");
+    const char *port = get_str(c, e, "port");
+    const char *frame = get_str(c, e, "frame");
+    long long out = get_int(c, e, "output-pdo", -1), in = get_int(c, e, "input-pdo", -1);
+    long long settings_index = get_int(c, e, "settings-index", 0x8000 + 0x10 * i);
+    long long baud = get_int(c, e, "baud", 9600);
+    uint8_t baud_value, frame_value = 0;
+    LCEC_CONF_MODPARAM_T *mp;
+    int base = ECAT_MP_SERIAL + 8 * c->n_ser;
+    if (c->n_ser == ECAT_MP_SERIAL_MAX_CHANNELS) {
+      error(c, "more than %d serial channels", ECAT_MP_SERIAL_MAX_CHANNELS);
+      return;
+    }
+    if (name == NULL || !name[0] || strlen(name) >= LCEC_CONF_STR_MAXLEN) {
+      error(c, "serial channel %d: name missing or too long", i + 1);
+      continue;
+    }
+    if (out < 0x1600 || out > 0x17FF || in < 0x1A00 || in > 0x1BFF) {
+      error(c, "serial channel %s: output-pdo (0x1600-0x17FF) and input-pdo (0x1A00-0x1BFF) are needed", name);
+      continue;
+    }
+    if (port == NULL || port[0] != '/' || strlen(port) >= LCEC_CONF_STR_MAXLEN) {
+      error(c, "serial channel %s: port must be a full path shorter than %d characters, such as /dev/ttyECAT0", name,
+          LCEC_CONF_STR_MAXLEN);
+      continue;
+    }
+    if (settings_index < 0x8000 || settings_index > 0x8FF0) {
+      error(c, "serial channel %s: settings-index must be 0x8000 to 0x8FF0", name);
+      continue;
+    }
+    if ((baud_value = ecat_ser_baud_value((unsigned long)baud)) == 0) {
+      error(c, "serial channel %s: baud %lld is not one of 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200",
+          name, baud);
+      continue;
+    }
+    {
+      // 8N1, 8E1, 7O2, ...
+      const char *f = frame != NULL ? frame : "8N1";
+      if (strlen(f) == 3 && (f[0] == '7' || f[0] == '8') && (f[2] == '1' || f[2] == '2'))
+        frame_value = ecat_ser_frame_value(f[0] - '0', f[1], f[2] - '0');
+      if (frame_value == 0) {
+        error(c, "serial channel %s: frame \"%s\" is not one of 7E1, 7O1, 8N1, 8E1, 8O1, 7E2, 7O2, 8N2, 8E2, 8O2", name, f);
+        continue;
+      }
+    }
+    for (j = 0; j < c->n_ser; j++) {
+      if (!strcmp(c->ser_name[j], name)) error(c, "serial channel %s: the name is used twice", name);
+      if (c->ser_pdo[j][0] == out || c->ser_pdo[j][1] == in) error(c, "serial channel %s: its PDOs are another channel's", name);
+      if (c->ser_settings[j] == settings_index) error(c, "serial channel %s: settings-index is another channel's", name);
+    }
+    if ((mp = modparam(c, b, slave_off, base + ECAT_MP_SERIAL_NAME, "serial.name")) == NULL) return;
+    copy_str(mp->value.str, name);
+    if ((mp = modparam(c, b, slave_off, base + ECAT_MP_SERIAL_PDOS, "serial.pdos")) == NULL) return;
+    mp->value.u32 = (uint32_t)out << 16 | (uint32_t)in;
+    if ((mp = modparam(c, b, slave_off, base + ECAT_MP_SERIAL_PORT, "serial.port")) == NULL) return;
+    copy_str(mp->value.str, port);
+    if ((mp = modparam(c, b, slave_off, base + ECAT_MP_SERIAL_SETTINGS, "serial.settings")) == NULL) return;
+    mp->value.u32 = (uint32_t)settings_index | (uint32_t)baud_value << 16 | (uint32_t)frame_value << 24;
+    c->ser_pdo[c->n_ser][0] = out;
+    c->ser_pdo[c->n_ser][1] = in;
+    c->ser_bits[c->n_ser][0] = c->ser_bits[c->n_ser][1] = 0;
+    c->ser_settings[c->n_ser] = settings_index;
+    c->ser_baud[c->n_ser] = baud_value;
+    c->ser_frame[c->n_ser] = frame_value;
+    copy_str(c->ser_name[c->n_ser], name);
+    c->n_ser++;
+  }
+}
+
+/// The serial channels' baud rate and data frame, written at start (and
+/// by the master again after a power cycle of the slave).
+static void serial_settings(ctx_t *c, buf_t *b, size_t slave_off) {
+  int k, j;
+  for (k = 0; k < c->n_ser; k++) {
+    for (j = 0; j < 2; j++) {
+      LCEC_CONF_SDOCONF_T *sc = append(b, sizeof(*sc) + 1);
+      if (sc == NULL) {
+        error(c, "out of memory");
+        return;
+      }
+      sc->confType = lcecConfTypeSdoConfig;
+      sc->index = c->ser_settings[k];
+      sc->subindex = j == 0 ? ECAT_SER_SUB_BAUD : ECAT_SER_SUB_FRAME;
+      sc->length = 1;
+      sc->data[0] = j == 0 ? c->ser_baud[k] : c->ser_frame[k];
+      ((LCEC_CONF_SLAVE_T *)(b->data + slave_off))->sdoConfigLength += sizeof(*sc) + 1;
+    }
+  }
+}
+
 static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   int a;
   yaml_node_t *ident = get(c, s, "identity");
@@ -804,6 +957,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     error(c, "profile \"%s\" is not supported (cia402, mdp, generic)", profile ? profile : "");
   }
   encoders(c, b, get(c, s, "encoders"), off);
+  serial_channels(c, b, get(c, s, "serial"), off);
 
   if (dc != NULL) {
     LCEC_CONF_DC_T *dcc = append(b, sizeof(*dcc));
@@ -844,12 +998,28 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       }
     }
   }
+  for (i = 0; i < c->n_ser; i++) {
+    int d;
+    for (d = 0; d < 2; d++) {
+      int bits = c->ser_bits[i][d];
+      if (bits == 0) {
+        error(c, "serial channel %s: PDO 0x%04X is not in the %s", c->ser_name[i], c->ser_pdo[i][d], d ? "inputs" : "outputs");
+      } else if (bits % 8 || bits < 24 || bits > 16 + 8 * ECAT_SER_MAX_DATA) {
+        error(c, "serial channel %s: PDO 0x%04X has %d bits; it needs a control (status) byte, a length byte and 1 to %d data bytes",
+            c->ser_name[i], c->ser_pdo[i][d], bits, ECAT_SER_MAX_DATA);
+      }
+    }
+    if (c->ser_bits[i][0] && c->ser_bits[i][1] && c->ser_bits[i][0] != c->ser_bits[i][1]) {
+      error(c, "serial channel %s: the output and input PDOs need the same size", c->ser_name[i]);
+    }
+  }
   for (i = 0; i < c->n_enc; i++) {
     if (!(c->enc_owned[i] & (1u << ENC_COUNTER))) {
       error(c, "encoder %s needs 0x%04X:11 (counter value) with \"use: profile\"", c->enc_name[i], c->enc_index[i]);
     }
   }
   memset(c->pp_limits, 0, sizeof(c->pp_limits));
+  serial_settings(c, b, off);
   settings(c, b, get(c, s, "settings"), off);
   if (c->cia402) {
     // the drive plans PP moves itself: it must know its travel. 0x607F

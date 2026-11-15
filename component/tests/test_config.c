@@ -13,6 +13,7 @@
 
 #include "../devices/ecat_cia402.h"
 #include "../devices/ecat_encoder.h"
+#include "../devices/ecat_serial.h"
 #include "../ecat_config.h"
 #include "fake.h"
 
@@ -333,7 +334,7 @@ static void test_entry_errors(void) {
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: sixteen, type: UINT, pin: p, hal-type: u32}"), "bits: \"sixteen\" is not a number");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p, hal-type: float, scale: x}"), "scale: \"x\" is not a number");
   // "use: profile" without a profile or encoder
-  CHECK_FAILS(ONE_ENTRY("{object: '0x6041:00', bits: 16, type: UINT, use: profile}"), "needs profile cia402 or an encoder channel");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6041:00', bits: 16, type: UINT, use: profile}"), "needs profile cia402, an encoder channel or a serial channel's PDO");
 }
 
 static void test_split(void) {
@@ -761,7 +762,105 @@ static void test_too_many_encoders(void) {
   CHECK_FAILS(yaml, "more than 16 encoder channels");
 }
 
+// ---- serial channels -------------------------------------------------
+
+/// An EL6021 with PDOs 0x1602/0x1A02 (a 16-bit control/status word and 22
+/// data bytes), its serial: block and settings from the arguments.
+static const char *el6021(const char *serial, const char *settings, int in_bits_cut) {
+  static char y[16384];
+  char *p = y;
+  int i;
+  p += sprintf(p, HEAD
+      "- position: 0\n"
+      "  name: com\n"
+      "  identity: {vendor: '0x00000002', product: '0x17853052'}\n"
+      "  profile: generic\n"
+      "%s"
+      "  process-data:\n"
+      "    outputs:\n"
+      "    - pdo: '0x1602'\n"
+      "      sm: 2\n"
+      "      entries:\n"
+      "      - {object: '0x3003:01', bits: 16, use: profile}\n", serial);
+  for (i = 0; i < 22; i++) p += sprintf(p, "      - {object: '0x3003:%02x', bits: 8, use: profile}\n", i + 2);
+  p += sprintf(p,
+      "    inputs:\n"
+      "    - pdo: '0x1A02'\n"
+      "      sm: 3\n"
+      "      entries:\n"
+      "      - {object: '0x3103:01', bits: 16, use: profile}\n");
+  for (i = 0; i < 22 - in_bits_cut; i++) p += sprintf(p, "      - {object: '0x3103:%02x', bits: 8, use: profile}\n", i + 2);
+  p += sprintf(p, "%s", settings);
+  return y;
+}
+
+#define SERIAL_OK                         \
+  "  serial:\n"                           \
+  "  - name: port\n"                      \
+  "    output-pdo: '0x1602'\n"            \
+  "    input-pdo: '0x1A02'\n"             \
+  "    port: /dev/ttyECAT0\n"             \
+  "    baud: 19200\n"                     \
+  "    frame: 8E1\n"
+
+static void test_serial(void) {
+  LCEC_CONF_MODPARAM_T *mp;
+  int i, found = 0;
+  CHECK_EQ(load(el6021(SERIAL_OK, "", 0)), 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 4);
+  CHECK_EQ(SLAVE(0)->pdoMappingCount, 0);  // no pins: all the function's
+  for (i = 0; (mp = MODPARAM(i)) != NULL; i++) {
+    switch (mp->id - ECAT_MP_SERIAL) {
+      case ECAT_MP_SERIAL_NAME: CHECK(!strcmp(mp->value.str, "port")); found |= 1; break;
+      case ECAT_MP_SERIAL_PDOS: CHECK_EQ(mp->value.u32, 0x16021A02); found |= 2; break;
+      case ECAT_MP_SERIAL_PORT: CHECK(!strcmp(mp->value.str, "/dev/ttyECAT0")); found |= 4; break;
+      case ECAT_MP_SERIAL_SETTINGS: CHECK_EQ(mp->value.u32, 0x8000 | 7 << 16 | 4 << 24); found |= 8; break;
+      default: CHECK(0);
+    }
+  }
+  CHECK_EQ(found, 15);
+  // baud rate and data frame written at start
+  CHECK_EQ(count(lcecConfTypeSdoConfig), 2);
+  CHECK(SDO(0)->index == 0x8000 && SDO(0)->subindex == 0x11 && SDO(0)->length == 1 && SDO(0)->data[0] == 7);
+  CHECK(SDO(1)->index == 0x8000 && SDO(1)->subindex == 0x15 && SDO(1)->length == 1 && SDO(1)->data[0] == 4);
+  // defaults: 9600 8N1
+  CHECK_EQ(load(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT1}\n", "", 0)), 0);
+  CHECK(SDO(0)->data[0] == 6 && SDO(1)->data[0] == 3);
+}
+
+static void test_serial_errors(void) {
+  CHECK_FAILS(el6021(SERIAL_OK, "", 1), "the output and input PDOs need the same size");
+  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT0, baud: 14400}\n", "", 0),
+      "baud 14400 is not one of");
+  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT0, frame: 7N1}\n", "", 0),
+      "frame \"7N1\" is not one of");
+  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02'}\n", "", 0), "port must be a full path");
+  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: ttyECAT0}\n", "", 0),
+      "port must be a full path");
+  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1603', input-pdo: '0x1A02', port: /dev/ttyECAT0}\n", "", 0),
+      "PDO 0x1603 is not in the outputs");
+  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1A02', input-pdo: '0x1A02', port: /dev/ttyECAT0}\n", "", 0),
+      "output-pdo (0x1600-0x17FF) and input-pdo");
+  CHECK_FAILS(el6021(SERIAL_OK, "  settings:\n  - {object: '0x8000:11', value: 6, type: USINT}\n", 0),
+      "are its baud and frame");
+  // an entry of the channel's PDO with a pin
+  {
+    static char y[16384], rest[16384];
+    char *e;
+    strcpy(y, el6021(SERIAL_OK, "", 0));
+    e = strstr(y, "{object: '0x3003:05', bits: 8, use: profile}");
+    CHECK(e != NULL);
+    if (e != NULL) {
+      strcpy(rest, e + strlen("{object: '0x3003:05', bits: 8, use: profile}"));
+      sprintf(e, "{object: '0x3003:05', bits: 8, pin: xx, type: USINT, hal-type: uint}%s", rest);
+    }
+    CHECK_FAILS(y, "serial channel port handles this PDO");
+  }
+  // use: profile without a channel
+  CHECK_FAILS(el6021("", "", 0), "a serial channel's PDO");
+}
+
 RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
-    test_too_many_encoders)
+    test_too_many_encoders, test_serial, test_serial_errors)

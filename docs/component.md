@@ -1141,6 +1141,99 @@ lcec's EL5101 driver had pins such as `enc-pos`, `enc-index-c-enable` and
 lcec's EL5101 driver mapped the old (non-MDP) objects at `0x6000`/`0x7000`;
 those are not handled here.
 
+## Serial channels
+
+Status: being built (2026-11-15), not tried on a terminal: we have none.
+The handshake and the function are tested against a simulated terminal
+(component/tests/sim_el60xx.c); the serial port on the computer (below) is
+not built yet.
+
+Beckhoff's serial terminals (EL6001 RS232, EL6002 two channels, EL6021
+RS422/RS485, EL6022 two channels) move bytes in windows of the process
+data with a handshake. A serial channel does that handshake and gives the
+bytes to a serial port on the computer, so that a program such as
+`mb2hal` (Modbus RTU to a VFD) uses the terminal as it would use
+`/dev/ttyUSB0`.
+
+A channel is two PDOs, which the channel owns completely (all their
+entries `use: profile`): the output PDO is a control byte, an output
+length and the data bytes; the input PDO a status byte, an input length
+and the data bytes. On an EL6021 these are 0x1602/0x1A02 (the default: a
+16-bit control word and 22 data bytes) or 0x1604/0x1A04 (the same bytes,
+the control bits as single entries).
+
+### In the configuration file (serial)
+
+```yaml
+- position: 4
+  name: rs485
+  profile: generic
+  serial:
+  - name: vfd
+    output-pdo: '0x1602'
+    input-pdo: '0x1A02'
+    port: /dev/ttyECAT0
+    baud: 19200
+    frame: 8E1
+  process-data:
+    outputs:
+    - pdo: '0x1602'
+      sm: 2
+      entries:
+      - {object: '0x3003:01', bits: 16, type: UINT, use: profile}
+      - {object: '0x3003:02', bits: 8, type: USINT, use: profile}
+      # ... to 0x3003:17, 22 data bytes
+    inputs:
+    - pdo: '0x1A02'
+      sm: 3
+      entries:
+      - {object: '0x3103:01', bits: 16, type: UINT, use: profile}
+      - {object: '0x3103:02', bits: 8, type: USINT, use: profile}
+      # ... to 0x3103:17
+  settings:
+  - {object: '0x8000:06', value: 1, type: BOOL}   # half duplex (RS485)
+```
+
+| Key | | |
+|---|---|---|
+| `name` | needed | the pin prefix: `<slave>.<name>.` |
+| `output-pdo`, `input-pdo` | needed | the channel's PDOs (0x16xx/0x17xx and 0x1Axx/0x1Bxx), both in the process data, of the same size: 3 to 24 bytes |
+| `port` | needed | the serial port's path, such as `/dev/ttyECAT0` |
+| `baud` | 9600 | at start: 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600 or 115200 (the EL6021 from 2400) |
+| `frame` | 8N1 | data bits, parity, stop bits at start: 7E1, 7O1, 8N1, 8E1, 8O1, 7E2, 7O2, 8N2, 8E2, 8O2 |
+| `settings-index` | 0x8000 + 0x10 × channel | the channel's CoE settings object |
+
+The baud rate and data frame are written at start (as settings: so they
+are not also in `settings:`); the terminal's other settings, such as half
+duplex for RS485 or "Enable send FIFO data continuous", are ordinary
+settings. A slave can have up to 8 channels (an EL6022 has two).
+
+### Pins (serial)
+
+| Pin | | |
+|---|---|---|
+| `<slave>.<name>.state` | uint out | 0 no process data, 1 writing settings, 2 init, 3 ready |
+| `<slave>.<name>.tx-bytes`, `.rx-bytes` | uint out | bytes the terminal has taken to send, and given |
+| `<slave>.<name>.parity-errors`, `.framing-errors`, `.overrun-errors` | uint out | counted from the status bits |
+| `<slave>.<name>.buffer-full` | uint out | times the terminal said its buffer was full |
+| `<slave>.<name>.baud` | uint out | the baud rate the terminal has |
+| `<slave>.<name>.settings-error` | bool out | the last change of settings could not be written |
+| `<slave>.<name>.port-open` | bool out | a program has the port open |
+
+### Behaviour (serial)
+
+- At start, and when the bus comes back, the channel makes an init (the
+  terminal empties its buffers and starts the handshake from the
+  beginning).
+- Bytes are sent window by window, each when the terminal has taken the
+  one before; received bytes are taken only when there is room for them
+  on the computer's side, so none are lost there (the terminal keeps them
+  meanwhile).
+- New settings asked for while running are written once the bytes queued
+  before them have left the terminal, followed by an init; after a power
+  cycle of the slave, the master writes the file's settings, and the
+  channel writes the ones asked for since again.
+
 ## Analog inputs and outputs
 
 Analog terminals that follow ETG.5001 (Beckhoff EL3xxx inputs, EL4xxx

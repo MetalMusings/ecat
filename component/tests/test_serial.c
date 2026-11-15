@@ -10,6 +10,7 @@
 
 #include <string.h>
 
+#include "../devices/ecat_serial.h"
 #include "../devices/ecat_serial_core.h"
 #include "fake.h"
 #include "sim_el60xx.h"
@@ -341,7 +342,114 @@ static void test_errors_are_counted(void) {
   CHECK_EQ(S.overrun_errors, 0);
 }
 
+// ---- the function on a slave (devices/ecat_serial.c) ----
+
+// No master in the tests: the SDO requests are not made (slave->config is
+// NULL), so settings while running fail, which the settings-error pin shows.
+ec_sdo_request_t *ecrt_slave_config_create_sdo_request(ec_slave_config_t *sc, uint16_t index, uint8_t subindex, size_t size) {
+  (void)sc, (void)index, (void)subindex, (void)size;
+  return NULL;
+}
+uint8_t *ecrt_sdo_request_data(const ec_sdo_request_t *req) { (void)req; return NULL; }
+int ecrt_sdo_request_write(ec_sdo_request_t *req) { (void)req; return 0; }
+int ecrt_sdo_request_timeout(ec_sdo_request_t *req, uint32_t timeout) { (void)req, (void)timeout; return 0; }
+ec_request_state_t ecrt_sdo_request_state(ec_sdo_request_t *req) { (void)req; return EC_REQUEST_ERROR; }
+
+static lcec_slave_t *SL;
+
+/// An EL6021 slave (PDOs 0x1602 and 0x1A02) with a serial channel "port".
+static void el6021_slave(void) {
+  static fake_entry_t e[2 * 23 + 1];
+  lcec_slave_modparam_t mp[5];
+  ec_pdo_info_t *pdo;
+  ec_sync_info_t *sm;
+  int i;
+  for (i = 0; i < 23; i++) {
+    e[i] = (fake_entry_t){0x3003, (uint8_t)(i + 1), i == 0 ? 16 : 8};
+    e[23 + i] = (fake_entry_t){0x3103, (uint8_t)(i + 1), i == 0 ? 16 : 8};
+  }
+  e[46] = (fake_entry_t)FAKE_END;
+  memset(mp, 0, sizeof(mp));
+  mp[0].id = ECAT_MP_SERIAL + ECAT_MP_SERIAL_NAME;
+  strcpy(mp[0].value.str, "port");
+  mp[1].id = ECAT_MP_SERIAL + ECAT_MP_SERIAL_PDOS;
+  mp[1].value.u32 = 0x16021A02;
+  mp[2].id = ECAT_MP_SERIAL + ECAT_MP_SERIAL_PORT;
+  strcpy(mp[2].value.str, "/dev/ttyECAT0");
+  mp[3].id = ECAT_MP_SERIAL + ECAT_MP_SERIAL_SETTINGS;
+  mp[3].value.u32 = 0x8000 | B115200 << 16 | F8E1 << 24;
+  mp[4].id = -1;
+  SL = fake_slave("com", e, mp);
+  // two PDOs instead of the fake's one
+  pdo = calloc(2, sizeof(*pdo));
+  sm = calloc(3, sizeof(*sm));
+  pdo[0] = SL->generic_sync_managers[0].pdos[0];
+  pdo[0].index = 0x1602;
+  pdo[0].n_entries = 23;
+  pdo[1] = pdo[0];
+  pdo[1].index = 0x1A02;
+  pdo[1].entries = pdo[0].entries + 23;
+  sm[0] = (ec_sync_info_t){2, EC_DIR_OUTPUT, 1, &pdo[0], EC_WD_DEFAULT};
+  sm[1] = (ec_sync_info_t){3, EC_DIR_INPUT, 1, &pdo[1], EC_WD_DEFAULT};
+  sm[2].index = 0xff;
+  SL->generic_sync_managers = sm;
+  ecat_serial_channels = NULL;
+  CHECK_EQ(ecat_serial_init(0, SL), 0);
+  sim_el60xx_init(&T, 22, B115200, F8E1, 128, 864);
+}
+
+/// A cycle of the slave against the simulated terminal: the master copies
+/// the terminal's inputs in, the function runs, its outputs go out.
+static void slave_cycle(void) {
+  uint8_t *pd = SL->master->process_data;
+  // 0x3003 at byte 0 (24 bytes), 0x3103 after it
+  memcpy(pd + 24, T.in, 24);
+  SL->proc_read(SL, PERIOD);
+  SL->proc_write(SL, PERIOD);
+  sim_el60xx_step(&T, pd, PERIOD);
+}
+
+static void test_function_on_a_slave(void) {
+  static uint8_t data[500], got[500];
+  ecat_serial_channel_t *ch;
+  size_t have = 0;
+  int i;
+  el6021_slave();
+  ch = ecat_serial_channels;
+  CHECK(ch != NULL);
+  if (ch == NULL) return;
+  CHECK(!strcmp(ch->name, "com.port"));
+  CHECK(!strcmp(ch->port, "/dev/ttyECAT0"));
+  CHECK_EQ(ch->data_bits, 8);
+  CHECK_EQ(ch->parity, 'E');
+  CHECK_EQ(ch->core.n_data, 22);
+  for (i = 0; i < 50 && PIN_U32("com.port.state") != ECAT_SER_READY; i++) slave_cycle();
+  CHECK_EQ(PIN_U32("com.port.state"), ECAT_SER_READY);
+  CHECK_EQ(PIN_U32("com.port.baud"), 115200);
+  pattern(data, sizeof(data), 8);
+  ecat_ser_ring_put(&ch->core.tx, data, sizeof(data));
+  for (i = 0; i < 1000 && have < sizeof(got); i++) {
+    slave_cycle();
+    have += ecat_ser_ring_get(&ch->core.rx, got + have, sizeof(got) - have);
+  }
+  CHECK_EQ(have, sizeof(data));
+  CHECK(!memcmp(data, got, sizeof(data)));
+  CHECK_EQ(PIN_U32("com.port.tx-bytes"), sizeof(data));
+  CHECK_EQ(PIN_U32("com.port.rx-bytes"), sizeof(data));
+  CHECK_EQ(PIN_BIT("com.port.settings-error"), 0);
+  // no SDO requests here: a new rate cannot be written
+  atomic_store(&ch->core.want_baud, B9600);
+  atomic_fetch_add(&ch->core.want_seq, 1);
+  for (i = 0; i < 100; i++) slave_cycle();
+  CHECK_EQ(PIN_BIT("com.port.settings-error"), 1);
+  CHECK_EQ(PIN_U32("com.port.baud"), 115200);
+  // bus loss
+  fake_bus(SL, 0);
+  slave_cycle();
+  CHECK_EQ(PIN_U32("com.port.state"), ECAT_SER_DOWN);
+}
+
 RUN_TESTS("serial", test_values, test_ring_wraps, test_starts_with_init, test_loopback,
     test_slow_baud_waits_for_the_terminal, test_receive_waits_for_room, test_turn_around_1_and_3,
     test_new_baud_after_the_queued_bytes, test_toggles_restart_after_init, test_baud_and_frame,
-    test_settings_that_fail, test_bus_loss, test_errors_are_counted)
+    test_settings_that_fail, test_bus_loss, test_errors_are_counted, test_function_on_a_slave)

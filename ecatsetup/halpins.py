@@ -2,7 +2,7 @@
 configuration, without running it.
 
 The lists mirror the C tables (component/lcec_main.c, devices/ecat_cia402.c,
-devices/ecat_encoder.c); tests/test_halcheck.py reads those tables and
+devices/ecat_encoder.c, devices/ecat_serial.c); tests/test_halcheck.py reads those tables and
 fails when the two differ.
 """
 
@@ -72,6 +72,12 @@ ENCODER = [
 ENCODER_INDEX = [("index-enable", "bool", "io")]
 ENCODER_LATCH = [("latch-enable-pos", "bool", "io"), ("latch-enable-neg", "bool", "io"),
                  ("latch-pos", "real", "out")]
+SERIAL = [
+    ("state", "uint", "out"), ("tx-bytes", "uint", "out"), ("rx-bytes", "uint", "out"),
+    ("parity-errors", "uint", "out"), ("framing-errors", "uint", "out"),
+    ("overrun-errors", "uint", "out"), ("buffer-full", "uint", "out"), ("baud", "uint", "out"),
+    ("settings-error", "bool", "out"), ("port-open", "bool", "out"),
+]
 FUNCTIONS = ["ecat.read-all", "ecat.write-all"]
 
 # Defaults of the parameters a user may set (docs/component.md); a parameter
@@ -155,6 +161,8 @@ def pins(cfg):
                 add(prefix, ENCODER_INDEX)
             if {(index, 0x02), (index, 0x12)} <= mapped and mapped & {(o, 0x02), (o, 0x04)}:
                 add(prefix, ENCODER_LATCH)
+        for ch in s.get("serial") or []:
+            add("%s.%s" % (name, ch.get("name")), SERIAL)
     return out
 
 

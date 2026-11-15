@@ -361,6 +361,7 @@ typedef struct lcec_slave {
   lcec_pdo_entry_reg_t *regs;
   void *profile_data;                        ///< Data of the slave's profile (ecat), if any.
   void *encoder_data;                        ///< Data of the slave's encoder channels (ecat), if any.
+  void *serial_data;                         ///< Data of the slave's serial channels (ecat), if any.
   ecat_events_slave_t ev_last;               ///< What the flight recorder last saw of the slave.
 } lcec_slave_t;
 

@@ -61,6 +61,8 @@ class TestPinList(unittest.TestCase):
         self.assertEqual(halpins.ENCODER, e["pins"] + e["params"])
         self.assertEqual(halpins.ENCODER_INDEX, e["index_pins"])
         self.assertEqual(halpins.ENCODER_LATCH, e["latch_pins"])
+        self.assertEqual(halpins.SERIAL, c_tables("devices/ecat_serial.c")["pins"])
+        self.assertEqual([p for p, _, _ in halpins.SERIAL], list(config.SERIAL_PINS))
 
     def test_pins_of_a_configuration(self):
         c = cfg()
