@@ -1487,16 +1487,81 @@ master 1.3, with no added work in the servo cycle. Not tried on a real slave. Le
 an EoE fetch in flight can be lost (one "Failed to receive mbox fetch
 datagram" warning).
 
+### Tried on a slave (2026-11-15)
+
+The test slave is an EaserCAT 3000 (STM32F407 with an AX58100, the SOES
+slave stack) with EoE added to a copy of its firmware: SOES's EoE and lwIP,
+which answers ping, echoes UDP on port 7 and serves one web page. It sat on
+the plasma cutter's bus as slave 4, after three ECT60 drives and an
+EaserCAT 7000; no drive was enabled. The PC is the N100 with the igc card,
+`xdp-native`, 1 ms servo period, the servo thread following the reference
+clock. The slave's mailboxes are 512 bytes.
+
+With the free master: the address set with `ethercat ip`, ping with every
+size up to a full frame (1472 bytes of data, four fragments each way), the
+web page.
+
+With ecat in halrun (`eoe:` and one start-up SDO on the same slave):
+
+| | |
+|---|---|
+| All five slaves in OP | 2.2 s after `loadrt`, as without EoE |
+| ping, 56 bytes | 30 of 30, 10 ms on average |
+| ping, 1472 bytes | 28 of 30, 43 ms on average |
+| The web page, 20 times | 20 of 20, 47 ms each |
+| ping 1000 bytes at 10 a second, and 40 SDO reads on four slaves meanwhile | no loss, no failed read |
+| ping 1000 bytes at 100 a second (more than gets through), 1500 frames | all answered, at 66 a second: about 0.5 Mbit/s each way |
+| Afterwards | ping and SDO reads as before, the bus in OP all the time |
+
+The two lost large pings came in the first seconds, with two "Fragmenting
+error" lines and a failed read of the slave's SDO dictionary in the
+master's log: probably the dictionary read and EoE in the same mailbox,
+where a second unread mail of one kind replaces the first (not looked into
+further).
+
+`scripts/dc-jitter-measure --mode follows --seconds 60`, without EoE traffic
+and with ping at the rate EoE carries (ns):
+
+| | quiet: mean | p99.9 | max | EoE: mean | p99.9 | max |
+|---|---|---|---|---|---|---|
+| send-offset | 5394 | 25106 | 43097 | 5495 | 23855 | 43556 |
+| pll-err (stddev 1512 / 1694) | -70 | 4449 | 5948 | -92 | 4809 | 11463 |
+| td - period | -4 | 6021 | 16924 | -4 | 4419 | 19323 |
+
+No PLL reset, turn-around 2 cycles in both. EoE in the cyclic frames costs
+the servo thread nothing that can be seen here.
+
+A bus without an EoE slave (the same five slaves before the EoE bit was
+written to the test slave's EEPROM) ran on the same master: OP after 2.2 s,
+1000 of 1000 SDO reads in OP.
+
+What the test found, all fixed in the master fork:
+
+- `ethercat ip` gave the slave no address: the tool and the master
+  disagreed on the request's layout by one field (fd422344).
+- A slave that did not take the set IP request was asked for ever, and the
+  master's tool interface hung with it (fd422344).
+- A frame the slave did not take was never freed; after about a hundred the
+  interface was dead (bb2480ee).
+- SOES reads no mail while its own mail waits to be read. The master sent
+  the next fragment a hundred times without reading that mail and then
+  dropped the frame; under load every frame took 100 ms (2e7eb18b).
+
+And two limits in the board's own ESC access code (not SOES's): a read of
+more than 128 bytes did nothing, and lengths were 8 bits wide. Small CoE
+mails never met them; an Ethernet frame in a 512 byte mailbox does.
+
 ### Not built
 
 - `host-ip`: ecat setting the host's address on the TAP device
   (`eoe0s<position>`, recreated at each handover) from the same file.
   Routing and bridging are documented, not configured.
 - A window card for `eoe:` (the file can be edited by hand).
-- A test slave: SOES with EoE on an EaserCAT board (the card's code and schema
-  are in `/mnt/server/src/MyOwnEtherCATDevice/Cards/EaserCAT-4000-THCAD-Reader`,
-  SOES in `/mnt/server/src/SOES`; work on copies).
-- Measuring the cyclic frame with EoE traffic (`scripts/dc-jitter-measure`).
+- The EoE firmware as part of the card's own code: it lives in a work copy
+  (`~/src/easercat-3000-eoe` on the plasma PC), not in MyOwnEtherCATDevice.
+- Several unread mails of one kind kept per slave (see the lost frames
+  above).
+- EoE in LinuxCNC (only halrun so far), and a device that was not made here.
 
 ## Start time: the XDP program stays on the card
 

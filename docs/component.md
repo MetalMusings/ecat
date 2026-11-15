@@ -1541,9 +1541,10 @@ or `and2` (HAL loads a component once).
 - SDOs to the same slave need the same master: before it, the EoE traffic
   took the slave's SDO responses, and a slave with `settings:` did not
   reach OP ([development.md](development.md#eoe)).
-- Not tried on a slave: none of ours has EoE. The address is verified in
-  unit tests (`component/tests/test_config.c`, `tests/test_prototype.py`)
-  and the master's own code path in the master's simulator tests.
+- Tried on one slave, an EaserCAT 3000 with SOES and lwIP, without motion
+  ([development.md](development.md#eoe)): ping, a web page and SDO reads
+  while the bus was in OP, about 0.5 Mbit/s each way at 1 ms, no change in
+  the servo thread's jitter. Not tried in LinuxCNC, nor on a bought device.
 
 ## Modular devices
 
