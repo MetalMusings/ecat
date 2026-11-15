@@ -1,0 +1,99 @@
+#!/bin/bash
+#
+# mb2hal (LinuxCNC's Modbus program) in halrun against a serial channel's
+# port, with a simulated terminal and a simulated Modbus RTU slave behind it
+# (component/tests/serial_sim_port): no bus, no terminal needed.
+#
+# mb2hal reads holding registers 0-4 and writes registers 5-9 (set from
+# HAL), as in its own example; the script checks both, and that the slave
+# understood every byte (the rate mb2hal set on the port reached the
+# terminal).
+#
+# Usage: scripts/serial-mb2hal-test [BAUD [FRAME [continuous]]]
+#   default 19200 8E1; the file's baud rate is another (9600, or 19200 when
+#   BAUD is 9600), so mb2hal's rate must reach the terminal for the slave
+#   to answer.
+#
+# Needs LinuxCNC 2.10's environment (. <tree>/scripts/rip-environment) for
+# halrun and mb2hal.
+
+set -e
+BAUD=${1:-19200}
+FRAME=${2:-8E1}
+MODE=${3:-}
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+command -v halrun >/dev/null || { echo "halrun not found: . <linuxcnc>/scripts/rip-environment first"; exit 2; }
+make -s -C "$HERE/component" tests/serial_sim_port
+
+D=$(mktemp -d /tmp/serial-mb2hal-XXXXXX)
+SIM=
+cleanup() {
+  [ -n "$SIM" ] && kill "$SIM" 2>/dev/null && wait "$SIM" 2>/dev/null || true
+  rm -rf "$D"
+}
+trap cleanup EXIT
+
+case ${FRAME:1:1} in N) PARITY=none ;; E) PARITY=even ;; O) PARITY=odd ;; esac
+
+# the file says 9600 (19200 when mb2hal uses 9600): mb2hal's rate has to
+# reach the terminal for the slave to understand anything
+FILE_BAUD=9600
+[ "$BAUD" = 9600 ] && FILE_BAUD=19200
+"$HERE/component/tests/serial_sim_port" "$D/ttyECAT0" "$FILE_BAUD" "$BAUD" "$FRAME" $MODE > "$D/sim.log" 2>&1 &
+SIM=$!
+for i in $(seq 50); do grep -q ready "$D/sim.log" && break; sleep 0.1; done
+grep -q ready "$D/sim.log" || { cat "$D/sim.log"; exit 1; }
+
+cat > "$D/mb2hal.ini" <<EOF
+[MB2HAL_INIT]
+INIT_DEBUG=1
+HAL_MODULE_NAME=mb2hal
+SLOWDOWN=0.0
+TOTAL_TRANSACTIONS=2
+[TRANSACTION_00]
+LINK_TYPE=serial
+SERIAL_PORT=$D/ttyECAT0
+SERIAL_BAUD=$BAUD
+SERIAL_BITS=${FRAME:0:1}
+SERIAL_PARITY=$PARITY
+SERIAL_STOP=${FRAME:2:1}
+SERIAL_DELAY_MS=10
+MB_SLAVE_ID=1
+MB_TX_CODE=fnct_03_read_holding_registers
+FIRST_ELEMENT=0
+NELEMENTS=5
+HAL_TX_NAME=RegIn
+MAX_UPDATE_RATE=0.0
+MB_RESPONSE_TIMEOUT_MS=500
+MB_BYTE_TIMEOUT_MS=100
+[TRANSACTION_01]
+MB_TX_CODE=fnct_16_write_multiple_registers
+FIRST_ELEMENT=5
+NELEMENTS=5
+HAL_TX_NAME=RegOut
+MAX_UPDATE_RATE=0.0
+EOF
+cat > "$D/run.hal" <<EOF
+loadusr -W mb2hal config=$D/mb2hal.ini
+setp mb2hal.RegOut.00 4660
+setp mb2hal.RegOut.04 22136
+loadusr -w sleep 3
+show pin mb2hal
+EOF
+halrun -f "$D/run.hal" > "$D/halrun.log" 2>&1 || true
+kill "$SIM"; wait "$SIM" 2>/dev/null || true
+SIM=
+
+echo "--- mb2hal's pins"
+grep -E "mb2hal\.(RegIn|RegOut)\.0[04]|num_errors" "$D/halrun.log" || cat "$D/halrun.log"
+echo "--- the simulated slave (gaps: pauses on the wire, between requests too)"
+cat "$D/sim.log"
+
+ok=1
+grep -Eq "4096 +mb2hal\.RegIn\.00\.int" "$D/halrun.log" || { echo "FAIL: register 0 not read (0x1000 = 4096)"; ok=0; }
+grep -Eq "0x0+ +mb2hal\.RegIn\.num_errors" "$D/halrun.log" || { echo "FAIL: mb2hal counted errors"; ok=0; }
+grep -q " 5:0x1234" "$D/sim.log" || { echo "FAIL: register 5 not written (0x1234)"; ok=0; }
+grep -q " 9:0x5678" "$D/sim.log" || { echo "FAIL: register 9 not written (0x5678)"; ok=0; }
+grep -q " bad 0 " "$D/sim.log" || { echo "FAIL: the slave got bytes at other settings"; ok=0; }
+[ $ok = 1 ] && echo "OK: mb2hal read and wrote registers through the port at $BAUD $FRAME $MODE"
+[ $ok = 1 ]

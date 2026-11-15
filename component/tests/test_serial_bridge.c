@@ -27,6 +27,7 @@
 #include "../devices/ecat_serial_bridge.h"
 #include "fake.h"
 #include "sim_el60xx.h"
+#include "sim_modbus.h"
 
 #define PERIOD 1000000L
 #define B_9600 6
@@ -198,83 +199,15 @@ static void test_two_stop_bits_from_the_program(void) {
 
 // ---- Modbus RTU: libmodbus against a simulated slave on the wire ----
 
-static uint16_t regs[64];
-static uint8_t rtu_baud = B_19200;  // the slave's rate
-static uint8_t rtu_in[300];
-static size_t rtu_n;
-static int rtu_frames, rtu_bad;
-
-static uint16_t crc16(const uint8_t *b, size_t n) {
-  uint16_t crc = 0xFFFF;
-  size_t i;
-  int k;
-  for (i = 0; i < n; i++) {
-    crc ^= b[i];
-    for (k = 0; k < 8; k++) crc = (crc & 1) ? (uint16_t)((crc >> 1) ^ 0xA001) : (uint16_t)(crc >> 1);
-  }
-  return crc;
-}
-
-static void rtu_answer(sim_el60xx_t *t, uint8_t *r, size_t n) {
-  uint16_t crc = crc16(r, n);
-  r[n] = crc & 0xff;
-  r[n + 1] = crc >> 8;
-  sim_el60xx_receive(t, r, n + 2);
-}
-
-/// Slave 1 at 19200 8E1: function 3 (read holding registers), 6 (write
-/// one), 16 (write several). A terminal at other settings garbles the
-/// bytes: the slave hears nothing.
-static void rtu_wire(sim_el60xx_t *t, const uint8_t *bytes, size_t n, void *ctx) {
-  size_t need;
-  (void)ctx;
-  if (t->baud != rtu_baud || t->frame != F_8E1) {
-    rtu_bad++;
-    return;
-  }
-  if (rtu_n + n > sizeof(rtu_in)) rtu_n = 0;
-  memcpy(rtu_in + rtu_n, bytes, n);
-  rtu_n += n;
-  if (rtu_n < 8) return;
-  need = rtu_in[1] == 16 ? (size_t)9 + rtu_in[6] : 8;
-  if (rtu_n < need) return;
-  if (rtu_in[0] == 1 && crc16(rtu_in, need - 2) == (rtu_in[need - 2] | rtu_in[need - 1] << 8)) {
-    uint8_t r[300];
-    unsigned a = rtu_in[2] << 8 | rtu_in[3], q = rtu_in[4] << 8 | rtu_in[5], i;
-    rtu_frames++;
-    r[0] = 1;
-    r[1] = rtu_in[1];
-    if (rtu_in[1] == 3 && a + q <= 64) {
-      r[2] = (uint8_t)(2 * q);
-      for (i = 0; i < q; i++) {
-        r[3 + 2 * i] = regs[a + i] >> 8;
-        r[4 + 2 * i] = regs[a + i] & 0xff;
-      }
-      rtu_answer(t, r, 3 + 2 * q);
-    } else if (rtu_in[1] == 6 && a < 64) {
-      regs[a] = (uint16_t)q;
-      memcpy(r, rtu_in, 6);
-      rtu_answer(t, r, 6);
-    } else if (rtu_in[1] == 16 && a + q <= 64) {
-      for (i = 0; i < q; i++) regs[a + i] = (uint16_t)(rtu_in[7 + 2 * i] << 8 | rtu_in[8 + 2 * i]);
-      memcpy(r, rtu_in, 6);
-      rtu_answer(t, r, 6);
-    }
-  }
-  rtu_n = 0;
-}
-
 static void test_modbus_rtu_through_the_port(void) {
   modbus_t *mb;
   uint16_t got[40], set[20];
   int i;
-  for (i = 0; i < 64; i++) regs[i] = (uint16_t)(0x1000 + i);
-  rtu_n = 0;
-  rtu_frames = rtu_bad = 0;
-  rtu_baud = B_19200;
+  for (i = 0; i < 64; i++) sim_modbus_regs[i] = (uint16_t)(0x1000 + i);
+  sim_modbus_reset(B_19200, F_8E1);
   // the file says 9600 8E1; mb2hal asks for 19200 (parity E as in the file)
   CHECK_EQ(start(B_9600, F_8E1), 0);
-  T.wire = rtu_wire;
+  T.wire = sim_modbus_wire;
   mb = modbus_new_rtu(port, 19200, 'E', 8, 1);
   CHECK(mb != NULL);
   if (mb == NULL) {
@@ -289,7 +222,7 @@ static void test_modbus_rtu_through_the_port(void) {
   CHECK_EQ(got[0], 0x1005);
   CHECK_EQ(got[1], 0x1006);
   CHECK_EQ(modbus_write_register(mb, 3, 0xBEEF), 1);
-  CHECK_EQ(regs[3], 0xBEEF);
+  CHECK_EQ(sim_modbus_regs[3], 0xBEEF);
   // an answer of 85 bytes: four windows of the terminal
   CHECK_EQ(modbus_read_registers(mb, 0, 40, got), 40);
   CHECK_EQ(got[3], 0xBEEF);
@@ -297,12 +230,12 @@ static void test_modbus_rtu_through_the_port(void) {
   // a request of 49 bytes: three windows
   for (i = 0; i < 20; i++) set[i] = (uint16_t)(0x2000 + i);
   CHECK_EQ(modbus_write_registers(mb, 10, 20, set), 20);
-  CHECK_EQ(regs[29], 0x2013);
+  CHECK_EQ(sim_modbus_regs[29], 0x2013);
   for (i = 0; i < 50; i++) {
     if (modbus_read_registers(mb, 0, 4, got) != 4) break;
   }
   CHECK_EQ(i, 50);
-  CHECK_EQ(rtu_bad, 0);
+  CHECK_EQ(sim_modbus_bad, 0);
   CHECK_EQ(T.baud, B_19200);
   modbus_close(mb);
   modbus_free(mb);
@@ -316,13 +249,11 @@ static void test_modbus_rtu_at_115200_with_send_continuous(void) {
   modbus_t *mb;
   uint16_t got[40], set[20];
   int i;
-  for (i = 0; i < 64; i++) regs[i] = (uint16_t)(0x3000 + i);
-  rtu_n = 0;
-  rtu_frames = rtu_bad = 0;
-  rtu_baud = B_115200;
+  for (i = 0; i < 64; i++) sim_modbus_regs[i] = (uint16_t)(0x3000 + i);
+  sim_modbus_reset(B_115200, F_8E1);
   // a frame over 22 bytes goes out without a pause
   CHECK_EQ(start_with(B_115200, F_8E1, CONTINUOUS), 0);
-  T.wire = rtu_wire;
+  T.wire = sim_modbus_wire;
   mb = modbus_new_rtu(port, 115200, 'E', 8, 1);
   modbus_set_slave(mb, 1);
   modbus_set_response_timeout(mb, 1, 0);
@@ -337,7 +268,7 @@ static void test_modbus_rtu_at_115200_with_send_continuous(void) {
   CHECK_EQ(T.gaps, 0);
   CHECK_EQ(CH->core.burst_timeouts, 0);
   CHECK(CH->core.bursts >= 40);
-  CHECK_EQ(rtu_bad, 0);
+  CHECK_EQ(sim_modbus_bad, 0);
   modbus_close(mb);
   modbus_free(mb);
   finish();

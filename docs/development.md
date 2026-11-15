@@ -1399,8 +1399,19 @@ Built so far:
   other data bits or parity than the channel's frame, or a baud rate the
   terminals do not have (`halcheck.mb2hal_check`, mutation-checked).
 
-Still to do: mb2hal in halrun, a capture from a real terminal (in
-particular of send-continuous: when exactly SW.2 drops).
+- mb2hal itself: `scripts/serial-mb2hal-test [BAUD [FRAME [continuous]]]`
+  (needs the 2.10 environment) runs `component/tests/serial_sim_port` (a
+  port with the simulated terminal and a simulated Modbus RTU slave,
+  `tests/sim_modbus.c`, behind it; the file's baud rate differs from the
+  slave's, so mb2hal's rate must reach the terminal) and mb2hal in halrun,
+  reading registers 0-4 and writing 5-9 for 3 s. 2026-11-15: 19200 8E1,
+  115200 8E1 with send-continuous, 9600 8N1: all read and written, no
+  errors in mb2hal, the slave understood every byte (108-171 requests).
+  When mb2hal stops, libmodbus puts the port back as it found it (the
+  file's rate), and the channel follows.
+
+Still to do: a capture from a real terminal (in particular of
+send-continuous: when exactly SW.2 drops).
 
 ## Start time: the XDP program stays on the card
 

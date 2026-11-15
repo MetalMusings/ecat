@@ -81,7 +81,7 @@ tests/test_int64: tests/test_int64.o tests/fake.o tests/fake_generic.o
 tests/test_bits: tests/test_bits.o tests/fake.o tests/fake_generic.o
 tests/test_captured: tests/test_captured.o tests/fake.o tests/fake_generic.o devices/ecat_cia402.o
 tests/test_serial: tests/test_serial.o tests/sim_el60xx.o tests/fake.o tests/fake_generic.o devices/ecat_serial.o devices/ecat_serial_core.o
-tests/test_serial_bridge: tests/test_serial_bridge.o tests/sim_el60xx.o tests/fake.o tests/fake_generic.o devices/ecat_serial_bridge.o devices/ecat_serial_core.o
+tests/test_serial_bridge: tests/test_serial_bridge.o tests/sim_el60xx.o tests/sim_modbus.o tests/fake.o tests/fake_generic.o devices/ecat_serial_bridge.o devices/ecat_serial_core.o
 tests/test_serial_bridge: TEST_LIBS = -lmodbus -lpthread
 tests/test_events: tests/test_events.o tests/fake.o tests/fake_generic.o ecat_events.o
 -include tests/*.d
@@ -89,6 +89,13 @@ tests/test_events: tests/test_events.o tests/fake.o tests/fake_generic.o ecat_ev
 $(tests):
 	@echo Linking $@
 	@$(CC) -o $@ $^ -lm -lyaml $(TEST_LIBS)
+
+# Not a test: a serial port with a simulated terminal and Modbus slave
+# behind it, for scripts/serial-mb2hal-test.
+tests/serial_sim_port: tests/serial_sim_port.o tests/sim_el60xx.o tests/sim_modbus.o tests/fake.o tests/fake_generic.o \
+	devices/ecat_serial_bridge.o devices/ecat_serial_core.o
+	@echo Linking $@
+	@$(CC) -o $@ $^ -lm -lyaml -lpthread
 
 check: $(tests)
 	@for t in $(tests); do $$t || exit 1; done
@@ -99,4 +106,4 @@ install: ecat.so
 	install -m 644 ecat.so $(DESTDIR)$(RTLIBDIR)/
 
 clean:
-	rm -f ecat.so *.o *.d devices/*.o devices/*.d tests/*.o tests/*.d $(tests) *.tmp *.sym *.ver
+	rm -f ecat.so *.o *.d devices/*.o devices/*.d tests/*.o tests/*.d $(tests) tests/serial_sim_port *.tmp *.sym *.ver

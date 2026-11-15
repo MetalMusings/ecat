@@ -1144,9 +1144,11 @@ those are not handled here.
 ## Serial channels
 
 Status: first version (2026-11-15), not tried on a terminal: we have none.
-The handshake, the function and the port are tested against a simulated
-terminal (component/tests/sim_el60xx.c), with libmodbus talking Modbus RTU
-through the port to a simulated slave.
+Built from Beckhoff's manual (EL600x, EL602x 6.2.0) and ESI files. The
+handshake, the function and the port are tested against a simulated
+terminal (component/tests/sim_el60xx.c), with libmodbus, and mb2hal in
+halrun (`scripts/serial-mb2hal-test`), talking Modbus RTU through the port
+to a simulated slave.
 
 Beckhoff's serial terminals (EL6001 RS232, EL6002 two channels, EL6021
 RS422/RS485, EL6022 two channels) move bytes in windows of the process
