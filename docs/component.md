@@ -1170,7 +1170,9 @@ byte "Legacy" sets.
 EtherCAT Setup proposes a channel for each such pair of PDOs (one on an
 EL6001/EL6021, two on an EL6002/EL6022, named `port` or `port-1`,
 `port-2`), with the port `/dev/ttyECAT<position>` (`-1`, `-2`) at 9600
-8N1: set `baud` and `frame` to the device's.
+8N1: set `baud` and `frame` to the device's, in the file or on the
+window's *Serial ports* card (which also sets half duplex for RS485 and
+gives the lines for mb2hal's INI file).
 
 ### In the configuration file (serial)
 

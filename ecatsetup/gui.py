@@ -1270,6 +1270,29 @@ class SlaveView(QWidget):
         self.homing_card.add(self.home_copy)
         lay.addWidget(self.homing_card)
 
+        # serial channels (EL6001, EL6021, ...)
+        self.serial_card = Card("Serial ports",
+                                "Each channel of the terminal is a serial port on the computer "
+                                "(a program such as mb2hal opens it). The program's baud rate is "
+                                "used; parity and data bits are the frame's here.")
+        self.serial_grid = QGridLayout()
+        self.serial_grid.setContentsMargins(0, 0, 0, 0)
+        self.serial_card.add(self.serial_grid)
+        self.serial_hint = self.serial_card.add(label("", "hint", wrap=True))
+        self.serial_lines_title = label("For mb2hal's INI file (a transaction on this port):", "hint")
+        self.serial_card.add(self.serial_lines_title)
+        self.serial_lines = QPlainTextEdit()
+        self.serial_lines.setReadOnly(True)
+        self.serial_lines.setFont(mono())
+        self.serial_lines.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.serial_card.add(self.serial_lines)
+        self.serial_copy = QPushButton("Copy the mb2hal lines")
+        self.serial_copy.clicked.connect(lambda: QApplication.clipboard().setText(
+            self.serial_lines.toPlainText()))
+        self.serial_card.add(self.serial_copy)
+        self.serial_widgets = []
+        lay.addWidget(self.serial_card)
+
         # process data
         pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
                                   "without one; entries the profile handles have no pins.")
@@ -1464,6 +1487,133 @@ class SlaveView(QWidget):
         self.show_process_data(s)
         self.show_settings(s)
         self.show_homing(s)
+        self.show_serial(s)
+
+    # -- serial channels
+
+    SERIAL_COLUMNS = ("Channel", "Port", "Baud rate", "Frame", "Send continuous", "RS485 (half duplex)")
+
+    def show_serial(self, s):
+        chans = s.get("serial") or []
+        self.serial_card.setVisible(bool(chans))
+        while self.serial_grid.count():
+            w = self.serial_grid.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        self.serial_widgets = []
+        if not chans:
+            return
+        for c, text in enumerate(self.SERIAL_COLUMNS):
+            self.serial_grid.addWidget(label(text, "hint"), 0, c)
+        for k, ch in enumerate(chans):
+            row = k + 1
+            w = {}
+            name = label("%s  (0x%s/0x%s)" % (ch.get("name"), str(ch.get("output-pdo", ""))[2:],
+                                               str(ch.get("input-pdo", ""))[2:]))
+            self.serial_grid.addWidget(name, row, 0)
+            w["port"] = QLineEdit(str(ch.get("port", "")))
+            w["port"].setFont(mono())
+            w["port"].setToolTip("The port's path: a program opens it like /dev/ttyUSB0. It is a link "
+                                 "that the ecat component makes when it is loaded")
+            w["port"].editingFinished.connect(lambda k=k: self.serial_edited(k, "port"))
+            self.serial_grid.addWidget(w["port"], row, 1)
+            w["baud"] = QuietCombo()
+            for b in sorted(config.SERIAL_BAUDS):
+                w["baud"].addItem(str(b), b)
+            w["baud"].setCurrentIndex(max(w["baud"].findData(ch.get("baud", 9600)), 0))
+            w["baud"].setToolTip("At start, until a program sets its own on the port. 300-1200 only on "
+                                 "the EL6002/EL6022; 12000 and 14400 on the EL6001/EL6021 from "
+                                 "firmware 07")
+            w["baud"].activated.connect(lambda *_, k=k: self.serial_edited(k, "baud"))
+            self.serial_grid.addWidget(w["baud"], row, 2)
+            w["frame"] = QuietCombo()
+            for f in config.SERIAL_FRAMES:
+                w["frame"].addItem(f, f)
+            w["frame"].setCurrentIndex(max(w["frame"].findData(str(ch.get("frame", "8N1"))), 0))
+            w["frame"].setToolTip("Data bits, parity, stop bits: the device's. A program on the port "
+                                  "cannot change parity and data bits (a pty does not pass them on); "
+                                  "its stop bits are used")
+            w["frame"].activated.connect(lambda *_, k=k: self.serial_edited(k, "frame"))
+            self.serial_grid.addWidget(w["frame"], row, 3)
+            w["continuous"] = QCheckBox()
+            w["continuous"].setChecked(bool(ch.get("send-continuous")))
+            w["continuous"].setToolTip("The terminal sends what the program wrote as a whole, without "
+                                       "a pause (0x8000:04). For Modbus RTU above 38400 baud")
+            w["continuous"].toggled.connect(lambda *_, k=k: self.serial_edited(k, "continuous"))
+            self.serial_grid.addWidget(w["continuous"], row, 4)
+            index = self._serial_index(ch, k)
+            w["half"] = QCheckBox()
+            have_half = bool(self.win.session.object_name(self.position, index, 0x06))
+            w["half"].setEnabled(have_half)
+            w["half"].setChecked(any(self._is_obj(st, index, 0x06) and st.get("value") for st in
+                                     s.get("settings") or []))
+            w["half"].setToolTip("0x%04X:06 \"Enable half duplex\" as a setting: for a two-wire RS485 "
+                                 "bus" % index if have_half else
+                                 "This terminal has no half duplex (or its dictionary is not read)")
+            w["half"].toggled.connect(lambda *_, k=k: self.serial_edited(k, "half"))
+            self.serial_grid.addWidget(w["half"], row, 5)
+            self.serial_widgets.append(w)
+        self.show_serial_lines(s)
+
+    @staticmethod
+    def _serial_index(ch, k):
+        try:
+            return int(str(ch.get("settings-index", "0x%04X" % (0x8000 + 0x10 * k))), 16)
+        except ValueError:
+            return 0x8000 + 0x10 * k
+
+    @staticmethod
+    def _is_obj(st, index, sub):
+        try:
+            return config.parse_obj(st.get("object")) == (index, sub)
+        except ValueError:
+            return False
+
+    def show_serial_lines(self, s):
+        out = []
+        chans = s.get("serial") or []
+        for ch in chans:
+            f = str(ch.get("frame", "8N1"))
+            out.append("%sLINK_TYPE=serial\nSERIAL_PORT=%s\nSERIAL_BAUD=%s\nSERIAL_BITS=%s\n"
+                       "SERIAL_PARITY=%s\nSERIAL_STOP=%s"
+                       % ("# %s.%s\n" % (s.get("name"), ch.get("name")) if len(chans) > 1 else "",
+                          ch.get("port", ""), ch.get("baud", 9600), f[0],
+                          {"N": "none", "E": "even", "O": "odd"}.get(f[1:2], "none"), f[2:3]))
+        text = "\n\n".join(out)
+        self.serial_lines.setPlainText(text)
+        # as high as the lines: the block spacing is a little more than the font's
+        self.serial_lines.setFixedHeight(int(self.serial_lines.fontMetrics().lineSpacing() * 1.25
+                                             * (text.count("\n") + 1)) + 16)
+        self.serial_hint.setText("Several transactions on one port: give these in the first; the next "
+                                 "ones take them over. The HAL check warns when mb2hal's frame "
+                                 "differs from the one here.")
+
+    def serial_edited(self, k, what):
+        s = self.win.session.slave(self.position)
+        chans = (s or {}).get("serial") or []
+        if self.loading or k >= len(chans) or k >= len(self.serial_widgets):
+            return
+        ch, w = chans[k], self.serial_widgets[k]
+        if what == "port":
+            ch["port"] = w["port"].text().strip()
+        elif what == "baud":
+            ch["baud"] = w["baud"].currentData()
+        elif what == "frame":
+            ch["frame"] = w["frame"].currentData()
+        elif what == "continuous":
+            if w["continuous"].isChecked():
+                ch["send-continuous"] = True
+            else:
+                ch.pop("send-continuous", None)
+        elif what == "half":
+            index = self._serial_index(ch, k)
+            sts = [st for st in s.get("settings") or [] if not self._is_obj(st, index, 0x06)]
+            if w["half"].isChecked():
+                sts.append({"object": config.obj(index, 0x06), "type": "BOOL", "value": 1})
+            s["settings"] = sts
+            self.show_settings(s)
+        self.show_serial_lines(s)
+        self.win.changed()
 
     # -- distributed clocks
 

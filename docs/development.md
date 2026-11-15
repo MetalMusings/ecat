@@ -1410,6 +1410,10 @@ Built so far:
   When mb2hal stops, libmodbus puts the port back as it found it (the
   file's rate), and the channel follows.
 
+- The window's *Serial ports* card (slave page): port, baud, frame,
+  send continuous, half duplex (as a setting), the mb2hal lines;
+  `tests/test_gui.py` test_serial_card (mutation-checked).
+
 Still to do: a capture from a real terminal (in particular of
 send-continuous: when exactly SW.2 drops).
 

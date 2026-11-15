@@ -143,6 +143,14 @@ Choosing a slave shows:
   *Copy the INI lines*. The choice goes to Settings. Switching modes is
   built and unit-tested but not yet tried on a drive
   ([Changing modes](component.md#changing-modes));
+- **Serial ports**, for a serial terminal (EL6001, EL6002, EL6021,
+  EL6022; [serial channels](component.md#serial-channels)): a row per
+  channel with its port (`/dev/ttyECAT4`), the baud rate at start, the
+  frame (data bits, parity, stop bits: the device's), *Send continuous*
+  (for Modbus RTU above 38400 baud) and *RS485 (half duplex)*, which adds
+  or removes the setting `0x80n0:06` (greyed out when the terminal has
+  none, an EL6001). Under it the lines for mb2hal's INI file for each
+  port, with *Copy the mb2hal lines*;
 - **Process data**: every PDO entry with its pin name and HAL type. The
   first column gives the direction and the PDO (`out 0x1600`). The
   columns Scale, Offset, Bit pins and Invert are shown only where an entry

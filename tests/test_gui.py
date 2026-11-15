@@ -916,6 +916,52 @@ class TestWindow(WindowBase):
         self.assertEqual(s["cia402"]["modes"], ["pp", "hm"])
         self.assertNotIn("HM", page.opmode_hint.text())
 
+    def test_serial_card(self):
+        w = self.window()
+        s = w.session.slave(0)
+        page = w.slave_page
+        w.select_slave(0)
+        self.assertTrue(page.serial_card.isHidden())          # no serial channels
+        s["serial"] = [{"name": "port", "output-pdo": "0x1602", "input-pdo": "0x1A02",
+                        "port": "/dev/ttyECAT0", "baud": 9600, "frame": "8N1"}]
+        with mock.patch.object(w.session, "object_name",
+                               lambda pos, i, sub: "Enable half duplex" if (i, sub) == (0x8000, 6) else ""):
+            w.select_slave(0)
+            self.assertFalse(page.serial_card.isHidden())
+            row = page.serial_widgets[0]
+            self.assertEqual(row["baud"].currentData(), 9600)
+            row["baud"].setCurrentIndex(row["baud"].findData(19200))
+            page.serial_edited(0, "baud")
+            self.assertEqual(s["serial"][0]["baud"], 19200)
+            row["frame"].setCurrentIndex(row["frame"].findData("8E1"))
+            page.serial_edited(0, "frame")
+            self.assertEqual(s["serial"][0]["frame"], "8E1")
+            row["port"].setText("/dev/ttyVFD")
+            page.serial_edited(0, "port")
+            self.assertEqual(s["serial"][0]["port"], "/dev/ttyVFD")
+            row["continuous"].setChecked(True)
+            self.assertTrue(s["serial"][0]["send-continuous"])
+            row["continuous"].setChecked(False)
+            self.assertNotIn("send-continuous", s["serial"][0])
+            # half duplex: a setting of the channel's settings object
+            self.assertTrue(row["half"].isEnabled())
+            row["half"].setChecked(True)
+            self.assertIn({"object": "0x8000:06", "type": "BOOL", "value": 1}, s["settings"])
+            row["half"].setChecked(False)
+            self.assertNotIn("0x8000:06", [x["object"] for x in s["settings"]])
+            # the lines for mb2hal follow
+            lines = page.serial_lines.toPlainText()
+            self.assertIn("SERIAL_PORT=/dev/ttyVFD", lines)
+            self.assertIn("SERIAL_BAUD=19200", lines)
+            self.assertIn("SERIAL_PARITY=even", lines)
+            # shown again from the file
+            w.select_slave(0)
+            self.assertEqual(page.serial_widgets[0]["frame"].currentData(), "8E1")
+        # a terminal without half duplex (EL6001): the box is off
+        with mock.patch.object(w.session, "object_name", lambda pos, i, sub: ""):
+            w.select_slave(0)
+            self.assertFalse(page.serial_widgets[0]["half"].isEnabled())
+
     def test_homing_card(self):
         w = self.window()
         s = w.session.slave(0)
