@@ -235,7 +235,10 @@ def eoe_errors(eoe):
             addr(k, eoe[k])
     if "hostname" in eoe and not (isinstance(eoe["hostname"], str) and 0 < len(eoe["hostname"]) < 32):
         out.append("eoe.hostname: %r is empty or longer than 31 characters" % (eoe["hostname"],))
-    if "mac" in eoe and not re.fullmatch(r"[0-9A-Fa-f]{1,2}(:[0-9A-Fa-f]{1,2}){5}", str(eoe["mac"])):
+    if "mac" in eoe and isinstance(eoe["mac"], int):
+        # YAML reads 12:00:00:00:10:21 without quotes as one number
+        out.append("eoe.mac: write the MAC address in quotes (\"02:00:00:00:10:21\")")
+    elif "mac" in eoe and not re.fullmatch(r"[0-9A-Fa-f]{1,2}(:[0-9A-Fa-f]{1,2}){5}", str(eoe["mac"])):
         out.append("eoe.mac: %r is not a MAC address such as 02:00:00:00:10:21" % (eoe["mac"],))
     if "host-ip" in eoe:
         before = len(out)
@@ -262,6 +265,28 @@ def eoe_network(eoe):
         return ipaddress.IPv4Interface(ip)
     except (KeyError, ValueError, TypeError):
         return None
+
+
+def eoe_device(slave):
+    """The name of the network device the master makes for the slave."""
+    return "eoe0s%s" % slave.get("position")
+
+
+def eoe_suggestion(cfg, slave, networks=()):
+    """An eoe: block to start from: the slave's address and the computer's
+    in the first 192.168.N.0/24 (N from 10) that no other slave's EoE and
+    none of the computer's own networks (`networks`, from host_networks())
+    is in."""
+    taken = [n for _, n in networks]
+    for s in (cfg or {}).get("slaves") or []:
+        net = eoe_network(s["eoe"]) if s is not slave and isinstance(s.get("eoe"), dict) else None
+        if net is not None:
+            taken.append(net.network)
+    for n in list(range(10, 255)) + list(range(0, 10)):
+        net = ipaddress.IPv4Network("192.168.%d.0/24" % n)
+        if not any(net.overlaps(t) for t in taken):
+            return {"ip": "192.168.%d.2/24" % n, "host-ip": "192.168.%d.1" % n}
+    return {"ip": "192.168.10.2/24", "host-ip": "192.168.10.1"}
 
 
 def host_networks(run=subprocess.run):

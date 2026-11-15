@@ -528,6 +528,8 @@ class TestEsi(unittest.TestCase):
         self.assertIn("not a subnet mask", errs(ip="10.0.0.5", mask="255.0.255.0")[0])
         self.assertIn("not a subnet mask", errs(ip="10.0.0.5", mask="0.0.0.0")[0])
         self.assertIn("eoe.mac", errs(ip="10.0.0.5", mac="02:00:00:00:10")[0])
+        # YAML reads an unquoted 12:00:00:00:10:21 as one number
+        self.assertIn("in quotes", errs(**config.yaml.safe_load("{ip: 10.0.0.5, mac: 12:00:00:00:10:21}"))[0])
         self.assertIn("eoe.hostname", errs(ip="10.0.0.5", hostname="")[0])
         self.assertIn("unknown key", errs(ip="10.0.0.5", host="x")[0])
         cfg = {"ecat": 1, "master": {}, "slaves": [

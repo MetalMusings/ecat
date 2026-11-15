@@ -5,6 +5,7 @@ Run with: python3 -m unittest discover -s tests
 """
 
 import copy
+import ipaddress
 import os
 import sys
 import tempfile
@@ -961,6 +962,74 @@ class TestWindow(WindowBase):
         with mock.patch.object(w.session, "object_name", lambda pos, i, sub: ""):
             w.select_slave(0)
             self.assertFalse(page.serial_widgets[0]["half"].isEnabled())
+
+    def test_eoe_card(self):
+        w = self.window()
+        s, other = w.session.slave(0), w.session.slave(1)
+        page = w.slave_page
+        w.select_slave(0)
+        self.assertTrue(page.eoe_card.isHidden())             # the slave has no EoE
+        w.session.bus[0].proposal.has_eoe = True
+        nets = [("enp1s0", ipaddress.IPv4Network("192.168.10.0/24"))]
+        with mock.patch.object(gui.config, "host_networks", lambda: nets):
+            w.select_slave(0)
+            self.assertFalse(page.eoe_card.isHidden())
+            self.assertFalse(page.eoe_on.isChecked())
+            self.assertFalse(page.eoe_fields["ip"].isEnabled())
+            self.assertNotIn("eoe", s)
+            # switched on: a subnet nobody has (the computer is in 192.168.10.x, slave 1 in .11.x)
+            other["eoe"] = {"ip": "192.168.11.2/24"}
+            page.eoe_on.setChecked(True)
+            self.assertEqual(s["eoe"], {"ip": "192.168.12.2/24", "host-ip": "192.168.12.1"})
+            self.assertEqual(page.eoe_fields["ip"].text(), "192.168.12.2/24")
+            self.assertTrue(page.eoe_fields["ip"].isEnabled())
+            self.assertTrue(page.eoe_fields["mask"].isHidden())
+            self.assertIn("eoe0s0", page.eoe_hint.text())
+            self.assertIn("ping 192.168.12.2,", page.eoe_hint.text())
+            self.assertTrue(page.eoe_errors.isHidden())
+            self.assertTrue(page.eoe_warn.isHidden())
+            self.assertEqual(config.check(w.session.cfg), [])
+
+            def typed(key, text):
+                page.eoe_fields[key].setText(text)
+                page.eoe_edited(key)
+            typed("hostname", "drive-x")
+            typed("mac", "12:00:00:00:10:21")
+            self.assertEqual(s["eoe"]["hostname"], "drive-x")
+            self.assertEqual(config.yaml.safe_load(config.dumps(w.session.cfg))["slaves"][0]["eoe"]["mac"],
+                             "12:00:00:00:10:21")
+            typed("hostname", "")                             # emptied: the key goes
+            self.assertNotIn("hostname", s["eoe"])
+            # an error and a warning are shown on the card
+            typed("host-ip", "192.168.13.1")
+            self.assertIn("not in the slave's subnet", page.eoe_errors.text())
+            self.assertTrue(page.eoe_hint.isHidden())
+            typed("host-ip", "192.168.12.1")
+            self.assertTrue(page.eoe_errors.isHidden())
+            typed("ip", "192.168.10.2/24")
+            typed("host-ip", "192.168.10.1")
+            self.assertIn("also the computer's own on enp1s0", page.eoe_warn.text())
+            self.assertNotIn("slave 0", page.eoe_warn.text())
+            # without the computer's address: the device is left down
+            typed("host-ip", "")
+            self.assertNotIn("host-ip", s["eoe"])
+            self.assertIn("left down", page.eoe_hint.text())
+            # switched off and on again: the block comes back as it was
+            kept = dict(s["eoe"])
+            page.eoe_on.setChecked(False)
+            self.assertNotIn("eoe", s)
+            page.eoe_on.setChecked(True)
+            self.assertEqual(s["eoe"], kept)
+            # a mask in the file has its own field
+            s["eoe"] = {"ip": "192.168.12.2", "mask": "255.255.255.0"}
+            w.select_slave(0)
+            self.assertFalse(page.eoe_fields["mask"].isHidden())
+            self.assertEqual(page.eoe_fields["mask"].text(), "255.255.255.0")
+            # a block on a slave whose SII has no EoE: shown, with a warning
+            w.session.bus[0].proposal.has_eoe = False
+            w.select_slave(0)
+            self.assertFalse(page.eoe_card.isHidden())
+            self.assertIn("does not list the EoE", page.eoe_warn.text())
 
     def test_homing_card(self):
         w = self.window()

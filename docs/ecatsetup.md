@@ -151,6 +151,18 @@ Choosing a slave shows:
   or removes the setting `0x80n0:06` (greyed out when the terminal has
   none, an EL6001). Under it the lines for mb2hal's INI file for each
   port, with *Copy the mb2hal lines*;
+- **Network (EoE)**, for a slave that speaks Ethernet over EtherCAT (its
+  SII lists the protocol) or has an `eoe:` block
+  ([eoe](component.md#eoe)): *Give the slave an IP address* adds the block,
+  starting from a subnet `192.168.N.x` that no other slave and none of the
+  computer's own networks is in (the slave `.2`, the computer `.1`);
+  switching it off removes the block. The fields are the slave's address
+  with its prefix length, the computer's address (`host-ip`; empty leaves
+  the network device down), gateway, DNS server, host name and MAC
+  address; an emptied field is taken out of the file. Under them: the name
+  of the slave's network device on the computer (`eoe0s4`) and what to try
+  (`ping`, the web page), and the errors and warnings of the check for
+  this slave;
 - **Process data**: every PDO entry with its pin name and HAL type. The
   first column gives the direction and the PDO (`out 0x1600`). The
   columns Scale, Offset, Bit pins and Invert are shown only where an entry

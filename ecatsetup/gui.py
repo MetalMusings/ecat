@@ -1293,6 +1293,39 @@ class SlaveView(QWidget):
         self.serial_widgets = []
         lay.addWidget(self.serial_card)
 
+        # Ethernet over EtherCAT
+        self.eoe_card = Card("Network (EoE)",
+                             "The slave speaks Ethernet over EtherCAT. With an address here the "
+                             "computer reaches it (ping, its web page) while LinuxCNC or a test "
+                             "runs.")
+        self.eoe_on = QCheckBox("Give the slave an IP address")
+        self.eoe_on.toggled.connect(self.eoe_toggled)
+        self.eoe_card.add(self.eoe_on)
+        self.eoe_form = QFormLayout()
+        self.eoe_form.setContentsMargins(0, 0, 0, 0)
+        self.eoe_fields = {}
+        for key, text, example, tip in self.EOE_FIELDS:
+            box = QLineEdit()
+            box.setFont(mono())
+            box.setPlaceholderText(example)
+            box.setToolTip(tip)
+            box.setMaximumWidth(280)
+            box.editingFinished.connect(lambda key=key: self.eoe_edited(key))
+            self.eoe_fields[key] = box
+            if key == "mask":       # a row only where the file has a mask (show_eoe)
+                self.eoe_mask_label = label(text)
+                self.eoe_mask_label.hide()
+                box.hide()
+            else:
+                self.eoe_form.addRow(text, box)
+        self.eoe_card.add(self.eoe_form)
+        self.eoe_hint = self.eoe_card.add(label("", "hint", wrap=True))
+        self.eoe_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.eoe_errors = self.eoe_card.add(label("", "problemText", wrap=True))
+        self.eoe_warn = self.eoe_card.add(label("", "warnText", wrap=True))
+        self.eoe_kept = {}      # position -> the block as it was when switched off
+        lay.addWidget(self.eoe_card)
+
         # process data
         pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
                                   "without one; entries the profile handles have no pins.")
@@ -1449,6 +1482,8 @@ class SlaveView(QWidget):
             self.st.setRowCount(0)
             self.notes.hide()
             self.homing_card.hide()
+            self.serial_card.hide()
+            self.eoe_card.hide()
             return
 
         is402 = s.get("profile") == "cia402"
@@ -1488,6 +1523,110 @@ class SlaveView(QWidget):
         self.show_settings(s)
         self.show_homing(s)
         self.show_serial(s)
+        self.show_eoe(s)
+
+    # -- Ethernet over EtherCAT
+
+    # key, label, example (shown in the empty field), tooltip
+    EOE_FIELDS = (
+        ("ip", "The slave's address", "192.168.10.2/24",
+         "The slave's IPv4 address with the prefix length (/24 is the mask 255.255.255.0)"),
+        ("mask", "Subnet mask", "255.255.255.0",
+         "Instead of the prefix length in the slave's address: not both"),
+        ("host-ip", "The computer's address", "192.168.10.1",
+         "This computer's own address in the slave's subnet. The master gives it to the "
+         "slave's network device and brings the device up. Empty: the device is left down, "
+         "yours to configure"),
+        ("gateway", "Gateway", "none", "An IPv4 address, sent to the slave"),
+        ("dns", "DNS server", "none", "An IPv4 address, sent to the slave"),
+        ("hostname", "Host name", "none", "At most 31 characters, sent to the slave"),
+        ("mac", "MAC address", "the slave's own", "Such as 02:00:00:00:10:21"),
+    )
+
+    def show_eoe(self, s):
+        b = self.win.session.bus.get(self.position)
+        eoe = s.get("eoe")
+        self.eoe_card.setVisible(eoe is not None or bool(b and getattr(b.proposal, "has_eoe", False)))
+        if self.eoe_card.isHidden():
+            return
+        on = isinstance(eoe, dict)
+        was, self.loading = self.loading, True
+        self.eoe_on.setChecked(on)
+        self.loading = was
+        for key, box in self.eoe_fields.items():
+            box.setText(str(eoe[key]) if on and key in eoe else "")
+            box.setEnabled(on)
+        # the mask is another way to write the prefix length: shown where the file has it
+        mask = self.eoe_fields["mask"]
+        show_mask = on and "mask" in eoe
+        if show_mask != (self.eoe_form.indexOf(mask) >= 0):
+            if show_mask:
+                self.eoe_form.insertRow(1, self.eoe_mask_label, mask)
+            else:
+                self.eoe_form.takeRow(mask)     # a hidden row would leave a gap
+            mask.setVisible(show_mask)
+            self.eoe_mask_label.setVisible(show_mask)
+        self.show_eoe_messages(s)
+
+    def show_eoe_messages(self, s):
+        eoe = s.get("eoe")
+        errors, warnings, hint = [], [], ""
+        if eoe is not None:
+            errors = config.eoe_errors(eoe)
+            cfg = self.win.session.cfg
+            who = "slave %s (%s): " % (s.get("position"), s.get("name"))
+            networks = config.host_networks() if isinstance(eoe, dict) and "host-ip" in eoe else ()
+            warnings = [t[len(who):] for t in config.eoe_warnings(cfg, networks) if t.startswith(who)]
+            b = self.win.session.bus.get(self.position)
+            if b is not None and not getattr(b.proposal, "has_eoe", True):
+                warnings.append("the slave's SII does not list the EoE mailbox protocol: the master "
+                                "cannot set its IP address")
+        net = config.eoe_network(eoe) if isinstance(eoe, dict) and not errors else None
+        if net is not None:
+            device = config.eoe_device(s)
+            if "host-ip" in eoe:
+                hint = ("The computer reaches the slave through its own network device %s, which the "
+                        "master sets up while LinuxCNC or a test runs. Try it then: ping %s, or "
+                        "http://%s/ in a browser. Only this computer reaches the slave."
+                        % (device, net.ip, net.ip))
+            else:
+                hint = ("The slave gets its address, but the computer's network device %s is left "
+                        "down: give the computer's address to reach the slave from here." % device)
+        self.eoe_hint.setText(hint)
+        self.eoe_hint.setVisible(bool(hint))
+        self.eoe_errors.setText("\n".join("Error: " + t for t in errors))
+        self.eoe_errors.setVisible(bool(errors))
+        self.eoe_warn.setText("\n".join("Warning: " + t for t in warnings))
+        self.eoe_warn.setVisible(bool(warnings))
+
+    def eoe_toggled(self, on):
+        s = self.win.session.slave(self.position)
+        if self.loading or s is None:
+            return
+        if on:
+            s["eoe"] = self.eoe_kept.pop(self.position, None) or config.eoe_suggestion(
+                self.win.session.cfg, s, config.host_networks())
+        else:
+            if isinstance(s.get("eoe"), dict):
+                self.eoe_kept[self.position] = s["eoe"]
+            s.pop("eoe", None)
+        self.show_eoe(s)
+        self.win.changed()
+
+    def eoe_edited(self, key):
+        s = self.win.session.slave(self.position)
+        eoe = (s or {}).get("eoe")
+        if self.loading or not isinstance(eoe, dict):
+            return
+        text = self.eoe_fields[key].text().strip()
+        if text == str(eoe.get(key, "")):
+            return
+        if text:
+            eoe[key] = text
+        else:
+            eoe.pop(key, None)
+        self.show_eoe(s)
+        self.win.changed()
 
     # -- serial channels
 

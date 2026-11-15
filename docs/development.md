@@ -1583,9 +1583,20 @@ subnet's route; 100 of 100 pings of 1472 bytes from that moment, the web
 page in 43 ms. Not tried on hardware: a rescan in OP (the simulator test
 covers it).
 
+### Done: the window's card
+
+Built 2026-11-15: *Network (EoE)* on the slave page (`gui.py` `show_eoe`),
+shown for a slave whose SII lists EoE or that has an `eoe:` block. Switching
+it on starts from `config.eoe_suggestion()`: the first `192.168.N.0/24` (N
+from 10) that no other slave's `eoe:` and none of the PC's networks is in.
+The card shows this slave's errors and warnings of the check
+(`config.eoe_errors()`, `eoe_warnings()`) and the device's name
+(`config.eoe_device()`). `tests/test_gui.py` test_eoe_card
+(mutation-checked). An unquoted MAC address that YAML reads as a number
+(`12:00:00:00:10:21`) now gets a message that says so.
+
 ### Not built
 
-- A window card for `eoe:` (the file can be edited by hand).
 - The EoE firmware as part of the card's own code: it lives in a work copy
   (`~/src/easercat-3000-eoe` on the plasma PC), not in MyOwnEtherCATDevice.
 - EoE in LinuxCNC (only halrun so far), and a device that was not made here.

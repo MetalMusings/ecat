@@ -338,6 +338,9 @@ is yours to configure.
   `ethercat.yaml` and sets none: `sudo ip addr add 192.168.10.1/24 dev
   eoe0s2; sudo ip link set eoe0s2 up` then.
 
+In the window the block is edited on the slave page's *Network (EoE)* card
+([ecatsetup.md](ecatsetup.md)), which proposes a free subnet.
+
 `ecatsetup --check` and the window refuse an address that is not an IPv4
 address, a mask that is not a subnet mask, a MAC address or hostname that
 does not fit, a `host-ip` outside the slave's subnet or equal to the slave's
