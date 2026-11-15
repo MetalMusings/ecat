@@ -1255,7 +1255,8 @@ SERIAL_STOP=1
 - Parity and data bits come from `frame` in the file: a pty does not pass
   them on. The terminal makes the parity on the wire itself. Give `frame`
   the device's setting (mb2hal's `SERIAL_PARITY` and `SERIAL_BITS` must
-  say the same: nothing checks it yet). Modbus RTU often uses 8E1.
+  say the same: the HAL check warns when they differ, docs/ecatsetup.md
+  "Checking the HAL files"). Modbus RTU often uses 8E1.
 - What the terminal receives while no program has the port open is
   dropped.
 - A path that exists and is not a link to a pty (a real `/dev/ttyS0`, a

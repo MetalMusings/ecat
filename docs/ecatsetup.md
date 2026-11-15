@@ -1263,6 +1263,7 @@ reports:
 | error | a signal with two writers |
 | warning | a signal on a slave's input with other pins but nothing that writes it (a signal with only the slave's pin may be written by a GUI's Python code, as in QtPlasmaC, and is not reported) |
 | warning | `ethercat-load.hal` or `ethercat.hal` changed by hand (below) |
+| warning | an mb2hal transaction (in the file a HAL file gives mb2hal with `loadusr ... mb2hal config=FILE`) on a serial channel's port whose `SERIAL_BITS` or `SERIAL_PARITY` differ from the channel's `frame` (the terminal uses the file's: a pty does not pass them on), or whose `SERIAL_BAUD` the serial terminals do not have; a transaction without these takes the one before it, as in mb2hal |
 
 It is on the *HAL & LinuxCNC* page (*HAL check*), and on the command
 line: `ecatsetup --check-hal <machine>.ini`. With *Check the HAL files

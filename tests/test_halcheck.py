@@ -132,6 +132,46 @@ class TestCheck(Folder):
         # g: two readers and no writer; but io.out-1 is on g and plasmac:laser-on
         self.assertIn("nothing writes signal g, so io.out-1 stays at its default", texts)
 
+    def test_mb2hal_frame_against_a_serial_channel(self):
+        c = cfg()
+        c["slaves"].append({"position": 9, "name": "rs485", "identity": {"vendor": "0x2", "product": "0x17853052"},
+                            "profile": "generic", "serial": [{"name": "vfd", "output-pdo": "0x1602",
+                                                              "input-pdo": "0x1A02", "port": "/dev/ttyECAT0",
+                                                              "baud": 19200, "frame": "8E1"}]})
+        self.write("machine.hal", self.read("machine.hal") +
+                   "loadusr -W mb2hal config=mb2hal.ini\n")
+        mb = ("[MB2HAL_INIT]\nINIT_DEBUG=0\n"
+              "[TRANSACTION_00]\nLINK_TYPE=serial\nSERIAL_PORT=/dev/ttyECAT0\nSERIAL_BAUD=%s\n"
+              "SERIAL_BITS=%s\nSERIAL_PARITY=%s\nSERIAL_STOP=1\nMB_SLAVE_ID=1\n"
+              "[TRANSACTION_01]\nMB_SLAVE_ID=1\nFIRST_ELEMENT=5\n"
+              "[TRANSACTION_02]\nLINK_TYPE=serial\nSERIAL_PORT=/dev/ttyUSB0\nSERIAL_PARITY=odd\n")
+
+        def warnings(baud, bits, parity):
+            self.write("mb2hal.ini", mb % (baud, bits, parity))
+            return [t for sev, _, _, t in self.check(c) if "mb2hal" in t and sev == "warn"]
+        # the same frame: nothing; the other port (ttyUSB0) is not ours
+        self.assertEqual(warnings(19200, 8, "even"), [])
+        # parity differs: once, though transaction 01 takes it over
+        found = warnings(19200, 8, "none")
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("serial channel rs485.vfd has frame 8E1", found[0])
+        self.assertIn("parity none", found[0])
+        self.assertEqual(len(warnings(19200, 7, "even")), 1)
+        # a rate the terminals do not have
+        found = warnings(14400, 8, "even")
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("14400 baud", found[0])
+        # a transaction takes the port of the one before it
+        self.write("mb2hal.ini", "[TRANSACTION_00]\nLINK_TYPE=serial\nSERIAL_PORT=/dev/ttyECAT0\n"
+                                 "SERIAL_BITS=8\nSERIAL_PARITY=even\n[TRANSACTION_01]\nSERIAL_PARITY=odd\n")
+        found = [t for _, _, _, t in self.check(c) if "mb2hal" in t]
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("[TRANSACTION_01]", " ".join(f.file for f in halcheck.check(self.ini, c)
+                                                   if "mb2hal" in f.text))
+        # without serial channels, mb2hal is not looked at
+        self.write("mb2hal.ini", mb % (19200, 8, "none"))
+        self.assertFalse(any("mb2hal" in t for _, _, _, t in self.check(cfg())))
+
     def test_renamed_slave(self):
         c = cfg()
         for s in c["slaves"]:

@@ -76,9 +76,8 @@ def hal_files(ini_path):
     return out
 
 
-def uses(ini_path):
-    """{pin: [Use]} over all HAL files, and {signal: [pins]}."""
-    pins, sigs = {}, {}
+def _statements(ini_path):
+    """(file name, 1-based line, tokens) of every statement of the HAL files."""
     for path, _ in hal_files(ini_path):
         lineno = None       # a .tcl file: the HAL it gives, with the Tcl file's lines
         if integrate.is_tcl(path):
@@ -98,29 +97,37 @@ def uses(ini_path):
         name = os.path.basename(path)
         for i, _, t in integrate.statements(text):
             a = (lineno[i] - 1 if i < len(lineno) else -1) if lineno is not None else i
-            if t[0] == "net" and len(t) > 1:
-                sig, ps = integrate.net_pins(t)
-                sigs.setdefault(sig, [])
-                for p in ps:
-                    pins.setdefault(p, []).append(Use(name, a + 1, sig))
-                    sigs[sig].append(p)
-            elif t[0] in ("linkps", "linksp") and len(t) >= 3:
-                p, sig = (t[1], t[2]) if t[0] == "linkps" else (t[2], t[1])
+            yield name, a + 1, t
+
+
+def uses(ini_path):
+    """{pin: [Use]} over all HAL files, and {signal: [pins]}."""
+    pins, sigs = {}, {}
+    for name, line, t in _statements(ini_path):
+        a = line - 1
+        if t[0] == "net" and len(t) > 1:
+            sig, ps = integrate.net_pins(t)
+            sigs.setdefault(sig, [])
+            for p in ps:
                 pins.setdefault(p, []).append(Use(name, a + 1, sig))
-                sigs.setdefault(sig, []).append(p)
-            elif t[0] == "unlinkp" and len(t) >= 2:
-                # the pin leaves its signal; what came before no longer counts
-                for u in pins.get(t[1], []):
-                    if u.signal and t[1] in sigs.get(u.signal, []):
-                        sigs[u.signal] = [x for x in sigs[u.signal] if x != t[1]]
-                pins[t[1]] = [u for u in pins.get(t[1], []) if u.signal is None]
-            elif t[0] == "delsig" and len(t) >= 2:
-                for p in sigs.pop(t[1], []):
-                    pins[p] = [u for u in pins.get(p, []) if u.signal != t[1]]
-            elif t[0] == "setp" and len(t) >= 3:
-                pins.setdefault(t[1], []).append(Use(name, a + 1))
-            elif len(t) == 3 and t[1] == "=" and "." in t[0]:
-                pins.setdefault(t[0], []).append(Use(name, a + 1))
+                sigs[sig].append(p)
+        elif t[0] in ("linkps", "linksp") and len(t) >= 3:
+            p, sig = (t[1], t[2]) if t[0] == "linkps" else (t[2], t[1])
+            pins.setdefault(p, []).append(Use(name, a + 1, sig))
+            sigs.setdefault(sig, []).append(p)
+        elif t[0] == "unlinkp" and len(t) >= 2:
+            # the pin leaves its signal; what came before no longer counts
+            for u in pins.get(t[1], []):
+                if u.signal and t[1] in sigs.get(u.signal, []):
+                    sigs[u.signal] = [x for x in sigs[u.signal] if x != t[1]]
+            pins[t[1]] = [u for u in pins.get(t[1], []) if u.signal is None]
+        elif t[0] == "delsig" and len(t) >= 2:
+            for p in sigs.pop(t[1], []):
+                pins[p] = [u for u in pins.get(p, []) if u.signal != t[1]]
+        elif t[0] == "setp" and len(t) >= 3:
+            pins.setdefault(t[1], []).append(Use(name, a + 1))
+        elif len(t) == 3 and t[1] == "=" and "." in t[0]:
+            pins.setdefault(t[0], []).append(Use(name, a + 1))
     return pins, sigs
 
 
@@ -198,6 +205,90 @@ def check(ini_path, cfg):
             u = pins[ours_in[0]][0]
             out.append(Finding("warn", u.file, u.line, "nothing writes signal %s, so %s stays "
                                "at its default" % (sig, ", ".join(ours_in))))
+    return out + mb2hal_check(ini_path, cfg)
+
+
+# mb2hal's serial settings (its INI file's TRANSACTION_nn sections); a
+# transaction without one takes the one before
+MB2HAL_SERIAL = ("LINK_TYPE", "SERIAL_PORT", "SERIAL_BAUD", "SERIAL_BITS", "SERIAL_PARITY", "SERIAL_STOP")
+MB2HAL_PARITY = {"none": "N", "even": "E", "odd": "O"}
+
+
+def mb2hal_files(ini_path):
+    """[(HAL file name, line, mb2hal's INI path)] of the mb2hal programs
+    the HAL files start (loadusr ... mb2hal config=FILE)."""
+    d = os.path.dirname(os.path.abspath(ini_path))
+    out = []
+    for name, line, t in _statements(ini_path):
+        if t[0] != "loadusr" or not any(os.path.basename(x) == "mb2hal" for x in t[1:]):
+            continue
+        for x in t[1:]:
+            if x.startswith("config="):
+                path = x[len("config="):].strip("\"'")
+                out.append((name, line, os.path.join(d, path)))
+    return out
+
+
+def mb2hal_check(ini_path, cfg):
+    """[Finding]: mb2hal transactions on a serial channel's port whose data
+    bits or parity differ from the channel's frame (a pty does not pass
+    them on: the terminal uses the file's), or whose baud rate the
+    terminal does not have."""
+    from . import config
+    channels = {}
+    for s in (cfg or {}).get("slaves") or []:
+        for ch in s.get("serial") or []:
+            if isinstance(ch.get("port"), str):
+                channels[os.path.normpath(ch["port"])] = ("%s.%s" % (s.get("name"), ch.get("name")),
+                                                          str(ch.get("frame", "8N1")))
+    out, said = [], set()
+    if not channels:
+        return out
+    for hal_name, hal_line, path in mb2hal_files(ini_path):
+        try:
+            entries = integrate.read_ini(path)
+        except OSError:
+            out.append(Finding("warn", hal_name, hal_line, "mb2hal's file %s cannot be read"
+                               % os.path.basename(path)))
+            continue
+        sections = list(dict.fromkeys(sec for sec, _, _ in entries if sec.startswith("TRANSACTION_")))
+        last = {}
+        for sec in sections:
+            for key in MB2HAL_SERIAL:
+                v = integrate.ini_get(entries, sec, key)
+                if v is not None:
+                    last[key] = v
+            if (last.get("LINK_TYPE") or "").lower() != "serial":
+                continue
+            port = os.path.normpath(last.get("SERIAL_PORT") or "")
+            if port not in channels:
+                continue
+            chan, frame = channels[port]
+            parity = MB2HAL_PARITY.get((last.get("SERIAL_PARITY") or "").lower())
+            bits = (last.get("SERIAL_BITS") or "").strip()
+            where = "%s [%s]" % (os.path.basename(path), sec)
+            if (parity and parity != frame[1]) or (bits and bits != frame[0]):
+                key = (path, port, "frame", bits, parity)
+                if key not in said:
+                    said.add(key)
+                    out.append(Finding("warn", where, 0,
+                                       "mb2hal uses %s with %s data bits and parity %s, serial channel "
+                                       "%s has frame %s: the terminal uses the file's frame (a pty does "
+                                       "not pass parity and data bits on); make them the same"
+                                       % (port, bits or "?", (last.get("SERIAL_PARITY") or "?").lower(),
+                                          chan, frame)))
+            try:
+                baud = int(last.get("SERIAL_BAUD") or 0)
+            except ValueError:
+                baud = 0
+            if baud and baud not in config.SERIAL_BAUDS:
+                key = (path, port, "baud", baud)
+                if key not in said:
+                    said.add(key)
+                    out.append(Finding("warn", where, 0,
+                                       "mb2hal uses %s at %d baud, which the serial terminals do not "
+                                       "have (%s)" % (port, baud, ", ".join(str(b) for b in
+                                                                            sorted(config.SERIAL_BAUDS)))))
     return out
 
 

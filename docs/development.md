@@ -1379,9 +1379,13 @@ Built so far:
   terminals get two). The Process data card says "handled by serial
   channel ...".
 
-Still to do: mb2hal in halrun against the simulated terminal, a warning
-when mb2hal's parity differs from the file's frame, a capture from a real
-terminal.
+- The HAL check warns when an mb2hal transaction on a channel's port has
+  other data bits or parity than the channel's frame, or a baud rate the
+  terminals do not have (`halcheck.mb2hal_check`, mutation-checked).
+
+Still to do: Beckhoff's manual (the handshake as we have it, and "Enable
+send FIFO data continuous", 0x8000:04 / control bit 3, not used yet),
+mb2hal in halrun, a capture from a real terminal.
 
 ## Start time: the XDP program stays on the card
 
