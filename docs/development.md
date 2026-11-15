@@ -1324,6 +1324,33 @@ Passed. Two findings:
   would show the wait.
 
 
+## Start time: the XDP program stays on the card
+
+Measured 2026-11-15 on this machine (N100, igc, `xdp-native`, three ECT60
+and the EaserCAT 7000, `ecat` in halrun, no motion). Before, from the event
+log: `ecat` loaded to OP 4.4 s, of which 3.0 s was the link going down and
+up: attaching an XDP program restarts the card (`igc`, `igb`). A test with
+a raw BPF program on both machines showed: attach and detach restart the
+link (igc 2.1 s, igb 1.6 s); replacing a program restarts igc but not igb;
+binding and closing AF_XDP sockets while a program stays on the card does
+not touch the link.
+
+So the master fork (3ee80d27, `transport/transport_xdp.c`) attaches its own
+program once and leaves it on the card; the next master only binds its
+socket, and checks the link at once instead of after 1 s. After it, with
+master package 1.3+git20261115.3ee80d27 installed:
+
+| | before | after |
+|---|---|---|
+| free master start to the end of the bus scan | 3.45 s | 0.37 s |
+| halrun start to OP (free master running before, so with the handover) | 4.4 s from `ecat` loaded | 1.47 s |
+| free master again after halrun (the window's restart question) | ~3.5 s | 0.42 s |
+
+The raw transport works with the program on the card. `sudo ip link set
+dev <if> xdp off` removes it (a reboot does too). The restart question
+after an I/O test stays for now (decided with the user); a service that
+keeps the free master running was discussed and put off.
+
 ## LinuxCNC 2.10
 
 Investigated 2026-11-11 against LinuxCNC master 64fab5d412 (2026-11-10,

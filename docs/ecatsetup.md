@@ -844,7 +844,11 @@ not running), EtherCAT Setup offers to start one:
 
 - the window asks at start, after a test has ended (the free-running master
   does not come back by itself), and when you press *Start the master...* on
-  the Bus card;
+  the Bus card. With `xdp-skb` or `xdp-native` and master package
+  1.3+git20261115 or later the master is back in under half a second: the
+  XDP program stays on the network card, so the link does not restart
+  (before, about 3 s; `sudo ip link set dev <if> xdp off` removes the
+  program);
 - the command line (`--propose`, `--diagnose`, `--update`) asks with
   `[y/N]`, but only on a terminal; in a script it prints the old hint.
 
