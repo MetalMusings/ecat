@@ -87,17 +87,14 @@ void sim_el60xx_step(sim_el60xx_t *t, const uint8_t *out, long period_ns) {
     // init makes the next request look like none, and sending stops,
     // as was seen on hardware)
     if ((cw ^ t->last_cw) & ECAT_SER_CW_TRANSMIT_REQUEST) t->tx_pending = 1;
+    // (Beckhoff's manual: the send buffer is written to; once it is
+    // full, all further data is lost)
     if (t->tx_pending) {
       if (len > t->n_data) len = (uint8_t)t->n_data;
-      if (t->tx.cap - t->tx.n >= len) {
-        fifo_put(&t->tx, out + 2, len);
-        t->sw ^= ECAT_SER_SW_TRANSMIT_ACCEPTED;
-        t->sw &= (uint8_t)~ECAT_SER_SW_BUFFER_FULL;
-        t->windows_taken++;
-        t->tx_pending = 0;
-      } else {
-        t->sw |= ECAT_SER_SW_BUFFER_FULL;
-      }
+      t->tx_lost += len - fifo_put(&t->tx, out + 2, len);
+      t->sw ^= ECAT_SER_SW_TRANSMIT_ACCEPTED;
+      t->windows_taken++;
+      t->tx_pending = 0;
     }
     // a window for the master, once it took the last one
     if (!!(t->sw & ECAT_SER_SW_RECEIVE_REQUEST) == !!(cw & ECAT_SER_CW_RECEIVE_ACCEPTED) && t->rx.n > 0) {
@@ -120,6 +117,8 @@ void sim_el60xx_step(sim_el60xx_t *t, const uint8_t *out, long period_ns) {
     if (n > 0 && t->wire != NULL) t->wire(t, b, n, t->wire_ctx);
   }
 
+  // SW.3: the receive buffer is full (0x8000:1A, its size by default)
+  if (t->rx.n >= t->rx.cap) t->sw |= ECAT_SER_SW_BUFFER_FULL; else t->sw &= (uint8_t)~ECAT_SER_SW_BUFFER_FULL;
   t->last_cw = cw;
   status[0] = t->sw;
   status[1] = t->in_len;

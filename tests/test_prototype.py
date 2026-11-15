@@ -540,7 +540,7 @@ class TestEsi(unittest.TestCase):
         self.assertEqual(errors([{"name": "p", "output-pdo": "0x1602", "input-pdo": "0x1A02",
                                   "port": "/dev/ttyECAT1"}]), [])
         fails("the output and input PDOs need the same size", [ok], in_n=21)
-        fails("baud 14400 is not one of", [dict(ok, baud=14400)])
+        fails("baud 28800 is not one of", [dict(ok, baud=28800)])
         fails("frame '7N1' is not one of", [dict(ok, frame="7N1")])
         fails("port must be a full path", [dict(ok, port="ttyECAT0")])
         fails("PDO 0x1603 is not in the outputs", [dict(ok, **{"output-pdo": "0x1603"})])

@@ -1,7 +1,7 @@
 //
 //    A simulated Beckhoff serial terminal channel (EL6001/EL6021 kind) for
 //    the serial function's tests, built from the ESI file (process data,
-//    CoE 0x8000), the handshake as Beckhoff describes it and IgH's example
+//    CoE 0x8000), Beckhoff's manual (EL600x, EL602x 6.2.0), IgH's example
 //    (examples/tty/serial.c), and what others found on hardware (after an
 //    init the terminal starts its toggles at 0). Captures from real
 //    terminals are to correct it where it differs.
@@ -61,7 +61,8 @@ struct sim_el60xx {
   // what the terminal did
   int inits, windows_taken, windows_given;
   uint8_t last_cw;
-  int tx_pending;  // a request seen, not yet taken (buffer full)
+  int tx_pending;  // a request seen, not yet taken
+  int tx_lost;     // bytes that did not fit in the send buffer
 };
 
 /// A terminal with this many data bytes per window, these settings, and

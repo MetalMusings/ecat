@@ -29,11 +29,14 @@
 #define ECAT_SER_SW_TRANSMIT_ACCEPTED 0x01
 #define ECAT_SER_SW_RECEIVE_REQUEST 0x02
 #define ECAT_SER_SW_INIT_ACCEPTED 0x04
-#define ECAT_SER_SW_BUFFER_FULL 0x08
+#define ECAT_SER_SW_BUFFER_FULL 0x08  // the receive buffer (0x8000:1A bytes, 864)
 #define ECAT_SER_SW_PARITY_ERROR 0x10
 #define ECAT_SER_SW_FRAMING_ERROR 0x20
 #define ECAT_SER_SW_OVERRUN_ERROR 0x40
 #define ECAT_SER_MAX_DATA 22
+// The terminal's send buffer: what does not fit is lost (Beckhoff's
+// manual), so the channel gives no more than the terminal can hold.
+#define ECAT_SER_TX_BUFFER 128
 
 // The settings object (0x8000 for the first channel, + 0x10 per channel).
 #define ECAT_SER_SUB_BAUD 0x11
@@ -124,7 +127,7 @@ uint8_t ecat_ser_baud_value(unsigned long baud);
 /// The baud rate of a value of 0x8000:11, 0 if unknown.
 unsigned long ecat_ser_baud_of(uint8_t value);
 /// Data frame value of 0x8000:15 (data bits 7 or 8, parity 'N', 'E' or 'O',
-/// stop bits 1 or 2), 0 if the terminals have none (7N1, 7N2).
+/// stop bits 1 or 2), 0 if the terminals have none (7N1).
 uint8_t ecat_ser_frame_value(int data_bits, char parity, int stop_bits);
 /// The other way round; 0 if unknown.
 int ecat_ser_frame_of(uint8_t value, int *data_bits, char *parity, int *stop_bits);

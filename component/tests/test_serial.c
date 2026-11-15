@@ -74,7 +74,7 @@ static void test_values(void) {
   char parity = 0;
   CHECK_EQ(ecat_ser_baud_value(19200), 7);
   CHECK_EQ(ecat_ser_baud_value(115200), 10);
-  CHECK_EQ(ecat_ser_baud_value(14400), 0);
+  CHECK_EQ(ecat_ser_baud_value(28800), 0);
   CHECK_EQ(ecat_ser_baud_of(6), 9600);
   CHECK_EQ(ecat_ser_baud_of(0), 0);
   CHECK_EQ(ecat_ser_baud_of(99), 0);
@@ -82,6 +82,10 @@ static void test_values(void) {
   CHECK_EQ(ecat_ser_frame_value(8, 'N', 2), 11);
   CHECK_EQ(ecat_ser_frame_value(7, 'O', 2), 10);
   CHECK_EQ(ecat_ser_frame_value(7, 'N', 1), 0);
+  CHECK_EQ(ecat_ser_frame_value(7, 'N', 2), 8);  // the manual's table
+  CHECK_EQ(ecat_ser_baud_value(12000), 14);
+  CHECK_EQ(ecat_ser_baud_value(14400), 15);
+  CHECK_EQ(ecat_ser_baud_of(11), 0);
   CHECK(ecat_ser_frame_of(12, &bits, &parity, &stop));
   CHECK(bits == 8 && parity == 'E' && stop == 2);
   CHECK(!ecat_ser_frame_of(6, &bits, &parity, &stop));
@@ -127,6 +131,7 @@ static void test_loopback(void) {
   // 115200 baud, 10 bits: 11.5 bytes/ms
   CHECK_EQ(collect(got, sizeof(got), 1000), sizeof(got));
   CHECK(!memcmp(data, got, sizeof(data)));
+  CHECK_EQ(T.tx_lost, 0);
   CHECK_EQ(S.tx_bytes, sizeof(data));
   CHECK_EQ(S.rx_bytes, sizeof(data));
 }
@@ -141,6 +146,21 @@ static void test_slow_baud_waits_for_the_terminal(void) {
   CHECK_EQ(collect(got, sizeof(got), 1500), sizeof(got));
   CHECK(!memcmp(data, got, sizeof(data)));
   CHECK_EQ(T.sw & ECAT_SER_SW_OVERRUN_ERROR, 0);
+  // the terminal takes every window and loses what does not fit in its
+  // 128-byte send buffer: the channel gives no more than fits
+  CHECK_EQ(T.tx_lost, 0);
+}
+
+static void test_slowest_rate_and_two_stop_bits(void) {
+  static uint8_t data[300], got[300];
+  setup(4, 12);  // 2400 baud 8E2: 12 bits, 200 bytes/s
+  CHECK(until_ready());
+  pattern(data, sizeof(data), 9);
+  ecat_ser_ring_put(&S.tx, data, sizeof(data));
+  CHECK_EQ(collect(got, sizeof(got), 2000), sizeof(got));
+  CHECK(!memcmp(data, got, sizeof(data)));
+  CHECK_EQ(T.tx_lost, 0);
+  CHECK(T.tx.n <= ECAT_SER_TX_BUFFER);
 }
 
 static void test_receive_waits_for_room(void) {
@@ -450,6 +470,6 @@ static void test_function_on_a_slave(void) {
 }
 
 RUN_TESTS("serial", test_values, test_ring_wraps, test_starts_with_init, test_loopback,
-    test_slow_baud_waits_for_the_terminal, test_receive_waits_for_room, test_turn_around_1_and_3,
+    test_slow_baud_waits_for_the_terminal, test_slowest_rate_and_two_stop_bits, test_receive_waits_for_room, test_turn_around_1_and_3,
     test_new_baud_after_the_queued_bytes, test_toggles_restart_after_init, test_baud_and_frame,
     test_settings_that_fail, test_bus_loss, test_errors_are_counted, test_function_on_a_slave)

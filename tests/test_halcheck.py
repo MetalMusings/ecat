@@ -158,9 +158,9 @@ class TestCheck(Folder):
         self.assertIn("parity none", found[0])
         self.assertEqual(len(warnings(19200, 7, "even")), 1)
         # a rate the terminals do not have
-        found = warnings(14400, 8, "even")
+        found = warnings(28800, 8, "even")
         self.assertEqual(len(found), 1, found)
-        self.assertIn("14400 baud", found[0])
+        self.assertIn("28800 baud", found[0])
         # a transaction takes the port of the one before it
         self.write("mb2hal.ini", "[TRANSACTION_00]\nLINK_TYPE=serial\nSERIAL_PORT=/dev/ttyECAT0\n"
                                  "SERIAL_BITS=8\nSERIAL_PARITY=even\n[TRANSACTION_01]\nSERIAL_PARITY=odd\n")

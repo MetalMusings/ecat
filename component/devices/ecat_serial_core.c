@@ -64,13 +64,14 @@ size_t ecat_ser_ring_get(ecat_ser_ring_t *r, uint8_t *data, size_t n) {
 
 // ---- settings values (the terminals' CoE enumerations) ----
 
-static const unsigned long bauds[] = {0, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
+// value -> baud; 11 to 13 are not used; 14 and 15 from firmware 07 (EL6001, EL6021)
+static const unsigned long bauds[] = {0, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 0, 0, 0, 12000, 14400};
 #define N_BAUDS (sizeof(bauds) / sizeof(bauds[0]))
 
 uint8_t ecat_ser_baud_value(unsigned long baud) {
   unsigned int i;
   for (i = 1; i < N_BAUDS; i++) {
-    if (bauds[i] == baud) return (uint8_t)i;
+    if (bauds[i] != 0 && bauds[i] == baud) return (uint8_t)i;
   }
   return 0;
 }
@@ -84,7 +85,7 @@ static const struct {
   int stop;
 } frames[] = {
     {1, 7, 'E', 1}, {2, 7, 'O', 1}, {3, 8, 'N', 1}, {4, 8, 'E', 1}, {5, 8, 'O', 1},
-    {9, 7, 'E', 2}, {10, 7, 'O', 2}, {11, 8, 'N', 2}, {12, 8, 'E', 2}, {13, 8, 'O', 2},
+    {8, 7, 'N', 2}, {9, 7, 'E', 2}, {10, 7, 'O', 2}, {11, 8, 'N', 2}, {12, 8, 'E', 2}, {13, 8, 'O', 2},
 };
 #define N_FRAMES (sizeof(frames) / sizeof(frames[0]))
 
@@ -230,7 +231,20 @@ static void ready(ecat_ser_t *s, uint8_t sw, const uint8_t *in, long period_ns) 
     s->out_len = 0;
   }
   if (!s->inflight && accepted) {
-    size_t n = ecat_ser_ring_get(&s->tx, s->out, (size_t)s->n_data);
+    // no more than the terminal's send buffer holds: it takes a window
+    // whether or not it fits, and loses what does not. hold_ns is how
+    // long it still sends what it has (counted from when it took it, so
+    // rather too long than too short).
+    size_t room = (size_t)s->n_data, n;
+    baud = ecat_ser_baud_of(s->cur_baud);
+    if (baud > 0) {
+      long long bits = char_bits(s->cur_frame);
+      long long held = (s->hold_ns * (long long)baud + bits * 1000000000LL - 1) / (bits * 1000000000LL);
+      long long free_bytes = ECAT_SER_TX_BUFFER - held;
+      if (free_bytes < 0) free_bytes = 0;
+      if ((size_t)free_bytes < room) room = (size_t)free_bytes;
+    }
+    n = room > 0 ? ecat_ser_ring_get(&s->tx, s->out, room) : 0;
     if (n > 0) {
       s->out_len = (uint8_t)n;
       s->cw ^= ECAT_SER_CW_TRANSMIT_REQUEST;

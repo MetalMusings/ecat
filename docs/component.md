@@ -1207,8 +1207,8 @@ EL6001/EL6021, two on an EL6002/EL6022, named `port` or `port-1`,
 | `name` | needed | the pin prefix: `<slave>.<name>.` |
 | `output-pdo`, `input-pdo` | needed | the channel's PDOs (0x16xx/0x17xx and 0x1Axx/0x1Bxx), both in the process data, of the same size: 3 to 24 bytes |
 | `port` | needed | the serial port's path, such as `/dev/ttyECAT0` |
-| `baud` | 9600 | at start: 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600 or 115200 (the EL6021 from 2400) |
-| `frame` | 8N1 | data bits, parity, stop bits at start: 7E1, 7O1, 8N1, 8E1, 8O1, 7E2, 7O2, 8N2, 8E2, 8O2 |
+| `baud` | 9600 | at start: 300, 600, 1200 (EL6002, EL6022), 2400, 4800, 9600, 12000, 14400 (EL6001, EL6021 from firmware 07), 19200, 38400, 57600 or 115200 |
+| `frame` | 8N1 | data bits, parity, stop bits at start: 7E1, 7O1, 8N1, 8E1, 8O1, 7N2, 7E2, 7O2, 8N2, 8E2, 8O2 |
 | `settings-index` | 0x8000 + 0x10 × channel | the channel's CoE settings object |
 
 The baud rate and data frame are written at start (as settings: so they
@@ -1223,7 +1223,7 @@ settings. A slave can have up to 8 channels (an EL6022 has two).
 | `<slave>.<name>.state` | uint out | 0 no process data, 1 writing settings, 2 init, 3 ready |
 | `<slave>.<name>.tx-bytes`, `.rx-bytes` | uint out | bytes the terminal has taken to send, and given |
 | `<slave>.<name>.parity-errors`, `.framing-errors`, `.overrun-errors` | uint out | counted from the status bits |
-| `<slave>.<name>.buffer-full` | uint out | times the terminal said its buffer was full |
+| `<slave>.<name>.buffer-full` | uint out | times the terminal's receive buffer was full (SW.3; what comes then is lost) |
 | `<slave>.<name>.baud` | uint out | the baud rate the terminal has |
 | `<slave>.<name>.settings-error` | bool out | the last change of settings could not be written |
 | `<slave>.<name>.port-open` | bool out | a program has the port open |
@@ -1251,7 +1251,8 @@ SERIAL_STOP=1
 - The baud rate the program sets is written to the terminal before what
   the program writes after it is sent; so are its stop bits. A rate the
   terminal does not have is refused with a message, and the terminal
-  keeps its rate.
+  keeps its rate. (12000 and 14400 can only come from the file: a program
+  cannot set them on a port.)
 - Parity and data bits come from `frame` in the file: a pty does not pass
   them on. The terminal makes the parity on the wire itself. Give `frame`
   the device's setting (mb2hal's `SERIAL_PARITY` and `SERIAL_BITS` must
@@ -1271,9 +1272,21 @@ SERIAL_STOP=1
   terminal empties its buffers and starts the handshake from the
   beginning).
 - Bytes are sent window by window, each when the terminal has taken the
-  one before; received bytes are taken only when there is room for them
-  on the computer's side, so none are lost there (the terminal keeps them
-  meanwhile).
+  one before, and never more than the terminal's send buffer (128 bytes)
+  holds: the terminal takes every window and loses what does not fit
+  (Beckhoff's manual), so the channel reckons how much the terminal still
+  has to send at the baud rate. Received bytes are taken only when there
+  is room for them on the computer's side, so none are lost there (the
+  terminal keeps them meanwhile, 864 bytes; after that it loses them).
+- 22 bytes can go each way every second cycle at most: about 11 bytes per
+  ms at a 1 ms servo period, which keeps up with 115200 baud (11.5 bytes
+  per ms at 8N1) only just. A Modbus RTU frame longer than 22 bytes then
+  goes out in windows; at 115200 baud there may be a short pause between
+  them on the wire (the terminal sends what it has as soon as it has it).
+  "Enable send FIFO data continuous" (0x8000:04, sending the whole buffer
+  at a rising edge of control bit 3) would avoid that; the channel does
+  not use it yet. At 38400 baud and below the terminal's buffer does not
+  run empty within a frame.
 - New settings asked for while running are written once the bytes queued
   before them have left the terminal, followed by an init; after a power
   cycle of the slave, the master writes the file's settings, and the

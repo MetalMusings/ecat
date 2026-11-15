@@ -66,9 +66,11 @@ ENCODER_PINS = ("reset", "counts", "raw-count", "pos", "velocity", "ok", "index-
 # CoE 0x8000:11 and :15, the most channels per slave
 SERIAL_PINS = ("state", "tx-bytes", "rx-bytes", "parity-errors", "framing-errors", "overrun-errors",
                "buffer-full", "baud", "settings-error", "port-open")
-SERIAL_BAUDS = {300: 1, 600: 2, 1200: 3, 2400: 4, 4800: 5, 9600: 6, 19200: 7, 38400: 8,
-                57600: 9, 115200: 10}
-SERIAL_FRAMES = {"7E1": 1, "7O1": 2, "8N1": 3, "8E1": 4, "8O1": 5, "7E2": 9, "7O2": 10,
+# (Beckhoff's manual EL600x, EL602x: 300-1200 on the EL6002/EL6022, 12000
+# and 14400 on the EL6001/EL6021 from firmware 07)
+SERIAL_BAUDS = {300: 1, 600: 2, 1200: 3, 2400: 4, 4800: 5, 9600: 6, 12000: 14, 14400: 15,
+                19200: 7, 38400: 8, 57600: 9, 115200: 10}
+SERIAL_FRAMES = {"7E1": 1, "7O1": 2, "8N1": 3, "8E1": 4, "8O1": 5, "7N2": 8, "7E2": 9, "7O2": 10,
                  "8N2": 11, "8E2": 12, "8O2": 13}
 SERIAL_MAX_CHANNELS = 8
 SERIAL_MAX_DATA = 22

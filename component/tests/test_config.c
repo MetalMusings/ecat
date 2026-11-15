@@ -830,8 +830,8 @@ static void test_serial(void) {
 
 static void test_serial_errors(void) {
   CHECK_FAILS(el6021(SERIAL_OK, "", 1), "the output and input PDOs need the same size");
-  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT0, baud: 14400}\n", "", 0),
-      "baud 14400 is not one of");
+  CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT0, baud: 28800}\n", "", 0),
+      "baud 28800 is not one of");
   CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02', port: /dev/ttyECAT0, frame: 7N1}\n", "", 0),
       "frame \"7N1\" is not one of");
   CHECK_FAILS(el6021("  serial:\n  - {name: p, output-pdo: '0x1602', input-pdo: '0x1A02'}\n", "", 0), "port must be a full path");

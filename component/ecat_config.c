@@ -793,7 +793,7 @@ static void serial_channels(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_
       continue;
     }
     if ((baud_value = ecat_ser_baud_value((unsigned long)baud)) == 0) {
-      error(c, "serial channel %s: baud %lld is not one of 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200",
+      error(c, "serial channel %s: baud %lld is not one of 300, 600, 1200, 2400, 4800, 9600, 12000, 14400, 19200, 38400, 57600, 115200",
           name, baud);
       continue;
     }
@@ -803,7 +803,7 @@ static void serial_channels(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_
       if (strlen(f) == 3 && (f[0] == '7' || f[0] == '8') && (f[2] == '1' || f[2] == '2'))
         frame_value = ecat_ser_frame_value(f[0] - '0', f[1], f[2] - '0');
       if (frame_value == 0) {
-        error(c, "serial channel %s: frame \"%s\" is not one of 7E1, 7O1, 8N1, 8E1, 8O1, 7E2, 7O2, 8N2, 8E2, 8O2", name, f);
+        error(c, "serial channel %s: frame \"%s\" is not one of 7E1, 7O1, 8N1, 8E1, 8O1, 7N2, 7E2, 7O2, 8N2, 8E2, 8O2", name, f);
         continue;
       }
     }

@@ -1338,10 +1338,24 @@ module is for the kernel master only.
 
 Sources, since we have no terminal: the ESI file (process data, CoE 0x8000
 "COM Settings" with its baud rate and data frame values), IgH's
-`examples/tty/serial.c`, and what others found on hardware (lcec commits
+`examples/tty/serial.c`, what others found on hardware (lcec commits
 04d397d, 1f50d45: after an init the terminal starts its toggles at 0, a
 request bit left at 1 stops sending; settings written while running are
-lost when the slave is power cycled). Beckhoff's manual is still to be read.
+lost when the slave is power cycled), and Beckhoff's manual "EL600x,
+EL602x" 6.2.0 (read 2026-11-15, the user downloaded it). The manual
+confirmed the handshake (its examples: TR/TA and RA/RR toggles, IR until
+IA, then both off) and that new settings need an init request, and
+corrected three things, now in the code: the terminal's 128-byte send
+buffer takes every window and loses what does not fit (the channel now
+sends no more than fits, reckoned from the baud rate: without it 3 tests
+lose data); SW.3 is the *receive* buffer full (0x8000:1A, 864); 7N2 (value
+8), 12000 and 14400 baud (values 14, 15) exist. Not used yet: "Enable send
+FIFO data continuous" (0x8000:04: the buffer, up to 128 bytes, goes out at
+a rising edge of CW.3, the terminal sets SW.2 when done, cleared with
+CW.3), explicit baud rate 0x8000:1B (EL6001 from firmware 11: any rate
+1000-115200), the reception pause of "transfer rate optimization"
+(0x8000:05, on by default: received bytes are passed on after a pause of
+about 16 bit times, so a Modbus answer comes in whole windows).
 
 Built so far:
 
@@ -1383,9 +1397,9 @@ Built so far:
   other data bits or parity than the channel's frame, or a baud rate the
   terminals do not have (`halcheck.mb2hal_check`, mutation-checked).
 
-Still to do: Beckhoff's manual (the handshake as we have it, and "Enable
-send FIFO data continuous", 0x8000:04 / control bit 3, not used yet),
-mb2hal in halrun, a capture from a real terminal.
+Still to do: send-continuous mode for Modbus frames over 22 bytes at
+115200 baud (see docs/component.md), mb2hal in halrun, a capture from a
+real terminal.
 
 ## Start time: the XDP program stays on the card
 
