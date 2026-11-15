@@ -1480,7 +1480,10 @@ fork's `docs/design/userspace-master.md`, "One Mailbox, Several Readers").
 Tests: `tests/test_mbox_share.c` (the rules, without a bus, 12 mutations
 caught) and `tests/test_sim_mbox_share.c`. The simulated slave had to learn
 two things a real one does: responses queue behind the send mailbox, and an
-empty mailbox does not answer. Not tried on a real slave. Left: at release,
+empty mailbox does not answer. Only slaves whose SII lists EoE are read
+this way, and `ecrt_master_send()` looks for EoE datagrams only when the EoE
+thread runs in the cyclic frames: a bus without EoE slaves is read as by
+master 1.3, with no added work in the servo cycle. Not tried on a real slave. Left: at release,
 an EoE fetch in flight can be lost (one "Failed to receive mbox fetch
 datagram" warning).
 
