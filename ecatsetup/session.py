@@ -370,7 +370,8 @@ class Session:
         slave read from the bus can do: "warning" or "note"."""
         out = [("warning", t) for t in config.dc_warnings(self.cfg)]
         out += [("note", t) for t in config.serial_notes(self.cfg)]
-        out += [("warning", t) for t in config.eoe_warnings(self.cfg)]
+        with_host = any(isinstance(s.get("eoe"), dict) and "host-ip" in s["eoe"] for s in (self.cfg or {}).get("slaves") or [])
+        out += [("warning", t) for t in config.eoe_warnings(self.cfg, config.host_networks() if with_host else ())]
         for s in (self.cfg or {}).get("slaves") or []:
             b = self.bus.get(s.get("position"))
             if s.get("eoe") and b is not None and same_kind(s, b.info) and not getattr(b.proposal, "has_eoe", True):

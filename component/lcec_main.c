@@ -865,6 +865,16 @@ static void ecat_config_eoe(lcec_master_t *master) {
       err |= ecrt_slave_config_eoe_dns_address(slave->config, a);
     }
     if (e->given & LCEC_EOE_HOSTNAME) err |= ecrt_slave_config_eoe_hostname(slave->config, e->hostname);
+    if (e->given & LCEC_EOE_HOST_IP) {
+#ifdef EC_HAVE_EOE_HOST_ADDRESS
+      struct in_addr m = {.s_addr = e->mask};
+      a.s_addr = e->host_ip;
+      err |= ecrt_slave_config_eoe_host_address(slave->config, a, m);
+#else
+      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "slave %s.%s: this master cannot set eoe.host-ip (it is older than the "
+          "function): give the slave's network device its address by hand\n", master->name, slave->name);
+#endif
+    }
     if (err) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "slave %s.%s: cannot set the EoE parameters\n", master->name, slave->name);
     } else {

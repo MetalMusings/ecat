@@ -548,6 +548,62 @@ class TestEsi(unittest.TestCase):
         # an invalid block is the check's business, not a warning
         self.assertEqual(config.eoe_warnings({"slaves": [slave(0, ip="nonsense")]}), [])
 
+    def test_eoe_host_ip(self):
+        # the rules, as ecat_config.c (component/tests/test_config.c test_eoe)
+        def errs(**eoe):
+            return config.eoe_errors({k.replace("_", "-"): v for k, v in eoe.items()})
+        self.assertEqual(errs(ip="192.168.10.21/24", host_ip="192.168.10.1"), [])
+        self.assertEqual(errs(ip="10.0.0.5", mask="255.255.0.0", host_ip="10.0.200.1"), [])
+        self.assertIn("eoe.host-ip: needs the subnet", errs(ip="10.0.0.5", host_ip="10.0.0.1")[0])
+        self.assertIn("is the slave's own address", errs(ip="10.0.0.5/24", host_ip="10.0.0.5")[0])
+        self.assertIn("is not in the slave's subnet", errs(ip="10.0.0.5/24", host_ip="10.0.1.1")[0])
+        self.assertIn("eoe.host-ip", errs(ip="10.0.0.5/24", host_ip="10.0.0.1/24")[0])
+        self.assertIn("room for one address only", errs(ip="10.0.0.5/32", host_ip="10.0.0.1")[0])
+        self.assertIn("eoe.host-ip: 'nonsense' is not an IPv4 address", errs(ip="10.0.0.5/24", host_ip="nonsense")[0])
+        # one error for a bad ip, not a second one about host-ip
+        self.assertEqual(len(errs(ip="nonsense", host_ip="10.0.0.1")), 1)
+
+        def slave(pos, **eoe):
+            return {"position": pos, "name": "s%d" % pos, "eoe": {k.replace("_", "-"): v for k, v in eoe.items()}}
+        # each slave its own subnet: nothing to say
+        two = {"slaves": [slave(0, ip="10.0.0.5/24", host_ip="10.0.0.1"), slave(1, ip="10.0.1.5/24", host_ip="10.0.1.1")]}
+        self.assertEqual(config.eoe_warnings(two), [])
+        # two network devices in one subnet
+        w = config.eoe_warnings({"slaves": [slave(0, ip="10.0.0.5/24", host_ip="10.0.0.1"),
+                                            slave(1, ip="10.0.0.6/24", host_ip="10.0.0.2")]})
+        self.assertEqual(len(w), 1)
+        self.assertIn("slave 1 (s1): eoe host-ip is in 10.0.0.0/24, as slave 0 (s0)'s", w[0])
+        # without host-ip on one of them the computer has one device there
+        self.assertEqual(config.eoe_warnings({"slaves": [slave(0, ip="10.0.0.5/24", host_ip="10.0.0.1"),
+                                                         slave(1, ip="10.0.0.6/24")]}), [])
+        # the computer's address is another slave's
+        w = config.eoe_warnings({"slaves": [slave(0, ip="10.0.0.5/24"), slave(1, ip="10.0.0.6/24", host_ip="10.0.0.5")]})
+        self.assertEqual(w, ["slave 1 (s1): eoe host-ip 10.0.0.5 is slave 0 (s0)'s address"])
+        # the subnet is one the computer already has
+        import ipaddress
+        own = [("enp1s0", ipaddress.IPv4Network("10.0.0.0/16"))]
+        w = config.eoe_warnings(two, own)
+        self.assertEqual(len(w), 2)
+        self.assertIn("slave 0 (s0): eoe subnet 10.0.0.0/24 is also the computer's own on enp1s0 (10.0.0.0/16)", w[0])
+        self.assertEqual(config.eoe_warnings(two, [("enp1s0", ipaddress.IPv4Network("192.168.1.0/24"))]), [])
+        # only with host-ip: the slave's own address is not the computer's business
+        self.assertEqual(config.eoe_warnings({"slaves": [slave(0, ip="10.0.0.5/24")]}, own), [])
+
+    def test_host_networks(self):
+        import ipaddress
+        import types
+        text = ('[{"ifname":"lo","addr_info":[{"local":"127.0.0.1","prefixlen":8}]},'
+                '{"ifname":"wlan0","addr_info":[{"local":"192.168.1.40","prefixlen":24}]},'
+                '{"ifname":"eoe0s4","addr_info":[{"local":"192.168.77.1","prefixlen":24}]},'
+                '{"ifname":"enp2s0","addr_info":[]}]')
+        nets = config.host_networks(run=lambda *a, **k: types.SimpleNamespace(stdout=text))
+        self.assertEqual(nets, [("wlan0", ipaddress.IPv4Network("192.168.1.0/24"))])
+        self.assertEqual(config.host_networks(run=lambda *a, **k: types.SimpleNamespace(stdout="not json")), [])
+
+        def missing(*a, **k):
+            raise FileNotFoundError("ip")
+        self.assertEqual(config.host_networks(run=missing), [])
+
     def test_eoe_note_from_sii(self):
         s = sii.Sii(2, 0x1, 0, 0, 0, name="X")
         s.mailbox_protocols = 0x06

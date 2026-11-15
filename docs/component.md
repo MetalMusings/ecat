@@ -303,7 +303,7 @@ the slave goes to SAFE-OP.
 ```yaml
 - position: 2
   name: x
-  eoe: {ip: 192.168.10.21/24, gateway: 192.168.10.1, hostname: drive-x}
+  eoe: {ip: 192.168.10.21/24, host-ip: 192.168.10.1, hostname: drive-x}
 ```
 
 | Key | Meaning |
@@ -313,18 +313,43 @@ the slave goes to SAFE-OP.
 | `gateway`, `dns` | IPv4 addresses. |
 | `hostname` | At most 31 characters. |
 | `mac` | The slave's MAC address (`02:00:00:00:10:21`); the slave's own if left out. |
+| `host-ip` | The PC's own address in the slave's subnet (`192.168.10.1`, no prefix length), see below. Needs the subnet (`ip` with a prefix length, or `mask`). |
+
+The PC reaches the slave through a network device of its own per slave,
+`eoe0s<position>` (`eoe0a<alias>` for a slave with an alias). The master
+makes it when it scans the bus, and makes it anew at every rescan and when
+LinuxCNC takes the bus over, so an address given to it with `ip addr add`
+does not last. With `host-ip`, the master gives the device that address and
+the slave's subnet mask and brings it up, each time: `ping 192.168.10.21`
+and the slave's web page then work while LinuxCNC (or the I/O test) runs,
+with nothing to set by hand. Without `host-ip` the device is left down and
+is yours to configure.
+
+- Give every EoE slave a subnet of its own (`192.168.10.x`, `192.168.11.x`):
+  each has its own device on the PC, and two devices in one subnet reach
+  only one of the slaves.
+- Do not use a subnet the PC already is in (its ordinary network): the PC
+  would have two ways into it.
+- Nothing is routed or bridged: only the PC itself reaches the slave. For
+  other computers to reach it, set up forwarding or a bridge yourself, and
+  mind that a bridge puts the machine's bus on your network.
+- The address is there while `ecat` is loaded. The idle master (after
+  `ethercat-uspace start`, with LinuxCNC not running) knows no
+  `ethercat.yaml` and sets none: `sudo ip addr add 192.168.10.1/24 dev
+  eoe0s2; sudo ip link set eoe0s2 up` then.
 
 `ecatsetup --check` and the window refuse an address that is not an IPv4
 address, a mask that is not a subnet mask, a MAC address or hostname that
-does not fit, and warn about the same address on two slaves and a gateway
-outside the slave's subnet. With the bus read, a slave whose SII does not
+does not fit, a `host-ip` outside the slave's subnet or equal to the slave's
+address, and warn about the same address on two slaves, a gateway outside
+the slave's subnet, two slaves with `host-ip` in one subnet and (in the
+window) a `host-ip` subnet the PC already has on another network device. With the bus read, a slave whose SII does not
 list the EoE mailbox protocol is warned about, and a slave that has it gets
 a note in its proposal. A slave that does not take the parameters only gives
 an error line in the master's log: the bus starts anyway.
 
-This sets what the slave knows. The frames to and from it (a network
-device on the PC, `eoe0s<position>`) are the master's own EoE, which is
-[not yet usable in LinuxCNC](#not-yet-eoe).
+The frames to and from the slave are carried by the master's own EoE, which
+needs a master newer than the released one: see [Not yet](#not-yet-eoe).
 
 #### settings
 
@@ -1541,6 +1566,8 @@ or `and2` (HAL loads a component once).
 - SDOs to the same slave need the same master: before it, the EoE traffic
   took the slave's SDO responses, and a slave with `settings:` did not
   reach OP ([development.md](development.md#eoe)).
+- `host-ip` needs the same unreleased master; with an older one `ecat`
+  says so in an error line and the device is left down.
 - Tried on one slave, an EaserCAT 3000 with SOES and lwIP, without motion
   ([development.md](development.md#eoe)): ping, a web page and SDO reads
   while the bus was in OP, about 0.5 Mbit/s each way at 1 ms, no change in

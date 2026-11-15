@@ -890,7 +890,7 @@ static int parse_ipv4(ctx_t *c, const char *key, const char *text, uint32_t *out
   return 0;
 }
 
-/// eoe: ip (with or without /prefix), mask, gateway, dns, hostname, mac.
+/// eoe: ip (with or without /prefix), mask, gateway, dns, hostname, mac, host-ip.
 static void eoe(ctx_t *c, buf_t *b, yaml_node_t *e) {
   LCEC_CONF_EOE_T *ec;
   const char *v;
@@ -936,6 +936,20 @@ static void eoe(ctx_t *c, buf_t *b, yaml_node_t *e) {
       int i;
       for (i = 0; i < 6; i++) ec->mac[i] = (uint8_t)m[i];
       ec->given |= LCEC_EOE_MAC;
+    }
+  }
+  if ((v = get_str(c, e, "host-ip")) != NULL && parse_ipv4(c, "host-ip", v, &ec->host_ip, NULL) == 0) {
+    // the PC's address on the slave's network device: in the slave's subnet
+    if ((ec->given & (LCEC_EOE_IP | LCEC_EOE_MASK)) != (LCEC_EOE_IP | LCEC_EOE_MASK)) {
+      error(c, "eoe.host-ip: needs the subnet: give ip with a prefix length (such as 192.168.10.21/24) or mask");
+    } else if (ec->mask == 0 || ec->mask == 0xffffffffu) {
+      error(c, "eoe.host-ip: the subnet has room for one address only");
+    } else if (ec->host_ip == ec->ip) {
+      error(c, "eoe.host-ip: \"%s\" is the slave's own address", v);
+    } else if ((ec->host_ip & ec->mask) != (ec->ip & ec->mask)) {
+      error(c, "eoe.host-ip: \"%s\" is not in the slave's subnet", v);
+    } else {
+      ec->given |= LCEC_EOE_HOST_IP;
     }
   }
 }

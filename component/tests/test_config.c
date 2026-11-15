@@ -419,6 +419,18 @@ static void test_eoe(void) {
   // /0 and /32
   CHECK_EQ(load(EOE_SLAVE("{ip: 10.0.0.5/32}")), 0);
   CHECK_EQ(EOE(0)->mask, htonl(0xFFFFFFFFu));
+  // the PC's own address on the slave's network device
+  CHECK_EQ(load(EOE_SLAVE("{ip: 192.168.10.21/24, host-ip: 192.168.10.1}")), 0);
+  CHECK_EQ(EOE(0)->given, LCEC_EOE_IP | LCEC_EOE_MASK | LCEC_EOE_HOST_IP);
+  CHECK_EQ(EOE(0)->host_ip, htonl(0xC0A80A01));
+  CHECK_EQ(load(EOE_SLAVE("{ip: 10.0.0.5, mask: 255.255.0.0, host-ip: 10.0.200.1}")), 0);
+  CHECK_EQ(EOE(0)->host_ip, htonl(0x0A00C801));
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5, host-ip: 10.0.0.1}"), "eoe.host-ip: needs the subnet");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5/24, host-ip: 10.0.0.5}"), "is the slave's own address");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5/24, host-ip: 10.0.1.1}"), "is not in the slave's subnet");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5/24, host-ip: 10.0.0.1/24}"), "eoe.host-ip");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5/32, host-ip: 10.0.0.1}"), "room for one address only");
+  CHECK_FAILS(EOE_SLAVE("{ip: 10.0.0.5/24, host-ip: nonsense}"), "eoe.host-ip: \"nonsense\" is not an IPv4 address");
   // without eoe: no record
   CHECK_EQ(load(io), 0);
   CHECK_EQ(count(lcecConfTypeEoe), 0);

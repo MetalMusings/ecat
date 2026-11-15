@@ -1562,11 +1562,29 @@ And two limits in the board's own ESC access code (not SOES's): a read of
 more than 128 bytes did nothing, and lengths were 8 bits wide. Small CoE
 mails never met them; an Ethernet frame in a 512 byte mailbox does.
 
+### Done: the host's address (`host-ip`)
+
+Built 2026-11-15. The TAP device is made anew at every scan and handover, so
+the address has to be set by whoever makes it: the master fork got
+`ecrt_slave_config_eoe_host_address()` (79e91fc1, not released; test
+`tests/test_sim_eoe_host.c`), which keeps the address in the slave's
+configuration and sets it on the device when the slave is configured and at
+the end of every scan. `ecat` passes `eoe.host-ip` and the slave's mask to
+it (`EC_HAVE_EOE_HOST_ADDRESS`; an older master gives an error line), with
+the same rules in `ecat_config.c` and `config.eoe_errors()`; the window
+also warns about a subnet the PC already has (`config.host_networks()`,
+from `ip -j -4 addr`). Routing and bridging are documented, not configured,
+and the idle master sets nothing ([component.md](component.md#eoe)).
+
+Tried on the EaserCAT 3000 in halrun, no `ip` command by hand: the device
+down and without an address under the idle master; all five slaves in OP
+2.4 s after halrun started, the device then up with 192.168.77.1/24 and the
+subnet's route; 100 of 100 pings of 1472 bytes from that moment, the web
+page in 43 ms. Not tried on hardware: a rescan in OP (the simulator test
+covers it).
+
 ### Not built
 
-- `host-ip`: ecat setting the host's address on the TAP device
-  (`eoe0s<position>`, recreated at each handover) from the same file.
-  Routing and bridging are documented, not configured.
 - A window card for `eoe:` (the file can be edited by hand).
 - The EoE firmware as part of the card's own code: it lives in a work copy
   (`~/src/easercat-3000-eoe` on the plasma PC), not in MyOwnEtherCATDevice.

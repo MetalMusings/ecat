@@ -8,7 +8,9 @@ read as they do in vendor documentation.
 """
 
 import ipaddress
+import json
 import re
+import subprocess
 
 import yaml
 
@@ -196,7 +198,7 @@ def dc_warnings(cfg):
             "servo-thread-follows-ref-clock: true" % (REF_SYNC_MAX, "not set" if n is None else n)]
 
 
-EOE_KEYS = ("ip", "mask", "gateway", "dns", "hostname", "mac")
+EOE_KEYS = ("ip", "mask", "gateway", "dns", "hostname", "mac", "host-ip")
 
 
 def eoe_errors(eoe):
@@ -204,8 +206,8 @@ def eoe_errors(eoe):
     if eoe is None:
         return []
     if not isinstance(eoe, dict):
-        return ["eoe: must be a mapping (ip, mask, gateway, dns, hostname, mac)"]
-    out = ["eoe: unknown key %r (ip, mask, gateway, dns, hostname, mac)" % k for k in eoe if k not in EOE_KEYS]
+        return ["eoe: must be a mapping (ip, mask, gateway, dns, hostname, mac, host-ip)"]
+    out = ["eoe: unknown key %r (ip, mask, gateway, dns, hostname, mac, host-ip)" % k for k in eoe if k not in EOE_KEYS]
 
     def addr(key, text, prefix=False):
         try:
@@ -235,6 +237,19 @@ def eoe_errors(eoe):
         out.append("eoe.hostname: %r is empty or longer than 31 characters" % (eoe["hostname"],))
     if "mac" in eoe and not re.fullmatch(r"[0-9A-Fa-f]{1,2}(:[0-9A-Fa-f]{1,2}){5}", str(eoe["mac"])):
         out.append("eoe.mac: %r is not a MAC address such as 02:00:00:00:10:21" % (eoe["mac"],))
+    if "host-ip" in eoe:
+        before = len(out)
+        host = addr("host-ip", eoe["host-ip"])
+        net = eoe_network(eoe) if before == len(out) else None
+        if host is not None and net is not None:
+            if "/" not in str(eoe.get("ip")) and "mask" not in eoe:
+                out.append("eoe.host-ip: needs the subnet: give ip with a prefix length (such as 192.168.10.21/24) or mask")
+            elif net.network.prefixlen in (0, 32):
+                out.append("eoe.host-ip: the subnet has room for one address only")
+            elif host == net.ip:
+                out.append("eoe.host-ip: %r is the slave's own address" % (eoe["host-ip"],))
+            elif host not in net.network:
+                out.append("eoe.host-ip: %r is not in the slave's subnet" % (eoe["host-ip"],))
     return out
 
 
@@ -249,10 +264,33 @@ def eoe_network(eoe):
         return None
 
 
-def eoe_warnings(cfg):
+def host_networks(run=subprocess.run):
+    """This computer's own IPv4 networks, [(device, IPv4Network)], without
+    the master's EoE devices (eoe...) and the loopback. [] if `ip` fails."""
+    try:
+        text = run(["ip", "-j", "-4", "addr"], capture_output=True, text=True, timeout=5).stdout
+        devices = json.loads(text)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    out = []
+    for d in devices if isinstance(devices, list) else []:
+        name = str(d.get("ifname", ""))
+        if name == "lo" or name.startswith("eoe"):
+            continue
+        for a in d.get("addr_info") or []:
+            try:
+                out.append((name, ipaddress.IPv4Interface("%s/%s" % (a["local"], a["prefixlen"])).network))
+            except (KeyError, ValueError):
+                pass
+    return out
+
+
+def eoe_warnings(cfg, networks=()):
     """Texts about EoE settings that are valid but probably wrong: the same
-    address twice, a gateway outside the slave's subnet."""
-    out, seen = [], {}
+    address twice, a gateway outside the slave's subnet, and for host-ip:
+    two network devices in one subnet, a subnet the computer already has
+    (`networks`, from host_networks())."""
+    out, seen, hosts = [], {}, []
     for s in (cfg or {}).get("slaves") or []:
         eoe = s.get("eoe")
         if not isinstance(eoe, dict) or eoe_errors(eoe):
@@ -266,6 +304,24 @@ def eoe_warnings(cfg):
         seen[net.ip] = who
         if "gateway" in eoe and ipaddress.IPv4Address(str(eoe["gateway"])) not in net.network and net.network.prefixlen < 32:
             out.append("%s: eoe gateway %s is not in the slave's subnet %s" % (who, eoe["gateway"], net.network))
+        if "host-ip" in eoe:
+            for other, other_net in hosts:
+                if net.network.overlaps(other_net):
+                    out.append("%s: eoe host-ip is in %s, as %s's: each slave has its own network device on the "
+                               "computer, and two in one subnet reach only one of the slaves. Give each slave "
+                               "its own subnet" % (who, net.network, other))
+            hosts.append((who, net.network))
+            for device, own in networks:
+                if net.network.overlaps(own):
+                    out.append("%s: eoe subnet %s is also the computer's own on %s (%s): with host-ip the "
+                               "computer would have two ways into it, and its network may stop working. "
+                               "Use a subnet of its own for the slave" % (who, net.network, device, own))
+    for s in (cfg or {}).get("slaves") or []:
+        eoe = s.get("eoe")
+        if isinstance(eoe, dict) and not eoe_errors(eoe) and "host-ip" in eoe:
+            host = ipaddress.IPv4Address(str(eoe["host-ip"]))
+            if host in seen and seen[host] != "slave %s (%s)" % (s.get("position"), s.get("name")):
+                out.append("slave %s (%s): eoe host-ip %s is %s's address" % (s.get("position"), s.get("name"), host, seen[host]))
     return out
 
 

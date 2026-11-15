@@ -119,11 +119,12 @@ typedef struct {
 #define LCEC_EOE_GATEWAY 0x08
 #define LCEC_EOE_DNS 0x10
 #define LCEC_EOE_HOSTNAME 0x20
+#define LCEC_EOE_HOST_IP 0x40  ///< the PC's own address on the slave's network device
 typedef struct {
   LCEC_CONF_TYPE_T confType;
   unsigned int given;  ///< LCEC_EOE_* bits: which values the file has
   uint8_t mac[6];
-  uint32_t ip, mask, gateway, dns;
+  uint32_t ip, mask, gateway, dns, host_ip;
   char hostname[LCEC_CONF_STR_MAXLEN];
 } LCEC_CONF_EOE_T;
 
