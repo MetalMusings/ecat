@@ -369,6 +369,7 @@ class Session:
         """[(level, text)] about the slaves' DC settings against what each
         slave read from the bus can do: "warning" or "note"."""
         out = [("warning", t) for t in config.dc_warnings(self.cfg)]
+        out += [("note", t) for t in config.serial_notes(self.cfg)]
         for s in (self.cfg or {}).get("slaves") or []:
             for level, text in dcinfo.problems(s, self.dc_info(s.get("position")), self.period):
                 out.append((level, "slave %s (%s): %s" % (s["position"], s.get("name"), text)))

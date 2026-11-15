@@ -195,6 +195,41 @@ def dc_warnings(cfg):
             "servo-thread-follows-ref-clock: true" % (REF_SYNC_MAX, "not set" if n is None else n)]
 
 
+# RS422/RS485 terminals (Beckhoff EL6021, EL6022): for two-wire RS485 they
+# need "Enable half duplex", or they hear what they send themselves
+SERIAL_RS485 = {(0x2, 0x17853052), (0x2, 0x17863052)}
+
+
+def serial_notes(cfg):
+    """Notes about serial channels that may be right, but often are not."""
+    out = []
+    for s in (cfg or {}).get("slaves") or []:
+        ident = s.get("identity") or {}
+        try:
+            key = (int(str(ident.get("vendor")), 16), int(str(ident.get("product")), 16))
+        except ValueError:
+            continue
+        if key not in SERIAL_RS485:
+            continue
+        set_objects = set()
+        for st in s.get("settings") or []:
+            try:
+                if st.get("value"):
+                    set_objects.add(parse_obj(st.get("object")))
+            except ValueError:
+                pass
+        for k, ch in enumerate(s.get("serial") or []):
+            try:
+                index = int(str(ch.get("settings-index", "0x%04X" % (0x8000 + 0x10 * k))), 16)
+            except ValueError:
+                continue
+            if (index, 0x06) not in set_objects:
+                out.append("slave %s (%s): serial channel %s has no half duplex (0x%04X:06): right "
+                           "for RS422; for two-wire RS485 tick it, or the terminal hears what it "
+                           "sends itself" % (s.get("position"), s.get("name"), ch.get("name"), index))
+    return out
+
+
 class _Dumper(yaml.SafeDumper):
     pass
 

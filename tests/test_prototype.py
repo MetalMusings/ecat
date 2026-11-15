@@ -513,6 +513,19 @@ class TestEsi(unittest.TestCase):
         s.pdos = [sii.Pdo(0x1600, "rx", 2, "Outputs", True, False, word(0x7000, "Value", "Data Out"))]
         self.assertEqual(propose.propose({"position": 0, "dc": False}, s, coe.Dictionary()).serial_channels, [])
 
+    def test_serial_half_duplex_note(self):
+        s = {"position": 4, "name": "rs485", "identity": {"vendor": "0x00000002", "product": "0x17853052"},
+             "serial": [{"name": "port", "output-pdo": "0x1604", "input-pdo": "0x1A04", "port": "/dev/ttyECAT4"}]}
+        notes = config.serial_notes({"slaves": [s]})
+        self.assertEqual(len(notes), 1)
+        self.assertIn("0x8000:06", notes[0])
+        s["settings"] = [{"object": "0x8000:06", "type": "BOOL", "value": 1}]
+        self.assertEqual(config.serial_notes({"slaves": [s]}), [])
+        # an EL6001 (RS232) has none
+        s["settings"] = []
+        s["identity"]["product"] = "0x17713052"
+        self.assertEqual(config.serial_notes({"slaves": [s]}), [])
+
     def test_serial_rules(self):
         # as ecat_config.c (component/tests/test_config.c test_serial_errors)
         def entries(index, n=22):

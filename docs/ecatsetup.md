@@ -425,7 +425,9 @@ command and what you want to read back.
      here, whatever `mb2hal` asks for: the port cannot pass them on.
    - *RS485 (half duplex)*: tick it for two-wire RS485. Without it the
      terminal also receives what it sends itself, and `mb2hal` reads its
-     own request back instead of the VFD's answer.
+     own request back instead of the VFD's answer. (The check list, and
+     `--check`, add a note for an EL6021 or EL6022 channel without it:
+     ignore it for RS422.)
    - *Send continuous*: tick it above 38400 baud, so that a request longer
      than 22 bytes goes out without a pause (which would break it);
      harmless below.

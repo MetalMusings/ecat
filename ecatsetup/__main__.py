@@ -566,6 +566,8 @@ def check_file(path, esi_paths=()):
     print("%s: %d slaves, no errors in the file" % (path, len(cfg["slaves"])))
     for text in config.dc_warnings(cfg):
         print("Warning: %s" % text)
+    for text in config.serial_notes(cfg):
+        print("Note: %s" % text)
     if esi_paths:
         # settings against the ESI files' object dictionaries
         sess = session.Session(esi_paths)
