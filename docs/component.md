@@ -1538,9 +1538,9 @@ or `and2` (HAL loads a component once).
   the cyclic frames (the fork after uspace-v1.3; not released yet). With
   1.3 and earlier, the master's log says "No EoE processing because of
   missing callbacks!" and the device is silent.
-- SDOs to the same slave can time out while EoE runs: the master does not
-  yet keep mailbox replies apart per protocol
-  ([development.md](development.md#eoe)).
+- SDOs to the same slave need the same master: before it, the EoE traffic
+  took the slave's SDO responses, and a slave with `settings:` did not
+  reach OP ([development.md](development.md#eoe)).
 - Not tried on a slave: none of ours has EoE. The address is verified in
   unit tests (`component/tests/test_config.c`, `tests/test_prototype.py`)
   and the master's own code path in the master's simulator tests.

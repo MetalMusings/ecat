@@ -1457,17 +1457,35 @@ cycle, process data complete, link loss with EoE in flight), mutation-checked.
 Needs a master release (uspace-v1.4) to reach the package. ecat itself
 needed no change.
 
+### Done: one mailbox, several protocols
+
+Found 2026-11-15, fixed the same day in the fork (c7585ee9, not pushed, not
+released). The master read a slave's mailbox for whichever protocol asked
+first and gave up on a mail of another protocol. The EoE handler polls the
+mailbox all the time (in userspace the TAP device counts as open from its
+creation), so it dropped CoE responses ("Other mailbox protocol response for
+eoe0s0"), and the CoE state machine failed on an Ethernet frame ("Received
+mailbox protocol 0x02 as response"). Measured in the simulator, a slave with
+EoE and CoE, the same with and without `ecrt_master_callbacks()` (so not
+from the cyclic change; upstream's way of running EoE has it too):
+
+| | no EoE | EoE, before | EoE, after |
+|---|---|---|---|
+| ten SDOs in the configuration: OP? | yes, 0.37 s | **no**, "SDO configuration failed" | yes, 0.40 s |
+| 50 SDO uploads in OP, frames echoed meanwhile | (50 of 50 without frames) | 44 of 50 (callbacks: 0 of 50) | 50 of 50 |
+
+Now a reader that fetches another reader's mail puts it aside for it, and
+only one reader at a time is told to fetch (`master/mailbox.c`; design: the
+fork's `docs/design/userspace-master.md`, "One Mailbox, Several Readers").
+Tests: `tests/test_mbox_share.c` (the rules, without a bus, 12 mutations
+caught) and `tests/test_sim_mbox_share.c`. The simulated slave had to learn
+two things a real one does: responses queue behind the send mailbox, and an
+empty mailbox does not answer. Not tried on a real slave. Left: at release,
+an EoE fetch in flight can be lost (one "Failed to receive mbox fetch
+datagram" warning).
+
 ### Not built
 
-- Mailbox sharing (found 2026-11-15): the master reads a slave's mailbox
-  for whichever protocol asks first, and drops a reply of another protocol
-  ("Other mailbox protocol response for eoe0s0"). The EoE handler polls the
-  mailbox all the time (in userspace the TAP device counts as open from its
-  creation), so CoE replies for the same slave are lost: start SDOs and SDO
-  requests to an EoE slave time out (seen in the simulator, also before the
-  cyclic change, and in upstream's way of running EoE). Needs replies kept
-  per protocol in the master, or EoE kept off the mailbox while another
-  protocol uses it.
 - `host-ip`: ecat setting the host's address on the TAP device
   (`eoe0s<position>`, recreated at each handover) from the same file.
   Routing and bridging are documented, not configured.
