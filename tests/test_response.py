@@ -292,6 +292,33 @@ class TestAnalyse(unittest.TestCase):
                          [0.2, 0.2, 0.5, 5.0, 10.0, 20.0])
 
 
+class TestOnTheBus(unittest.TestCase):
+    """Two recordings from the bus (2026-11-16): an EaserCAT 3000 acting as a CiA 402
+    drive (a model: Kp 40 /s, Kv 200 /s, 100 % torque = 2000000 counts/s2), 1000
+    counts/mm, 40 mm at 100 mm/s and 1000 mm/s2; without feedforward, then with
+    velocity 1.0 and the torque per acceleration the first gave."""
+
+    DATA = os.path.join(os.path.dirname(__file__), "data")
+
+    def load(self, name):
+        return response.Recording.load(os.path.join(self.DATA, "response-simdrive-%s.samples" % name))
+
+    def test_without_and_with_feedforward(self):
+        off, on = self.load("noff"), self.load("ff")
+        r0, r1 = response.analyse(off), response.analyse(on)
+        self.assertAlmostEqual(r0.lag, 0.0265, delta=0.0005)
+        self.assertAlmostEqual(r0.drive_lag, 0.0245, delta=0.0005)
+        self.assertAlmostEqual(r0.bus, 0.002)
+        self.assertEqual(r0.findings[0][0], "feedforward")
+        # the model's own: 100 % / 2000000 counts/s2 * 1000 counts/mm
+        self.assertAlmostEqual(r0.torque_per_accel, 0.05, delta=0.0005)
+        self.assertAlmostEqual(r1.lag, 0.0019, delta=0.0002)
+        self.assertNotIn("feedforward", [k for k, _t in r1.findings])
+        lines = response.compare(off, r0, on, r1)
+        self.assertIn("feedforward velocity 0 -> 1 (cia402.feedforward)", lines[0])
+        self.assertIn("lag 26.53 -> 1.87 ms", "\n".join(lines))
+
+
 class TestCompare(unittest.TestCase):
     def test_before_and_after(self):
         before = recording(kp=1000.0, window=25, trials={"0x2009:00": [25600, 25600]})

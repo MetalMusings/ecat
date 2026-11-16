@@ -6,7 +6,7 @@ program. Usage:
 
     scripts/docs-screenshots [--out DIR] [NAME ...]
 
-NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-test,
+NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-test, gui-response,
 gui-status, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply);
 without names all are taken. Look at them before committing: a change in
 the window can need another state than the one shown here.
@@ -17,11 +17,12 @@ import os
 import sys
 import tempfile
 import time
+import types
 from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-sync", "gui-status", "gui-settings",
-         "gui-settings-picker", "gui-hal", "gui-hal-apply"]
+NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-sync", "gui-response", "gui-status",
+         "gui-settings", "gui-settings-picker", "gui-hal", "gui-hal-apply"]
 
 # English system messages (strerror) and no display: set before anything loads
 if os.environ.get("LC_ALL") != "C":
@@ -32,7 +33,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 sys.path.insert(0, ROOT)
 import test_gui  # noqa: E402  (sets the test environment: no user quirk files or settings)
-from ecatsetup import events, gui, session  # noqa: E402
+from ecatsetup import events, gui, response, session  # noqa: E402
 from PyQt5.QtWidgets import QApplication  # noqa: E402
 
 INI = """[EMC]
@@ -129,6 +130,8 @@ class Shots:
         self.page(w, w.test_page, "gui-test")
         if self.want("gui-sync"):
             self.sync(w)
+        if self.want("gui-response"):
+            self.response(w)
         if self.want("gui-settings") or self.want("gui-settings-picker"):
             self.settings(w)
         self.close(w)
@@ -163,6 +166,30 @@ class Shots:
         self.settle()
         page.sync_card.resize(900, page.sync_card.sizeHint().height())
         self.save(page.sync_card, "gui-sync")
+
+    def response(self, w):
+        """The Response card after two measurements of the simulated drive on the bus
+        (tests/data: an EaserCAT 3000 as a CiA 402 drive, 1000 counts/mm, 40 mm at
+        100 mm/s): without feedforward, then with the card's line (no test is started)."""
+        card = w.test_page.response
+        for name in ("response-simdrive-noff.samples", "response-simdrive-ff.samples"):
+            rec = response.Recording.load(os.path.join(ROOT, "tests", "data", name))
+            for key, box in card.fields.items():
+                box.setValue(float(rec.meta["spec"][key]))
+            path = "~/.local/state/ecatsetup/responses/drv-%s" % name.split("-")[-1]
+            card.finished(types.SimpleNamespace(recording=rec, ended=None, path=path))
+        card.objects.setText("Recorded: pos-cmd, pos-fb, the drive's own following error (0x60F4), "
+                             "the drive's torque (0x6077).")
+        card.add_button.hide()
+        # the card sits in the test page's drive part, hidden without a prepared drive:
+        # taken out as a window of its own for the picture
+        card.setParent(None)
+        card.show()
+        self.settle()
+        card.resize(1000, card.sizeHint().height())
+        self.settle()
+        self.save(card, "gui-response")
+        card.close()
 
     def settings(self, w):
         """The Settings card of slave 0 with one setting, and the picker."""

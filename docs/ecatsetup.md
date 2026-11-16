@@ -974,6 +974,148 @@ started), the following error (CSP: the command less the feedback) and
 the velocity (PP and PV: the position and the velocity). It is drawn from
 the pins, every 200 ms.
 
+#### Tuning a servo drive, step by step
+
+In CSP LinuxCNC sends a position every cycle and the drive does the rest:
+its command filter, its position and velocity loops, its feedforward.
+There is no PID in LinuxCNC to tune. What LinuxCNC sees is the following
+error, `pos-cmd` - `pos-fb`, and `FERROR` must allow for it. Tuning here
+means finding what that error is made of and making the parts that are
+not the bus small, one change at a time, with a measurement before and
+after. The *Response* card on the Test page does the measuring and
+comparing; the details of each line are in [Measuring a drive's
+response](#measuring-a-drives-response) below.
+
+![The Response card after two measurements: without and with feedforward](images/gui-response.png)
+
+*The Response card after two measurements of a simulated drive (an
+EaserCAT 3000 acting as a CiA 402 drive, 1000 counts/mm, 40 mm at 100
+mm/s): first without feedforward (25 ms behind: the grey line), then with
+the feedforward line the first measurement gave. The comparison comes
+first.*
+
+**Before you start**
+
+- The machine is free to move the test's distance both ways, someone is
+  at it with the emergency stop within reach, and the drive is a `cia402`
+  slave in CSP. The drive moves only while *Measure (hold)* is held.
+- Start the test (Test page), choose the drive on the *Move* card, give
+  its scale (counts per mm), travel, following error and max torque, and
+  press *Write limits to the drive*. The Response card appears.
+- Record what the drive can tell: its own following error `0x60F4` and its
+  torque `0x6077`. When the drive has them but they are not in the process
+  data, *Add them to the process data*, save, and start the test again.
+  Without `0x60F4` the card cannot tell a command filter from a slow loop;
+  without `0x6077` it says nothing about torque.
+
+**1. Measure the drive as it is**
+
+- Distance, velocity and acceleration: near the joint's `MAX_VELOCITY` and
+  `MAX_ACCELERATION`, and a distance long enough for some constant speed
+  (the card says when it was too short). Two strokes back and forth.
+- Hold *Measure (hold)* until it says *Done*. Measure with the real load
+  on the axis: inertia and friction are part of the result.
+
+**2. Read what it points at**
+
+The first lines say where most of the error comes from. What to do:
+
+| The card says | It comes from | What to try |
+|---|---|---|
+| the drive follows within the bus's delay | the bus only (two cycles) | nothing; set `FERROR` (step 5) |
+| the drive's target is behind `pos-cmd` by more than the bus | a command filter or smoothing in the drive | make it small: LinuxCNC's path is smooth already (ECT60: `0x2009`) |
+| the drive's position loop lags *n* ms (an effective gain of *k* /s) | the position loop without (enough) velocity feedforward | velocity feedforward in the drive, a higher position gain, or [feedforward from LinuxCNC](#feedforward-from-linuxcnc) |
+| part of the error follows the acceleration | inertia not made up for | torque feedforward or the inertia ratio in the drive, or torque feedforward from LinuxCNC |
+| overshoot at the stops, a long settling | a gain too high, or a resonance | a lower gain, a notch filter |
+| an offset that stays at standstill | no integral, or friction | the position loop's integral |
+| the torque reached the test's limit | the test's max torque | raise *Max torque* on the Move card, or a lower acceleration |
+
+**3. Try one setting at a time**
+
+- *Look for settings in the drive* lists the settings that may be the
+  cause, what the measurement points at first, with their present values
+  (from the drive's quirk file, then by name from its own dictionary).
+  Nothing is written.
+- Choose one, give a new value and press *Try it*: the drive's own value is
+  kept first, and the new one goes to its RAM while it is disabled.
+- Measure again with the same move. The result starts with what changed
+  and how much the lag, the error and the stops moved.
+- *Keep as setting* when it helped: the value goes into the slave's
+  Settings in the configuration, which ecat writes at every start (save
+  the file). *Undo* puts the drive's own value back. Nothing is stored in
+  the drive's EEPROM; what is still being tried is put back when the test
+  stops.
+
+##### Feedforward from LinuxCNC
+
+A drive with `0x60B1` (velocity offset) and `0x60B2` (torque offset) can
+take its feedforward from LinuxCNC: the profile works them out from
+`pos-cmd` every cycle ([component.md, feedforward in
+CSP](component.md#feedforward-in-csp)). It removes the position loop's lag
+without touching the drive's gains.
+
+- The objects must be in the drive's outputs, as `use: profile` (the
+  proposal does that when the drive's PDOs have them), and the drive must
+  be told to use them: a vendor setting, such as StepperOnline A6's
+  C01.13 = 5 and C01.16 = 5. Add that setting to the slave's Settings, and
+  turn the drive's own feedforward off.
+- Measure without it first. With `0x6077` recorded, the card gives the
+  torque per acceleration as the line to use: *as feedforward from
+  LinuxCNC: cia402: {feedforward: {torque: 0.05}}*.
+- Try it while the test runs, in a terminal (the window has no field for
+  it yet):
+
+  ```
+  halcmd setp <drive>.ff-velocity-gain 1.0
+  halcmd setp <drive>.ff-torque-per-accel 0.05
+  ```
+
+  and measure again: the comparison names the change (*feedforward
+  velocity 0 -> 1*). `velo-scale` is set by the test.
+- Keep it in the configuration by hand: in `ethercat.yaml`, on the slave,
+
+  ```yaml
+  cia402:
+    mode: csp
+    feedforward: {velocity: 1.0, torque: 0.05}
+  ```
+
+  *Apply* (HAL & LinuxCNC page) then writes `setp <drive>.velo-scale`
+  with the joint's scale, which `0x60B1` needs (counts per second).
+
+**4. Measure again until nothing is left to tune**
+
+Until the card says the drive follows within the bus's delay, or the
+changes no longer make a difference worth having. Compare at the same
+move every time.
+
+**5. Into LinuxCNC**
+
+- Save the configuration and *Apply* it (HAL & LinuxCNC page), so that
+  the kept settings and the feedforward are written at start.
+- Set `FERROR` and `MIN_FERROR` from the card's last line: twice the error
+  it predicts at the joint's `MAX_VELOCITY` and `MAX_ACCELERATION`, with
+  the bus's delay counted. A `FERROR` far above it hides a fault; one
+  below it stops the machine with "joint N following error" at speed.
+- Run LinuxCNC at full speed and watch `joint.N.f-error` (halscope), or
+  measure again in the test with the same move.
+
+**Two examples**
+
+- *A plasma cutter's ECT60 drives* (2026-11-16): the card said the drive's
+  target was 15 ms more behind than the bus: a command filter. *Look for
+  settings* found `0x2009` "Filter Time" at 25600 us, its maximum. Tried
+  6400, then 2000: the lag went from 17.3 to 4.6 ms and the error at 100
+  mm/s from 1.65 to 0.49 mm. Kept as a setting. Measured again at 300
+  mm/s, the card suggested `FERROR` 20 and `MIN_FERROR` 0.2.
+- *A drive with `0x60B1` / `0x60B2`* (the simulated drive in the picture):
+  26.53 ms of lag, most of it the position loop (24.5 ms: an effective
+  gain of 41 /s).
+  With feedforward velocity 1.0 and the card's torque 0.05: 1.87 ms, the
+  bus's two cycles; the peak error from 2.69 to 0.19 mm. In LinuxCNC (40 mm
+  moves at 100 mm/s) `joint.0.f-error` stayed below 0.09 mm; without it
+  LinuxCNC stopped with "joint 0 following error".
+
 #### Measuring a drive's response
 
 The *Response* card (CSP drives, once *Write limits to the drive* is done)

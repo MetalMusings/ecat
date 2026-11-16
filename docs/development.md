@@ -40,7 +40,10 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
 - `scripts/docs-screenshots [NAME ...]` takes the window's screenshots in
   `docs/images` again, offscreen against the same fake bus (no event log,
   English messages, only the quirk files that come with the program; the
-  HAL pages with a three-joint machine "mill" in a temporary folder). Take
+  HAL pages with a three-joint machine "mill" in a temporary folder;
+  `gui-response` from two recordings of the simulated drive on the bus in
+  `tests/data/response-simdrive-*.samples`, which `tests/test_response.py`
+  also analyses). Take
   them again when the window changes, look at them, and keep an unchanged
   picture out of the commit (`gui-hal-apply` shows the temporary folder's
   name).
