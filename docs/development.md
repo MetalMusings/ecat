@@ -1519,6 +1519,13 @@ the 250 us run.
   the call). With it: 3 minutes at 200 us in LinuxCNC with a program running and the mouse used,
   no lost cycle. One run, so not proof: before it, the loss came about once in 100 s to 10
   minutes.
+- **150 us in LinuxCNC with the interrupts pinned** (`irq-cpu: 3`, the machine on, the user
+  homing, jogging and cutting, `stress-ng` as above for 10 minutes): no lost cycle after the
+  start-up burst; the servo thread 8-11 us on average and 84.5 us at most (of 150), PLL error
+  within 7.4 us, the largest following error 4.1 mm in the jogs, SYNC0 shift 91 us, turn-around
+  2 cycles. The start-up burst is still there (about 170 events in 1.4 s, 3 s after the bus
+  was activated, when the automatic SYNC0 shift takes effect; the machine is in E-stop then, so
+  nothing is shut down that was running): it is not the interrupts. Wait for it before enabling.
 - **In practice:** 1 ms is what the machine runs, 250 us is tried (and worked), 200 us is the
   shortest where the bus is clean from the start, 150 and 125 us work after a start-up burst
   that matters only if the drives are enabled then, and 100 us and below does not work on this
