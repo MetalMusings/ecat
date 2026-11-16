@@ -781,8 +781,9 @@ but by the time the user looks, the fault has often passed.
 
 #### For all of them
 
-A start page in the window with the five tasks, leading to the pages
-and the order for each. The pages exist; what is missing is the way in
+A start page in the window with the five tasks (six since 2026-11-16:
+tuning a servo drive, see "Tuning a drive"), leading to the pages and the
+order for each. The pages exist; what is missing is the way in
 for someone who does not know where to begin.
 
 ### Open questions
@@ -860,7 +861,8 @@ in this order:
    watching is tried against a fake HAL, not a running LinuxCNC.
 7. **The start page**, once the parts exist. Built 2026-11-10: the *Start* tab
    (`ecatsetup/tasks.py`) lists the five tasks with their steps and a button
-   for each; it opens first when nothing is loaded.
+   for each; it opens first when nothing is loaded. A sixth, *Tuning a servo
+   drive*, added 2026-11-16 (the Response card's way in).
 
 ### Mockups
 
