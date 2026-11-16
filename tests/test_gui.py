@@ -1281,7 +1281,8 @@ class TestWindow(WindowBase):
         self.assertTrue(all("measured" not in t for lv, t in w.session.dc_problems()))     # no DC: not about SYNC0
         w.session.period = None
         page.show_dc_warnings(s)
-        self.assertIn("servo period is not known", page.dc_cycle.text())
+        self.assertIn("Servo period 1 ms (the default: no INI file chosen", page.dc_cycle.text())
+        self.assertNotIn("Measured", page.dc_cycle.text())              # nothing to compare with
         # a device nothing was measured on
         s["identity"] = {"vendor": "0x00000002", "product": "0x03F03052"}
         w.session.period = 125000

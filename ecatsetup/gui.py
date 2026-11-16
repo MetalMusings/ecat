@@ -1805,18 +1805,17 @@ class SlaveView(QWidget):
         """The SYNC0 cycle this slave gets (the servo period times its factor), and what was
         measured on this kind of device at servo periods that were tried ("" for none)."""
         period = self.win.session.period
+        shown = period or 1000000          # as the title bar: 1 ms until an INI file or a typed period
+        how = "" if period else " (the default: no INI file chosen, none typed on the Master page)"
         dc = s.get("dc")
         out = []
-        if dc is not None and period and dcinfo.parse_assign(dc.get("assign-activate", "")):
+        if dc is not None and dcinfo.parse_assign(dc.get("assign-activate", "")):
             n = int(dc.get("sync0-cycles") or 1)
-            out.append("SYNC0 every %s: the servo period %s times cycle %d."
-                       % (_us_text(period * n), _us_text(period), n))
-        elif period:
-            out.append("Servo period %s; this slave runs without SYNC0." % _us_text(period))
+            out.append("SYNC0 every %s: the servo period %s%s times cycle %d."
+                       % (_us_text(shown * n), _us_text(shown), how, n))
         else:
-            out.append("The servo period is not known (choose the INI file on the HAL page, or "
-                       "type it on the Master page).")
-        m = measured.line(s, period)
+            out.append("Servo period %s%s; this slave runs without SYNC0." % (_us_text(shown), how))
+        m = measured.line(s, period) if period else ""
         if m:
             out.append(m + ".")
         return "\n".join(out)
