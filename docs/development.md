@@ -2341,6 +2341,25 @@ and devices that should work but do not need a device on a bus to develop
 and try against. There are four ways to get one, in this order: the first
 that suffices is used.
 
+### Waiting for equipment (list, 2026-11-16)
+
+Built and tested as far as possible here, but the last try needs a device or
+wiring we do not have. Each moves off the list when a user with the device
+sends a capture or report (way 1 below), or the device comes here.
+
+| What | Built and tried so far | Needs |
+|---|---|---|
+| Feedforward from LinuxCNC (`cia402.feedforward`, 0x60B1 / 0x60B2) on a real drive | unit tests; a simulated drive on the bus (an EaserCAT 3000 acting as a CiA 402 drive), the Response card, LinuxCNC 2.10 | a servo drive with velocity and torque offset in its PDOs, and a setting to use them (StepperOnline A6: C01.13 / C01.16 = 5; Leadshine, Delta and others) |
+| The Response card's *Look for settings* / *Try it* on another drive than the ECT60 | the ECT60 (filter, Kp, Ki) at the machine; dictionary search unit-tested | any other CiA 402 drive, ideally a real servo (A6: the quirk file's `tuning:` is not filled in) |
+| `cia402.axes`: several axes in one slave | unit tests, objects 0x800 apart | a two-axis drive (ECT60x2, ECR60x2) or an EL72xx with channels |
+| Serial channels (`serial:`, EL6021 / EL6022) on a Beckhoff terminal | the EL6021 protocol emulated by the EaserCAT 3000 over a real wire, 2400-115200 baud, mb2hal | an EL6021 or EL6022 (and, for RS-485, a Modbus device on it) |
+| EoE on a bought device, and two EoE slaves on one bus | one EaserCAT 3000 with our own SOES/lwIP firmware, in LinuxCNC | a device with a web page over EoE (a drive, an IO-Link master, a gateway), and a second EoE slave |
+| Analog terminals (EL3xxx, EL4xxx) | the proposal (scaling from the range in the name, status bits) | an analog input and an output terminal |
+| Stepper and DC motor terminals (EL7041, EL70x1, EL7342) | a quirk file for the EL7041; `generic` slaves | an EL7041 (or EL70x1 / EL7342) with a motor |
+| Modular devices (modules in slots, 0xF030 / 0xF050) | a coupler with terminals works (each a slave); slots not built | a slave with modules in slots |
+| Absolute encoders (EL5002, EL5032) | nothing yet (check whether `generic` plus settings is enough) | an SSI or EnDat terminal with an encoder |
+| Homing by the drive with a switch (ECT60 torque homing 36/37 did not move; a repeatable method needs a switch) | method 35 at the machine; the homing card unit-tested | a home switch wired to the drive's input |
+
 ### 1. A capture from the user
 
 The user runs `ecatsetup --capture` and sends the file
