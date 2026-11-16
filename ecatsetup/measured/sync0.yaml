@@ -1,0 +1,20 @@
+# What was measured about a device's SYNC0 cycle, by running it: results at
+# servo periods that were tried. Read by EtherCAT Setup (ecatsetup/measured.py),
+# which shows them on the slave's page and warns when the servo period is at or
+# below a period the device refused. Not read by the component. The user's own
+# results are in ~/.config/ecatsetup/measured/sync0.yaml and are added to these
+# (the same period: the user's wins). Add results with "Remember this period" on
+# the Test page, or by hand.
+#
+# result: ok (the bus was in OP, turn-around 2 cycles, no lost cycles) or refused
+# (the device did not go to OP: al-status says why). Only the periods that were
+# tried are here: a limit is not claimed between them.
+- name: Rtelligent ECT60
+  match: {vendor: '0x00000A88', product: '0x0A880002'}
+  results:
+  - {period-us: 250, result: ok, date: 2026-11-16, note: "LinuxCNC, 10 min under load, the machine moving"}
+  - {period-us: 200, result: ok, date: 2026-11-16, note: "LinuxCNC with the machine moving, and 270 s under load in halrun"}
+  - {period-us: 175, result: ok, date: 2026-11-16, note: "halrun under load, 40 s"}
+  - {period-us: 150, result: ok, date: 2026-11-16, note: "LinuxCNC, 10 min under load, the machine moving"}
+  - {period-us: 125, result: ok, date: 2026-11-16, note: "LinuxCNC, 10 min under load, the machine moving, margins a sixth of the period"}
+  - {period-us: 100, result: refused, al-status: '0x0036', date: 2026-11-16, note: "LinuxCNC: the first drive refused SAFEOP, DC Sync0 Cycle Time"}
