@@ -132,7 +132,12 @@ Choosing a slave shows:
   predefined assignment the file uses; choosing another proposes the slave
   again with it, after asking), `configure-pdos`, the Sync
   choice (free run, one of the slave's DC modes, or DC mode with user settings; see
-  [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift,
+  [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift; under
+  it what the slave says about DC (chip, SII, ESI, CoE), a line with the SYNC0
+  cycle it gets (the servo period times the cycle factor) and, when there are
+  any, what was *measured on the bus* on this kind of device at servo periods that
+  were tried ([Measured SYNC0 cycles](#measured-sync0-cycles)), with a warning when
+  the servo period is at or below one that was refused,
   and for a drive the CiA 402 modes (below), *Propose again* and the homing
   card ([cia402](component.md#the-cia402-profile));
 - **CiA 402 modes**, for a drive: *Mode of operation* is the mode the
@@ -261,7 +266,11 @@ Works with no LinuxCNC. *Start the I/O test* runs `ecat` in `halrun` on
 the bus; stop the kernel master first, or the two share the NIC
 ([Getting started](getting-started.md#getting-started)). For the chosen slave:
 
-- **Synchronisation**: DC state and where SYNC0 falls;
+- **Synchronisation**: DC state, where SYNC0 falls and the turn-around, the
+  `pll-err` spread, the room for two cycles, where the network card's
+  interrupts are, and what was measured on the drives; *Remember this period for
+  the drives...* keeps what a good (or refused) run shows
+  ([details](#synchronisation-in-the-test-mode));
 - **Outputs** and **Inputs**, live, and **All pins**. Outputs are set
   here and go back to 0 when the test stops;
 - **SDO**: read and write a CoE object while a master runs;
@@ -677,6 +686,10 @@ count: "refused at 100 us" and "ok at 125 us" say nothing about 110 us.
 A slave without DC has no SYNC0 to place; the card then says only
 whether the slaves are in OP.
 
+What the rows mean for how short a servo period can be, and what was
+measured on one machine, is in [Servo period and
+performance](component.md#servo-period-and-performance).
+
 ### Keeping what you chose
 
 *Save as quirk file...* on the slave's page saves its pin names, scales
@@ -735,7 +748,7 @@ explains the fault.
    |---|---|---|
    | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*PDO assignment*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). If LinuxCNC does not use the slave at all, untick *Used by LinuxCNC* on its page: the slave is then left alone. A slave of the file that does not reach OP stops every drive (the working counter is incomplete), a slave that is not used does not. |
    | 0x0026, 0x0043 | A setting (start-up SDO) was refused, or does not fit the others. | Read the master's messages for the object; check it in the Settings card (*Read present values*), take it out and try again. |
-   | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period (0x0036, "DC Sync0 Cycle Time": the slave does not take the servo period as its SYNC0 cycle; the Rtelligent ECT60 refuses 100 us and takes 125 us and up: use a longer period). | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings. |
+   | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period (0x0036, "DC Sync0 Cycle Time": the slave does not take the servo period as its SYNC0 cycle; the Rtelligent ECT60 refuses 100 us and takes 125 us and up: use a longer period). | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings; [Servo period and performance](component.md#servo-period-and-performance). |
    | 0x001B | Sync manager watchdog: the process data stopped. | LinuxCNC or the test stopped, or the servo thread missed cycles: see the event log. |
    | 0x0020, 0x0060, 0x0011 | The slave needs a power cycle, reset itself, or follows an earlier error. | Power the slave off and on; restart the master. |
 

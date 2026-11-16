@@ -73,6 +73,75 @@ package (or a master built from source, with `USPACE_ETHERCAT=<its
 prefix>`), `linuxcnc-uspace-dev` and `libyaml-dev`; see
 [Developing ecat](development.md#build-and-test).
 
+## Servo period and performance
+
+How short can LinuxCNC's servo period be with ecat? It depends on the drives, the
+network card and the computer; these are numbers from one machine (a plasma
+cutter: three Rtelligent ECT60 drives and an EaserCAT 7000 on an Intel N100 with an
+`igc` card on `xdp-native`, PREEMPT_RT, the servo thread on an isolated CPU,
+LinuxCNC 2.10 with QtPlasmaC, 2026-11-16). They show what is possible, not what
+your machine will do: measure yours (below).
+
+| Servo period | What was seen |
+|---|---|
+| 1 ms | The usual setting. Every earlier test of the component ran here. |
+| 250 us | Works. In LinuxCNC with the machine moving and a heavy CPU load (`stress-ng`, 10 min): the servo thread 9-13 us on average, 68 us at most; one lost cycle at the start of the load (before the card's interrupts were pinned, see below). |
+| 200 us | Works: 270 s under load in `halrun` and 3 minutes of a running program in LinuxCNC without a lost cycle (with the interrupts pinned). Before they were pinned, one lost cycle came in about 100 s of real use. |
+| 175 us | Clean from the start in `halrun` under load (40 s). |
+| 150 us | Works: 10 minutes under load with the machine moving, no lost cycle after the start-up burst (below), the servo thread 84 us at most. |
+| 125 us | Works, and is the shortest these drives take: 10 minutes under load, SYNC0 at two cycles of turn-around throughout, the servo thread 63 us at most (half the period). |
+| 100 us and below | Does not work with these drives: the ECT60 refuses a SYNC0 cycle of 100 us (the bus never reaches OP, AL status 0x0036 "DC Sync0 Cycle Time"; LinuxCNC shows "amplifier fault"). |
+
+What to expect from it:
+
+- **The drives set the floor.** A drive's minimum SYNC0 cycle is in its manual, not
+  reliably in the slave: the ECT60's ESI file gives none and its CoE object
+  `0x1C32:05` reads nonsense. EtherCAT Setup shows what was measured on a kind of
+  device on its slave page (*Measured on the bus*) and warns when the servo
+  period is at or below a period the device refused. Find yours by trying, and
+  keep it with *Remember this period* ([ecatsetup.md](ecatsetup.md#measured-sync0-cycles)).
+- **Pin the network card's interrupts** on the CPU of the servo thread:
+  `master: irq-cpu: 3` for `isolcpus=3` ([master](#master)). By default they are
+  handled on the CPUs that also run the GUI, the mouse and the graphics, and a
+  frame's arrival can wait behind them: a cycle is then lost now and then at
+  250 us and shorter. The *Synchronisation* card says where they are. The
+  kernel needs an isolated CPU for the servo thread (here
+  `isolcpus=3 nohz_full=3 rcu_nocbs=3 irqaffinity=0-2`).
+- **A lost cycle stops the drives.** One cycle in which the working counter is
+  not complete shuts the drives down (CiA 402 profile, by design: they stay
+  shut down until `enable` drops). At 1 ms it was not seen in the tests; at
+  250 us and shorter it is the thing to watch, in the event log
+  (`working counter zero`) and in the *Synchronisation* card.
+- **A burst when the bus starts at 150 us and shorter.** About 1.4 s after the bus is
+  activated, when the automatic SYNC0 shift takes effect, the working counter is lost
+  for about a second (150 events at 150 and 125 us). LinuxCNC is in E-stop then and
+  nothing that runs is shut down, but do not switch the machine on in the first
+  seconds. It is not the interrupts, and a fixed shift did not remove it.
+- **The thread's own time grows with the machine.** Alone, `ecat` takes 4-5 us per
+  cycle here; with LinuxCNC's motion code and QtPlasmaC in the same thread, 9-13 us on
+  average and 60-85 us at most. At 125 us that is up to two thirds of the period.
+- **The automatic SYNC0 shift keeps two cycles of turn-around** only while the
+  period has room: the two margins and the spread of the frames' send time have to
+  fit. The margins are 50 us, and a sixth of the period when that is less, so 125 us
+  keeps 83 us for the spread. The *Synchronisation* card shows the room.
+- Serial channels and EoE share the bus frames; neither was measured at short
+  periods.
+
+Measure your own:
+
+1. Copy your configuration and set `SERVO_PERIOD` in the copy (and `irq-cpu` in
+   `ethercat.yaml`); keep the machine off for the first seconds.
+2. Start LinuxCNC (or the I/O test, in *EtherCAT Setup*) and read the
+   *Synchronisation* card: all slaves in OP, two cycles of turn-around, `pll-err`
+   spread, the room for two cycles, where the interrupts are.
+3. Load the computer as you will (a running program, the GUI, `stress-ng`) for ten
+   minutes, jog and cut, and read the event log: `working counter zero` is a lost
+   cycle. `latency-histogram --nox --base N --servo N` (LinuxCNC's own tool) shows the
+   thread's latency without the bus.
+4. Shorten the period in steps. When a drive refuses OP, or cycles are lost, go back
+   one step. Use *Remember this period for the drives...* on the Test page after a
+   run that was good, so that the slave page knows it next time.
+
 ## The configuration file
 
 Status: **draft, format version 1**, 2026-11-08. It will change as the
