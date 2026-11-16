@@ -32,6 +32,20 @@ TASKS = [
      [("Read the bus.", "scan", "Rescan the bus"),
       ("Start the test, pick the slave, set outputs or move a drive in small steps.", "test",
        "Test")]),
+    ("Tuning a servo drive",
+     "A CSP drive lags or overshoots, or you want FERROR right: measure what its following "
+     "error is made of and change one thing at a time, with no LinuxCNC.",
+     [("Open the machine's ethercat.yaml.", "open", "Open..."),
+      ("Have the drive's own following error (0x60F4) and torque (0x6077) in its process data "
+       "(the Response card can add them).", "bus", "Bus"),
+      ("Start the test, choose the drive on the Move card and write its limits; the machine "
+       "must be free to move and someone at it.", "test", "Test"),
+      ("Measure on the Response card and read what it points at; try one setting at a time "
+       "and keep what helps.", "test", "Test"),
+      ("For a drive with 0x60B1 / 0x60B2: try LinuxCNC's feedforward on the same card and "
+       "keep it in the configuration.", "test", "Test"),
+      ("Save, write into LinuxCNC, and set FERROR from the card's last line.", "hal",
+       "HAL && LinuxCNC")]),
     ("Troubleshooting while LinuxCNC runs",
      "Something unexpected happens and a slave may be the cause.",
      [("Watch the pins live without touching anything.", "watch", "Watch LinuxCNC"),

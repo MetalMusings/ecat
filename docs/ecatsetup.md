@@ -88,6 +88,7 @@ tasks:
 - changing a configuration that runs;
 - bringing up a new slave;
 - using a slave by hand;
+- tuning a servo drive ([step by step](#tuning-a-servo-drive-step-by-step));
 - troubleshooting while LinuxCNC runs.
 
 ### Bus
