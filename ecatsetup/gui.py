@@ -3348,6 +3348,11 @@ class MoveCard(Card):
         self.where.setText(text)
 
 
+def _duration_text(seconds):
+    s = int(seconds)
+    return "%d min %d s" % (s // 60, s % 60) if s >= 60 else "%d s" % s
+
+
 def _us_text(ns):
     """A time in ns as microseconds, or milliseconds from 1 ms."""
     if ns >= 1000000:
@@ -3526,7 +3531,86 @@ class TestPage(QWidget):
             set_pill(mark, "✓" if ok else "!" if ok is False else "–",
                      "green" if ok else "red" if ok is False else "grey")
             text.setText(t)
+        # how long the bus has run well: all slaves in OP, no DC failure, two cycles
+        good = (get("all-op") == "TRUE" and get("dc-sync-failed") != "TRUE"
+                and (get("turnaround-cycles") in ("2", "0", None) or
+                     ((self.win.session.cfg or {}).get("master", {}).get("dc", {}).get("sync0-shift-ns") != "auto")))
+        now = time.monotonic()
+        if not good:
+            self.ok_since = None
+        elif self.ok_since is None:
+            self.ok_since = now
+        self.remember_text.setText(
+            "Running well for %s at %s." % (_duration_text(now - self.ok_since), _us_text(period)) if self.ok_since
+            and period else "Not running well yet (all slaves in OP, two cycles)." if period else
+            "The servo period is not known.")
         self.sync_card.show()
+
+    def remember_period(self):
+        """Record what this run shows about the drives that use SYNC0 (measured.py)."""
+        win = self.win
+        cfg = win.session.cfg or {}
+        period = win.session.period
+        slaves = [s for s in cfg.get("slaves") or [] if s.get("dc") and not s.get("unused")
+                  and quirks.identity(s) and s.get("position") is not None]
+        if not period or not slaves:
+            QMessageBox.information(self, TITLE, "There is no servo period, or no slave that uses SYNC0.")
+            return
+        states = {}
+        for s in slaves:
+            try:
+                st, _, code = diagnose.al_status(s["position"])
+            except Exception as e:                      # the master tool or a register read failed
+                QMessageBox.warning(self, TITLE, "Could not read slave %s's state: %s" % (s["position"], e))
+                return
+            states[s["position"]] = (st, code)
+        # one entry per kind of device
+        kinds = {}
+        for s in slaves:
+            kinds.setdefault(quirks.identity(s), []).append(s)
+        notin = [s for s in slaves if states[s["position"]][0] != 8]
+        if not notin:
+            secs = time.monotonic() - self.ok_since if self.ok_since else 0
+            if secs < 60:
+                QMessageBox.information(self, TITLE, "The bus has run well for %s. Let it run for a minute or "
+                                        "more first: a result is worth more after a while under the load you use."
+                                        % _duration_text(secs))
+                return
+            names = ", ".join("%s (%s)" % (g[0].get("device") or g[0].get("name"), ", ".join(x["name"] for x in g))
+                              for g in kinds.values())
+            if QMessageBox.question(self, TITLE, "Keep that %s works at the servo period %s: all slaves in OP for %s?"
+                                    % (names, _us_text(period), _duration_text(secs)),
+                                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                return
+            note = "Test page: all slaves in OP for %s, turn-around %s" % (_duration_text(secs), "2 cycles")
+            for g in kinds.values():
+                path = measured.record(g[0], period, "ok", note=note)
+        else:
+            dc_codes = (0x0030, 0x0035, 0x0036, 0x0037)
+            refused = [s for s in notin if states[s["position"]][1] in dc_codes]
+            other = [s for s in notin if s not in refused]
+            if not refused:
+                QMessageBox.information(self, TITLE, "%s not in OP, with AL status %s: that is not a SYNC0 cycle "
+                                        "problem, so nothing is kept." % (
+                                            ", ".join(s["name"] for s in notin),
+                                            ", ".join("0x%04X" % states[s["position"]][1] for s in notin)))
+                return
+            names = ", ".join("%s (%s, AL 0x%04X)" % (s.get("device") or s.get("name"), s["name"], states[s["position"]][1])
+                              for s in refused)
+            if QMessageBox.question(self, TITLE, "Keep that %s refused the servo period %s?%s" % (
+                    names, _us_text(period), ("\n\nNot kept: %s (another reason)." % ", ".join(s["name"] for s in other)) if other else ""),
+                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                return
+            seen = set()
+            for s in refused:
+                if quirks.identity(s) in seen:
+                    continue
+                seen.add(quirks.identity(s))
+                path = measured.record(s, period, "refused", al_status=states[s["position"]][1],
+                                       note="Test page: did not go to OP")
+        win.status("Kept in %s" % path)
+        if win.slave_page.position is not None:
+            win.slave_page.show_slave(win.slave_page.position)        # its measured line
 
     def __init__(self, win):
         super().__init__()
@@ -3594,6 +3678,20 @@ class TestPage(QWidget):
             self.sync_rows.append((mark, text))
         self.offsets = []
         self.pll = []
+        self.ok_since = None         # monotonic time since which the bus has run well (OP, two cycles)
+        brow = QHBoxLayout()
+        self.remember = QPushButton("Remember this period for the drives...")
+        self.remember.setToolTip(
+            "Keep what this run shows about the drives' SYNC0 cycle: after a minute or more with all "
+            "slaves in OP and the turn-around at two cycles, that the servo period works; when a drive "
+            "does not go to OP because it does not take the cycle (AL status 0x0030, 0x0035, 0x0036), "
+            "that it refused it. Written to your own file, ~/.config/ecatsetup/measured/sync0.yaml, and "
+            "shown on the slave's page; only the periods that were tried count.")
+        self.remember.clicked.connect(self.remember_period)
+        brow.addWidget(self.remember)
+        self.remember_text = label("", "hint", wrap=True)
+        brow.addWidget(self.remember_text, 1)
+        self.sync_card.add(brow)
         lay.addWidget(self.sync_card)
         self.sync_card.hide()
 

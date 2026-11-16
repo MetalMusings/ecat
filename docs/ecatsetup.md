@@ -645,7 +645,31 @@ the master's pins (`ecat.0.*`):
   so while it still measures (2 s after all OP), and warns at 3 or more;
 - how much the moment the frame is sent varies (`send-offset`, the last
   50 samples): more than a quarter of the period points at the servo
-  thread's latency.
+  thread's latency;
+- the servo thread's `pll-err` as a spread over the last 50 samples, not only
+  the last value;
+- the **room for two cycles**: the period less the two margins (`auto-shift-margin`
+  and `auto-shift-input-margin`) less the spread of the frames' send time. When
+  it is under a tenth of the period, a late frame can put SYNC0 in the
+  three-cycle position (what happened at 125 us on the plasma cutter, with
+  the old fixed margins of 50 us);
+- **where the network card's interrupts are**, against the CPU that is isolated
+  for real time (`isolcpus=`): on the other CPUs the arrival of a frame waits
+  behind the GUI and other work (`master: irq-cpu` pins them);
+- what was **measured on the kinds of drive** that run with SYNC0 here at this
+  servo period (below).
+
+*Remember this period for the drives...* keeps what the run shows. With all
+slaves that use SYNC0 in OP for a minute or more and the turn-around at two
+cycles (the text beside the button says for how long it has run well), it
+records that the period works for each kind of drive; when a drive is not in
+OP with an AL status that is about the SYNC0 cycle (0x0030, 0x0035, 0x0036,
+0x0037) it records that it refused the period; any other reason is not kept.
+It asks first. The results go to your own file,
+`~/.config/ecatsetup/measured/sync0.yaml`, are added to the ones that come
+with the program (`ecatsetup/measured/sync0.yaml`: the ECT60, 100 to 250 us,
+2026-11-16), and are shown on the slave's page. Only periods that were tried
+count: "refused at 100 us" and "ok at 125 us" say nothing about 110 us.
 
 A slave without DC has no SYNC0 to place; the card then says only
 whether the slaves are in OP.
@@ -1784,6 +1808,20 @@ reached and what to start, and with the closing run's stop guard in the log. The
 file name is proposed next to the INI file, and nothing is written there unless
 the dialog is accepted. Its paths show the user's home folder name; look
 the report through before posting it.
+
+### Measured SYNC0 cycles
+
+A slave's page says, under the Sync row, what SYNC0 cycle it gets (the servo
+period times the cycle factor) and what was measured on this kind of device:
+for example "250 us ok, 200 us ok, ..., 100 us refused (AL 0x0036); measured
+2026-11-16". A servo period at or below one that was refused is a warning
+(also in the check list); one between the periods that were tried is a note;
+at or above the shortest that worked, nothing. This is separate from what the
+slave says about itself (ESI, SII, CoE 0x1C32/0x1C33), which the same page
+also shows: the ECT60's ESI gives no minimum cycle and its CoE object reads
+nonsense, so for it the measurements are the only thing there is. See
+[Synchronisation, in the test mode](#synchronisation-in-the-test-mode) for how
+they are recorded.
 
 ## Quirk files
 

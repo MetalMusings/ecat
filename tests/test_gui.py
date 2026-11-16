@@ -7,6 +7,7 @@ Run with: python3 -m unittest discover -s tests
 import copy
 import ipaddress
 import os
+import time
 import sys
 import tempfile
 import unittest
@@ -1287,6 +1288,85 @@ class TestWindow(WindowBase):
         s["dc"] = {"assign-activate": "0x0300"}
         page.show_dc_warnings(s)
         self.assertNotIn("Measured", page.dc_cycle.text())
+
+    def test_remember_period(self):
+        import tempfile
+        w = self.window()
+        s = w.session.slave(0)
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
+        s["device"], s["name"] = "ECT60", "x"
+        s["dc"] = {"assign-activate": "0x0300"}
+        tp = w.test_page
+        w.session.period = 110000                   # a period nothing was measured at, between 100 and 125
+        asked, told = [], []
+        yes = lambda parent, title, text, *a: (asked.append(text), gui.QMessageBox.Yes)[1]
+        info = lambda parent, title, text, *a: told.append(text)
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"ECATSETUP_MEASURED": d}), \
+                mock.patch.object(gui.QMessageBox, "question", yes), \
+                mock.patch.object(gui.QMessageBox, "information", info):
+            # all in OP, but for ten seconds only: not enough
+            tp.ok_since = time.monotonic() - 10
+            with mock.patch.object(gui.diagnose, "al_status", lambda pos: (8, False, 0)):
+                tp.remember_period()
+            self.assertTrue(told and "Let it run for a minute or more" in told[0], told)
+            self.assertEqual(asked, [])
+            self.assertEqual([r for r in gui.measured.results(s) if r["period-us"] == 110], [])
+            # after two minutes: asked, kept
+            tp.ok_since = time.monotonic() - 120
+            with mock.patch.object(gui.diagnose, "al_status", lambda pos: (8, False, 0)):
+                tp.remember_period()
+            self.assertIn("ECT60 (x) works at the servo period 110 us: all slaves in OP for 2 min", asked[-1])
+            r = [r for r in gui.measured.results(s) if r["period-us"] == 110][0]
+            self.assertEqual(r["result"], "ok")
+            self.assertIn("2 min", r["note"])
+            self.assertTrue(os.path.exists(os.path.join(d, "sync0.yaml")))
+            # a drive that is not in OP with the SYNC0 cycle time code: kept as refused
+            w.session.period = 90000
+            with mock.patch.object(gui.diagnose, "al_status", lambda pos: (2, True, 0x36)):
+                tp.remember_period()
+            self.assertIn("refused the servo period 90 us", asked[-1])
+            self.assertIn("AL 0x0036", asked[-1])
+            r = [r for r in gui.measured.results(s) if r["period-us"] == 90][0]
+            self.assertEqual((r["result"], r["al-status"]), ("refused", "0x0036"))
+            # not in OP for another reason: nothing is kept
+            w.session.period = 80000
+            n = len(asked)
+            with mock.patch.object(gui.diagnose, "al_status", lambda pos: (2, True, 0x1D)):
+                tp.remember_period()
+            self.assertEqual(len(asked), n)
+            self.assertIn("not a SYNC0 cycle problem", told[-1])
+            self.assertEqual([r for r in gui.measured.results(s) if r["period-us"] == 80], [])
+            # answering no keeps nothing
+            w.session.period = 70000
+            with mock.patch.object(gui.QMessageBox, "question", lambda *a, **k: gui.QMessageBox.No), \
+                    mock.patch.object(gui.diagnose, "al_status", lambda pos: (2, True, 0x35)):
+                tp.remember_period()
+            self.assertEqual([r for r in gui.measured.results(s) if r["period-us"] == 70], [])
+            # no period: told
+            w.session.period = None
+            tp.remember_period()
+            self.assertIn("no servo period", told[-1])
+
+    def test_remember_text_follows_the_run(self):
+        w = self.window()
+        tp = w.test_page
+        pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE", "pll-err": "1",
+                "shift-time": "70000", "turnaround-cycles": "2"}
+        w.session.cfg["master"] = {"dc": {"servo-thread-follows-ref-clock": True, "sync0-shift-ns": "auto"}}
+        tp.ok_since = None
+        tp.show_sync(pins.get, 125000)
+        self.assertIsNotNone(tp.ok_since)
+        self.assertIn("Running well for 0 s at 125 us", tp.remember_text.text())
+        tp.ok_since -= 200
+        tp.show_sync(pins.get, 125000)
+        self.assertIn("Running well for 3 min 20 s at 125 us", tp.remember_text.text())
+        pins["turnaround-cycles"] = "3"                     # three cycles with the automatic shift: not well
+        tp.show_sync(pins.get, 125000)
+        self.assertIsNone(tp.ok_since)
+        self.assertIn("Not running well yet", tp.remember_text.text())
+        pins.update({"turnaround-cycles": "2", "all-op": "FALSE"})
+        tp.show_sync(pins.get, 125000)
+        self.assertIsNone(tp.ok_since)
 
     def test_message_selects_slave(self):
         w = self.window()

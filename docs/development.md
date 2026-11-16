@@ -1558,6 +1558,19 @@ the 250 us run.
   same thread, 67 us at most, a period below about 150 us would leave little margin
   in any case.
 
+### Possible later: making and keeping device data
+
+What EtherCAT Setup knows about a device beyond its ESI file, SII and dictionary is in
+two kinds of file today: quirk files (pins, settings, limits, homing, HAL lines:
+`ecatsetup/devices`, written by hand or from a configured slave with *Save as quirk
+file...*) and the measured SYNC0 results (`ecatsetup/measured/sync0.yaml`, written by
+*Remember this period* on the Test page). A user's quirk file for a device replaces the
+one that came with the program, so a file with one new fact would drop the others; that
+is why the measured results are a store of their own. Not decided or built: how this
+data is made and kept up to date as a whole (a guided way to write a quirk file, one
+place for both kinds of data, sharing results between users, dating or expiring a result
+when a firmware or a revision changes, checking that a shipped result still holds).
+
 ## EoE
 
 Use case (the user, 2026-11-15): web pages for a drive's settings through
