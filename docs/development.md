@@ -1526,6 +1526,15 @@ the 250 us run.
   2 cycles. The start-up burst is still there (about 170 events in 1.4 s, 3 s after the bus
   was activated, when the automatic SYNC0 shift takes effect; the machine is in E-stop then, so
   nothing is shut down that was running): it is not the interrupts. Wait for it before enabling.
+- **125 us in LinuxCNC with the interrupts pinned** (same test as 150 us, 10 minutes): no lost
+  cycle after the start-up burst (143 events in the first 5 s), the servo thread 9-12 us on
+  average and 68 us at most (of 125), PLL error within 8.9 us, the largest following error 6.6
+  mm in the user's jogs and cuts, all slaves in OP throughout. But 6.4 minutes into the run the
+  automatic SYNC0 shift chose again, without any other event: "SYNC0 shift 92 us, turn-around
+  3 cycles" (it had been 77 us and 2 cycles), and it stayed so to the end. The cia402 profile
+  counts on two cycles from output to status (`STATUS_CYCLES`), and nothing went wrong in the
+  minutes that followed, but at this period the window for two cycles is narrow: the frame
+  (about 160 bytes through four slaves) and the PLL's jitter use a good part of 125 us.
 - **100 us in LinuxCNC** (2026-11-16, the user): the first ECT60 refused SAFEOP, AL status 0x0036
   "DC Sync0 Cycle Time", so the bus never reached OP and LinuxCNC showed "amplifier fault" on
   all joints. The drive does not accept a SYNC0 cycle of 100 us (125 us and up were accepted).
