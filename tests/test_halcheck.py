@@ -57,6 +57,8 @@ class TestPinList(unittest.TestCase):
         self.assertEqual(halpins.CIA402_STOP, c["stop_params"])
         self.assertEqual(halpins.CIA402_ZERO, c["zero_pins"])
         self.assertEqual(halpins.CIA402_MODE, c["mode_pins"])
+        self.assertEqual(halpins.CIA402_FF_VELOCITY, c["ff_velocity_pins"] + c["ff_velocity_params"])
+        self.assertEqual(halpins.CIA402_FF_TORQUE, c["ff_torque_pins"] + c["ff_torque_params"])
         e = c_tables("devices/ecat_encoder.c")
         self.assertEqual(halpins.ENCODER, e["pins"] + e["params"])
         self.assertEqual(halpins.ENCODER_INDEX, e["index_pins"])

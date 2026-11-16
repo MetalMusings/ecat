@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +44,8 @@ typedef struct {
   unsigned int cia402_modes;  // the other modes it may switch to (bit n: mode n)
   unsigned int cia402_all;    // mode and modes
   int n_axes;         // the drive's axes (cia402.axes), 1 without
+  int ff_velocity;    // cia402.feedforward.velocity is given
+  int ff_torque;      // cia402.feedforward.torque is given
   unsigned int pp_limits[ECAT_CIA402_MAX_AXES];  // per axis: settings 0x607D:01, 0x607D:02 seen (bits 0-1)
   unsigned int owned[ECAT_CIA402_MAX_AXES];      // per axis: which of the profile's objects it has (bits of cia402_objects)
   int n_enc;          // the slave's encoder channels
@@ -76,6 +79,8 @@ static const struct {
     {0x607A, 32, 1},  // target position
     {0x6081, 32, 1},  // profile velocity (PP)
     {0x60FF, 32, 1},  // target velocity
+    {0x60B1, 32, 1},  // velocity offset (feedforward in CSP)
+    {0x60B2, 16, 1},  // torque offset (feedforward in CSP)
 };
 #define N_CIA402_OBJECTS (int)(sizeof(cia402_objects) / sizeof(cia402_objects[0]))
 
@@ -1052,6 +1057,39 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       }
       if (n > 0) c->n_axes = n;
     }
+    c->ff_velocity = c->ff_torque = 0;
+    {
+      // feedforward in CSP: modparams with float values
+      yaml_node_t *ff = get(c, get(c, s, "cia402"), "feedforward");
+      static const struct {
+        const char *key;
+        int id;
+      } keys[] = {{"velocity", ECAT_MP_CIA402_FF_VELOCITY}, {"torque", ECAT_MP_CIA402_FF_TORQUE},
+                  {"torque-max", ECAT_MP_CIA402_FF_TORQUE_MAX}};
+      unsigned int k;
+      if (ff != NULL && ff->type != YAML_MAPPING_NODE) error(c, "cia402.feedforward needs velocity, torque and/or torque-max");
+      for (k = 0; ff != NULL && ff->type == YAML_MAPPING_NODE && k < sizeof(keys) / sizeof(keys[0]); k++) {
+        double v;
+        if (get_str(c, ff, keys[k].key) == NULL) continue;
+        v = get_float(c, ff, keys[k].key, 0.0);
+        if (!isfinite(v) || (keys[k].id == ECAT_MP_CIA402_FF_TORQUE_MAX && (v < 0 || v > 300))) {
+          error(c, "cia402.feedforward.%s: %s", keys[k].key,
+                keys[k].id == ECAT_MP_CIA402_FF_TORQUE_MAX ? "0 to 300 (% of rated torque)" : "a number");
+          continue;
+        }
+        if ((mp = append(b, sizeof(*mp))) == NULL) {
+          error(c, "out of memory");
+          return;
+        }
+        mp->confType = lcecConfTypeModParam;
+        mp->id = keys[k].id;
+        snprintf(mp->name, LCEC_CONF_STR_MAXLEN, "cia402.feedforward.%s", keys[k].key);
+        mp->value.flt = v;
+        ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount++;
+        if (keys[k].id == ECAT_MP_CIA402_FF_VELOCITY) c->ff_velocity = 1;
+        if (keys[k].id == ECAT_MP_CIA402_FF_TORQUE) c->ff_torque = 1;
+      }
+    }
     if (get_bool(c, get(c, s, "cia402"), "zero-at-start", 0)) {
       if ((mp = append(b, sizeof(*mp))) == NULL) {
         error(c, "out of memory");
@@ -1107,7 +1145,16 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
                                                need[j] + a * ECAT_CIA402_AXIS_OFFSET,
                                                j >= n_mode_objects ? " to change modes" : "");
       }
+      // feedforward: its object, and CSP to use it in
+      if (c->ff_velocity && !(c->owned[a] & (1u << cia402_object(0x60B1, 0))))
+        error(c, "cia402.feedforward.velocity needs 0x%04X:00 (velocity offset) with \"use: profile\" in the outputs",
+              0x60B1 + a * ECAT_CIA402_AXIS_OFFSET);
+      if (c->ff_torque && !(c->owned[a] & (1u << cia402_object(0x60B2, 0))))
+        error(c, "cia402.feedforward.torque needs 0x%04X:00 (torque offset) with \"use: profile\" in the outputs",
+              0x60B2 + a * ECAT_CIA402_AXIS_OFFSET);
     }
+    if ((c->ff_velocity || c->ff_torque) && !(c->cia402_all & (1u << 8)))
+      error(c, "cia402.feedforward works in CSP only: csp must be the mode or one of the modes");
   }
   for (i = 0; i < c->n_ser; i++) {
     int d;

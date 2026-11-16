@@ -17,7 +17,8 @@ from . import dcinfo, quirks
 # a drive with several axes: axis n's objects at index + n * 0x800
 AXIS_OFFSET = 0x800
 CIA402_PROFILE = {0x603F, 0x6040, 0x6041, 0x6060, 0x6061,
-                  0x6064, 0x606C, 0x607A, 0x6081, 0x60FF}
+                  0x6064, 0x606C, 0x607A, 0x6081, 0x60FF,
+                  0x60B1, 0x60B2}   # velocity and torque offset: feedforward in CSP
 # Other CiA 402 process data, with fixed pin names and types.
 CIA402_PINS = {
     0x6071: ("torque-cmd", "sint"), 0x6077: ("torque-fb", "sint"),

@@ -1922,6 +1922,222 @@ static void test_homing_abandoned_while_halting(void) {
   CHECK_EQ(PIN_BIT("m.drv-fault"), 0);
 }
 
+// ---- feedforward ------------------------------------------------------
+
+static const fake_entry_t ff_entries[] = {
+    {0x6040, 0, 16}, {0x6060, 0, 8}, {0x607A, 0, 32}, {0x60B1, 0, 32}, {0x60B2, 0, 16},  // outputs
+    {0x603F, 0, 16}, {0x6041, 0, 16}, {0x6061, 0, 8}, {0x6064, 0, 32},                  // inputs
+    FAKE_END,
+};
+
+/// A CSP drive with both offsets and these feedforward modparams (-1: not given).
+static lcec_slave_t *ff_drive(double v, double t, double tmax) {
+  lcec_slave_modparam_t mp[4];
+  int n = 0;
+  if (v >= 0) { mp[n].id = ECAT_MP_CIA402_FF_VELOCITY; mp[n++].value.flt = v; }
+  if (t >= 0) { mp[n].id = ECAT_MP_CIA402_FF_TORQUE; mp[n++].value.flt = t; }
+  if (tmax >= 0) { mp[n].id = ECAT_MP_CIA402_FF_TORQUE_MAX; mp[n++].value.flt = tmax; }
+  mp[n].id = -1;
+  S = fake_slave("x", ff_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 8);
+  return S;
+}
+
+static int32_t vel_offset(void) { return (int32_t)fake_get(S, 0x60B1, 0); }
+static int16_t torque_offset(void) { return (int16_t)fake_get(S, 0x60B2, 0); }
+
+/// Enable a feedforward drive at pos-cmd 0, standing still.
+static void ff_enabled(void) {
+  PIN_FLOAT("x.pos-scale") = 100;
+  PIN_FLOAT("x.velo-scale") = 100;
+  PIN_FLOAT("x.pos-cmd") = 0;
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(5);
+  CHECK_EQ(sw_now, SW_ENABLED);
+}
+
+static void test_ff_pins_only_with_the_objects(void) {
+  csp_drive();
+  CHECK(fake_find("x.velocity-ff") == NULL && fake_find("x.ff-velocity-gain") == NULL);
+  CHECK(fake_find("x.torque-ff") == NULL && fake_find("x.ff-torque-max") == NULL);
+  // the file's values, and the default limit
+  ff_drive(0.8, 0.012, -1);
+  CHECK_NEAR(PIN_FLOAT("x.ff-velocity-gain"), 0.8, 0);
+  CHECK_NEAR(PIN_FLOAT("x.ff-torque-per-accel"), 0.012, 0);
+  CHECK_NEAR(PIN_FLOAT("x.ff-torque-max"), ECAT_CIA402_FF_TORQUE_MAX_DEFAULT, 0);
+  // without feedforward in the file: the objects are written 0
+  ff_drive(-1, -1, -1);
+  CHECK_NEAR(PIN_FLOAT("x.ff-velocity-gain"), 0, 0);
+  ff_enabled();
+  PIN_FLOAT("x.pos-cmd") = 0.1;
+  run(3);
+  CHECK_EQ(vel_offset(), 0);
+  CHECK_EQ(torque_offset(), 0);
+}
+
+static void test_ff_velocity(void) {
+  int i;
+  ff_drive(1.0, -1, -1);
+  ff_enabled();
+  CHECK_EQ(vel_offset(), 0);
+  // 0.1 mm a cycle of 1 ms: 100 mm/s, 10000 counts/s
+  for (i = 1; i <= 5; i++) {
+    PIN_FLOAT("x.pos-cmd") = 0.1 * i;
+    run(1);
+  }
+  CHECK_EQ(vel_offset(), 10000);
+  CHECK_NEAR(PIN_FLOAT("x.velocity-ff"), 100.0, 1e-6);
+  // the share fed forward
+  PIN_FLOAT("x.ff-velocity-gain") = 0.5;
+  PIN_FLOAT("x.pos-cmd") = 0.6;
+  run(1);
+  CHECK_EQ(vel_offset(), 5000);
+  // standing still: 0
+  run(1);
+  CHECK_EQ(vel_offset(), 0);
+  // not a number: no feedforward, the drive goes on
+  PIN_FLOAT("x.ff-velocity-gain") = NAN;
+  PIN_FLOAT("x.pos-cmd") = 0.7;
+  run(1);
+  CHECK_EQ(vel_offset(), 0);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
+static void test_ff_torque(void) {
+  int i;
+  double p = 0, v = 0;
+  ff_drive(-1, 0.01, 20);
+  ff_enabled();
+  // 1000 mm/s^2: the step grows by 0.001 mm a cycle
+  for (i = 0; i < 6; i++) {
+    v += 1.0;          // mm/s, +1 each 1 ms cycle
+    p += v * 0.001;
+    PIN_FLOAT("x.pos-cmd") = p;
+    run(1);
+  }
+  // 0.01 % per mm/s^2 x 1000 = 10 %, 100 per mille
+  CHECK_EQ(torque_offset(), 100);
+  CHECK_NEAR(PIN_FLOAT("x.torque-ff"), 10.0, 1e-6);
+  // within the limit
+  PIN_FLOAT("x.ff-torque-per-accel") = 0.05;
+  v += 1.0;
+  p += v * 0.001;
+  PIN_FLOAT("x.pos-cmd") = p;
+  run(1);
+  CHECK_EQ(torque_offset(), 200);
+  PIN_FLOAT("x.ff-torque-max") = -5;     // the size counts
+  v += 1.0;
+  p += v * 0.001;
+  PIN_FLOAT("x.pos-cmd") = p;
+  run(1);
+  CHECK_EQ(torque_offset(), 50);
+  // never beyond 300 %
+  PIN_FLOAT("x.ff-torque-max") = 1000;
+  PIN_FLOAT("x.ff-torque-per-accel") = 10;
+  v += 1.0;
+  p += v * 0.001;
+  PIN_FLOAT("x.pos-cmd") = p;
+  run(1);
+  CHECK_EQ(torque_offset(), 3000);
+}
+
+static void test_ff_never_kicks(void) {
+  int i;
+  ff_drive(1.0, 0.01, 30);
+  // pos-cmd far from 0 while the drive is enabled: the first cycle of
+  // following starts from velocity 0, the second from acceleration 0
+  PIN_FLOAT("x.pos-scale") = 100;
+  PIN_FLOAT("x.velo-scale") = 100;
+  PIN_FLOAT("x.pos-cmd") = 50.0;
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  for (i = 0; i < 6; i++) {
+    run(1);
+    CHECK_EQ(vel_offset(), 0);
+    CHECK_EQ(torque_offset(), 0);
+  }
+  CHECK_EQ(sw_now, SW_ENABLED);
+  PIN_FLOAT("x.pos-cmd") = 50.1;
+  run(1);
+  CHECK_EQ(vel_offset(), 10000);
+  CHECK_EQ(torque_offset(), 30 * 10);    // 100000 mm/s^2, at the limit
+  PIN_FLOAT("x.pos-cmd") = 50.2;
+  run(1);
+  CHECK_EQ(torque_offset(), 0);
+  // disabled: 0 at once; enabled again: from velocity 0, not from the old pos-cmd
+  PIN_BIT("x.enable") = 0;
+  run(1);
+  CHECK_EQ(vel_offset(), 0);
+  CHECK_EQ(torque_offset(), 0);
+  PIN_FLOAT("x.pos-cmd") = 60.0;
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  for (i = 0; i < 5; i++) {
+    run(1);
+    CHECK_EQ(vel_offset(), 0);
+  }
+  // a fault: 0
+  PIN_FLOAT("x.pos-cmd") = 60.1;
+  run(1);
+  CHECK_EQ(vel_offset(), 10000);
+  sw_now = SW_FAULT;
+  run(1);
+  CHECK_EQ(vel_offset(), 0);
+  CHECK_EQ(torque_offset(), 0);
+}
+
+static void test_ff_only_in_csp(void) {
+  static const fake_entry_t e[] = {
+      {0x6040, 0, 16}, {0x6060, 0, 8}, {0x60FF, 0, 32}, {0x60B1, 0, 32},
+      {0x603F, 0, 16}, {0x6041, 0, 16}, {0x6061, 0, 8}, {0x606C, 0, 32},
+      FAKE_END,
+  };
+  lcec_slave_modparam_t mp[3] = {{.id = ECAT_MP_CIA402_MODE}, {.id = ECAT_MP_CIA402_FF_VELOCITY}, {.id = -1}};
+  mp[0].value.u32 = 9;  // CSV
+  mp[1].value.flt = 1.0;
+  S = fake_slave("x", e, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 9);
+  PIN_FLOAT("x.velo-scale") = 100;
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(5);
+  PIN_FLOAT("x.velocity-cmd") = 10.0;
+  {
+    int i;
+    for (i = 1; i <= 4; i++) {
+      PIN_FLOAT("x.pos-cmd") = 0.1 * i;   // moving, but not followed in CSV
+      run(1);
+      CHECK_EQ(vel_offset(), 0);
+    }
+  }
+  CHECK_EQ(sw_now, SW_ENABLED);
+}
+
+static void test_ff_starts_from_rest_while_the_command_moves(void) {
+  int i, following = -1;
+  ff_drive(1.0, 0.01, 30);
+  PIN_FLOAT("x.pos-scale") = 100;
+  PIN_FLOAT("x.velo-scale") = 100;
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  // pos-cmd moves 0.1 mm a cycle from the start: the cycles before following
+  // and the first two of following give no acceleration, the second the velocity
+  for (i = 1; i <= 8; i++) {
+    PIN_FLOAT("x.pos-cmd") = 0.1 * i;
+    run(1);
+    if (following < 0 && sw_now == SW_ENABLED && (int32_t)fake_get(S, 0x607A, 0) == 10 * i) following = 0;
+    CHECK_EQ(torque_offset(), 0);
+    if (following >= 0) {
+      CHECK_EQ(vel_offset(), following == 0 ? 0 : 10000);
+      following++;
+    }
+  }
+  CHECK(following >= 3);
+}
+
 // ---- zero at start -----------------------------------------------------
 
 static lcec_slave_t *zero_drive(unsigned modes) {
@@ -2140,7 +2356,8 @@ static void test_two_axes(void) {
   CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 500);
 }
 
-RUN_TESTS("cia402", test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
+RUN_TESTS("cia402", test_ff_pins_only_with_the_objects, test_ff_velocity, test_ff_torque, test_ff_never_kicks,
+    test_ff_only_in_csp, test_ff_starts_from_rest_while_the_command_moves, test_defaults, test_needs_the_control_and_status_words, test_held_ready_without_enable,
     test_enables_step_by_step, test_target_holds_actual_until_enabled, test_position_is_clamped,
     test_feedback_and_status_pins, test_states, test_wrong_mode_is_not_enabled, test_enable_timeout, test_no_timeout_when_zero,
     test_fault_while_enabled_shuts_down_until_enable_drops, test_fault_reset_on_enable,

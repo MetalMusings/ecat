@@ -64,6 +64,9 @@ CIA402_PP_VELOCITY = [("pp-velocity", "real", "in")]
 CIA402_STOP = [("stop-timeout-ms", "uint", "rw")]
 CIA402_ZERO = [("pos-zero", "sint", "out")]
 CIA402_MODE = [("opmode-cmd", "sint", "in")]
+CIA402_FF_VELOCITY = [("velocity-ff", "real", "out"), ("ff-velocity-gain", "real", "rw")]
+CIA402_FF_TORQUE = [("torque-ff", "real", "out"), ("ff-torque-per-accel", "real", "rw"),
+                    ("ff-torque-max", "real", "rw")]
 ENCODER = [
     ("reset", "bool", "in"), ("counts", "sint", "out"), ("raw-count", "sint", "out"),
     ("pos", "real", "out"), ("velocity", "real", "out"), ("ok", "bool", "out"),
@@ -87,6 +90,7 @@ DEFAULTS = {
     "enable-timeout-ms": 2000, "watchdog-ms": 0, "stop-timeout-ms": 10000,
     "pp-timeout-ms": 60000, "pp-immediate": False, "home-timeout-ms": 60000,
     "velocity-window-ms": 10,
+    "ff-torque-max": 30.0,
 }
 
 
@@ -147,6 +151,10 @@ def pins(cfg):
                     add(axis, CIA402_MODE)
                 if c.get("zero-at-start"):
                     add(axis, CIA402_ZERO)
+                if (0x60B1 + off, 0) in mapped:
+                    add(axis, CIA402_FF_VELOCITY)
+                if (0x60B2 + off, 0) in mapped:
+                    add(axis, CIA402_FF_TORQUE)
         mapped = _mapped(s)
         for ch in s.get("encoders") or []:
             prefix = "%s.%s" % (name, ch.get("name"))

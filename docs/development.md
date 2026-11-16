@@ -1608,9 +1608,15 @@ acceleration. The plan, agreed with the user:
    `ethercat.yaml` (written at every start), storing in the drive (ECT60
    `0x1010:01` = 1; the A6 has no `0x1010` in its ESI and seems to write SDOs
    to its EEPROM itself: alarm ALF1.3 "too frequent writing") a separate step.
-3. **Maybe**: velocity / torque feedforward from LinuxCNC through `0x60B1` /
-   `0x60B2`, for drives that take it there (A6 with C01.13/C01.16 = 5; the
-   ECT60 has neither object).
+3. **Feedforward from LinuxCNC** through `0x60B1` / `0x60B2` (built
+   2026-11-16, design A: the profile works them out from `pos-cmd`; docs/
+   component.md "Feedforward in CSP"; C tests in component/tests/test_cia402.c
+   and test_config.c, mutation-checked; config.check, halpins, the Response
+   card prints `cia402.feedforward.torque` from a torque measurement). Not
+   tried on a drive: the ECT60 has neither object; the A6 has `0x60B1` in its
+   flexible 0x1600 and `0x60B2` in the fixed 0x1705 (C01.13/C01.16 = 5). Next
+   for it: an EaserCAT 3000 firmware that acts as a CiA 402 drive with them, to
+   try the chain on a bus.
 
 ### Part 1: how the measurement works
 

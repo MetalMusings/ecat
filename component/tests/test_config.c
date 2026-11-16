@@ -709,6 +709,40 @@ static void test_cia402_zero_at_start(void) {
   CHECK_FAILS(CIA402("csp, zero-at-start: 1", CSP_OUT, CSP_IN), "zero-at-start: \"1\" is not true or false");
 }
 
+static void test_cia402_feedforward(void) {
+#define FF_OUT CSP_OUT P("0x60B1:00", 32, "DINT") P("0x60B2:00", 16, "INT")
+  CHECK_EQ(load(CIA402("csp, feedforward: {velocity: 0.9, torque: 0.012, torque-max: 50}", FF_OUT, CSP_IN)), 0);
+  CHECK_EQ(fake_msgs[0], 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 4);
+  CHECK_EQ(MODPARAM(1)->id, ECAT_MP_CIA402_FF_VELOCITY);
+  CHECK_NEAR(MODPARAM(1)->value.flt, 0.9, 0);
+  CHECK_EQ(MODPARAM(2)->id, ECAT_MP_CIA402_FF_TORQUE);
+  CHECK_NEAR(MODPARAM(2)->value.flt, 0.012, 0);
+  CHECK_EQ(MODPARAM(3)->id, ECAT_MP_CIA402_FF_TORQUE_MAX);
+  CHECK_NEAR(MODPARAM(3)->value.flt, 50, 0);
+  // the offsets belong to the profile, also without feedforward (written 0)
+  CHECK_EQ(load(CIA402("csp", FF_OUT, CSP_IN)), 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 1);
+  CHECK_FAILS(CIA402("csp", CSP_OUT E("0x60B1:00", 32, "DINT", "pin: voff, hal-type: sint"), CSP_IN),
+              "the cia402 profile handles this object");
+  CHECK_FAILS(CIA402("csp", CSP_OUT P("0x60B2:00", 32, "DINT"), CSP_IN), "the cia402 profile needs 16 bits");
+  // each needs its object
+  CHECK_FAILS(CIA402("csp, feedforward: {velocity: 1}", CSP_OUT, CSP_IN),
+              "cia402.feedforward.velocity needs 0x60B1:00 (velocity offset)");
+  CHECK_FAILS(CIA402("csp, feedforward: {torque: 0.01}", CSP_OUT P("0x60B1:00", 32, "DINT"), CSP_IN),
+              "cia402.feedforward.torque needs 0x60B2:00 (torque offset)");
+  CHECK_FAILS(CIA402("csp, feedforward: {velocity: 1, torque-max: 400}", FF_OUT, CSP_IN),
+              "cia402.feedforward.torque-max: 0 to 300");
+  CHECK_FAILS(CIA402("csp, feedforward: {velocity: fast}", FF_OUT, CSP_IN), "velocity: \"fast\" is not a number");
+  CHECK_FAILS(CIA402("csp, feedforward: 1", FF_OUT, CSP_IN), "cia402.feedforward needs");
+  // CSP only
+  CHECK_FAILS(CIA402("csv, feedforward: {velocity: 1}",
+                     P("0x6040:00", 16, "UINT") P("0x60FF:00", 32, "DINT") P("0x60B1:00", 32, "DINT"),
+                     P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT")),
+              "cia402.feedforward works in CSP only");
+#undef FF_OUT
+}
+
 // ---- encoder channels -------------------------------------------------
 
 #define ENCODER(encoders, outputs, inputs) \
@@ -957,7 +991,7 @@ static void test_unused(void) {
   CHECK_FAILS("ecat: 1\nslaves:\n- position: 0\n  name: a\n  profile: generic\n  unused: true\n  eoe: {ip: 10.0.0.2/24}\n", "unused: true and eoe");
 }
 
-RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
+RUN_TESTS("config", test_cia402_feedforward, test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders, test_serial, test_serial_errors, test_unused, test_master_cpus)

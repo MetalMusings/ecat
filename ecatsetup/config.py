@@ -201,6 +201,38 @@ def dc_warnings(cfg):
 EOE_KEYS = ("ip", "mask", "gateway", "dns", "hostname", "mac", "host-ip")
 
 
+FEEDFORWARD_KEYS = {"velocity": 0x60B1, "torque": 0x60B2, "torque-max": None}
+
+
+def feedforward_errors(c, other_modes, owned, n_axes):
+    """What is wrong with cia402.feedforward (as ecat_config.c checks it)."""
+    ff = c.get("feedforward")
+    if ff is None:
+        return []
+    if not isinstance(ff, dict):
+        return ["cia402.feedforward needs velocity, torque and/or torque-max"]
+    out = ["cia402.feedforward: unknown key %r (velocity, torque, torque-max)" % k
+           for k in ff if k not in FEEDFORWARD_KEYS]
+    for k, index in FEEDFORWARD_KEYS.items():
+        if k not in ff:
+            continue
+        v = ff[k]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            out.append("cia402.feedforward.%s: %r is not a number" % (k, v))
+            continue
+        if k == "torque-max" and not 0 <= v <= 300:
+            out.append("cia402.feedforward.torque-max: 0 to 300 (% of rated torque)")
+        if index is not None:
+            for a in range(n_axes):
+                if index + a * AXIS_OFFSET not in owned:
+                    out.append("cia402.feedforward.%s needs 0x%04X:00 (%s) with use: profile in the "
+                               "outputs" % (k, index + a * AXIS_OFFSET,
+                                            "velocity offset" if k == "velocity" else "torque offset"))
+    if (set(ff) & {"velocity", "torque"}) and "csp" not in [c.get("mode")] + list(other_modes):
+        out.append("cia402.feedforward works in CSP only: csp must be the mode or one of the modes")
+    return out
+
+
 def eoe_errors(eoe):
     """Errors in a slave's eoe: block (the same rules as component/ecat_config.c)."""
     if eoe is None:
@@ -782,6 +814,8 @@ def check(cfg):
                     for i in sorted(CIA402_MODE_OBJECTS - {x - off for x in owned} - rx - tx):
                         err("%s: changing modes needs 0x%04X:00 in the process data"
                             % (where, i + off))
+            for e in feedforward_errors(s.get("cia402") or {}, other_modes, owned, n_axes):
+                err("%s: %s" % (where, e))
         dc = s.get("dc")
         if dc is not None:
             aa = dc.get("assign-activate")

@@ -335,6 +335,7 @@ file each stopped the load with their own line.
 | `modules` | For a modular device: the module idents it detected (`0xF050`) when it was read, to notice a change ([modular devices](#modular-devices)). The component does not read it. |
 | `cia402.axes` | For `cia402`: a drive with several axes in one slave (such as a two-axis ECT60x2): a list of 1 to 4 names, the axes' pin prefixes. Axis n uses the CiA 402 objects at index + n × 0x800 (`0x6040`, `0x6840`, `0x7040`, `0x7840`); see [cia402](#several-axes). Without it, the drive has one axis named after the slave. |
 | `cia402.zero-at-start` | For `cia402`: `true` makes positions count from where the drive stands when the bus first reaches OP, for drives that keep their position from an earlier run (see [cia402](#zero-at-start)). Default `false`. |
+| `cia402.feedforward` | For `cia402` in CSP: `velocity` (the share of the command's velocity fed forward, 1.0 for all), `torque` (% of rated torque per machine unit/s² of acceleration), `torque-max` (the torque offset's limit, %, default 30); written to `0x60B1` and `0x60B2`, which must be `use: profile` in the outputs (see [cia402](#feedforward-in-csp)). |
 | `cia402.modes` | For `cia402`: other modes the drive may change to: `hm` for homing by the drive's own method, and `csp`, `csv`, `pv`, `pp` to choose with the `opmode-cmd` pin. It needs `0x6060` and `0x6061`, and each mode's objects, in the process data. |
 | `homing` | For `cia402` with `hm`: the homing method chosen in the window, `{method: 17, fast: 3000, slow: 1000, accel: 5000, offset: 0}` (a list of them, `null` for an axis without, for a drive with several axes). The master ignores it. The window writes the same choice to `settings` (0x6098, 0x6099, 0x609A, 0x607C and what the drive needs besides, from its quirk file), which is what the drive gets at start; the drive test writes it too, so a test homes as LinuxCNC will ([quirk files](ecatsetup.md#homing)). |
 | `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder channels](#encoder-channels). |
@@ -576,6 +577,8 @@ they are in the process data:
 | `0x60FF` target velocity | output | `csv`, `pv` |
 | `0x6081` profile velocity | output | no; `pp` gets a `pp-velocity` pin if mapped |
 | `0x606C` velocity actual value | input | `csv`, `pv` |
+| `0x60B1` velocity offset | output | no; feedforward in `csp`, 0 without it |
+| `0x60B2` torque offset | output | no; feedforward in `csp`, 0 without it |
 | `0x603F` error code | input | no |
 
 Other entries of the drive, such as torque or digital inputs, get ordinary
@@ -606,6 +609,8 @@ Pins are `<slave name>.<pin>`.
 | `drv-actual-position`, `drv-actual-velocity` | sint | out | Unscaled feedback. |
 | `drv-target-position`, `drv-target-velocity` | sint | out | Unscaled commands as written. |
 | `pos-zero` | sint | out | With `zero-at-start`: the drive's position taken as 0, in counts. |
+| `velocity-ff` | real | out | With `0x60B1`: the velocity fed forward, machine units/s (written × `velo-scale`). |
+| `torque-ff` | real | out | With `0x60B2`: the torque fed forward, % of rated torque (written in per mille). |
 | `stat-switchon-ready`, `stat-switched-on`, `stat-op-enabled`, `stat-fault`, `stat-voltage-enabled`, `stat-quick-stop`, `stat-switchon-disabled`, `stat-warning`, `stat-remote`, `stat-target-reached` | bool | out | Status word bits. |
 | `opmode-no-mode`, `opmode-homing`, `opmode-cyclic-position`, `opmode-cyclic-velocity` | bool | out | From `opmode-display`. |
 
@@ -619,6 +624,9 @@ Parameters:
 | `enable-timeout-ms` | 2000 | Time allowed to reach "Operation enabled"; 0 for no limit. |
 | `watchdog-ms` | 0 | Watchdog time for the `watchdog` pin; 0 for off. |
 | `mode` | | The mode from the file, 8 (CSP), 9 (CSV), 3 (PV) or 1 (PP); read only. |
+| `ff-velocity-gain` | `feedforward.velocity`, else 0 | With `0x60B1`: the share of the velocity fed forward. |
+| `ff-torque-per-accel` | `feedforward.torque`, else 0 | With `0x60B2`: % of rated torque per machine unit/s². |
+| `ff-torque-max` | `feedforward.torque-max`, else 30 | With `0x60B2`: the torque offset's limit, % (never above 300). |
 
 `cia-state`: 0 not ready to switch on, 1 switch on disabled, 2 ready to
 switch on, 3 switched on, 4 operation enabled, 5 quick stop active,
@@ -966,6 +974,60 @@ This replaces writing a "zero position" command as a setting, such as
 the ECT60's `0x2010` (Zero Position), which is a command rather than a
 setting and did not take effect as a start-up SDO on the ECT60.
 In EtherCAT Setup it is *Start position* on the slave's page.
+
+### Feedforward in CSP
+
+In CSP the drive gets only a position each cycle and works out the
+velocity and acceleration itself; a drive whose own feedforward is off or
+weak lags by velocity / its position gain (40 /s at 100 mm/s is 2.5 mm).
+CiA 402 drives can take them from the controller instead: `0x60B1`
+(velocity offset) is added to the drive's velocity reference, `0x60B2`
+(torque offset, per mille of rated torque) to its torque reference.
+
+```yaml
+  cia402:
+    mode: csp
+    feedforward:
+      velocity: 1.0       # the share of the velocity fed forward
+      torque: 0.012       # % of rated torque per mm/s² of acceleration
+      torque-max: 30      # the torque offset's limit, %; default 30
+  process-data:
+    outputs:
+    - pdo: '0x1600'
+      entries:
+      - {object: '0x6040:00', bits: 16, type: UINT, use: profile}
+      - {object: '0x607A:00', bits: 32, type: DINT, use: profile}
+      - {object: '0x60B1:00', bits: 32, type: DINT, use: profile}
+      - {object: '0x60B2:00', bits: 16, type: INT, use: profile}
+```
+
+- The profile works them out from `pos-cmd`, cycle by cycle: the
+  velocity is the step since the last cycle over the period, the
+  acceleration the change of that. They come from the same stream as the
+  target, so they are in step with it; nothing needs connecting in HAL.
+- `0x60B1` gets `ff-velocity-gain` × velocity × `velo-scale` (set
+  `velo-scale` to the drive's velocity unit per machine unit/s: counts
+  per second for most drives, the same as `pos-scale`). `0x60B2` gets
+  `ff-torque-per-accel` × acceleration, within ± `ff-torque-max`.
+- Both are 0 unless the drive follows `pos-cmd` in CSP in "Operation
+  enabled": while enabling, after a fault, during a mode change or
+  homing, in other modes. The first cycle of following starts from
+  velocity 0 and the second from acceleration 0, so neither kicks when
+  `pos-cmd` is far from where the profile last saw it.
+- The drive must be told to use them: a vendor setting, such as
+  StepperOnline A6's C01.13 = 5 (speed feedforward from communication) and
+  C01.16 = 5 (torque). Without that the drive ignores them. Leave the
+  drive's own feedforward off when it takes LinuxCNC's.
+- `torque` is what the Response card in EtherCAT Setup measures as torque
+  per acceleration (with `0x6077` recorded); it prints the line to use.
+  The card also shows whether the lag went.
+- `0x60B1` and `0x60B2` are always the profile's when mapped (written 0
+  without `feedforward`), and the parameters can be changed while the
+  machine runs (`setp x.ff-velocity-gain 0.8`).
+
+Built and unit-tested (component/tests: values, scaling, limits, no kick,
+CSP only); not tried on a drive with these objects (the ECT60 has
+neither).
 
 ### Homing by the drive
 

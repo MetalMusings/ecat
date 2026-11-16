@@ -701,7 +701,9 @@ def diagnose(res):
             out.append((res.drive_lag, "feedforward",
                         "The drive's position loop lags %.1f ms (0x60F4: %.3f mm at %g mm/s, an "
                         "effective gain of %.0f /s): velocity feedforward, or a higher position "
-                        "gain." % (res.drive_lag * ms, res.drive_lag * v, v, 1.0 / res.drive_lag)))
+                        "gain. Feedforward can also come from LinuxCNC: cia402.feedforward.velocity, "
+                        "if the drive has 0x60B1 (velocity offset)."
+                        % (res.drive_lag * ms, res.drive_lag * v, v, 1.0 / res.drive_lag)))
         else:
             out.append((res.drive_lag, "command-filter",
                         "The drive adds %.1f ms to the bus's %.1f ms (%.3f mm at %g mm/s): a "
@@ -712,7 +714,9 @@ def diagnose(res):
     if acc >= max(0.25 * res.peak, 2 * res.band):
         out.append((acc / v, "torque",
                     "%.3f mm of the error follows the acceleration: torque feedforward or the "
-                    "load inertia ratio in the drive." % acc))
+                    "load inertia ratio in the drive%s." % (acc, "; or from LinuxCNC: "
+                    "cia402.feedforward.torque: %.4g (measured here), if the drive has 0x60B2"
+                    % res.torque_per_accel if res.torque_per_accel else "")))
     over = max((st.overshoot for st in res.stops), default=0.0)
     unsettled = any(st.settle is None for st in res.stops)
     if over > max(2 * res.band, 0.05 * res.peak) or (unsettled and over > res.band):
@@ -813,6 +817,9 @@ def report(res, rec=None):
         if res.torque_per_accel is not None:
             line += ", %.2f %% per 1000 mm/s²" % (res.torque_per_accel * 1000)
         out.append(line)
+        if res.torque_per_accel:
+            out.append("  as feedforward from LinuxCNC (0x60B2 torque offset): cia402: "
+                       "{feedforward: {torque: %.4g}}" % res.torque_per_accel)
     if res.ferror:
         f = res.ferror
         out.append("For LinuxCNC, from %s: about %.4f mm at full speed, so FERROR %g and "

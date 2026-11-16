@@ -295,6 +295,39 @@ class TestPropose(unittest.TestCase):
         slave["cia402"]["axes"] = ["a", "b", "c", "d", "e"]
         self.assertTrue(any("axes must be a list of 1 to 4" in e for e in config.check(cfg)))
 
+    def test_cia402_feedforward(self):
+        def drive(cia402, offsets=("0x60B1:00", "0x60B2:00")):
+            def e(obj, bits, t):
+                return {"object": obj, "bits": bits, "type": t, "use": "profile"}
+            out = [e("0x6040:00", 16, "UINT"), e("0x607A:00", 32, "DINT")]
+            out += [e(o, 32 if o.startswith("0x60B1") else 16, "DINT" if o.startswith("0x60B1") else "INT")
+                    for o in offsets]
+            inp = [e("0x6041:00", 16, "UINT"), e("0x6064:00", 32, "DINT")]
+            return {"ecat": 1, "master": {}, "slaves": [{
+                "position": 0, "name": "x", "identity": {"vendor": "0x99", "product": "0x1"},
+                "profile": "cia402", "cia402": cia402, "process-data": {
+                    "outputs": [{"pdo": "0x1600", "sm": 2, "entries": out}],
+                    "inputs": [{"pdo": "0x1A00", "sm": 3, "entries": inp}]}}]}
+        ff = {"velocity": 1.0, "torque": 0.012, "torque-max": 50}
+        self.assertEqual(config.check(drive({"mode": "csp", "feedforward": ff})), [])
+        # the offsets belong to the profile even without feedforward
+        self.assertEqual(config.check(drive({"mode": "csp"})), [])
+        self.assertEqual(sorted(halpins.pins(drive({"mode": "csp"}))).count("x.velocity-ff"), 1)
+        self.assertIn("x.ff-torque-max", halpins.pins(drive({"mode": "csp"})))
+        self.assertNotIn("x.torque-ff", halpins.pins(drive({"mode": "csp"}, ("0x60B1:00",))))
+        cases = [
+            (drive({"mode": "csp", "feedforward": {"velocity": 1}}, ()), "needs 0x60B1:00 (velocity offset)"),
+            (drive({"mode": "csp", "feedforward": {"torque": 0.01}}, ("0x60B1:00",)),
+             "needs 0x60B2:00 (torque offset)"),
+            (drive({"mode": "csp", "feedforward": {"torque-max": 400}}), "torque-max: 0 to 300"),
+            (drive({"mode": "csp", "feedforward": {"velocity": "fast"}}), "'fast' is not a number"),
+            (drive({"mode": "csp", "feedforward": {"speed": 1}}), "unknown key 'speed'"),
+            (drive({"mode": "csp", "feedforward": 1}), "feedforward needs"),
+            (drive({"mode": "pp", "feedforward": {"velocity": 1}}), "works in CSP only"),
+        ]
+        for cfg, text in cases:
+            self.assertTrue(any(text in e for e in config.check(cfg)), (text, config.check(cfg)))
+
     def test_cia402_missing_entries(self):
         s = self.cia402_sii([sii.PdoEntry(0x6041, 0, "Status Word", "UINT", 16)])
         p = propose.propose({"position": 0, "dc": True}, s, coe.Dictionary(), device_type=0x192)

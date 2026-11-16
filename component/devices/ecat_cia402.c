@@ -74,6 +74,20 @@
 /// drive. `drv-actual-position` and `drv-target-position` stay the drive's
 /// own counts. Homing by the drive sets `pos-zero` back to 0, since the
 /// drive's position is then the homed one.
+///
+/// Feedforward in CSP (`cia402.feedforward`, with 0x60B1 velocity offset
+/// and/or 0x60B2 torque offset in the process data): the profile works out
+/// the command's velocity and acceleration from `pos-cmd`, cycle by cycle
+/// (the step since the last cycle, over the period), and writes
+/// `ff-velocity-gain` x velocity x `velo-scale` to 0x60B1 and
+/// `ff-torque-per-accel` x acceleration (% of rated torque, in per mille,
+/// within +-`ff-torque-max`) to 0x60B2, so that the drive's loop need not
+/// lag to find them. They come from the same stream as the target, so they
+/// are always in step with it. Both are 0 unless the drive follows
+/// `pos-cmd` in CSP in "Operation enabled"; the first cycle of following
+/// (after enabling, a mode change or homing) starts from velocity 0, and
+/// the second from acceleration 0, so they never kick. The drive must be
+/// told to use them (a vendor setting).
 
 #include "ecat_cia402.h"
 
@@ -94,6 +108,8 @@
 #define OBJ_TARGET_POSITION 0x607A
 #define OBJ_TARGET_VELOCITY 0x60FF
 #define OBJ_PROFILE_VELOCITY 0x6081
+#define OBJ_VELOCITY_OFFSET 0x60B1
+#define OBJ_TORQUE_OFFSET 0x60B2
 
 #define MODE_PP 1
 #define MODE_PV 3
@@ -259,6 +275,12 @@ typedef struct {
   hal_sint_t opmode_cmd;
   // with zero-at-start
   hal_sint_t pos_zero;
+  // feedforward, with 0x60B1 / 0x60B2 in the process data
+  hal_real_t velocity_ff;   // machine units/s written (before velo-scale)
+  hal_real_t torque_ff;     // % of rated torque written
+  hal_real_t ff_velocity_gain;
+  hal_real_t ff_torque_per_accel;
+  hal_real_t ff_torque_max;
   // parameters
   hal_real_t pos_scale;
   hal_real_t velo_scale;
@@ -274,6 +296,7 @@ typedef struct {
   // process data
   obj_t error_code_o, controlword_o, statusword_o, modes_o, modes_display_o;
   obj_t actual_position_o, actual_velocity_o, target_position_o, target_velocity_o, profile_velocity_o;
+  obj_t velocity_offset_o, torque_offset_o;
 
   // state
   int state;
@@ -324,6 +347,9 @@ typedef struct {
   int ev_reason;        // the fault-reason the recorder has
   int32_t zero;         // counts taken off the drive's position
   int pv_wait;          // PV: cycles until "target reached" answers it
+  int ff_cycles;        // feedforward: cycles following pos-cmd so far (0, 1, 2+)
+  double ff_pos, ff_vel;  // feedforward: pos-cmd and velocity of the cycle before
+  double ff_v0, ff_t0, ff_tmax;  // the file's feedforward values (modparams)
 } cia402_t;
 
 static const lcec_pindesc_t pins[] = {
@@ -408,6 +434,27 @@ static const lcec_pindesc_t mode_pins[] = {
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
+static const lcec_pindesc_t ff_velocity_pins[] = {
+    {HAL_REAL, HAL_OUT, offsetof(cia402_t, velocity_ff), "%s.velocity-ff"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_paramdesc_t ff_velocity_params[] = {
+    {HAL_REAL, HAL_RW, offsetof(cia402_t, ff_velocity_gain), "%s.ff-velocity-gain"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_pindesc_t ff_torque_pins[] = {
+    {HAL_REAL, HAL_OUT, offsetof(cia402_t, torque_ff), "%s.torque-ff"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
+static const lcec_paramdesc_t ff_torque_params[] = {
+    {HAL_REAL, HAL_RW, offsetof(cia402_t, ff_torque_per_accel), "%s.ff-torque-per-accel"},
+    {HAL_REAL, HAL_RW, offsetof(cia402_t, ff_torque_max), "%s.ff-torque-max"},
+    {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
+};
+
 static const lcec_paramdesc_t stop_params[] = {
     {HAL_UINT, HAL_RW, offsetof(cia402_t, stop_timeout_ms), "%s.stop-timeout-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
@@ -469,7 +516,9 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
       find(slave, OBJ_ACTUAL_VELOCITY + off, &d->actual_velocity_o) ||
       find(slave, OBJ_TARGET_POSITION + off, &d->target_position_o) ||
       find(slave, OBJ_TARGET_VELOCITY + off, &d->target_velocity_o) ||
-      find(slave, OBJ_PROFILE_VELOCITY + off, &d->profile_velocity_o)) {
+      find(slave, OBJ_PROFILE_VELOCITY + off, &d->profile_velocity_o) ||
+      find(slave, OBJ_VELOCITY_OFFSET + off, &d->velocity_offset_o) ||
+      find(slave, OBJ_TORQUE_OFFSET + off, &d->torque_offset_o)) {
     return -EIO;
   }
   // ecat_config.c has checked these; a safety net
@@ -525,6 +574,14 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
     if ((err = lcec_pin_newf_list(d, mode_pins, name)) != 0) return err;
   }
   if (d->zero_at_start && (err = lcec_pin_newf_list(d, zero_pins, name)) != 0) return err;
+  if (d->velocity_offset_o.mapped) {
+    if ((err = lcec_pin_newf_list(d, ff_velocity_pins, name)) != 0) return err;
+    if ((err = lcec_param_newf_list(d, ff_velocity_params, name)) != 0) return err;
+  }
+  if (d->torque_offset_o.mapped) {
+    if ((err = lcec_pin_newf_list(d, ff_torque_pins, name)) != 0) return err;
+    if ((err = lcec_param_newf_list(d, ff_torque_params, name)) != 0) return err;
+  }
 
   // after the parameters are made, which zeroes them
   hal_set_sint(d->mode, mode);
@@ -538,6 +595,9 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
   hal_set_bool(d->auto_fault_reset, 1);
   hal_set_uint(d->enable_timeout_ms, 2000);
   hal_set_uint(d->watchdog_ms, 0);
+  if (d->ff_velocity_gain) hal_set_real(d->ff_velocity_gain, d->ff_v0);
+  if (d->ff_torque_per_accel) hal_set_real(d->ff_torque_per_accel, d->ff_t0);
+  if (d->ff_torque_max) hal_set_real(d->ff_torque_max, d->ff_tmax);
   d->state = ST_UNKNOWN;
   return 0;
 }
@@ -548,6 +608,7 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   const char *names[ECAT_CIA402_MAX_AXES];
   int err, a, n = 0, mode = MODE_CSP, zero = 0;
   unsigned int others = 0;
+  double ff_v = 0.0, ff_t = 0.0, ff_tmax = ECAT_CIA402_FF_TORQUE_MAX_DEFAULT;
 
   if ((err = lcec_generic_init(comp_id, slave)) != 0) return err;
 
@@ -555,6 +616,9 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
     if (p->id == ECAT_MP_CIA402_MODES) others = p->value.u32;
     if (p->id == ECAT_MP_CIA402_MODE) mode = p->value.u32;
     if (p->id == ECAT_MP_CIA402_ZERO_AT_START) zero = p->value.u32 != 0;
+    if (p->id == ECAT_MP_CIA402_FF_VELOCITY) ff_v = p->value.flt;
+    if (p->id == ECAT_MP_CIA402_FF_TORQUE) ff_t = p->value.flt;
+    if (p->id == ECAT_MP_CIA402_FF_TORQUE_MAX) ff_tmax = p->value.flt;
     if (p->id == ECAT_MP_CIA402_AXIS) {
       // ecat_config.c has checked the count
       if (n >= ECAT_CIA402_MAX_AXES) {
@@ -574,6 +638,9 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
     cia402_t *d = LCEC_HAL_ALLOCATE(cia402_t);
     d->zero_at_start = zero;
     d->axis = a;
+    d->ff_v0 = ff_v;
+    d->ff_t0 = ff_t;
+    d->ff_tmax = ff_tmax;
     if ((err = axis_init(slave, d, names[a], (uint16_t)(a * ECAT_CIA402_AXIS_OFFSET), mode, others)) != 0) return err;
     dev->axis[dev->n++] = d;
   }
@@ -1127,6 +1194,36 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
     }
     EC_WRITE_S32(&pd[d->target_position_o.os], hal_get_sint(d->drv_target_position));
   }
+  // feedforward: from pos-cmd, only while the drive follows it in CSP
+  if (d->velocity_offset_o.mapped || d->torque_offset_o.mapped) {
+    double vel = 0.0, acc = 0.0, dt = period > 0 ? period * 1e-9 : 1e-3;
+    if (run && d->active == MODE_CSP) {
+      double p = hal_get_real(d->pos_cmd);
+      if (d->ff_cycles > 0) vel = (p - d->ff_pos) / dt;
+      if (d->ff_cycles > 1) acc = (vel - d->ff_vel) / dt;
+      d->ff_pos = p;
+      d->ff_vel = vel;
+      if (d->ff_cycles < 2) d->ff_cycles++;
+    } else {
+      d->ff_cycles = 0;
+    }
+    if (d->velocity_offset_o.mapped) {
+      double g = hal_get_real(d->ff_velocity_gain);
+      double v = isfinite(g) ? g * vel : 0.0;
+      hal_set_real(d->velocity_ff, v);
+      EC_WRITE_S32(&pd[d->velocity_offset_o.os], clamp_s32(v * scale_or_one(hal_get_real(d->velo_scale))));
+    }
+    if (d->torque_offset_o.mapped) {
+      double k = hal_get_real(d->ff_torque_per_accel), lim = fabs(hal_get_real(d->ff_torque_max));
+      double t = isfinite(k) ? k * acc : 0.0;
+      if (!isfinite(lim) || lim > 300.0) lim = 300.0;
+      if (t > lim) t = lim;
+      if (t < -lim) t = -lim;
+      hal_set_real(d->torque_ff, t);
+      EC_WRITE_S16(&pd[d->torque_offset_o.os], (int16_t)lrint(t * 10.0));
+    }
+  }
+
   if (d->target_velocity_o.mapped) {
     if (run && (d->active == MODE_CSV || d->active == MODE_PV)) {
       hal_set_sint(d->drv_target_velocity, clamp_s32(hal_get_real(d->velocity_cmd) * scale_or_one(hal_get_real(d->velo_scale))));

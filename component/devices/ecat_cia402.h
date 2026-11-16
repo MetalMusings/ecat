@@ -27,6 +27,19 @@
 /// the axis's pin prefix). Given once per axis, in order: axis n uses the
 /// CiA 402 objects at index + n * ECAT_CIA402_AXIS_OFFSET.
 #define ECAT_MP_CIA402_AXIS 0x4023
+
+/// modParam ids for feedforward in CSP (cia402.feedforward; value: flt).
+/// The profile works out the command's velocity and acceleration from
+/// pos-cmd and writes them to the drive's velocity offset (0x60B1) and
+/// torque offset (0x60B2), when those are in the process data.
+/// VELOCITY: the share of the velocity fed forward (1.0: all of it).
+/// TORQUE: % of rated torque per machine unit/s^2 of acceleration.
+/// TORQUE_MAX: the torque offset's limit, % of rated torque.
+#define ECAT_MP_CIA402_FF_VELOCITY 0x4024
+#define ECAT_MP_CIA402_FF_TORQUE 0x4025
+#define ECAT_MP_CIA402_FF_TORQUE_MAX 0x4026
+/// The torque offset's limit without cia402.feedforward.torque-max, %.
+#define ECAT_CIA402_FF_TORQUE_MAX_DEFAULT 30.0
 #define ECAT_CIA402_AXIS_OFFSET 0x800
 #define ECAT_CIA402_MAX_AXES 4
 

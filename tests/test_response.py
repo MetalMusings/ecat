@@ -150,6 +150,15 @@ class TestAnalyse(unittest.TestCase):
         res = response.analyse(recording(kp=40.0, window=9, targets=(60, 0, 60, 0)))
         self.assertEqual([k for k, _t in res.findings][:2], ["feedforward", "command-filter"])
 
+    def test_feedforward_from_linuxcnc(self):
+        # the profile's velocity feedforward (0x60B1) is, for the drive, what its own
+        # is: the same simulated drive with it lags only by the bus
+        soft = response.analyse(recording(kp=40.0))
+        self.assertIn("cia402.feedforward.velocity", soft.findings[0][1])
+        fed = response.analyse(recording(kp=40.0, ff=1.0))
+        self.assertAlmostEqual(fed.lag, 0.002, delta=0.0003)
+        self.assertNotIn("feedforward", [k for k, _t in fed.findings])
+
     def test_feedforward_leaves_the_bus(self):
         res = response.analyse(recording(kp=200.0, ff=1.0))
         self.assertAlmostEqual(res.lag, 0.002, delta=0.0002)
@@ -229,6 +238,8 @@ class TestAnalyse(unittest.TestCase):
         self.assertEqual(res.window, {"test": 2.0, "drive": 4.0})
         text = "\n".join(response.report(res, rec))
         self.assertIn("Torque: peak 15", text)
+        # what the profile's torque feedforward would need (cia402.feedforward.torque)
+        self.assertIn("cia402: {feedforward: {torque: 0.02}}", text)
         self.assertIn("of the drive's own window (4.000 mm)", text)
         # at the test's limit the result is not the drive's own
         rec.meta["limits"]["max-torque"] = [150, 1000]
