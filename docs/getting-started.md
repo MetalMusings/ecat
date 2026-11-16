@@ -43,7 +43,7 @@ gone at the next boot).
 ## Install
 
 ecat needs LinuxCNC 2.10 (2.9: use ecat 0.11) and the userspace master
-`linuxcnc-ethercat-uspace` (1.4 or newer, from the
+`linuxcnc-ethercat-uspace` (1.5 or newer, from the
 [releases](https://github.com/MetalMusings/ethercat/releases) of the master).
 Both are for Debian 12 or 13. Install the master first:
 

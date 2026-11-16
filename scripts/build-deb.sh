@@ -18,16 +18,16 @@
 # Build dependencies: build-essential git dpkg-dev libyaml-dev libmodbus-dev (C tests)
 #   LinuxCNC 2.10 (linuxcnc-uspace-dev, or a run-in-place build: source its
 #   scripts/rip-environment first; halcompile must be on the PATH), and
-#   linuxcnc-ethercat-uspace 1.4 or newer (its headers in
+#   linuxcnc-ethercat-uspace 1.5 or newer (its headers in
 #   /opt/linuxcnc-ethercat-uspace/include).
 
 set -euo pipefail
 
 PKG=linuxcnc-ecat
-BASE_VERSION=0.20
+BASE_VERSION=0.21
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
-MASTER_MIN=1.4
+MASTER_MIN=1.5
 OUTDIR=$PWD
 WORKTREE=
 

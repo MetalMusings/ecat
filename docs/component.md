@@ -387,7 +387,7 @@ clock; slaves before the reference clock are not synchronized, which is
 right for slaves without `dc:`. Without any slave with `dc:` the master's
 own choice stands. `ecatsetup --check` names the reference clock and warns
 when it has no DC system time (a chip with delay measurement only). The
-choice needs the master package 1.4+git20261116.52eabcf4 or later (fork
+choice needs the master package 1.5 or later (uspace-v1.5, fork
 52eabcf4; before it the selection counted only from the next bus scan, so
 the master's own choice stayed).
 
