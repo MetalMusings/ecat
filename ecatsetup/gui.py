@@ -3561,16 +3561,16 @@ class ResponseCard(Card):
         self.ff_try.setToolTip("Sets the drive's ff-* parameters in the test's HAL; measure again "
                                "to see the difference. The drive must be set to use 0x60B1 / 0x60B2 "
                                "(a vendor setting in its Settings).")
-        self.ff_try.clicked.connect(self.try_feedforward)
+        self.ff_try.clicked.connect(lambda: self.try_feedforward())   # not clicked's bool
         brow.addWidget(self.ff_try)
         self.ff_off = QPushButton("Off")
         self.ff_off.setToolTip("Feedforward 0 in the test")
-        self.ff_off.clicked.connect(self.feedforward_off)
+        self.ff_off.clicked.connect(lambda: self.feedforward_off())
         brow.addWidget(self.ff_off)
         self.ff_keep = QPushButton("Keep in the configuration")
         self.ff_keep.setToolTip("Writes the values as cia402.feedforward of the slave (save the "
                                 "file); Apply then sets the joint's velo-scale for it")
-        self.ff_keep.clicked.connect(self.keep_feedforward)
+        self.ff_keep.clicked.connect(lambda: self.keep_feedforward())
         brow.addWidget(self.ff_keep)
         brow.addStretch(1)
         fl.addLayout(brow)

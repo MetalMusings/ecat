@@ -895,21 +895,21 @@ class TestResponseCard(unittest.TestCase):
         self.assertAlmostEqual(float(card.ff_fields["torque"].text()), 0.02, delta=0.0006)
         # tried in the test's HAL
         card.ff_fields["velocity"].setText("1,0")      # a decimal comma is taken
-        card.try_feedforward()
+        card.ff_try.click()             # the button, as the user does (clicked passes a bool)
         self.assertEqual(set_["x.ff-velocity-gain"], "1.0")
         self.assertAlmostEqual(float(set_["x.ff-torque-per-accel"]), 0.02, delta=0.0006)
         self.assertEqual(set_["x.ff-torque-max"], "30.0")
-        card.feedforward_off()
+        card.ff_off.click()
         self.assertEqual((set_["x.ff-velocity-gain"], set_["x.ff-torque-per-accel"]), ("0.0", "0.0"))
         # a value out of range is not set
         set_.clear()
         card.ff_fields["velocity"].setText("5")
-        card.try_feedforward()
+        card.ff_try.click()
         self.assertEqual(set_, {})
         # kept in the configuration
         card.ff_fields["velocity"].setText("1")
         card.ff_fields["torque"].setText("0.02")
-        card.keep_feedforward()
+        card.ff_keep.click()
         self.assertEqual(s.cfg["slaves"][0]["cia402"]["feedforward"], {"velocity": 1.0, "torque": 0.02})
         self.assertIn("In the configuration: velocity 1, torque 0.02", card.ff_now.text())
         s.saved = copy.deepcopy(s.cfg)
