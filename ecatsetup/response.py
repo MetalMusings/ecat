@@ -376,11 +376,19 @@ class Measurement:
                 "period-ns": self.run.period, "scale": self.dt.settings["scale"],
                 "spec": self.spec, "ended": self.ended, "limits": lim,
                 "turnaround-cycles": self._turnaround(), "ini": self.ini,
+                "trials": self._trials(),
                 "when": time.strftime("%Y-%m-%d %H:%M:%S")}
         self.recording = Recording(meta, data, lost)
         if len(self.recording):
             self.recording.save(self.path)
         self.state = "done" if len(self.recording) else "failed"
+
+    def _trials(self):
+        """The settings being tried in this drive now (tuning.py): {object: [original, value]}."""
+        from . import tuning
+        pos = self.dt.slave.get("position")
+        return {config.obj(e["index"], e["subindex"]): [e["original"], e["value"]]
+                for e in tuning.pending() if e["position"] == pos}
 
     def _turnaround(self):
         try:
@@ -819,6 +827,57 @@ def report(res, rec=None):
         at = 1 if spec else 0
         out[at:at] = ["What it points at:"] + ["  - %s" % text for _kind, text in res.findings]
     out += res.notes
+    return out
+
+
+def compare(prev, prev_res, rec, res):
+    """Lines comparing a measurement with the one before it: what was changed
+    in the drive between them (the settings being tried, tuning.py) and how
+    the numbers moved."""
+    out = []
+    ps, s = prev.meta.get("spec") or {}, rec.meta.get("spec") or {}
+    same = all(ps.get(k) == s.get(k) for k in ("distance", "velocity", "acceleration"))
+    pt, t = prev.meta.get("trials") or {}, rec.meta.get("trials") or {}
+    changes = []
+    for obj in sorted(set(pt) | set(t)):
+        before = pt[obj][1] if obj in pt else t[obj][0]
+        after = t[obj][1] if obj in t else pt[obj][0]
+        if before != after:
+            changes.append("%s %d -> %d%s" % (obj, before, after, "" if obj in t else " (put back)"))
+    out.append("Since the last measurement: %s" % ("; ".join(changes) if changes else
+                                                   "no setting changed in the drive"))
+    if not same:
+        out.append("  the move is not the same (%g mm, %g mm/s, %g mm/s² before): the numbers "
+                   "are not comparable" % (ps.get("distance"), ps.get("velocity"),
+                                           ps.get("acceleration")))
+        return out
+    if prev_res.lag is None or res.lag is None:
+        return out
+    ms = 1000.0
+
+    def mean_const(r):
+        return sum(abs(x) for x in r.const.values()) / len(r.const) if r.const else None
+
+    def stop(r, f):
+        return max((f(st) for st in r.stops), default=None)
+    rows = [("lag", prev_res.lag * ms, res.lag * ms, "ms"),
+            ("error at constant speed", mean_const(prev_res), mean_const(res), "mm"),
+            ("peak error", prev_res.peak, res.peak, "mm"),
+            ("added before the drive's loop", None if prev_res.command_delay is None
+             else prev_res.command_delay * ms, None if res.command_delay is None
+             else res.command_delay * ms, "ms"),
+            ("the drive's loop", None if prev_res.drive_lag is None else prev_res.drive_lag * ms,
+             None if res.drive_lag is None else res.drive_lag * ms, "ms"),
+            ("overshoot at the stops", stop(prev_res, lambda st: st.overshoot),
+             stop(res, lambda st: st.overshoot), "mm"),
+            ("error after the dwell", stop(prev_res, lambda st: abs(st.final)),
+             stop(res, lambda st: abs(st.final)), "mm")]
+    for name, a, b, unit in rows:
+        if a is None or b is None:
+            continue
+        digits = 2 if unit == "ms" else 4
+        change = " (%+.0f %%)" % (100.0 * (b - a) / a) if abs(a) > 1e-9 else ""
+        out.append("  %s %.*f -> %.*f %s%s" % (name, digits, a, digits, b, unit, change))
     return out
 
 

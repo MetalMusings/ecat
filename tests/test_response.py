@@ -6,6 +6,7 @@ test_testmode with a fake halsampler.
 Run with: python3 -m unittest discover -s tests
 """
 
+import copy
 import json
 import math
 import os
@@ -257,6 +258,31 @@ class TestAnalyse(unittest.TestCase):
                          [0.2, 0.2, 0.5, 5.0, 10.0, 20.0])
 
 
+class TestCompare(unittest.TestCase):
+    def test_before_and_after(self):
+        before = recording(kp=1000.0, window=25, trials={"0x2009:00": [25600, 25600]})
+        after = recording(kp=1000.0, window=5, trials={"0x2009:00": [25600, 6400]})
+        lines = response.compare(before, response.analyse(before), after, response.analyse(after))
+        self.assertEqual(lines[0], "Since the last measurement: 0x2009:00 25600 -> 6400")
+        text = "\n".join(lines)
+        self.assertRegex(text, r"lag 1[45]\.\d\d -> [45]\.\d\d ms \(-\d\d %\)")
+        self.assertIn("added before the drive's loop", text)
+        # put back between them; nothing tried at all
+        lines = response.compare(after, response.analyse(after), before.__class__(
+            dict(before.meta, trials={}), before.data), response.analyse(before))
+        self.assertEqual(lines[0], "Since the last measurement: 0x2009:00 6400 -> 25600 (put back)")
+        plain = recording(kp=200.0, ff=1.0)
+        self.assertEqual(response.compare(plain, response.analyse(plain), plain,
+                                          response.analyse(plain))[0],
+                         "Since the last measurement: no setting changed in the drive")
+
+    def test_another_move_is_not_compared(self):
+        a, b = recording(kp=80.0), recording(kp=80.0, v=40.0)
+        lines = response.compare(a, response.analyse(a), b, response.analyse(b))
+        self.assertIn("not comparable", lines[1])
+        self.assertEqual(len(lines), 2)
+
+
 class TestRecordingFile(unittest.TestCase):
     def test_parse_samples(self):
         text = "0 1.5 2.0 1\n1 1.6 2.1 1\noverrun\n4 1.9 2.2 0\nbad line\n5 2.0 2.3\n"
@@ -447,6 +473,15 @@ class TestMeasurement(unittest.TestCase):
     def test_a_whole_measurement(self):
         dt = self.prepared()
         clock = Clock()
+        # a setting being tried in this drive goes with the recording
+        from ecatsetup import tuning
+        p = mock.patch.object(tuning, "TRIALS_FILE", os.path.join(self.dir.name, "trials.json"))
+        p.start()
+        self.addCleanup(p.stop)
+        tuning._save([{"position": 0, "slave": "x", "index": 0x2009, "subindex": 0,
+                       "dtype": "uint16", "original": 25600, "value": 2000},
+                      {"position": 5, "slave": "y", "index": 0x2009, "subindex": 0,
+                       "dtype": "uint16", "original": 25600, "value": 1000}])
         m = self.measurement(dt, {"distance": 30.0, "velocity": 40.0, "acceleration": 400.0,
                                   "repeats": 1, "dwell": 0.5}, {"joint": 0}, clock=clock)
         m.start()
@@ -486,6 +521,7 @@ class TestMeasurement(unittest.TestCase):
         rec = m.recording
         self.assertEqual(len(rec), 1 + len(recording(targets=(10, 0)).data["cmd"]) - 1)
         self.assertEqual(rec.meta["turnaround-cycles"], 2)
+        self.assertEqual(rec.meta["trials"], {"0x2009:00": [25600, 2000]})
         self.assertEqual(rec.meta["limits"]["following-error"], [200, 4000])
         self.assertTrue(os.path.exists(m.path))
         self.assertFalse(os.path.exists(m.path + ".raw"))
@@ -610,6 +646,72 @@ class TestResponseCard(unittest.TestCase):
         self.assertFalse(card.settings_hint.isHidden())
         card.show_settings([])
         self.assertTrue(t.isHidden())
+
+    def test_try_keep_undo_and_compare(self):
+        from ecatsetup import tuning
+        for box in ("warning", "question"):
+            p = mock.patch.object(gui.QMessageBox, box, side_effect=AssertionError("a dialog: %s" % box))
+            p.start()
+            self.addCleanup(p.stop)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        p = mock.patch.object(tuning, "TRIALS_FILE", os.path.join(d.name, "trials.json"))
+        p.start()
+        self.addCleanup(p.stop)
+        sdos = {(0x2009, 0): 25600, (0x6041, 0): 0x0231}
+
+        def download(pos, i, sub, v, t=None):
+            sdos[(i, sub)] = int(v)
+        for name, fn in (("upload", lambda pos, i, sub, t=None: sdos.get((i, sub))),
+                         ("download", download)):
+            p = mock.patch.object(gui.tool, name, fn)
+            p.start()
+            self.addCleanup(p.stop)
+        s = session.Session()
+        s.cfg = {"slaves": [dict(ECT60, settings=[])]}
+        w = gui.MainWindow(s)
+        self.addCleanup(w.close)
+        card = w.test_page.response
+
+        class DT:
+            name = "x"
+            slave = s.cfg["slaves"][0]
+        card.drive = lambda: DT
+        card.show_settings([tuning.Candidate(0x2009, 0, "Filter Time", "command-filter", "uint16",
+                                             25600, 0, 25600)])
+        card.settings_table.selectRow(0)
+        self.assertFalse(card.try_row.isHidden())
+        self.assertEqual(card.try_value.text(), "25600")
+        card.try_value.setText("2000")
+        card.try_setting()
+        self.assertEqual(sdos[(0x2009, 0)], 2000)
+        self.assertEqual(card.trials_table.rowCount(), 1)
+        self.assertEqual(card.trials_table.item(0, 2).text(), "25600")
+        self.assertEqual(card.settings_table.item(0, 2).text(), "2000")
+        card.undo_trial(tuning.pending()[0])
+        self.assertEqual(sdos[(0x2009, 0)], 25600)
+        self.assertEqual(card.trials_table.rowCount(), 0)
+        card.settings_table.selectRow(0)
+        card.try_value.setText("2000")
+        card.try_setting()
+        card.keep_trial(tuning.pending()[0])
+        self.assertEqual(s.cfg["slaves"][0]["settings"],
+                         [{"object": "0x2009:00", "name": "Filter Time", "type": "UINT",
+                           "value": 2000}])
+        self.assertEqual(tuning.pending(), [])
+        self.assertEqual(sdos[(0x2009, 0)], 2000)       # still in the drive's RAM
+        # a measurement after another: what changed, first
+        before = recording(kp=1000.0, window=25, trials={})
+        after = recording(kp=1000.0, window=5, trials={"0x2009:00": [25600, 2000]})
+        for rec in (before, after):
+            class Done:
+                recording = rec
+                ended = None
+                path = "x.samples"
+            card.finished(Done())
+        self.assertTrue(card.result.text().startswith(
+            "Since the last measurement: 0x2009:00 25600 -> 2000"))
+        s.saved = copy.deepcopy(s.cfg)    # closing would ask about saving
         # hidden without a prepared CSP drive
         card.show_drive(ECT60)
         self.assertTrue(card.isHidden())

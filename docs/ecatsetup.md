@@ -1037,12 +1037,25 @@ first part of tuning, the measuring.
   filter, a gain, feedforward, inertia or a notch (input filters, the
   current loop, alarms and commands are left out), with their present
   values. A value at the end of its range is marked, and so is one that
-  belongs to a mode the drive is not in. Nothing is written: try one at a
-  time in the SDO card (RAM until the drive is switched off), measure
-  again, and put one that helps in the slave's Settings, which ecat writes
-  at every start. This is how a drive nobody has tuned here yet can be
-  looked at without its manual; the measurement before and after decides,
-  not the name.
+  belongs to a mode the drive is not in. Listing them writes nothing. This
+  is how a drive nobody has tuned here yet can be looked at without its
+  manual; the measurement before and after decides, not the name.
+- **Trying one**: choose a row, give a new value and press *Try it*. The
+  value is written to the drive's RAM, only while the drive is disabled
+  and within the range where one is known; the drive's own value is read
+  first and kept in `~/.local/state/ecatsetup/tuning-trials.json` before
+  anything is written, and a value the drive does not take is put back.
+  *Being tried* lists what is in the drive now. Then measure again with
+  the same move: the result starts with what changed since the last
+  measurement (*0x2009:00 25600 -> 2000*) and how the lag, the error at
+  constant speed, the peak, the drive's parts and the stops moved, in per
+  cent. Try one setting at a time.
+- **Keep as setting** adds the value to the slave's Settings in the
+  configuration (save the file), which ecat writes at every start; the
+  drive keeps it in RAM meanwhile. Nothing is stored in the drive's EEPROM.
+  **Undo** writes the drive's own value back. Values still being tried are
+  written back when the test stops or the window closes, and offered back
+  at the next start if the program ended without that.
 - **Make the move long enough**: the drive's lag settles only after a few
   of its time constants at constant speed. The card says when constant
   speed lasted less than five times the lag; use a longer distance or a

@@ -10,11 +10,16 @@ by the names in its own dictionary ("Filter Time", "PosLoop_Kp", ...), and a
 value at the end of its range is flagged: that is how the ECT60's command
 filter, 0x2009 at its maximum of 25600 us, was found (2026-11-16).
 
-Nothing is written here. A setting is tried by writing it in RAM (the
-Test page's SDO card) and measuring again; one that helps belongs in the
-configuration's settings, which ecat writes at every start.
+A setting is tried by writing it in RAM (try_value), the drive's own value
+kept first in TRIALS_FILE, and measuring again: response.compare() says what
+changed. One that helps is kept as a setting of the slave (keep), which ecat
+writes at every start; one that does not is put back (undo). Values still
+being tried are put back when the test stops, and offered back after a
+crash (undo_all). Nothing is stored in the drive's EEPROM.
 """
 
+import json
+import os
 import re
 from dataclasses import dataclass
 
@@ -157,3 +162,138 @@ def candidates(slave, dictionary, read=None, kinds=()):
         return (order.index(c.kind) if c.kind in order else len(order),
                 not c.applies, not c.from_quirk, c.edge is None, c.index, c.subindex)
     return sorted(out, key=rank)
+
+
+# -- trying a setting: written in RAM, the original kept until it is kept or undone
+
+TRIALS_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                           "ecatsetup", "tuning-trials.json")
+# the ethercat tool's type -> the configuration's
+CONFIG_TYPES = {v: k for k, v in TOOL_TYPES.items()}
+
+
+class TrialError(Exception):
+    pass
+
+
+def pending():
+    """Settings being tried: [{"position", "slave", "index", "subindex",
+    "dtype", "original", "value", "name"}], oldest first."""
+    try:
+        with open(TRIALS_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def _save(entries):
+    os.makedirs(os.path.dirname(TRIALS_FILE), exist_ok=True)
+    if not entries:
+        if os.path.exists(TRIALS_FILE):
+            os.remove(TRIALS_FILE)
+        return
+    tmp = TRIALS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(entries, f, indent=1)
+    os.replace(tmp, TRIALS_FILE)
+
+
+def _same(e, position, index, subindex):
+    return e["position"] == position and e["index"] == index and e["subindex"] == subindex
+
+
+def drive_enabled(slave, read):
+    """Whether one of the slave's axes is in "Operation enabled" (0x6041 bit 2)."""
+    for n in range(len(config.axes(slave)) or 1):
+        sw = read(0x6041 + n * config.AXIS_OFFSET, 0, "uint16")
+        if sw is not None and int(sw) & 4:
+            return True
+    return False
+
+
+def try_value(slave, c, value, read, write):
+    """Write value to the candidate's object in the drive (RAM), keeping the
+    drive's own value first. A second try of the same object keeps the first
+    original. read(index, subindex, type) -> int or None; write(index,
+    subindex, value text, type). Refused while the drive is enabled, outside
+    a known range, or when the drive does not take it. Returns the entry."""
+    pos = slave["position"]
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise TrialError("give a whole number for %s" % c.obj)
+    if (c.minimum is not None and value < c.minimum) or (c.maximum is not None and value > c.maximum):
+        raise TrialError("%s takes %s..%s" % (c.obj, c.minimum, c.maximum))
+    if drive_enabled(slave, read):
+        raise TrialError("%s is enabled: release the buttons first; a setting is changed only "
+                         "while the drive stands disabled" % slave.get("name"))
+    entries = pending()
+    entry = next((e for e in entries if _same(e, pos, c.index, c.subindex)), None)
+    before = entry["value"] if entry is not None else None    # an earlier try, still in the drive
+    if entry is None:
+        original = read(c.index, c.subindex, c.data_type)
+        if original is None:
+            raise TrialError("cannot read %s from slave %d" % (c.obj, pos))
+        entry = {"position": pos, "slave": slave.get("name"), "index": c.index,
+                 "subindex": c.subindex, "dtype": c.data_type, "original": int(original),
+                 "value": None, "name": c.name}
+        entries.append(entry)
+    entry["value"] = value
+    # the original is in the file before the value is written
+    _save(entries)
+    try:
+        write(c.index, c.subindex, str(value), c.data_type)
+    except Exception as e:      # noqa: BLE001 - the drive's refusal, shown as it is
+        # nothing changed in the drive: it keeps its own value, or the earlier try
+        rest = [x for x in pending() if not _same(x, pos, c.index, c.subindex)]
+        if before is not None:
+            rest.append(dict(entry, value=before))
+        _save(rest)
+        raise TrialError("the drive refused %s = %d: %s" % (c.obj, value, e))
+    back = read(c.index, c.subindex, c.data_type)
+    if back is not None and int(back) != value:
+        undo(entry, write)
+        raise TrialError("%s reads %s after writing %d: the drive did not take it; put back"
+                         % (c.obj, back, value))
+    return entry
+
+
+def undo(entry, write):
+    """Put the drive's own value back; the entry leaves the file."""
+    write(entry["index"], entry["subindex"], str(entry["original"]), entry["dtype"])
+    _save([e for e in pending() if not _same(e, entry["position"], entry["index"], entry["subindex"])])
+
+
+def keep(entry, slave):
+    """Make a tried value a setting of the slave (ecat writes it at every
+    start; the drive keeps it in RAM meanwhile); the entry leaves the file.
+    Returns the setting."""
+    obj = config.obj(entry["index"], entry["subindex"])
+    st = {"object": obj, "name": entry.get("name") or obj,
+          "type": CONFIG_TYPES.get(entry["dtype"], "UDINT"), "value": entry["value"]}
+    sts = slave.setdefault("settings", [])
+    for i, x in enumerate(sts):
+        if str(x.get("object")).upper() == obj.upper():
+            sts[i] = dict(x, value=entry["value"])
+            st = sts[i]
+            break
+    else:
+        sts.append(st)
+    _save([e for e in pending() if not _same(e, entry["position"], entry["index"], entry["subindex"])])
+    return st
+
+
+def undo_all(write_for):
+    """Put back every value being tried (the test stops, or what a crash left).
+    write_for(position) -> write(index, subindex, value text, type). Returns
+    (done, failed) as readable strings; failed entries stay in the file."""
+    done, failed = [], []
+    for e in list(pending()):
+        text = "slave %d %s back to %d" % (e["position"], config.obj(e["index"], e["subindex"]),
+                                          e["original"])
+        try:
+            undo(e, write_for(e["position"]))
+            done.append(text)
+        except Exception as x:      # noqa: BLE001 - kept in the file, said to the user
+            failed.append("%s: %s" % (text, x))
+    return done, failed

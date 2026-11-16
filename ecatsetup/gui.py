@@ -3550,8 +3550,43 @@ class ResponseCard(Card):
         self.settings_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.settings_table.horizontalHeader().setStretchLastSection(True)
         self.settings_table.setWordWrap(True)
+        self.settings_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.settings_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.settings_table.itemSelectionChanged.connect(self.setting_chosen)
         self.settings_table.hide()
         self.add(self.settings_table)
+        # trying the chosen one: written in RAM, the drive's own value kept
+        self.try_row = QWidget()
+        tr = QHBoxLayout(self.try_row)
+        tr.setContentsMargins(0, 0, 0, 0)
+        self.try_label = label("", "hint")
+        tr.addWidget(self.try_label)
+        self.try_value = QLineEdit()
+        self.try_value.setMaximumWidth(140)
+        self.try_value.returnPressed.connect(self.try_setting)
+        tr.addWidget(self.try_value)
+        self.try_button = QPushButton("Try it (write to the drive's RAM)")
+        self.try_button.setToolTip("Writes the value to the drive with the drive disabled; its own "
+                                   "value is kept and put back by Undo, or when the test stops")
+        self.try_button.clicked.connect(self.try_setting)
+        tr.addWidget(self.try_button)
+        tr.addStretch(1)
+        self.try_row.hide()
+        self.add(self.try_row)
+        self.trials_title = label("Being tried in the drive (RAM). Measure again to see the "
+                                  "difference; keep a value that helps, undo one that does not.",
+                                  "hint", wrap=True)
+        self.trials_title.hide()
+        self.add(self.trials_title)
+        self.trials_table = QTableWidget(0, 5)
+        self.trials_table.setHorizontalHeaderLabels(["Object", "Name", "Drive's own", "Trying", ""])
+        self.trials_table.verticalHeader().hide()
+        self.trials_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.trials_table.horizontalHeader().setStretchLastSection(True)
+        self.trials_table.hide()
+        self.add(self.trials_table)
+        self.found = []         # the candidates shown in the settings table
+        self.last_res = None    # the analysis of self.last
         self.settings_hint = label("Try one at a time: write it in the SDO card on this page (the "
                                    "drive keeps it in RAM until it is switched off), then measure "
                                    "again; the last measurement stays grey in the plot. One that "
@@ -3577,9 +3612,13 @@ class ResponseCard(Card):
             self.result.setText("")
             self.saved.setText("")
             self.kinds = []
+            self.last_res = None
+            self.found = []
             self.settings_table.setRowCount(0)
             self.settings_table.hide()
             self.settings_hint.hide()
+            self.try_row.hide()
+        self.show_trials()
         have = response.measure_entries(slave, dt.axis)
         missing = response.missing_objects(slave, self.win.session.dictionary(slave["position"]),
                                            dt.axis)
@@ -3641,6 +3680,8 @@ class ResponseCard(Card):
         self.win.run("Reading the drive's settings...", work, self.show_settings)
 
     def show_settings(self, found):
+        self.found = list(found)
+        self.try_row.hide()
         t = self.settings_table
         t.setRowCount(0)
         for c in found:
@@ -3664,6 +3705,103 @@ class ResponseCard(Card):
         self.settings_hint.setVisible(bool(found))
         if not found:
             self.win.status("No settings found that look like a filter, a gain or feedforward")
+
+    def chosen(self):
+        rows = self.settings_table.selectionModel().selectedRows() if self.settings_table.selectionModel() else []
+        return self.found[rows[0].row()] if rows and rows[0].row() < len(self.found) else None
+
+    def setting_chosen(self):
+        c = self.chosen()
+        self.try_row.setVisible(c is not None)
+        if c is not None:
+            rng = "" if c.minimum is None and c.maximum is None else " (%s..%s)" % (
+                "" if c.minimum is None else c.minimum, "" if c.maximum is None else c.maximum)
+            self.try_label.setText("New value for %s %s%s:" % (c.obj, c.name, rng))
+            self.try_value.setText("" if c.value is None else str(c.value))
+
+    def try_setting(self):
+        dt, c = self.drive(), self.chosen()
+        if dt is None or c is None or (self.measurement is not None and self.measurement.active):
+            return
+        pos = dt.slave["position"]
+        try:
+            e = tuning.try_value(dt.slave, c, self.try_value.text().strip(),
+                                 lambda i, sub, t: self._read(pos, i, sub, t),
+                                 lambda i, sub, v, t: tool.download(pos, i, sub, v, t))
+        except tuning.TrialError as x:
+            QMessageBox.warning(self, TITLE, str(x))
+            return
+        c.value = e["value"]
+        self.win.status("%s = %d in %s's RAM (its own %d is kept); measure again"
+                        % (c.obj, e["value"], dt.slave.get("name"), e["original"]))
+        self.show_settings(self.found)
+        self.show_trials()
+
+    @staticmethod
+    def _read(pos, index, sub, ttype):
+        try:
+            return tool.upload(pos, index, sub, ttype)
+        except (tool.ToolError, OSError):
+            return None
+
+    def show_trials(self):
+        dt = self.drive()
+        pos = dt.slave.get("position") if dt is not None else None
+        entries = [e for e in tuning.pending() if e["position"] == pos]
+        t = self.trials_table
+        t.setRowCount(0)
+        for e in entries:
+            r = t.rowCount()
+            t.insertRow(r)
+            for col, text in enumerate((config.obj(e["index"], e["subindex"]), e.get("name", ""),
+                                        str(e["original"]), str(e["value"]))):
+                t.setItem(r, col, QTableWidgetItem(text))
+            cell = QWidget()
+            cl = QHBoxLayout(cell)
+            cl.setContentsMargins(0, 0, 0, 0)
+            keep = QPushButton("Keep as setting")
+            keep.setToolTip("Adds it to the slave's Settings in the configuration (written at "
+                            "every start); save the file to keep it. Nothing is stored in the "
+                            "drive's EEPROM.")
+            keep.clicked.connect(lambda _c=False, x=e: self.keep_trial(x))
+            back = QPushButton("Undo")
+            back.setToolTip("Writes the drive's own value back")
+            back.clicked.connect(lambda _c=False, x=e: self.undo_trial(x))
+            cl.addWidget(keep)
+            cl.addWidget(back)
+            t.setCellWidget(r, 4, cell)
+        t.resizeColumnsToContents()
+        t.resizeRowsToContents()
+        t.setMinimumHeight(min(40 + 34 * len(entries), 240))
+        t.setVisible(bool(entries))
+        self.trials_title.setVisible(bool(entries))
+
+    def keep_trial(self, e):
+        s = self.win.session.slave(e["position"])
+        if s is None:
+            return
+        st = tuning.keep(e, s)
+        self.win.changed()
+        self.win.status("%s = %s is now a setting of %s: save the configuration to keep it"
+                        % (st["object"], st["value"], s.get("name")))
+        self.show_trials()
+
+    def undo_trial(self, e):
+        if self.measurement is not None and self.measurement.active:
+            return
+        try:
+            tuning.undo(e, lambda i, sub, v, t: tool.download(e["position"], i, sub, v, t))
+        except (tool.ToolError, OSError) as x:
+            QMessageBox.warning(self, TITLE, "Not written back (kept in %s): %s"
+                                % (tuning.TRIALS_FILE, x))
+            return
+        self.win.status("%s back to the drive's own %d" % (config.obj(e["index"], e["subindex"]),
+                                                          e["original"]))
+        for c in self.found:
+            if (c.index, c.subindex) == (e["index"], e["subindex"]):
+                c.value = e["original"]
+        self.show_settings(self.found)
+        self.show_trials()
 
     def start(self):
         dt = self.drive()
@@ -3721,9 +3859,18 @@ class ResponseCard(Card):
         self.progress.setText("Done%s" % (" (ended early: %s)" % m.ended if m.ended else
                                           ": you may release the button"))
         self.plot.show_recording(rec, self.last)
-        self.result.setText("\n".join(response.report(res, rec)))
+        lines = response.report(res, rec)
+        if self.last is not None and self.last_res is not None:
+            lines = response.compare(self.last, self.last_res, rec, res) + [""] + lines
+        self.result.setText("\n".join(lines))
+        self.last_res = res
         self.saved.setText("Samples: %s (ecatsetup --response FILE shows this again)" % m.path)
         self.last = rec
+
+
+def _writer(position):
+    """write(index, subindex, value text, type) for a slave, with the ethercat tool."""
+    return lambda i, sub, v, t: tool.download(position, i, sub, v, t)
 
 
 def _duration_text(seconds):
@@ -6450,6 +6597,9 @@ class MainWindow(QMainWindow):
             for dt in tests:
                 progress("Writing the drive's own limits back to %s" % dt.name)
                 failed += ["%s %s" % (dt.name, f) for f in dt.restore()]
+            if tuning.pending():
+                progress("Writing back the settings that were being tried")
+                failed += tuning.undo_all(_writer)[1]
             run.stop()
             return failed
 
@@ -6509,7 +6659,22 @@ class MainWindow(QMainWindow):
             self.test.disable_drives()
 
     def offer_restore(self):
-        """Limits a crashed drive test left in drives: offer to put them back."""
+        """Limits a crashed drive test left in drives, and settings being tried
+        (the Response card): offer to put them back."""
+        if tuning.pending() and not testmode.test_holder():
+            text = "\n".join("slave %s (%s): %s back to %s" % (
+                e["position"], e.get("slave"), config.obj(e["index"], e["subindex"]), e["original"])
+                for e in tuning.pending())
+            if QMessageBox.question(
+                    self, TITLE, "Settings were being tried in drives when EtherCAT Setup ended:\n\n"
+                    "%s\n\nWrite the drives' own values back now? (A master must run.)" % text,
+                    QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                done, failed = tuning.undo_all(_writer)
+                if failed:
+                    QMessageBox.warning(self, TITLE, "Not written back (kept in %s):\n%s"
+                                        % (tuning.TRIALS_FILE, "\n".join(failed)))
+                else:
+                    self.status("Written back: %s" % "; ".join(done))
         pending = drivetest.pending_restores()
         if not pending or testmode.test_holder():
             # while another window runs a test, the values are its own
@@ -6723,6 +6888,7 @@ class MainWindow(QMainWindow):
             for dt in self.drive_tests.values():
                 dt.restore()
             self.drive_tests = {}
+            tuning.undo_all(_writer)
             self.test.stop()
             self.heartbeat.stop()
             self.pending_timer.stop()

@@ -1669,6 +1669,16 @@ choice); the user heard no difference. The ECT60's `0x6077` reads a constant
 Y's `0x2023:02` (Ki) reads 0 (factory 100); X shows a constant +0.03 mm both ways:
 not tried yet.
 
+Then built (the user's points 6, 8, 10): trying a setting from the list
+(`tuning.try_value`: the drive disabled, within a known range, the drive's own
+value in `tuning-trials.json` before the write, read back after it), *Keep as
+setting* (`tuning.keep`: a setting of the slave; nothing in EEPROM) and *Undo*;
+every recording carries the values being tried (`meta.trials`), and
+`response.compare()` puts "since the last measurement: what changed, and how the
+numbers moved" first. Put back at test stop, window close, and offered after a
+crash. Tested against fakes (tests/test_tuning.py, tests/test_response.py,
+mutation-checked); not yet tried at the machine.
+
 How it was found, which the window now does (`tuning.py`): the drive's own error
 small but the lag large, so the delay is before its loop; its target 15 cycles
 later than the bus explains; the drive's dictionary has `0x2009 "Filter Time"` at

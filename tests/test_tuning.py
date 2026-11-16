@@ -164,3 +164,107 @@ class TestQuirkKeys(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeDrive:
+    def __init__(self, values, refuse=(), ignore=()):
+        self.values = dict(values)
+        self.refuse, self.ignore = set(refuse), set(ignore)
+        self.writes = []
+        self.seen_in_file = []      # what the trials file held at each write
+
+    def read(self, index, sub, _type):
+        return self.values.get((index, sub))
+
+    def write(self, index, sub, value, _type):
+        self.seen_in_file.append([(e["index"], e["original"]) for e in tuning.pending()])
+        if (index, sub) in self.refuse:
+            raise RuntimeError("SDO abort 0x06090030")
+        self.writes.append((index, sub, int(value)))
+        if (index, sub) not in self.ignore:
+            self.values[(index, sub)] = int(value)
+
+
+class TestTrials(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        p = mock.patch.object(tuning, "TRIALS_FILE", os.path.join(d.name, "trials.json"))
+        p.start()
+        self.addCleanup(p.stop)
+        self.drive = FakeDrive({(0x2009, 0): 25600, (0x6041, 0): 0x0231, (0x2080, 0): 3})
+        self.filt = tuning.Candidate(0x2009, 0, "Filter Time", "command-filter", "uint16",
+                                     maximum=25600, minimum=0)
+
+    def tried(self, c, value):
+        return tuning.try_value(ECT60, c, value, self.drive.read, self.drive.write)
+
+    def test_try_keep(self):
+        e = self.tried(self.filt, "6400")
+        self.assertEqual((e["original"], e["value"]), (25600, 6400))
+        # the drive's own value was in the file before anything was written
+        self.assertEqual(self.drive.seen_in_file[0], [(0x2009, 25600)])
+        self.assertEqual(self.drive.values[(0x2009, 0)], 6400)
+        # a second try keeps the drive's own value, not the first try
+        self.tried(self.filt, 2000)
+        self.assertEqual([(x["original"], x["value"]) for x in tuning.pending()], [(25600, 2000)])
+        slave = {"name": "x", "position": 0, "settings": [
+            {"object": "0x2000:00", "type": "UINT", "value": 4000}]}
+        st = tuning.keep(tuning.pending()[0], slave)
+        self.assertEqual(st, {"object": "0x2009:00", "name": "Filter Time", "type": "UINT",
+                              "value": 2000})
+        self.assertEqual(len(slave["settings"]), 2)
+        self.assertEqual(tuning.pending(), [])
+        self.assertFalse(os.path.exists(tuning.TRIALS_FILE))
+        # kept again: the setting is replaced, not doubled
+        self.tried(self.filt, 3000)
+        tuning.keep(tuning.pending()[0], slave)
+        self.assertEqual([x["value"] for x in slave["settings"]], [4000, 3000])
+
+    def test_undo(self):
+        e = self.tried(self.filt, 2000)
+        tuning.undo(e, self.drive.write)
+        self.assertEqual(self.drive.values[(0x2009, 0)], 25600)
+        self.assertEqual(tuning.pending(), [])
+
+    def test_refused(self):
+        with self.assertRaisesRegex(tuning.TrialError, "takes 0..25600"):
+            self.tried(self.filt, 30000)
+        with self.assertRaisesRegex(tuning.TrialError, "whole number"):
+            self.tried(self.filt, "2.5")
+        self.drive.values[(0x6041, 0)] = 0x0237      # Operation enabled
+        with self.assertRaisesRegex(tuning.TrialError, "enabled"):
+            self.tried(self.filt, 2000)
+        self.assertEqual(self.drive.writes, [])
+        self.drive.values[(0x6041, 0)] = 0x0231
+        # the drive refuses it: its own value is written back, nothing is left pending
+        self.drive.refuse = {(0x2009, 0)}
+        with self.assertRaisesRegex(tuning.TrialError, "refused"):
+            self.tried(self.filt, 2000)
+        self.assertEqual(tuning.pending(), [])
+        self.assertEqual(self.drive.writes, [])
+        # refused after an earlier try: that one is still in the drive, and in the file
+        self.drive.refuse = set()
+        self.tried(self.filt, 6400)
+        self.drive.refuse = {(0x2009, 0)}
+        with self.assertRaises(tuning.TrialError):
+            self.tried(self.filt, 2000)
+        self.assertEqual([(e["original"], e["value"]) for e in tuning.pending()], [(25600, 6400)])
+
+    def test_a_drive_that_does_not_take_it(self):
+        self.drive.ignore = {(0x2009, 0)}
+        with self.assertRaisesRegex(tuning.TrialError, "did not take it"):
+            self.tried(self.filt, 2000)
+        self.assertEqual(self.drive.writes[-1], (0x2009, 0, 25600))
+        self.assertEqual(tuning.pending(), [])
+
+    def test_undo_all(self):
+        other = tuning.Candidate(0x2080, 0, "Command filter", "command-filter", "uint16")
+        self.tried(self.filt, 2000)
+        self.tried(other, 5)
+        self.drive.refuse = {(0x2080, 0)}
+        done, failed = tuning.undo_all(lambda pos: self.drive.write)
+        self.assertEqual(done, ["slave 0 0x2009:00 back to 25600"])
+        self.assertIn("0x2080:00 back to 3", failed[0])
+        # what could not be written back stays in the file
+        self.assertEqual([(e["index"], e["original"]) for e in tuning.pending()], [(0x2080, 3)])
