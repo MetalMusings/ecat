@@ -369,6 +369,12 @@ folder. A folder chosen in the window is remembered, in
 `~/.config/ecatsetup/settings.yaml` (or `$ECATSETUP_SETTINGS`), and read
 again at the next start; a folder that no longer exists is skipped.
 
+What is read from the files is kept in `~/.cache/ecatsetup/esi-cache.pickle`
+(or `$ECATSETUP_ESI_CACHE`; empty for none) and used again while a file has
+the same size and time. Beckhoff's whole set (1.2 GB of XML) takes about a
+minute to read the first time, and a second after that; the window says
+so while it reads. Removing the file only makes the next start slower.
+
 ### A spindle encoder (EL5101)
 
 How to get a terminal with an incremental encoder input (an EL5101, or
@@ -1029,7 +1035,9 @@ first part of tuning, the measuring.
     (such as the ECT60) loses steps or stops;
   - `FERROR` and `MIN_FERROR` for LinuxCNC: twice the error the result
     predicts at the joint's `MAX_VELOCITY` and `MAX_ACCELERATION` (from the
-    INI file, when the drive is a joint), else at the test's own.
+    INI file, when the drive is a joint: the configuration's Joints, or
+    else the joint whose `motor-pos-cmd` the HAL files connect to the
+    drive's `pos-cmd`), else at the test's own.
 - **Look for settings in the drive** lists the drive's settings that may
   explain the result, what it points at first: those its quirk file names
   (`tuning:`, with their range, factory value and what was found on a

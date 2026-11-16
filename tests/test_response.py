@@ -604,6 +604,20 @@ class TestIniValues(unittest.TestCase):
             self.assertEqual(response.ini_values(ini, c, "y"), {})
             self.assertEqual(response.ini_values(None, c, "x"), {})
 
+    def test_from_the_hal_files(self):
+        # a configuration written by hand: no linuxcnc.joints, the HAL file connects the joint
+        with tempfile.TemporaryDirectory() as d:
+            ini = os.path.join(d, "m.ini")
+            with open(ini, "w") as f:
+                f.write("[KINS]\nJOINTS = 2\n[HAL]\nHALFILE = m.hal\n"
+                        "[JOINT_1]\nMAX_VELOCITY = 400\nMAX_ACCELERATION = 1500\n")
+            with open(os.path.join(d, "m.hal"), "w") as f:
+                f.write("net xp <= joint.1.motor-pos-cmd\nnet xp => x.pos-cmd\n")
+            c = cfg()
+            self.assertEqual(response.ini_values(ini, c, "x"),
+                             {"joint": 1, "MAX_VELOCITY": 400.0, "MAX_ACCELERATION": 1500.0})
+            self.assertEqual(response.ini_values(ini, c, "io"), {})
+
 
 try:
     from PyQt5.QtWidgets import QApplication

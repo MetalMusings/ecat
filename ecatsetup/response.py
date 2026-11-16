@@ -889,12 +889,21 @@ def compare(prev, prev_res, rec, res):
 
 
 def ini_values(ini_path, cfg, axis_name):
-    """{"joint", "MAX_VELOCITY", ...} of the joint the axis is connected to
-    (linuxcnc.joints in the configuration), from the INI file; {} if none."""
+    """{"joint", "MAX_VELOCITY", ...} of the joint the axis is connected to,
+    from the INI file; {} if none. The joint is the configuration's
+    (linuxcnc.joints), else the one the HAL files connect to the axis's
+    pos-cmd (a configuration written by hand, not by Apply)."""
     from . import integrate
     if not ini_path:
         return {}
     joint = next((j for j in integrate.joints(cfg) if j.get("slave") == axis_name), None)
+    if joint is None:
+        try:
+            found = integrate.propose_joints(ini_path, cfg)
+        except (OSError, ValueError):
+            found = {}
+        n = next((j for j, (name, _scale) in sorted(found.items()) if name == axis_name), None)
+        joint = {"joint": n} if n is not None else None
     if joint is None:
         return {}
     try:

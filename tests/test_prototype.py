@@ -463,6 +463,60 @@ ENCODER_ESI = """<?xml version="1.0"?>
 
 
 class TestEsi(unittest.TestCase):
+    def test_parsed_files_are_kept_between_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "esi")
+            os.makedirs(os.path.join(folder, "sub"))
+            for name, text in (("enc.xml", ENCODER_ESI), ("sub/drive.xml", ESI), ("notes.txt", "x")):
+                with open(os.path.join(folder, name), "w") as f:
+                    f.write(text)
+            cache = os.path.join(tmp, "cache", "esi.pickle")
+            parsed = []
+            real = esi.load_file
+
+            def counting(path):
+                parsed.append(os.path.basename(path))
+                return real(path)
+            with mock.patch.dict(os.environ, {"ECATSETUP_ESI_CACHE": cache}), \
+                    mock.patch.object(esi, "load_file", counting):
+                first = esi.load_dirs([folder])
+                self.assertEqual(sorted(parsed), ["drive.xml", "enc.xml"])
+                self.assertTrue(os.path.exists(cache))
+                parsed.clear()
+                second = esi.load_dirs([folder])
+                self.assertEqual(parsed, [])          # from the cache
+                self.assertEqual([(d.vendor_id, d.product_code, d.name) for d in second],
+                                 [(d.vendor_id, d.product_code, d.name) for d in first])
+                self.assertEqual(second[0].pdo_sets, first[0].pdo_sets)
+                # a changed file is read again, the other is not
+                path = os.path.join(folder, "enc.xml")
+                st = os.stat(path)
+                os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1000000000))
+                esi.load_dirs([folder])
+                self.assertEqual(parsed, ["enc.xml"])
+                # another program version's cache, or a broken one, is not used
+                parsed.clear()
+                with mock.patch.object(esi, "CACHE_VERSION", esi.CACHE_VERSION + 1):
+                    esi.load_dirs([folder])
+                self.assertEqual(sorted(parsed), ["drive.xml", "enc.xml"])
+                with open(cache, "wb") as f:
+                    f.write(b"not a pickle")
+                parsed.clear()
+                self.assertEqual(len(esi.load_dirs([folder])), len(first))
+                self.assertEqual(len(parsed), 2)
+                # a file asked for alone keeps the others in the cache
+                parsed.clear()
+                esi.load_dirs([path])
+                esi.load_dirs([folder])
+                self.assertEqual(parsed, [])
+            # no cache at all
+            parsed.clear()
+            with mock.patch.dict(os.environ, {"ECATSETUP_ESI_CACHE": ""}), \
+                    mock.patch.object(esi, "load_file", counting):
+                esi.load_dirs([folder])
+                esi.load_dirs([folder])
+            self.assertEqual(len(parsed), 4)
+
     def test_predefined_pdo_assignments(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "enc.xml")

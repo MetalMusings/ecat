@@ -6905,7 +6905,21 @@ def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
     app.setApplicationName(TITLE)
     # the ESI folders given before, then those on the command line
     esi_paths = list(dict.fromkeys(settings.esi_folders() + list(esi_paths)))
+    # ESI files not read before take a while (Beckhoff's set: about a minute, once;
+    # then they come from the cache): say so instead of showing nothing
+    notice = None
+    n, size = esi.uncached(esi_paths)
+    if size > 20 * 1024 * 1024:
+        notice = QLabel("EtherCAT Setup: reading %d ESI files (%d MB) for the first time.\n"
+                        "This takes about %d s once; later starts take them from a cache."
+                        % (n, size // (1024 * 1024), max(5, size // (25 * 1024 * 1024))))
+        notice.setWindowTitle(TITLE)
+        notice.setContentsMargins(24, 18, 24, 18)
+        notice.show()
+        app.processEvents()
     win = MainWindow(Session(esi_paths, ini_path, mode))
+    if notice is not None:
+        notice.close()
     if path:
         if os.path.exists(path):
             win.load(path)

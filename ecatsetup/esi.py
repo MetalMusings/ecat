@@ -2,6 +2,7 @@
 device description that matches a slave."""
 
 import os
+import pickle
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
@@ -134,17 +135,124 @@ def load_file(path):
     return devices
 
 
-def load_dirs(paths):
-    """All device descriptions in the given files and folders (recursively)."""
-    devices = []
+# Parsed files are kept between runs: Beckhoff's set alone is 1.2 GB of XML
+# and took 50 s to read at every start. An entry is used while its file has
+# the same size and modification time; CACHE_VERSION changes when what is read
+# from a file changes.
+CACHE_VERSION = 1
+
+
+def cache_path():
+    """Where the parsed ESI files are kept ("" for nowhere)."""
+    if "ECATSETUP_ESI_CACHE" in os.environ:
+        return os.environ["ECATSETUP_ESI_CACHE"]
+    if os.environ.get("ECATSETUP_TEST_STATE"):
+        return os.path.join(os.environ["ECATSETUP_TEST_STATE"], "esi-cache.pickle")
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(base, "ecatsetup", "esi-cache.pickle")
+
+
+_cache_mem = {}      # path -> (size and time of the cache file, its files): read once
+
+
+def _read_cache(path):
+    try:
+        st = os.stat(path)
+        stamp = (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return {}
+    mem = _cache_mem.get(path)
+    if mem is not None and mem[0] == (stamp, CACHE_VERSION):
+        return mem[1]
+    files = _load_cache(path)
+    _cache_mem[path] = ((stamp, CACHE_VERSION), files)
+    return files
+
+
+def _load_cache(path):
+    try:
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+    except (OSError, EOFError, pickle.PickleError, AttributeError, ImportError, TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict) or data.get("version") != CACHE_VERSION:
+        return {}
+    return data.get("files") or {}
+
+
+def _write_cache(path, files):
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump({"version": CACHE_VERSION, "files": files}, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, path)
+        st = os.stat(path)
+        _cache_mem[path] = (((st.st_size, st.st_mtime_ns), CACHE_VERSION), files)
+    except OSError:
+        pass        # only slower next time
+
+
+def _names(paths):
+    names = []
     for p in paths:
         if os.path.isdir(p):
             for dirpath, _dirs, files in os.walk(p):
-                for f in files:
-                    if f.lower().endswith(".xml"):
-                        devices.extend(load_file(os.path.join(dirpath, f)))
+                names += [os.path.join(dirpath, f) for f in sorted(files) if f.lower().endswith(".xml")]
         else:
-            devices.extend(load_file(p))
+            names.append(p)
+    return names
+
+
+def _stamp(name):
+    try:
+        st = os.stat(name)
+        return st.st_size, st.st_mtime_ns
+    except OSError:
+        return None
+
+
+def uncached(paths):
+    """(files, bytes) that load_dirs would have to parse, not take from the cache."""
+    where = cache_path()
+    old = _read_cache(where) if where else {}
+    n = size = 0
+    for name in _names(paths):
+        stamp = _stamp(name)
+        hit = old.get(os.path.abspath(name))
+        if stamp is not None and (hit is None or hit[0] != stamp):
+            n += 1
+            size += stamp[0]
+    return n, size
+
+
+def load_dirs(paths):
+    """All device descriptions in the given files and folders (recursively),
+    from the cache where a file has not changed since it was read."""
+    names = _names(paths)
+    where = cache_path()
+    old = _read_cache(where) if where else {}
+    new, devices, changed = {}, [], False
+    for name in names:
+        key = os.path.abspath(name)
+        stamp = _stamp(name)
+        hit = old.get(key)
+        if stamp is not None and hit is not None and hit[0] == stamp:
+            found = hit[1]
+        else:
+            found = load_file(name)
+            changed = True
+        if stamp is not None:
+            new[key] = (stamp, found)
+        devices.extend(found)
+    # files read before and not asked for now are kept: another folder list may need them
+    for key, hit in old.items():
+        if key not in new and os.path.exists(key):
+            new[key] = hit
+        elif key not in new:
+            changed = True
+    if where and changed:
+        _write_cache(where, new)
     return devices
 
 
