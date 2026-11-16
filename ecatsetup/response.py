@@ -18,11 +18,13 @@ limits, and the limit3 in front of pos-cmd.
   timer; the drive moves only while the button is held.
 - analyse() splits LinuxCNC's following error (pos-cmd - pos-fb) into
   T * v + K * a + c over the samples in motion: T is the lag in time, made of
-  the transport delay (the frames: about two cycles) and the drive's own lag
-  (1 / its effective position gain, when it has no or too little velocity
-  feedforward); K the part that follows the acceleration. With 0x60F4 the
-  drive's own lag is measured and the transport delay found, else the
-  delay is taken from the turn-around. Also: overshoot and settling at each
+  the bus (the frames: the turn-around, about two cycles), what the drive
+  adds before its loop (a command filter: its own target, pos-fb + 0x60F4,
+  is behind pos-cmd by more than the bus), and its position loop's lag
+  (0x60F4 per velocity: 1 / its effective position gain, when it has no or
+  too little velocity feedforward); K the part that follows the
+  acceleration. Without 0x60F4 the drive's part is not split. diagnose()
+  says what each part points at in the drive (KINDS). Also: overshoot and settling at each
   stop, torque (servo drives), the margin to the drive's following-error
   window (stepper drives lose steps there), and FERROR / MIN_FERROR for
   LinuxCNC from the result.
@@ -36,7 +38,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
-from . import config, lcnc_env, testmode
+from . import config, lcnc_env, quirks, testmode
 
 HALSAMPLER = os.environ.get("ECAT_HALSAMPLER") or lcnc_env.program("halsampler")
 DEPTH = 16384           # samples in each sampler channel's FIFO
@@ -76,6 +78,8 @@ def measure_entries(slave, axis=0):
             except ValueError:
                 continue
             col = MEASURE_OBJECTS.get(index - off)
+            if index - off in quirks.measure_ignore(slave):
+                continue
             if col and sub == 0 and e.get("pin") and e.get("hal-type") in SAMPLER_LETTER:
                 out[col[0]] = (index, e)
     return out
@@ -450,9 +454,10 @@ class Result:
     offset: float = None        # c, mm
     fit_r2: float = None
     fit_rms: float = None
-    transport: float = None     # s
-    transport_measured: bool = False
-    drive_lag: float = None     # s
+    bus: float = None           # s: the frames, pos-cmd to the drive and back (the turn-around)
+    target_delay: float = None  # s: how far the drive's own target (pos-fb + 0x60F4) is behind pos-cmd
+    command_delay: float = None  # s: of that, what the drive adds before its loop (a command filter)
+    drive_lag: float = None     # s: the drive's position loop (0x60F4), or all the drive adds
     drive_lag_measured: bool = False
     peak: float = 0.0           # mm, LinuxCNC's error
     peak_accel: float = 0.0     # mm, while the command accelerates
@@ -467,6 +472,7 @@ class Result:
     torque_limit: float = None  # % (the test's 0x6072)
     window: dict = field(default_factory=dict)  # "test"/"drive" -> mm (following-error window)
     ferror: dict = field(default_factory=dict)  # suggestions for LinuxCNC
+    findings: list = field(default_factory=list)  # [(kind, text)]: what to look at, most first
     notes: list = field(default_factory=list)
 
 
@@ -485,22 +491,20 @@ def _enabled_span(rec):
     return (idx[0], idx[-1] + 1) if idx else (0, 0)
 
 
-def transport_cycles(cmd, err, derr, start, end, moving, kmax=8):
-    """The transport delay in cycles: LinuxCNC's error less the drive's own
-    (0x60F4) is pos-cmd now less the target the drive works on, pos-cmd k
-    cycles ago. The k that fits best, and its rms."""
+def target_delay(cmd, tgt, idx, cruise, v, p):
+    """How many cycles the drive's own target (pos-fb + 0x60F4) is behind
+    pos-cmd: first from the mean gap at constant speed (gap / velocity), then
+    the whole number of cycles around it that fits best. (cycles, rms mm)."""
+    est = [(cmd[n] - tgt[n]) / v[n] for n in cruise if abs(v[n]) > 0]
+    guess = int(round(sum(est) / len(est) / p)) if est else 0
     best = None
-    for k in range(0, kmax + 1):
-        s, n = 0.0, 0
-        for i in range(max(start, start + k), end):
-            if moving[i]:
-                d = (err[i] - derr[i]) - (cmd[i] - cmd[i - k])
-                s += d * d
-                n += 1
-        if n:
-            rms = math.sqrt(s / n)
-            if best is None or rms < best[1]:
-                best = (k, rms)
+    for k in range(max(guess - 3, 0), guess + 4):
+        pts = [n for n in idx if n - k >= 0]
+        if not pts:
+            continue
+        rms = math.sqrt(sum((tgt[n] - cmd[n - k]) ** 2 for n in pts) / len(pts))
+        if best is None or rms < best[1]:
+            best = (k, rms)
     return best
 
 
@@ -555,8 +559,9 @@ def analyse(rec, ini=None):
         # assumptions (a drive that has not settled at the end of a short move)
         res.lag = (res.const[1] - res.const[-1]) / (2 * res.vmax)
         res.offset = (res.const[1] + res.const[-1]) / 2
-    # the drive's own error: its lag, and the transport delay from the difference
+    # the drive's own error: its loop's lag, and how far its target is behind pos-cmd
     turn = int(meta.get("turnaround-cycles") or 0) or 2
+    res.bus = turn * p
     derr = None
     if "drive-error" in rec.data:
         derr = [x / float(meta.get("scale") or 1.0) for x in rec.data["drive-error"]]
@@ -571,17 +576,18 @@ def analyse(rec, ini=None):
             res.drive_lag, res.drive_lag_measured = (dconst[1] - dconst[-1]) / (2 * res.vmax), True
         elif dc:
             res.drive_lag, res.drive_lag_measured = dc[0], True
-        k = transport_cycles(cmd, err, derr, lo, hi, moving)
+        tgt = [f + d for f, d in zip(fb, derr)]
+        k = target_delay(cmd, tgt, idx, cruise, v, p)
         if k is not None:
-            res.transport, res.transport_measured = k[0] * p, True
+            res.target_delay = k[0] * p
+            res.command_delay = max(res.target_delay - res.bus, 0.0)
             if k[1] > max(res.band, 0.1 * res.peak):
-                res.notes.append("LinuxCNC's error less the drive's (0x60F4) is not a plain delay "
-                                 "(rms %.4f mm left): the drive's 0x60F4 may count from its own "
-                                 "interpolated target" % k[1])
-    if res.transport is None:
-        res.transport = turn * p
+                res.notes.append("the drive's target (pos-fb + 0x60F4) is not pos-cmd a whole "
+                                 "number of cycles later (rms %.4f mm left): it is smoothed, not "
+                                 "only delayed" % k[1])
     if res.lag is not None and not res.drive_lag_measured:
-        res.drive_lag = res.lag - res.transport
+        # without 0x60F4: all the drive adds to the bus, filter and loop together
+        res.drive_lag = res.lag - res.bus
     # a soft drive needs a few of its time constants at constant speed to settle
     run, longest, in_cruise = 0, 0, set(cruise)
     for n in range(lo, hi):
@@ -607,8 +613,11 @@ def analyse(rec, ini=None):
                 direction = 1 if cmd[e] > before else -1
                 before = target
                 past = [direction * (fb[i] - target) for i in range(e, nxt)]
-                outside = [i for i in range(e, nxt) if abs(fb[i] - target) > res.band]
                 tail = [fb[i] - target for i in range(nxt - max((nxt - e) // 5, 1), nxt)]
+                # settled: within the band of where it ends up (a stepper may stay a few
+                # counts off the target; that is the final error, not a failure to settle)
+                rest = target + sum(tail) / len(tail)
+                outside = [i for i in range(e, nxt) if abs(fb[i] - rest) > res.band]
                 settle = None if outside and outside[-1] >= nxt - 1 else \
                     ((outside[-1] + 1 - e) * p if outside else 0.0)
                 res.stops.append(Stop((e - start) * p, direction, max(max(past), 0.0), settle,
@@ -648,7 +657,71 @@ def analyse(rec, ini=None):
     if res.ended:
         res.notes.append("ended early: %s" % res.ended)
     _suggest_ferror(res, ini)
+    res.findings = diagnose(res)
     return res
+
+
+# what a finding points at, for the search of the drive's settings (tuning.py)
+KINDS = {
+    "command-filter": "a command filter or smoothing in the drive (filter time, smoothing, "
+                      "position command filter, moving average)",
+    "position-loop": "the drive's position loop (position gain, Kp, integral, stiffness)",
+    "feedforward": "velocity feedforward in the drive (speed feedforward, Kvff)",
+    "torque": "torque feedforward or the load inertia ratio in the drive",
+    "gain-high": "a gain too high, or a resonance (notch filters)",
+}
+
+
+def diagnose(res):
+    """[(kind, text)]: what the result points at in the drive, the largest
+    part of the following error first. kind is one of KINDS, or "ok"."""
+    if res.lag is None:
+        return []
+    ms = 1000.0
+    out = []
+    v = res.vmax or 1.0
+    if res.command_delay is not None and res.command_delay >= max(2 * res.period, 0.001):
+        out.append((res.command_delay, "command-filter",
+                    "The drive starts on a new position %.1f ms after it arrives (its target is "
+                    "%.0f cycles behind pos-cmd, the bus accounts for %.0f): a command filter or "
+                    "smoothing in the drive. At %g mm/s that alone is %.3f mm. In CSP LinuxCNC's "
+                    "path is already smooth, so such a filter can mostly be small."
+                    % (res.command_delay * ms, res.target_delay / res.period,
+                       res.bus / res.period, v, res.command_delay * v)))
+    if res.drive_lag is not None and res.drive_lag >= max(0.001, 0.25 * abs(res.lag)):
+        if res.drive_lag_measured:
+            out.append((res.drive_lag, "feedforward",
+                        "The drive's position loop lags %.1f ms (0x60F4: %.3f mm at %g mm/s, an "
+                        "effective gain of %.0f /s): velocity feedforward, or a higher position "
+                        "gain." % (res.drive_lag * ms, res.drive_lag * v, v, 1.0 / res.drive_lag)))
+        else:
+            out.append((res.drive_lag, "command-filter",
+                        "The drive adds %.1f ms to the bus's %.1f ms (%.3f mm at %g mm/s): a "
+                        "command filter in the drive, or its position loop without feedforward. "
+                        "Add 0x60F4 to the process data to tell which."
+                        % (res.drive_lag * ms, res.bus * ms, res.drive_lag * v, v)))
+    acc = abs(res.accel_term or 0.0) * (res.amax or 0.0)
+    if acc >= max(0.25 * res.peak, 2 * res.band):
+        out.append((acc / v, "torque",
+                    "%.3f mm of the error follows the acceleration: torque feedforward or the "
+                    "load inertia ratio in the drive." % acc))
+    over = max((st.overshoot for st in res.stops), default=0.0)
+    unsettled = any(st.settle is None for st in res.stops)
+    if over > max(2 * res.band, 0.05 * res.peak) or (unsettled and over > res.band):
+        out.append((over / v, "gain-high",
+                    "At the stops the axis overshoots by up to %.3f mm%s: a gain too high or a "
+                    "resonance." % (over, " and does not settle within the dwell"
+                                    if unsettled else "")))
+    if abs(res.offset or 0.0) >= 3 * res.band:
+        out.append((abs(res.offset) / v, "position-loop",
+                    "The error has a constant %+.3f mm in both directions: the drive's integral "
+                    "gain, or friction it does not make up for." % res.offset))
+    out.sort(key=lambda x: -x[0])
+    found = [(kind, text) for _w, kind, text in out]
+    if not found:
+        found.append(("ok", "The drive follows within the bus's delay (%.1f ms): nothing in it "
+                      "to tune for this move." % (res.bus * ms)))
+    return found
 
 
 def _suggest_ferror(res, ini):
@@ -691,19 +764,20 @@ def report(res, rec=None):
     out.append("It is %.2f ms x velocity %+.5f s² x acceleration %+.4f mm (fit: %.0f %% of the "
                "variation, %.4f mm rms left)" % (res.lag * ms, res.accel_term, res.offset,
                                                    100 * res.fit_r2, res.fit_rms))
-    out.append("  transport delay %.2f ms (%s, %d cycles of %g ms): the frames, not an error at "
-               "the motor" % (res.transport * ms, "measured with 0x60F4" if res.transport_measured
-                              else "assumed from the turn-around", round(res.transport / res.period),
-                              res.period * ms))
+    out.append("  the bus: %d cycles of %g ms (%.2f ms), pos-cmd to the drive and back; no "
+               "setting removes it" % (round(res.bus / res.period), res.period * ms, res.bus * ms))
+    if res.target_delay is not None:
+        out.append("  the drive's target (pos-fb + 0x60F4) is %.2f ms behind pos-cmd: %.2f ms "
+                   "more than the bus, added in the drive before its loop"
+                   % (res.target_delay * ms, res.command_delay * ms))
     if res.drive_lag is not None:
-        if res.drive_lag > 0.0002:
-            out.append("  the drive's own lag %.2f ms%s: an effective position gain of %.0f /s; "
-                       "a drive with velocity feedforward lags less"
-                       % (res.drive_lag * ms, " (0x60F4)" if res.drive_lag_measured else "",
-                          1.0 / res.drive_lag))
+        if res.drive_lag_measured:
+            out.append("  the drive's position loop lags %.2f ms (0x60F4)%s"
+                       % (res.drive_lag * ms, ": an effective position gain of %.0f /s"
+                          % (1.0 / res.drive_lag) if res.drive_lag > 0.0002 else ""))
         else:
-            out.append("  the drive's own lag %.2f ms%s: it follows within the transport delay"
-                       % (res.drive_lag * ms, " (0x60F4)" if res.drive_lag_measured else ""))
+            out.append("  the drive adds %.2f ms to the bus (a command filter and its loop "
+                       "together; 0x60F4 would tell them apart)" % (res.drive_lag * ms))
     if res.drive_peak is not None:
         out.append("The drive's own following error (0x60F4): peak %.4f mm" % res.drive_peak)
     for name, text in (("test", "the test's window"), ("drive", "the drive's own window")):
@@ -740,6 +814,10 @@ def report(res, rec=None):
                        if f["now"] else "",
                        "; extrapolated far beyond the test: measure nearer those values"
                        if f["extrapolated"] else ""))
+    if res.findings:
+        # first, after the line about the move: what to look at
+        at = 1 if spec else 0
+        out[at:at] = ["What it points at:"] + ["  - %s" % text for _kind, text in res.findings]
     out += res.notes
     return out
 
@@ -775,7 +853,10 @@ def missing_objects(slave, dictionary, axis=0):
     have = measure_entries(slave, axis)
     off = axis * config.AXIS_OFFSET
     out = []
+    ignored = quirks.measure_ignore(slave)
     for index, (col, what) in sorted(MEASURE_OBJECTS.items()):
+        if index in ignored:
+            continue
         if col not in have and dictionary is not None and (index + off, 0) in dictionary.entries:
             out.append((index + off, col, what))
     return out

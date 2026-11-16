@@ -64,16 +64,23 @@ def trapezoid(targets, v, a, p=P, dwell=500, settle=300):
     return out
 
 
-def drive(cmd, k=2, kp=40.0, ff=0.0, p=P, zeta=None):
+def drive(cmd, k=2, kp=40.0, ff=0.0, p=P, zeta=None, window=1, stay=0.0):
     """A drive k cycles behind the command (the frames) with a position loop
     of gain kp and velocity feedforward ff: (pos-fb, its 0x60F4 in counts).
-    zeta: a second-order loop instead, with that damping (overshoots)."""
+    zeta: a second-order loop instead, with that damping (overshoots).
+    window: a sliding average over that many cycles on the command before
+    the loop (a command filter, such as the ECT60's 0x2009). stay: mm the
+    position stays off the target at standstill (a stepper's last counts)."""
+    def at(i):
+        i = min(max(i, 0), len(cmd) - 1)
+        return sum(cmd[max(j, 0)] for j in range(i - window + 1, i + 1)) / window
     x, vx, fb, de = 0.0, 0.0, [], []
     for n in range(len(cmd)):
-        t = cmd[n - k] if n >= k else cmd[0]
-        tp = cmd[n - k - 1] if n - k - 1 >= 0 else cmd[0]
-        fb.append(round(x * SCALE) / SCALE)
-        de.append(float(round((t - x) * SCALE)))
+        t = at(n - k) if n >= k else cmd[0]
+        tp = at(n - k - 1) if n - k - 1 >= 0 else cmd[0]
+        off = stay if abs(t - tp) < 1e-12 else 0.0
+        fb.append(round((x + off) * SCALE) / SCALE)
+        de.append(float(round((t - x - off) * SCALE)))
         if zeta is None:
             x += (ff * (t - tp) / p + kp * (t - x)) * p
         else:
@@ -84,9 +91,9 @@ def drive(cmd, k=2, kp=40.0, ff=0.0, p=P, zeta=None):
 
 
 def recording(targets=(40, 0, 40, 0), v=50.0, a=500.0, k=2, kp=40.0, ff=0.0, with_de=True,
-              turnaround=2, zeta=None, **meta):
+              turnaround=2, zeta=None, window=1, stay=0.0, **meta):
     cmd = trapezoid(targets, v, a)
-    fb, de = drive(cmd, k, kp, ff, zeta=zeta)
+    fb, de = drive(cmd, k, kp, ff, zeta=zeta, window=window, stay=stay)
     data = {"cmd": cmd, "fb": fb, "enabled": [1.0] * len(cmd)}
     if with_de:
         data["drive-error"] = de
@@ -100,10 +107,11 @@ def recording(targets=(40, 0, 40, 0), v=50.0, a=500.0, k=2, kp=40.0, ff=0.0, wit
 class TestAnalyse(unittest.TestCase):
     def test_a_soft_drive_without_feedforward(self):
         res = response.analyse(recording(kp=40.0))
-        # the transport delay is found from LinuxCNC's error less the drive's own
-        self.assertTrue(res.transport_measured)
-        self.assertAlmostEqual(res.transport, 0.002)
-        # and the rest is the drive's lag: 1/Kp
+        # the bus: the turn-around; the drive's target is just that much behind
+        self.assertAlmostEqual(res.bus, 0.002)
+        self.assertAlmostEqual(res.target_delay, 0.002)
+        self.assertAlmostEqual(res.command_delay, 0.0)
+        # and the rest is the drive's loop: 1/Kp
         self.assertTrue(res.drive_lag_measured)
         self.assertAlmostEqual(res.drive_lag, 1 / 40.0, delta=0.0015)
         self.assertAlmostEqual(res.lag, 0.002 + 1 / 40.0, delta=0.0015)
@@ -113,31 +121,60 @@ class TestAnalyse(unittest.TestCase):
         self.assertAlmostEqual(res.lag, (res.const[1] - res.const[-1]) / (2 * res.vmax), places=9)
         self.assertEqual(len(res.stops), 4)
         self.assertEqual(max(s.overshoot for s in res.stops), 0.0)
+        self.assertEqual([k for k, _t in res.findings], ["feedforward"])
         text = "\n".join(response.report(res, recording()))
         self.assertIn("an effective position gain of 4", text)
-        self.assertIn("measured with 0x60F4, 2 cycles", text)
+        self.assertIn("the bus: 2 cycles", text)
+        self.assertIn("velocity feedforward", text)
 
-    def test_three_cycles_of_transport(self):
-        res = response.analyse(recording(k=3, kp=80.0))
-        self.assertAlmostEqual(res.transport, 0.003)
-        self.assertAlmostEqual(res.drive_lag, 1 / 80.0, delta=0.001)
+    def test_a_command_filter(self):
+        # a stiff loop behind a 25-cycle sliding average, as the ECT60 with 0x2009 = 25600 us
+        res = response.analyse(recording(kp=1000.0, window=25))
+        self.assertAlmostEqual(res.bus, 0.002)
+        self.assertAlmostEqual(res.target_delay, 0.014, delta=0.0011)
+        self.assertAlmostEqual(res.command_delay, 0.012, delta=0.0011)
+        self.assertLess(res.drive_lag, 0.002)
+        self.assertEqual(res.findings[0][0], "command-filter")
+        self.assertIn("12.0 ms after it arrives", res.findings[0][1])
+        # a bus of three cycles is not taken for a filter
+        res = response.analyse(recording(k=3, kp=1000.0, turnaround=3))
+        self.assertAlmostEqual(res.target_delay, 0.003)
+        self.assertAlmostEqual(res.command_delay, 0.0)
+        self.assertEqual([k for k, _t in res.findings], ["ok"])
 
-    def test_feedforward_leaves_the_transport_delay(self):
+    def test_the_largest_part_first(self):
+        # a 12 ms filter in front of a loop that lags 10 ms, and the other way round
+        res = response.analyse(recording(kp=100.0, window=25, targets=(60, 0, 60, 0)))
+        self.assertEqual([k for k, _t in res.findings][:2], ["command-filter", "feedforward"])
+        res = response.analyse(recording(kp=40.0, window=9, targets=(60, 0, 60, 0)))
+        self.assertEqual([k for k, _t in res.findings][:2], ["feedforward", "command-filter"])
+
+    def test_feedforward_leaves_the_bus(self):
         res = response.analyse(recording(kp=200.0, ff=1.0))
         self.assertAlmostEqual(res.lag, 0.002, delta=0.0002)
         self.assertLess(abs(res.drive_lag), 0.0002)
-        self.assertIn("follows within the transport delay", "\n".join(response.report(res)))
+        self.assertEqual(res.findings[0][0], "ok")
+        self.assertIn("follows within the bus's delay", "\n".join(response.report(res)))
 
-    def test_without_0x60f4_the_delay_is_the_turn_around(self):
+    def test_without_0x60f4_the_drive_is_not_split(self):
         res = response.analyse(recording(k=3, kp=80.0, with_de=False, turnaround=3))
-        self.assertFalse(res.transport_measured)
-        self.assertAlmostEqual(res.transport, 0.003)
+        self.assertIsNone(res.target_delay)
+        self.assertAlmostEqual(res.bus, 0.003)
+        self.assertFalse(res.drive_lag_measured)
         self.assertAlmostEqual(res.drive_lag, 1 / 80.0, delta=0.001)
         self.assertIsNone(res.drive_peak)
+        self.assertEqual(res.findings[0][0], "command-filter")
+        self.assertIn("Add 0x60F4", res.findings[0][1])
         # no turn-around known (no automatic SYNC0 shift): two cycles
         res = response.analyse(recording(kp=80.0, with_de=False, turnaround=0))
-        self.assertAlmostEqual(res.transport, 0.002)
-        self.assertIn("assumed from the turn-around", "\n".join(response.report(res)))
+        self.assertAlmostEqual(res.bus, 0.002)
+        self.assertIn("0x60F4 would tell them apart", "\n".join(response.report(res)))
+
+    def test_a_stepper_that_stays_a_few_counts_off_has_settled(self):
+        res = response.analyse(recording(kp=1000.0, stay=0.004))
+        self.assertTrue(all(st.settle is not None for st in res.stops))
+        self.assertAlmostEqual(max(abs(st.final) for st in res.stops), 0.004, delta=0.0015)
+        self.assertNotIn("gain-high", [k for k, _t in res.findings])
 
     def test_a_short_move_says_so(self):
         res = response.analyse(recording(targets=(10, 0), kp=40.0))
@@ -148,6 +185,7 @@ class TestAnalyse(unittest.TestCase):
     def test_overshoot_and_settling(self):
         res = response.analyse(recording(kp=60.0, zeta=0.3, with_de=False))
         self.assertGreater(max(s.overshoot for s in res.stops), 0.05)
+        self.assertIn("gain-high", [k for k, _t in res.findings])
         self.assertTrue(all(s.settle and s.settle > 0.02 for s in res.stops))
         # every stop counts from the move's own direction
         self.assertEqual([s.direction for s in res.stops], [1, -1, 1, -1])
@@ -242,6 +280,8 @@ class TestRecordingFile(unittest.TestCase):
 def drive_cfg(inputs_extra=(), axes=None):
     c = cfg()
     x = c["slaves"][0]
+    # a drive without a quirk file (the ECT60's leaves its 0x6077 out)
+    x["identity"] = {"vendor": "0x00000099", "product": "0x00000001"}
     x["process-data"]["inputs"][0]["entries"] += list(inputs_extra)
     if axes:
         x["cia402"]["axes"] = axes
@@ -318,7 +358,11 @@ with open(os.environ["FAKE_SAMPLES"]) as f:
 sys.stdout.flush()
 with open(os.environ["FAKE_SAMPLES"] + ".args", "w") as f:
     f.write(" ".join(sys.argv[1:]))
-while True:
+parent = os.getppid()
+# never outlives the test that started it
+for _ in range(1200):
+    if os.getppid() != parent:
+        break
     time.sleep(0.05)
 """
 
@@ -381,6 +425,18 @@ class TestMeasurement(unittest.TestCase):
         with open(self.state + ".setp") as f:
             return f.read().splitlines()
 
+    def measurement(self, dt, spec, ini=None, clock=None):
+        m = response.Measurement(dt, spec, ini, clock=clock)
+
+        def stop():
+            if m.proc is not None and m.proc.poll() is None:
+                m.proc.kill()
+                m.proc.wait(2)
+            if m.out is not None:
+                m.out.close()
+        self.addCleanup(stop)
+        return m
+
     def prepared(self):
         run = self.started()
         dt = drivetest.DriveTest(run, ECT60, None, {"scale": 100.0, "travel": 20.0})
@@ -391,8 +447,8 @@ class TestMeasurement(unittest.TestCase):
     def test_a_whole_measurement(self):
         dt = self.prepared()
         clock = Clock()
-        m = response.Measurement(dt, {"distance": 30.0, "velocity": 40.0, "acceleration": 400.0,
-                                      "repeats": 1, "dwell": 0.5}, {"joint": 0}, clock=clock)
+        m = self.measurement(dt, {"distance": 30.0, "velocity": 40.0, "acceleration": 400.0,
+                                  "repeats": 1, "dwell": 0.5}, {"joint": 0}, clock=clock)
         m.start()
         log = self.setp_log()
         # the drive is enabled where it stands, then the measurement's limits
@@ -439,7 +495,7 @@ class TestMeasurement(unittest.TestCase):
     def test_released_early(self):
         dt = self.prepared()
         clock = Clock()
-        m = response.Measurement(dt, {"distance": 5.0}, clock=clock)
+        m = self.measurement(dt, {"distance": 5.0}, clock=clock)
         m.start()
         self.set_fake_pin("x.stat-op-enabled", "TRUE")
         m.step()
@@ -455,7 +511,7 @@ class TestMeasurement(unittest.TestCase):
     def test_the_drive_stops_by_itself(self):
         dt = self.prepared()
         clock = Clock()
-        m = response.Measurement(dt, {"distance": 5.0}, clock=clock)
+        m = self.measurement(dt, {"distance": 5.0}, clock=clock)
         m.start()
         self.set_fake_pin("x.stat-op-enabled", "TRUE")
         m.step()
@@ -470,7 +526,7 @@ class TestMeasurement(unittest.TestCase):
     def test_the_drive_never_enables(self):
         dt = self.prepared()
         clock = Clock()
-        m = response.Measurement(dt, {"distance": 5.0}, clock=clock)
+        m = self.measurement(dt, {"distance": 5.0}, clock=clock)
         m.start()
         clock.t += 3.1
         self.assertEqual(m.step(), "draining")
@@ -536,6 +592,24 @@ class TestResponseCard(unittest.TestCase):
         self.assertIn("/somewhere/x.samples", card.saved.text())
         self.assertIs(card.last, rec)
         card.plot.grab()        # paints without an error
+        self.assertEqual(card.kinds, ["feedforward"])
+        # the drive's settings, what the result points at first
+        from ecatsetup import tuning
+        found = [tuning.Candidate(0x2009, 0, "Filter Time", "command-filter", "uint16", 25600,
+                                  0, 25600, 6400, "us", "a filter", from_quirk=True),
+                 tuning.Candidate(0x2026, 1, "PVIA_Kp", "position-loop", "uint16", 2000)]
+        found[1].applies = False
+        card.show_settings(found)
+        t = card.settings_table
+        self.assertFalse(t.isHidden())
+        self.assertEqual(t.rowCount(), 2)
+        self.assertEqual(t.item(0, 0).text(), "0x2009:00")
+        self.assertEqual(t.item(0, 2).text(), "25600 us")
+        self.assertIn("at the maximum of its range", t.item(0, 3).text())
+        self.assertIn("not used in the drive's present mode", t.item(1, 3).text())
+        self.assertFalse(card.settings_hint.isHidden())
+        card.show_settings([])
+        self.assertTrue(t.isHidden())
         # hidden without a prepared CSP drive
         card.show_drive(ECT60)
         self.assertTrue(card.isHidden())

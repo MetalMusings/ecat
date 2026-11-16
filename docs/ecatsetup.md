@@ -996,18 +996,29 @@ first part of tuning, the measuring.
   the previous measurement's following error in grey behind it, and these
   lines:
   - the peak following error, and its mean at constant speed each way;
-  - the error as *T* × velocity + *K* × acceleration + *c*. *T* is a time:
-    - the **transport delay**, the cycles from `pos-cmd` to the drive and
-      back to `pos-fb` (two with the automatic SYNC0 shift). It is measured
-      when `0x60F4` is recorded (LinuxCNC's error less the drive's is
-      `pos-cmd` now less `pos-cmd` that many cycles ago), else taken from
-      the turn-around. It is not an error at the motor, and no setting
-      removes it; `FERROR` has to allow for it;
-    - the rest is the **drive's own lag**, 1 / its effective position gain.
-      A drive without velocity feedforward lags by velocity / position
-      gain: 40 /s at 100 mm/s is 2.5 mm. Where this part is large, the
-      drive's feedforward or gain is what to look at (in the drive, not in
-      LinuxCNC: in CSP there is no PID in LinuxCNC);
+  - **What it points at**, first: the largest part of the following error
+    and the kind of setting in the drive that it comes from (a command
+    filter, the position loop, velocity feedforward, torque feedforward or
+    inertia, a gain too high), or that the drive follows within the bus's
+    delay and there is nothing in it to tune;
+  - the error as *T* × velocity + *K* × acceleration + *c*. *T* is a time,
+    made of:
+    - **the bus**: the cycles from `pos-cmd` to the drive and back to
+      `pos-fb`, the turn-around (two with the automatic SYNC0 shift). It is
+      not an error at the motor, and no setting removes it; `FERROR` has to
+      allow for it;
+    - **what the drive adds before its loop**: with `0x60F4` recorded, the
+      drive's own target (`pos-fb` + `0x60F4`) is compared with `pos-cmd`.
+      When it is further behind than the bus, the drive delays or smooths
+      the command: a command filter. In CSP LinuxCNC's path is already
+      smooth, so such a filter can mostly be small. (The ECT60's `0x2009`
+      "Filter Time" stood at its maximum, 25.6 ms, on a plasma cutter: 15 of
+      its 17 ms of lag.)
+    - **the drive's position loop**: `0x60F4` per velocity, 1 / its
+      effective position gain. A drive without velocity feedforward lags by
+      velocity / position gain: 40 /s at 100 mm/s is 2.5 mm. In CSP there is
+      no PID in LinuxCNC: the gains and feedforward are the drive's.
+    - Without `0x60F4` the drive's two parts are given together;
   - at each stop, the overshoot and the time until the position stays
     within a band (3 counts, at least 0.002 mm);
   - the torque at constant speed (friction) and per acceleration, when
@@ -1019,6 +1030,19 @@ first part of tuning, the measuring.
   - `FERROR` and `MIN_FERROR` for LinuxCNC: twice the error the result
     predicts at the joint's `MAX_VELOCITY` and `MAX_ACCELERATION` (from the
     INI file, when the drive is a joint), else at the test's own.
+- **Look for settings in the drive** lists the drive's settings that may
+  explain the result, what it points at first: those its quirk file names
+  (`tuning:`, with their range, factory value and what was found on a
+  machine), then those whose names in the drive's own dictionary suggest a
+  filter, a gain, feedforward, inertia or a notch (input filters, the
+  current loop, alarms and commands are left out), with their present
+  values. A value at the end of its range is marked, and so is one that
+  belongs to a mode the drive is not in. Nothing is written: try one at a
+  time in the SDO card (RAM until the drive is switched off), measure
+  again, and put one that helps in the slave's Settings, which ecat writes
+  at every start. This is how a drive nobody has tuned here yet can be
+  looked at without its manual; the measurement before and after decides,
+  not the name.
 - **Make the move long enough**: the drive's lag settles only after a few
   of its time constants at constant speed. The card says when constant
   speed lasted less than five times the lag; use a longer distance or a
@@ -1977,6 +2001,14 @@ limits:                    # where the drive test finds a limit
   following-error: {object: '0x2022:00', type: uint32}
   travel: why the drive's own object is not used
 
+tuning:                    # settings the Response card's search shows first
+  '0x2009:00': {kind: command-filter, type: UINT, unit: us, min: 0, max: 25600, factory: 6400,
+                note: what it does, tried: what it gave on a machine}
+  '0x2023:04': {kind: feedforward, type: UINT, when: {object: '0x2011:00', values: [1]}}
+
+measure:
+  ignore: {'0x6077': why the response measurement does not record it}
+
 hal:                       # HAL lines for each matching slave
   load: {edge: ['{name}-enable-edge']}
   addf: ['{name}-enable-edge']
@@ -2003,6 +2035,8 @@ serves the import alone.
 | `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [file format](component.md#the-configuration-file); or `split`, a list of bit pin names from bit 0 (`null` for a bit without a pin) for an object that holds several bits. Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. *Save as quirk file* keeps bit pins too. |
 | `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [file format](component.md#the-configuration-file). |
 | `commands` | Per object index: why it is a command. The test mode does not write it. |
+| `tuning` | Per object: `kind` (`command-filter`, `position-loop`, `feedforward`, `torque`, `gain-high`, `other`) and `type`, and optionally `unit`, `min`, `max`, `factory`, `note`, `tried` (what it gave on a machine), and `when` (`object` and `values`: it is used only in that mode of the drive). Shown by *Look for settings in the drive* ([Measuring a drive's response](#measuring-a-drives-response)). |
+| `measure` | `ignore`: per object index, why the response measurement does not record it (a drive's object that does not mean what the standard says). |
 | `limits` | For the drive test: `following-error`, `max-torque`, `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), or `travel` and the others as a text saying why the drive's own object is not used. |
 | `hal` | `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
 | `lcec.types` | lcec type names (`type=` in the XML) that `modparams` and `settings` apply to. |
@@ -2048,7 +2082,9 @@ first axis; for later axes their indexes move by 0x800 as the other objects do.
 
 - `rtelligent-ect60.yaml`: `0x2010` is a command (Zero Position); the
   drive test's following error is `0x2022`; the ECT60 ignores `0x607D` in
-  CSP; lcec's `0x2010` sdoConfig becomes `cia402.zero-at-start`.
+  CSP; lcec's `0x2010` sdoConfig becomes `cia402.zero-at-start`; its
+  tuning settings (`0x2009` the command filter, `0x2023` servo mode 1,
+  `0x2026` FOC); its `0x6077` is not recorded (it does not report torque).
 - `beckhoff-el7041.yaml`: pin names and the velocity scale; HAL lines
   that reset an error when `enable` comes on again (as lcec's driver did);
   lcec's modParams. See [stepper terminals](component.md#stepper-and-dc-motor-terminals).

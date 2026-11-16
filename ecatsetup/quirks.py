@@ -18,7 +18,10 @@ import yaml
 from . import config
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
-KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec", "homing"}
+KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec", "homing",
+        "tuning", "measure"}
+# what a tuning entry is about (response.KINDS)
+TUNING_KINDS = {"command-filter", "position-loop", "feedforward", "torque", "gain-high", "other"}
 
 
 def user_dir():
@@ -115,6 +118,31 @@ def parse(data, path="<quirk>"):
     homing = data.get("homing")
     if homing is not None:
         q["homing"] = _homing(homing)
+    tuning = []
+    for k, v in (data.get("tuning") or {}).items():
+        index, sub = _obj(k)
+        if not isinstance(v, dict) or v.get("kind") not in TUNING_KINDS or "type" not in v:
+            raise QuirkError("tuning.%s needs a kind (%s) and a type"
+                             % (k, ", ".join(sorted(TUNING_KINDS))))
+        t = {"index": index, "subindex": sub or 0, "kind": v["kind"], "type": str(v["type"])}
+        for key in ("unit", "note", "tried"):
+            if v.get(key) is not None:
+                t[key] = str(v[key])
+        for key in ("min", "max", "factory"):
+            if v.get(key) is not None:
+                t[key] = int(v[key])
+        when = v.get("when")
+        if when is not None:
+            if not isinstance(when, dict) or "object" not in when or "values" not in when:
+                raise QuirkError("tuning.%s: when needs object and values" % k)
+            wi, ws = _obj(when["object"])
+            t["when"] = (wi, ws or 0, [int(x) for x in when["values"]], str(when.get("type", "uint16")))
+        tuning.append(t)
+    q["tuning"] = tuning
+    measure = data.get("measure") or {}
+    if not isinstance(measure, dict):
+        raise QuirkError("measure needs a mapping (ignore: {object: why})")
+    q["measure-ignore"] = {_obj(k)[0]: str(v) for k, v in (measure.get("ignore") or {}).items()}
     lcec = data.get("lcec") or {}
     q["lcec"] = {"types": [str(t) for t in lcec.get("types") or []],
                  "sdo": {}, "modparams": {}, "settings": []}
@@ -213,6 +241,17 @@ def limits(slave):
     """{limit: (index, subindex, tool type), or why the drive's object is
     not used} for the drive test."""
     return of(slave).get("limits", {})
+
+
+def tuning(slave):
+    """[{"index", "subindex", "kind", "type", "unit", "min", "max", "factory",
+    "note", "tried", "when"}]: the drive's settings that tuning looks at."""
+    return of(slave).get("tuning", [])
+
+
+def measure_ignore(slave):
+    """{object index: why}: objects the response measurement does not record."""
+    return of(slave).get("measure-ignore", {})
 
 
 def pins(key):

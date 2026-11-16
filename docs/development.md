@@ -1641,11 +1641,40 @@ acceleration. The plan, agreed with the user:
   overshoots): transport 2 and 3 cycles found, drive lag 1/Kp within 1.5 ms
   for Kp 40 when the move is long enough (a 10 mm move at 50 mm/s gives 23.4
   instead of 25 ms, and the card says the move was short). Mutation-checked.
-- **Not tried on a drive yet.** First, with the user at the machine: X of the
-  plasma cutter (ECT60, servo mode 1, `0x2023:01` Kp 4000, `0x2023:04` Kvff
-  30), with `0x60F4` added to its inputs (`TxPdo Fixed="0"` in the ECT60 ESI).
-  Then one change by hand, `Kvff` 30 -> 60, to see whether part 2 is worth
-  building.
+
+### Tried on the plasma cutter (2026-11-16, with the user)
+
+Copy `~/linuxcnc/configs/QtPlasma-ecat402-210-tune` (1 ms; `0x60F4` added to X's
+inputs from the card; `0x6077` mapped as the 16 bits the drive has, it was 32 in the
+older copies). X and Y, ECT60 in servo mode 1 (Kp 4000, Kvff 30):
+
+| | `0x2009` | lag | at constant speed | drive's target behind `pos-cmd` | drive's own error (`0x60F4`) |
+|---|---|---|---|---|---|
+| X, 20 mm/s | 25600 us | 17.3 ms | 0.37 mm | 17 cycles | 0.04 mm |
+| X, 20 mm/s | 6400 us | 7.7 ms | 0.19 mm | 7 cycles | 0.04 mm |
+| X, 20 mm/s | 2000 us | 5.5 ms | 0.14 mm | 5 cycles | 0.04 mm |
+| X, 100 mm/s | 2000 us | 4.6 ms | 0.48 mm | 4 cycles | 0.07 mm |
+| Y, 100 mm/s | 25600 us | 16.4 ms | 1.65 mm | (no `0x60F4`) | |
+| Y, 100 mm/s | 2000 us | 4.7 ms | 0.49 mm | | |
+
+The drives' position loop was never the problem (0.04-0.07 mm): their command filter
+`0x2009` "Filter Time" (a sliding average, factory 6400 us) stood at its maximum,
+25600 us, in all three drives' EEPROM, and delays by about half its time. The
+first analysis called the whole delay "transport"; it now compares the drive's own
+target (`pos-fb` + `0x60F4`) with `pos-cmd` and the bus's turn-around, and says
+what the parts point at (`response.diagnose()`). `0x2009` = 2000 is a setting of X,
+Y, Z in the user's `QtPlasma` configuration (not in the drives' EEPROM, the user's
+choice); the user heard no difference. The ECT60's `0x6077` reads a constant
+(-1998 on X, 0 on Y and Z): its quirk file now leaves it out of the measurement.
+Y's `0x2023:02` (Ki) reads 0 (factory 100); X shows a constant +0.03 mm both ways:
+not tried yet.
+
+How it was found, which the window now does (`tuning.py`): the drive's own error
+small but the lag large, so the delay is before its loop; its target 15 cycles
+later than the bus explains; the drive's dictionary has `0x2009 "Filter Time"` at
+the end of its range. *Look for settings in the drive* lists such settings (quirk
+file `tuning:` first, then by name), what the diagnosis points at first; one
+change and a measurement before and after decides.
 
 ## EoE
 

@@ -39,7 +39,8 @@ from PyQt5.QtWidgets import (
 
 from . import (config, dcinfo, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
                integrate, lcnc_env, masterstart, measured,
-               netif, pindocs, propose, quirks, response, settings, symptoms, tasks, testmode, tool, update, wiring)
+               netif, pindocs, propose, quirks, response, settings, symptoms, tasks, testmode, tool, tuning,
+               update, wiring)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -3533,6 +3534,32 @@ class ResponseCard(Card):
         self.saved = label("", "hint", wrap=True)
         self.saved.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.add(self.saved)
+        # the drive's settings that may explain the result (tuning.py)
+        row = QHBoxLayout()
+        self.look = QPushButton("Look for settings in the drive")
+        self.look.setToolTip("Reads the drive's settings its quirk file names and those whose names "
+                             "suggest a filter, a gain or feedforward; what the measurement points "
+                             "at comes first. Nothing is written.")
+        self.look.clicked.connect(self.look_for_settings)
+        row.addWidget(self.look)
+        row.addStretch(1)
+        self.add(row)
+        self.settings_table = QTableWidget(0, 4)
+        self.settings_table.setHorizontalHeaderLabels(["Object", "Name", "Now", "Why look at it"])
+        self.settings_table.verticalHeader().hide()
+        self.settings_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.settings_table.horizontalHeader().setStretchLastSection(True)
+        self.settings_table.setWordWrap(True)
+        self.settings_table.hide()
+        self.add(self.settings_table)
+        self.settings_hint = label("Try one at a time: write it in the SDO card on this page (the "
+                                   "drive keeps it in RAM until it is switched off), then measure "
+                                   "again; the last measurement stays grey in the plot. One that "
+                                   "helps belongs in the slave's Settings, which ecat writes at "
+                                   "every start.", "hint", wrap=True)
+        self.settings_hint.hide()
+        self.add(self.settings_hint)
+        self.kinds = []         # what the last result points at, most first
 
     def drive(self):
         return self.win.test_page.move.test()
@@ -3549,6 +3576,10 @@ class ResponseCard(Card):
             self.plot.show_recording(None)
             self.result.setText("")
             self.saved.setText("")
+            self.kinds = []
+            self.settings_table.setRowCount(0)
+            self.settings_table.hide()
+            self.settings_hint.hide()
         have = response.measure_entries(slave, dt.axis)
         missing = response.missing_objects(slave, self.win.session.dictionary(slave["position"]),
                                            dt.axis)
@@ -3589,6 +3620,50 @@ class ResponseCard(Card):
         self.win.status("Added %s to %s's inputs; save, then stop and start the test to record them"
                         % (", ".join(e["object"] for e in added), s.get("name")))
         self.show_drive(s)
+
+    def look_for_settings(self):
+        dt = self.drive()
+        if dt is None or (self.measurement is not None and self.measurement.active):
+            return
+        s, pos = dt.slave, dt.slave["position"]
+        d = self.win.session.dictionary(pos)
+        kinds = self.kinds or list(response.KINDS)
+
+        def read(index, sub, ttype):
+            try:
+                return tool.upload(pos, index, sub, ttype)
+            except (tool.ToolError, OSError):
+                return None
+
+        def work(progress):
+            progress("Reading %s's settings..." % s.get("name"))
+            return tuning.candidates(s, d, read, kinds)
+        self.win.run("Reading the drive's settings...", work, self.show_settings)
+
+    def show_settings(self, found):
+        t = self.settings_table
+        t.setRowCount(0)
+        for c in found:
+            r = t.rowCount()
+            t.insertRow(r)
+            now = "?" if c.value is None else ("%d %s" % (c.value, c.unit)).strip()
+            for col, text in enumerate((c.obj, c.name, now, c.why() or response.KINDS.get(c.kind, ""))):
+                item = QTableWidgetItem(text)
+                if col == 3:
+                    item.setToolTip(response.KINDS.get(c.kind, c.kind))
+                if c.edge or (c.kind in self.kinds[:1] and c.from_quirk):
+                    item.setForeground(AMBER)
+                if not c.applies:
+                    item.setForeground(GREY)
+                t.setItem(r, col, item)
+        t.resizeColumnsToContents()
+        t.setColumnWidth(1, min(t.columnWidth(1), 280))
+        t.resizeRowsToContents()
+        t.setMinimumHeight(min(60 + 28 * len(found), 420))
+        t.setVisible(bool(found))
+        self.settings_hint.setVisible(bool(found))
+        if not found:
+            self.win.status("No settings found that look like a filter, a gain or feedforward")
 
     def start(self):
         dt = self.drive()
@@ -3642,6 +3717,7 @@ class ResponseCard(Card):
             self.progress.setText("Nothing was recorded%s" % (": %s" % m.ended if m.ended else ""))
             return
         res = response.analyse(rec)
+        self.kinds = [k for k, _t in res.findings if k in response.KINDS]
         self.progress.setText("Done%s" % (" (ended early: %s)" % m.ended if m.ended else
                                           ": you may release the button"))
         self.plot.show_recording(rec, self.last)
