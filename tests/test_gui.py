@@ -1490,6 +1490,7 @@ class TestCards(unittest.TestCase):
         rows = gui.sync_rows({"slaves": [{"name": "io"}]}, pins.get, [], 1000000)
         self.assertEqual([r[0] for r in rows], [True, None])
 
+    @unittest.skipIf(gui is None, "PyQt5 is not installed")
     def test_sync_rows_pll_and_room(self):
         pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
                 "pll-err": "281", "shift-time": "80000", "turnaround-cycles": "2",
@@ -1522,6 +1523,7 @@ class TestCards(unittest.TestCase):
         self.assertEqual(gui.room_for_two(125000, offs, 50000, 50000), -18000)
         self.assertEqual(gui.room_for_two(1000000, [50000, 80000], 50000, 50000), 870000)
 
+    @unittest.skipIf(gui is None, "PyQt5 is not installed")
     def test_sync_rows_measured_and_irq(self):
         pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
                 "pll-err": "0", "shift-time": "80000", "turnaround-cycles": "2"}
@@ -1540,6 +1542,7 @@ class TestCards(unittest.TestCase):
         rows = gui.sync_rows(cfg, pins.get, [], 125000, irq=(False, "NIC interrupts elsewhere"))
         self.assertIn((False, "NIC interrupts elsewhere"), rows)
 
+    @unittest.skipIf(gui is None, "PyQt5 is not installed")
     def test_irq_row(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
