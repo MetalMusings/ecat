@@ -203,7 +203,10 @@ per cycle. The pins `ecat.0.shift-time` (the shift in use) and
 `ecat.0.turnaround-cycles` (0 while measuring, then 2 or 3) show the
 result; the parameters `ecat.0.auto-shift-margin` (time between a frame
 and SYNC0) and `ecat.0.auto-shift-input-margin` (time from SYNC0 until
-the inputs are ready) are 50000 ns by default. This is the same code as
+the inputs are ready) are 50000 ns by default, and a sixth of the servo
+period when that is less (20833 ns at 125 us: with 50 us each, a 125 us period had 25 us
+left for the spread of the frames' send time, and one late frame put SYNC0 in the
+three-cycle position). This is the same code as
 lcec's `globalShiftTime="auto"` (see linuxcnc-ethercat's
 `documentation/distributed-clocks.md`). The cia402 profile counts on two cycles
 (see [the cia402 profile](#the-cia402-profile)); three is reported as an error.

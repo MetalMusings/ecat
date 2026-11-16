@@ -84,6 +84,7 @@ static void test_autoshift_three_cycles_when_two_do_not_fit(void) {
   // 250 us with a slow input: two cycles need 210 .. 200 us (empty),
   // three fit at -40 .. 0 us: the middle, -20 us, is 230 us
   lcec_autoshift_init(&a, 250000, 125000);
+  a.margin = 50000;  // these windows are worked out for 50 us
   a.input_margin = 100000;
   measure(&a, 250000, 50000, 160000);
   CHECK_EQ(a.state, LCEC_AUTOSHIFT_THREE);
@@ -93,6 +94,7 @@ static void test_autoshift_three_cycles_when_two_do_not_fit(void) {
 
   // just within the window for two
   lcec_autoshift_init(&a, 250000, 125000);
+  a.margin = 50000;  // these windows are worked out for 50 us
   a.input_margin = 100000;
   measure(&a, 250000, 50000, 150000);
   CHECK_EQ(a.state, LCEC_AUTOSHIFT_TWO);
@@ -162,6 +164,7 @@ static void test_autoshift_two_to_three(void) {
 
   // 250 us with a slow input: two cycles at 150 .. 200 us
   lcec_autoshift_init(&a, 250000, 125000);
+  a.margin = 50000;  // these windows are worked out for 50 us
   a.input_margin = 100000;
   measure(&a, 250000, 50000, 100000);
   CHECK_EQ(a.state, LCEC_AUTOSHIFT_TWO);
@@ -195,6 +198,7 @@ static void test_autoshift_keeps_half_the_margins(void) {
   // leaves them 90 us, more than half: kept
   lcec_autoshift_init(&a, 1000000, 500000);
   measure(&a, 1000000, 400000, 420000);
+  a.margin = 50000;  // these windows are worked out for 50 us
   a.input_margin = 100000;
   CHECK_EQ(feed(&a, 1, early, 1, 1), 0);
   CHECK_EQ((int)a.shift, 910000);
@@ -202,6 +206,7 @@ static void test_autoshift_keeps_half_the_margins(void) {
   // three cycles at -20 us (-40 .. 0 us): frames at 185 and 25 us leave
   // SYNC0 inside the window widened by half the margin
   lcec_autoshift_init(&a, 250000, 125000);
+  a.margin = 50000;  // these windows are worked out for 50 us
   a.input_margin = 100000;
   measure(&a, 250000, 50000, 160000);
   CHECK_EQ(a.state, LCEC_AUTOSHIFT_THREE);
@@ -211,4 +216,32 @@ static void test_autoshift_keeps_half_the_margins(void) {
 
 }
 
-RUN_TESTS("autoshift", test_autoshift_waits_for_the_bus, test_autoshift_two_cycles_in_the_middle, test_autoshift_wraps_into_the_period, test_autoshift_three_cycles_when_two_do_not_fit, test_autoshift_nothing_fits, test_autoshift_follows_later_frames, test_autoshift_input_side, test_autoshift_two_to_three, test_autoshift_keeps_half_the_margins)
+static void test_autoshift_margins_follow_a_short_period(void) {
+  lcec_autoshift_t a;
+  int32_t offs[] = {8000, 30000, 51000};
+
+  CHECK_EQ((int)lcec_autoshift_default_margin(1000000), 50000);
+  CHECK_EQ((int)lcec_autoshift_default_margin(300000), 50000);  // as it was from here up
+  CHECK_EQ((int)lcec_autoshift_default_margin(250000), 41666);
+  CHECK_EQ((int)lcec_autoshift_default_margin(125000), 20833);
+  CHECK_EQ((int)lcec_autoshift_default_margin(100000), 16666);
+  lcec_autoshift_init(&a, 125000, 70000);
+  CHECK_EQ((int)a.margin, 20833);
+  CHECK_EQ((int)a.input_margin, 20833);
+  lcec_autoshift_init(&a, 1000000, 500000);
+  CHECK_EQ((int)a.margin, 50000);
+  // 125 us, frames 8..51 us (a spread of 43 us, as seen at 06:37 on the plasma bus):
+  // two cycles fit with the margins of 20.8 us ...
+  lcec_autoshift_init(&a, 125000, 70000);
+  feed(&a, 1, offs, 3, (int)(LCEC_AUTOSHIFT_MEASURE_NS / 125000) + 1);
+  CHECK_EQ(a.state, LCEC_AUTOSHIFT_TWO);
+  CHECK_EQ(a.fits, 1);
+  CHECK_EQ((int)a.shift, 92000);  // the middle of 71.8 .. 112.2 us (the shift the plasma bus got at 06:37)
+  // ... and did not with the old 50 us margins
+  lcec_autoshift_init(&a, 125000, 70000);
+  a.margin = a.input_margin = 50000;
+  feed(&a, 1, offs, 3, (int)(LCEC_AUTOSHIFT_MEASURE_NS / 125000) + 1);
+  CHECK_EQ(a.state, LCEC_AUTOSHIFT_THREE);
+}
+
+RUN_TESTS("autoshift", test_autoshift_waits_for_the_bus, test_autoshift_two_cycles_in_the_middle, test_autoshift_wraps_into_the_period, test_autoshift_three_cycles_when_two_do_not_fit, test_autoshift_nothing_fits, test_autoshift_follows_later_frames, test_autoshift_input_side, test_autoshift_two_to_three, test_autoshift_keeps_half_the_margins, test_autoshift_margins_follow_a_short_period)

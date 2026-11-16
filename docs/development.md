@@ -1535,6 +1535,14 @@ the 250 us run.
   counts on two cycles from output to status (`STATUS_CYCLES`), and nothing went wrong in the
   minutes that followed, but at this period the window for two cycles is narrow: the frame
   (about 160 bytes through four slaves) and the PLL's jitter use a good part of 125 us.
+- **125 us again, with the auto-shift margins a sixth of the period** (20.8 us instead of 50 us;
+  `lcec_autoshift_default_margin()`, unit test `test_autoshift_margins_follow_a_short_period`,
+  from 300 us up unchanged): the same 10 minutes under load, the machine on, jogs and a cut.
+  SYNC0 shift 80 us at the start, turn-around 2 cycles to the end (the shift was not chosen
+  again), no lost cycle after the start-up burst, the servo thread 63 us at most, PLL error
+  within 8 us, the largest following error 6.5 mm. The run before had gone to three cycles after
+  6.4 minutes with the old margins; one run each, so this does not prove that the margins were
+  the whole cause.
 - **100 us in LinuxCNC** (2026-11-16, the user): the first ECT60 refused SAFEOP, AL status 0x0036
   "DC Sync0 Cycle Time", so the bus never reached OP and LinuxCNC showed "amplifier fault" on
   all joints. The drive does not accept a SYNC0 cycle of 100 us (125 us and up were accepted).

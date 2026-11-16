@@ -961,8 +961,8 @@ static void ecat_config_dc(lcec_master_t *master) {
   hal_set_uint(master->hal_data->pll_max_err, master->app_time_period);
   // set default DC_PHASE_MAX_ERR: 10% of period
   hal_set_uint(master->hal_data->dc_phase_max_err, master->app_time_period / 10);
-  hal_set_uint(master->hal_data->auto_shift_margin, LCEC_AUTOSHIFT_MARGIN_DEFAULT);
-  hal_set_uint(master->hal_data->auto_shift_input_margin, LCEC_AUTOSHIFT_INPUT_MARGIN_DEFAULT);
+  hal_set_uint(master->hal_data->auto_shift_margin, lcec_autoshift_default_margin(master->app_time_period));
+  hal_set_uint(master->hal_data->auto_shift_input_margin, lcec_autoshift_default_margin(master->app_time_period));
   hal_set_uint(master->hal_data->shift_time, master->global_shift_time);
   if (master->auto_shift) {
     lcec_autoshift_init(&master->autoshift, master->app_time_period, master->global_shift_time);

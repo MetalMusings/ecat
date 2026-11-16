@@ -59,6 +59,17 @@ extern "C" {
 #define LCEC_AUTOSHIFT_MARGIN_DEFAULT 50000         ///< ns between a frame and SYNC0
 #define LCEC_AUTOSHIFT_INPUT_MARGIN_DEFAULT 50000   ///< ns from SYNC0 until the inputs are ready
 #define LCEC_AUTOSHIFT_MEASURE_NS 2000000000LL      ///< time to measure before the first choice
+#define LCEC_AUTOSHIFT_MARGIN_FRACTION 6            ///< at short periods the margins are period / this
+
+/// The margins the choice starts from for a servo period: 50 us, and no more
+/// than a sixth of the period. Both margins together took 100 us of a 125 us
+/// period, leaving 25 us for the spread of the frames' send time; a single late
+/// frame then put SYNC0 in the three-cycle position (a Rtelligent ECT60 bus,
+/// docs/development.md "The servo period"). From 300 us up it is 50 us as it was.
+static inline int64_t lcec_autoshift_default_margin(int64_t period) {
+  int64_t m = period / LCEC_AUTOSHIFT_MARGIN_FRACTION;
+  return m < LCEC_AUTOSHIFT_MARGIN_DEFAULT ? m : LCEC_AUTOSHIFT_MARGIN_DEFAULT;
+}
 
 /// States, also the value of the turnaround-cycles pin.
 enum {

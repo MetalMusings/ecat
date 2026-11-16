@@ -23,8 +23,8 @@
 
 void lcec_autoshift_init(lcec_autoshift_t *a, uint32_t period, uint32_t shift) {
   a->period = period;
-  a->margin = LCEC_AUTOSHIFT_MARGIN_DEFAULT;
-  a->input_margin = LCEC_AUTOSHIFT_INPUT_MARGIN_DEFAULT;
+  a->margin = lcec_autoshift_default_margin(period);
+  a->input_margin = lcec_autoshift_default_margin(period);
   a->send_min = 0;
   a->send_max = 0;
   a->measured = 0;
