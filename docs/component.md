@@ -1578,7 +1578,9 @@ or `and2` (HAL loads a component once).
 - Tried on one slave, an EaserCAT 3000 with SOES and lwIP, without motion
   ([development.md](development.md#eoe)): ping, a web page and SDO reads
   while the bus was in OP, about 0.5 Mbit/s each way at 1 ms, no change in
-  the servo thread's jitter. Not tried in LinuxCNC, nor on a bought device.
+  the servo thread's jitter; then in LinuxCNC with traffic while the machine
+  homed and jogged. Not tried on a bought device, nor with two EoE slaves.
+  A step-by-step guide: [ecatsetup.md](ecatsetup.md#a-devices-web-page-over-eoe).
 
 ## Modular devices
 

@@ -21,8 +21,10 @@ Contents:
 
 - [The window](#the-window): a tour of the five tabs;
 - [Bringing up a new slave](#bringing-up-a-new-slave): where a proposal
-  comes from, ESI files, [a spindle encoder](#a-spindle-encoder-el5101),
-  synchronisation;
+  comes from, ESI files, how-tos for [a spindle
+  encoder](#a-spindle-encoder-el5101), [a Modbus VFD on a serial
+  terminal](#a-modbus-vfd-on-a-serial-terminal-el6021) and [a device's web
+  page over EoE](#a-devices-web-page-over-eoe), synchronisation;
 - [Troubleshooting a slave](#troubleshooting-a-slave): five questions, and
   the steps to answer them;
 - [Test mode](#test-mode): I/O, SDOs, moving a drive, homing;
@@ -412,9 +414,9 @@ instead of a USB-RS485 adapter. The terminal's channel becomes a serial
 port on the computer, `/dev/ttyECAT4` for instance, and `mb2hal` uses it as
 it would use `/dev/ttyUSB0`. The same goes for the EL6001 (RS232) and the
 two-channel EL6002 and EL6022. Status: built from Beckhoff's manual and ESI
-files, tested against a simulated terminal with `mb2hal` in `halrun`
-(`scripts/serial-mb2hal-test`); not tried on a real terminal yet (see
-[serial channels](component.md#serial-channels)).
+files; tried with `mb2hal` over a real wire against a slave of our own made
+to behave as an EL6021 (2400 to 115200 baud, in `halrun`), not on a real
+terminal yet (see [serial channels](component.md#serial-channels)).
 
 What you need from the VFD's manual: its Modbus address (slave id), baud
 rate, parity and stop bits, and the registers for run/stop, the speed
@@ -505,6 +507,83 @@ command and what you want to read back.
 If you have a serial terminal, [a capture of the bus](#a-capture-of-the-bus)
 while `mb2hal` talks to the VFD helps to make the channel right for
 everyone (it has not met a real terminal yet).
+
+### A device's web page over EoE
+
+How to reach the built-in web page (or another network service) of a
+drive, an I/O module or a gateway through the EtherCAT cable, with no
+second cable to it: Ethernet over EtherCAT (EoE). The slave gets an IP
+address, the computer a network device of its own for that slave, and a
+browser on the computer opens `http://<the slave's address>/` while
+LinuxCNC runs. Status: tried on one slave of our own (an EaserCAT 3000
+with a small web server), in halrun and in LinuxCNC with the machine
+moving ([development.md](development.md#eoe)); not on a bought device.
+The reference is [eoe](component.md#eoe).
+
+What you need: a slave that speaks EoE (its manual says so, and the
+slave's page in the window then has the *Network (EoE)* card), and the
+master package 1.4 or later.
+
+1. **Read the bus** and open the slave's page. No *Network (EoE)* card:
+   the slave's SII does not list EoE, and it has none (or needs another
+   firmware or setting to have it: its manual).
+2. **Tick *Give the slave an IP address*.** The card fills in a subnet
+   that nothing else uses: the slave `192.168.10.2/24`, the computer
+   `192.168.10.1`. Keep them unless the device insists on an address of
+   its own (some have a fixed one, or take it only from their own
+   settings: then give the card that address and prefix, and the
+   computer another address in the same subnet).
+   - The subnet must not be one the computer already is in (your
+     ordinary network, often `192.168.1.x` or `192.168.0.x`): the card
+     warns.
+   - *Gateway*, *DNS server*, *Host name* and *MAC address* can stay
+     empty for a web page.
+3. **Save**, and write into LinuxCNC (*Apply*) as for any slave.
+4. **Start LinuxCNC** (or the *Test* page's I/O test, which loads `ecat`
+   too). When the bus is in OP, try it from a terminal on the same
+   computer (the card names both):
+
+   ```
+   ping 192.168.10.2
+   ```
+
+   and then the browser: `http://192.168.10.2/`. Use `http://`, not
+   `https://`, and no proxy for that address.
+
+**Several slaves.** Each EoE slave has its own card, its own network
+device on the computer (`eoe0s<position>`) and must have its own subnet:
+`192.168.10.x` for the first, `192.168.11.x` for the next. The card
+proposes the next free one; two slaves in one subnet are an error in the
+check, since the computer would reach only one of them. (Two EoE slaves on
+one bus have not been tried.)
+
+**Speed.** About 0.5 Mbit/s each way for a slave at a 1 ms servo period
+(one mailbox of data per cycle): fine for a settings page, slow for a
+firmware file. It does not disturb the servo cycle: the traffic rides in
+the cyclic frames, and the servo thread's jitter was unchanged in the
+tests.
+
+**When LinuxCNC is not running** the address is gone: the network device
+is made anew whenever the bus is taken over or scanned, and only `ecat`
+knows the file. With the master started but nothing loaded, set it by
+hand (`sudo ip addr add 192.168.10.1/24 dev eoe0s4; sudo ip link set
+eoe0s4 up`), or use the I/O test.
+
+**From another computer.** Nothing is routed: only the computer on the
+bus reaches the slave. The simple way from elsewhere is an SSH tunnel,
+`ssh -L 8080:192.168.10.2:80 <the LinuxCNC computer>`, then
+`http://localhost:8080/`. A bridge to your network would put the
+machine's bus on it: do not.
+
+If it does not work:
+
+| What you see | Look at |
+|---|---|
+| no *Network (EoE)* card | the slave has no EoE (step 1) |
+| `ping`: "Network is unreachable", or `ip addr show eoe0s4` has no address | LinuxCNC or the test is not running, the *computer's address* field is empty, or the master package is older than 1.4 (`ecat` then prints "this master cannot set eoe.host-ip" at start) |
+| `ping`: no answer, the device has the address | the slave did not take the address (*Slave status*, "Messages from the master": a set-IP error), has a fixed address of its own, or the subnet is also the computer's ordinary network (`ip route`) |
+| `ping` answers, the browser does not | `http://` and port (the device's manual), a proxy setting in the browser |
+| the master's log says "No EoE processing because of missing callbacks!" | the master package is 1.3 or older |
 
 ### Distributed clocks
 
