@@ -320,11 +320,19 @@ class TestTestMode(unittest.TestCase):
         self.assertIn("net ecatjog0-load ecatnot0.out => ecatjog0.load", lines)
         self.assertIn("setp ecatjog0.maxv 0", lines)
         self.assertIn("setp x.watchdog-ms %d" % testmode.WATCHDOG_MS, lines)
-        # the jog runs between reading and writing the bus
+        # the jog runs between reading and writing the bus, and the response
+        # sampler after it, so that it sees this cycle's pos-cmd
         order = [l for l in lines if l.startswith("addf")]
         self.assertEqual(order, ["addf ecat.read-all servo-thread", "addf ecatsel0 servo-thread",
                                  "addf ecatnot0 servo-thread", "addf ecatjog0 servo-thread",
+                                 "addf sampler.0 servo-thread",
                                  "addf ecat.write-all servo-thread"])
+        self.assertIn("loadrt sampler depth=16384 cfg=ffb", lines)
+        self.assertIn("net ecatjog0-cmd => sampler.0.pin.0", lines)
+        self.assertIn("net ecatjog0-fb => sampler.0.pin.1", lines)
+        self.assertIn("net ecatjog0-enabled => sampler.0.pin.2", lines)
+        # disabled until a measurement
+        self.assertIn("setp sampler.0.enable 0", lines)
 
     def test_heartbeat(self):
         run = self.started()

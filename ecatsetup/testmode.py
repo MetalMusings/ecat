@@ -157,12 +157,14 @@ def hal_file(cfg, cfg_path, period):
     lines = ["# Written by EtherCAT Setup for its test mode.",
              "loadrt ecat config=%s" % cfg_path,
              "loadrt threads name1=servo-thread period1=%d" % period]
+    from . import response
     drives = csp_drives(cfg)
+    s_load, s_addf, s_nets = response.sampler_hal(cfg)
     if drives:
         jogs, sels, nots = zip(*(jog_names(i) for i in range(len(drives))))
         lines += ["loadrt limit3 names=%s" % ",".join(jogs),
                   "loadrt mux2 names=%s" % ",".join(sels),
-                  "loadrt not names=%s" % ",".join(nots)]
+                  "loadrt not names=%s" % ",".join(nots)] + s_load
     lines.append("addf ecat.read-all servo-thread")
     for i, name in enumerate(drives):
         jog, sel, not_ = jog_names(i)
@@ -175,6 +177,8 @@ def hal_file(cfg, cfg_path, period):
             "net %s-cmd %s.out => %s.pos-cmd" % (jog, jog, name),
             # until the drive test sets it: no motion at all
             "setp %s.maxv 0" % jog]
+    # the response measurement's samplers (response.py): after pos-cmd is made
+    lines += s_addf + s_nets
     for s in cfg.get("slaves") or []:
         for a in config.axes(s):
             lines.append("setp %s.watchdog-ms %d" % (a, WATCHDOG_MS))

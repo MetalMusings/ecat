@@ -964,6 +964,70 @@ started), the following error (CSP: the command less the feedback) and
 the velocity (PP and PV: the position and the velocity). It is drawn from
 the pins, every 200 ms.
 
+#### Measuring a drive's response
+
+The *Response* card (CSP drives, once *Write limits to the drive* is done)
+moves the drive out and back with a chosen distance, velocity and
+acceleration, and records every servo cycle. It says what LinuxCNC's
+following error is made of. Nothing in the drive is changed: this is the
+first part of tuning, the measuring.
+
+- **Hold *Measure (hold)*** for the whole move (the card says about how
+  long). The drive is enabled where it stands, waits 0.3 s, then moves out
+  by the distance and back, *Back and forth* times, with the dwell at
+  each end. Releasing the button stops it at once; what was recorded is
+  still shown, marked as ended early. The Move card's safety holds: the
+  heartbeat, the travel (the distance is cut to it), and the following
+  error and torque written to the drive. For a fast move, raise *Following
+  error* and *Max torque* on the Move card first, or the drive stops
+  itself: that is the window doing its work, not a fault of the
+  measurement.
+- **What is recorded**: LinuxCNC's `pos-cmd` and `pos-fb`, whether the
+  drive is in "Operation enabled", and where the drive has them in its
+  process data, its own following error (`0x60F4`) and torque (`0x6077`).
+  If the drive has them in its dictionary but not in the process data,
+  *Add them to the process data* adds them to the first input PDO (not to
+  a PDO the ESI file marks as fixed); save, then stop and start the test.
+  The test's HAL has a `sampler` channel per CSP drive, after the jog and
+  before `ecat.write-all`; `halsampler` reads it while the measurement
+  runs.
+- **What it shows**: a plot of the whole move (command and position, the
+  following error, LinuxCNC's and the drive's own, and the torque), with
+  the previous measurement's following error in grey behind it, and these
+  lines:
+  - the peak following error, and its mean at constant speed each way;
+  - the error as *T* × velocity + *K* × acceleration + *c*. *T* is a time:
+    - the **transport delay**, the cycles from `pos-cmd` to the drive and
+      back to `pos-fb` (two with the automatic SYNC0 shift). It is measured
+      when `0x60F4` is recorded (LinuxCNC's error less the drive's is
+      `pos-cmd` now less `pos-cmd` that many cycles ago), else taken from
+      the turn-around. It is not an error at the motor, and no setting
+      removes it; `FERROR` has to allow for it;
+    - the rest is the **drive's own lag**, 1 / its effective position gain.
+      A drive without velocity feedforward lags by velocity / position
+      gain: 40 /s at 100 mm/s is 2.5 mm. Where this part is large, the
+      drive's feedforward or gain is what to look at (in the drive, not in
+      LinuxCNC: in CSP there is no PID in LinuxCNC);
+  - at each stop, the overshoot and the time until the position stays
+    within a band (3 counts, at least 0.002 mm);
+  - the torque at constant speed (friction) and per acceleration, when
+    `0x6077` is recorded; whether it reached the test's torque limit (then
+    the result is the limit's, not the drive's);
+  - how much of the drive's following-error window (the test's and the
+    drive's own) the error used: where a stepper drive with an encoder
+    (such as the ECT60) loses steps or stops;
+  - `FERROR` and `MIN_FERROR` for LinuxCNC: twice the error the result
+    predicts at the joint's `MAX_VELOCITY` and `MAX_ACCELERATION` (from the
+    INI file, when the drive is a joint), else at the test's own.
+- **Make the move long enough**: the drive's lag settles only after a few
+  of its time constants at constant speed. The card says when constant
+  speed lasted less than five times the lag; use a longer distance or a
+  lower velocity then. A test near the joint's `MAX_VELOCITY` gives the
+  best `FERROR`.
+- **The samples** are kept in `~/.local/state/ecatsetup/responses/`
+  (`<drive>-<date>-<time>.samples`, text with a header line); `ecatsetup
+  --response FILE [--ini <machine>.ini]` shows the result again.
+
 ### Watching LinuxCNC
 
 *Watch LinuxCNC that runs (read only)* on the *Test* page (or in the
@@ -2014,6 +2078,7 @@ ecatsetup --check-hal <machine>.ini
 ecatsetup --events [prev]
 ecatsetup --report --ini <machine>.ini
 ecatsetup --capture --esi <ESI folder>
+ecatsetup --response ~/.local/state/ecatsetup/responses/<file>.samples [--ini <machine>.ini]
 ecatsetup --from-capture ecat-capture-<time>.tar.gz --diagnose
 ecatsetup --apply ethercat.yaml --ini <machine>.ini
 ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
@@ -2046,6 +2111,8 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   `--capture` records the bus for a developer who does not have the
   devices, and `--from-capture` reads the bus from such a file
   ([A capture of the bus](#a-capture-of-the-bus)).
+- `--response` analyses a recording of the Response card again
+  ([Measuring a drive's response](#measuring-a-drives-response)).
 - Other options: `--mode` chooses the mode proposed for CiA 402 drives,
   `-p` limits the proposal to some slaves, `--json` prints it as JSON,
   `--transport` and `--interface` set the master's for `--write`.

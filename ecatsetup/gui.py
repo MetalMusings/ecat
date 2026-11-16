@@ -39,7 +39,7 @@ from PyQt5.QtWidgets import (
 
 from . import (config, dcinfo, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
                integrate, lcnc_env, masterstart, measured,
-               netif, pindocs, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
+               netif, pindocs, propose, quirks, response, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
 TITLE = "EtherCAT Setup"
@@ -3253,6 +3253,8 @@ class MoveCard(Card):
                     self.fields["scale"].setToolTip("From the configuration's HAL files")
         self.unsupported.setVisible(bool(self.unsupported.text()))
         self.win.test_page.show_limits(dt)
+        if getattr(self.win.test_page, "response", None) is not None:
+            self.win.test_page.response.show_drive(slave)
 
     def settings(self):
         return {k: box.value() for k, box in self.fields.items()}
@@ -3384,6 +3386,268 @@ class MoveCard(Card):
                                        "error" if v("home-error") == "TRUE" else
                                        "homed" if v("stat-homed") == "TRUE" else "not homed")
         self.where.setText(text)
+
+
+class RecordingPlot(QWidget):
+    """A response recording over its whole length: the command and the
+    position, the following error (LinuxCNC's, and the drive's own when
+    recorded), and the torque; the previous recording's following error in
+    grey behind the new one."""
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(220)
+        self.rec = self.prev = None
+
+    def show_recording(self, rec, prev=None):
+        self.rec, self.prev = rec, prev
+        self.update()
+
+    @staticmethod
+    def lanes(rec):
+        """[(title, unit, [(name, values, colour)])] of a recording."""
+        d = rec.data
+        err = [c - f for c, f in zip(d["cmd"], d["fb"])]
+        start = d["cmd"][0] if d["cmd"] else 0.0
+        blue = THEMES[_current["theme"]]["bluetext"] if _current["theme"] == "dark" else "#2563eb"
+        out = [("position", "mm", [("command", [x - start for x in d["cmd"]], "#9ca3af"),
+                                    ("position", [x - start for x in d["fb"]], blue)]),
+               ("following error", "mm", [("LinuxCNC", err, RED.name())])]
+        if "drive-error" in d:
+            sc = float(rec.meta.get("scale") or 1.0) or 1.0
+            out[1][2].append(("drive (0x60F4)", [x / sc for x in d["drive-error"]], AMBER.name()))
+        if "torque" in d:
+            out.append(("torque", "%", [("0x6077", [x / 10.0 for x in d["torque"]], GREEN.name())]))
+        return out
+
+    def paintEvent(self, _event):
+        if self.rec is None or not len(self.rec):
+            return
+        p = QPainter(self)
+        p.setFont(mono())
+        lanes = self.lanes(self.rec)
+        prev_err = None
+        if self.prev is not None and len(self.prev):
+            pd = self.prev.data
+            prev_err = [c - f for c, f in zip(pd["cmd"], pd["fb"])]
+        n = len(lanes)
+        h, w = self.height() / n, self.width()
+        period = (self.rec.meta.get("period-ns") or 1000000) / 1e9
+        length = max(len(self.rec), len(prev_err or [])) or 1
+        for i, (title, unit, series) in enumerate(lanes):
+            top = i * h
+            values = [v for _, vals, _ in series for v in vals]
+            if title == "following error" and prev_err:
+                values += prev_err
+            lo, hi = min(values), max(values)
+            if hi - lo < 1e-9:
+                lo, hi = lo - 0.5, hi + 0.5
+            pad = (hi - lo) * 0.08
+            lo, hi = lo - pad, hi + pad
+            p.setPen(QPen(QColor("#9ca3af"), 1))
+            p.drawLine(0, int(top + h - 1), w, int(top + h - 1))
+            if lo < 0 < hi:
+                y0 = top + 4 + hi / (hi - lo) * (h - 10)
+                p.setPen(QPen(QColor("#9ca3af"), 1, Qt.DotLine))
+                p.drawLine(0, int(y0), w, int(y0))
+            drawn = ([("previous", prev_err, "#9ca3af")] if title == "following error" and prev_err
+                     else []) + series
+            for _name, vals, colour in drawn:
+                p.setPen(QPen(QColor(colour), 1.5))
+                step = max(len(vals) // max(w, 1), 1)
+                prev = None
+                for k in range(0, len(vals), step):
+                    x = k / length * w
+                    y = top + 4 + (hi - vals[k]) / (hi - lo) * (h - 10)
+                    if prev:
+                        p.drawLine(int(prev[0]), int(prev[1]), int(x), int(y))
+                    prev = (x, y)
+            p.setPen(QPen(QColor(series[-1][2])))
+            p.drawText(6, int(top + 14), "%s (%s): %s" % (title, unit, ", ".join(
+                s[0] for s in drawn)))
+            p.drawText(6, int(top + h - 5), "%+.4f..%+.4f" % (lo + pad, hi - pad))
+        p.setPen(QPen(QColor("#9ca3af")))
+        p.drawText(int(w - 70), int(self.height() - 5), "%.2f s" % (length * period))
+        p.end()
+
+
+class ResponseCard(Card):
+    """Measuring a CSP drive's response (response.py): a test move recorded
+    every servo cycle, and what the following error is made of. Changes
+    nothing in the drive; the move runs only while the button is held."""
+
+    FIELDS = [("distance", "Distance (mm, ±)", -1000, 1000, 2),
+              ("velocity", "Velocity (mm/s)", 0.1, 5000, 1),
+              ("acceleration", "Acceleration (mm/s²)", 1, 100000, 0),
+              ("repeats", "Back and forth (times)", 1, 20, 0),
+              ("dwell", "Dwell at each end (s)", 0.1, 5, 1)]
+
+    def __init__(self, win):
+        super().__init__("Response", "A test move recorded every servo cycle: how far the drive "
+                         "lags and why. Nothing in the drive is changed.")
+        self.win = win
+        self.measurement = None
+        self.last = None        # the last Recording, for the next one's grey line
+        self.for_drive = None
+        top = QHBoxLayout()
+        form = QFormLayout()
+        self.fields = {}
+        for key, text, lo, hi, dec in self.FIELDS:
+            box = QDoubleSpinBox()
+            box.setRange(lo, hi)
+            box.setDecimals(dec)
+            box.setValue(response.DEFAULTS[key])
+            form.addRow(text, box)
+            self.fields[key] = box
+        top.addLayout(form)
+        side = QVBoxLayout()
+        self.objects = label("", "hint", wrap=True)
+        side.addWidget(self.objects)
+        self.add_button = QPushButton("Add them to the process data")
+        self.add_button.setToolTip("Adds the objects to the drive's first input PDO in the "
+                                   "configuration; they are recorded once the test is started again")
+        self.add_button.clicked.connect(self.add_objects)
+        side.addWidget(self.add_button)
+        self.measure = QPushButton("Measure (hold)")
+        self.measure.setObjectName("hold")
+        self.measure.setToolTip("Hold alone: enables the drive and moves it out by the distance and "
+                                "back, at the velocity and acceleration above, recording every "
+                                "cycle; releasing stops it")
+        self.measure.pressed.connect(self.start)
+        self.measure.released.connect(self.release)
+        side.addWidget(self.measure)
+        self.progress = label("", "hint", wrap=True)
+        side.addWidget(self.progress)
+        side.addStretch(1)
+        top.addLayout(side, 1)
+        self.add(top)
+        self.add(label("The drive's limits on the Move card hold here too: raise its following "
+                       "error and max torque for a fast move, or the drive stops it. The travel "
+                       "limits the distance.", "hint", wrap=True))
+        self.plot = RecordingPlot()
+        self.add(self.plot)
+        self.result = label("", "mono", wrap=True)
+        self.result.setFont(mono())
+        self.result.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.add(self.result)
+        self.saved = label("", "hint", wrap=True)
+        self.saved.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.add(self.saved)
+
+    def drive(self):
+        return self.win.test_page.move.test()
+
+    def show_drive(self, slave):
+        dt = self.drive()
+        ok = dt is not None and dt.prepared and dt.mode == "csp" and not self.win.test.watching \
+            if self.win.test is not None else False
+        self.setVisible(bool(ok))
+        if not ok:
+            return
+        if self.for_drive != dt.name:
+            self.for_drive, self.last = dt.name, None
+            self.plot.show_recording(None)
+            self.result.setText("")
+            self.saved.setText("")
+        have = response.measure_entries(slave, dt.axis)
+        missing = response.missing_objects(slave, self.win.session.dictionary(slave["position"]),
+                                           dt.axis)
+        missing = [m for m in missing if m[1] not in have]
+        text = "Recorded: pos-cmd, pos-fb%s." % "".join(
+            ", %s" % response.MEASURE_OBJECTS[i - dt.axis * config.AXIS_OFFSET][1]
+            for i, _e in (have[k] for k in sorted(have)))
+        # the test runs the configuration as it was when it started
+        running = {c.key for c in response.columns(self.win.test.cfg,
+                                                   self.win.test.drives.index(dt.name), dt.name)}
+        if set(have) - running:
+            text += " Added since the test started: stop the test and start it again to record them."
+        if missing:
+            text += " Not in the process data: %s." % ", ".join(w for _i, _c, w in missing)
+        self.objects.setText(text)
+        self.add_button.setVisible(bool(missing))
+
+    def spec(self):
+        out = {k: box.value() for k, box in self.fields.items()}
+        out["repeats"] = int(out["repeats"])
+        return out
+
+    def add_objects(self):
+        dt = self.drive()
+        if dt is None:
+            return
+        s = dt.slave
+        d = self.win.session.dictionary(s["position"])
+        missing = response.missing_objects(s, d, dt.axis)
+        dev = self.win.session.esi_device(s["position"])
+        fixed = [x.index for x in (dev.pdos if dev else []) if x.fixed]
+        try:
+            added = response.add_objects(s, [i for i, _c, _w in missing], d, fixed)
+        except ValueError as e:
+            QMessageBox.warning(self, TITLE, str(e))
+            return
+        self.win.changed()
+        self.win.status("Added %s to %s's inputs; save, then stop and start the test to record them"
+                        % (", ".join(e["object"] for e in added), s.get("name")))
+        self.show_drive(s)
+
+    def start(self):
+        dt = self.drive()
+        if dt is None or (self.measurement is not None and self.measurement.active):
+            return
+        ini = response.ini_values(self.win.session.ini_path, self.win.session.cfg, dt.name)
+        try:
+            self.measurement = response.Measurement(dt, self.spec(), ini)
+            self.measurement.start()
+        except (testmode.TestError, OSError) as e:
+            self.measurement = None
+            self.win.status(str(e))
+            return
+        self.win.tested_drives.add(dt.name)
+        self.progress.setText("Moving: hold the button for about %.0f s, until it says done"
+                              % self.measurement.duration())
+
+    def release(self):
+        m = self.measurement
+        if m is not None and m.active:
+            m.abort()
+
+    def stop(self):
+        """The test stops: no halsampler is left running."""
+        m = self.measurement
+        if m is not None and m.active:
+            m.abort("the test stopped")
+            m._finish()
+
+    def tick(self):
+        """From the window's 25 ms timer while a measurement runs."""
+        m = self.measurement
+        if m is None or not m.active:
+            return
+        try:
+            state = m.step()
+        except testmode.TestError as e:
+            m.abort(str(e))
+            state = m.state
+        if state in ("moving", "dwell"):
+            self.progress.setText("Moving: %d of %d strokes; keep holding"
+                                  % (m.step_no + 1, len(m.targets)))
+        elif state == "draining":
+            self.progress.setText("Reading the samples...")
+        elif state in ("done", "failed"):
+            self.finished(m)
+
+    def finished(self, m):
+        rec = m.recording
+        if rec is None or not len(rec):
+            self.progress.setText("Nothing was recorded%s" % (": %s" % m.ended if m.ended else ""))
+            return
+        res = response.analyse(rec)
+        self.progress.setText("Done%s" % (" (ended early: %s)" % m.ended if m.ended else
+                                          ": you may release the button"))
+        self.plot.show_recording(rec, self.last)
+        self.result.setText("\n".join(response.report(res, rec)))
+        self.saved.setText("Samples: %s (ecatsetup --response FILE shows this again)" % m.path)
+        self.last = rec
 
 
 def _duration_text(seconds):
@@ -3811,6 +4075,9 @@ class TestPage(QWidget):
         sw.lay.addStretch(1)
         three.addWidget(sw, 2)
         dl.addLayout(three)
+        self.response = ResponseCard(win)
+        self.response.hide()
+        dl.addWidget(self.response)
         lay.addWidget(self.drive)
 
         # an I/O slave
@@ -6097,6 +6364,7 @@ class MainWindow(QMainWindow):
         if self.test is None:
             return
         self.test_timer.stop()
+        self.test_page.response.stop()
         run = self.test
         tests = list(self.drive_tests.values())
 
@@ -6144,6 +6412,8 @@ class MainWindow(QMainWindow):
             self.status(str(e))
 
     def pending_tick(self):
+        if self.test is not None and not self.test.watching:
+            self.test_page.response.tick()
         if self.test is not None and not self.test.watching and not self.busy and \
                 any(dt.pending is not None or dt.homing for dt in self.drive_tests.values()):
             self.service_pending()

@@ -164,6 +164,9 @@ def main(argv=None):
                     help="list the quirk files and measured results, yours and the shipped ones, and "
                          "what looks stale or wrong")
     ap.add_argument("--capture-info", metavar="FILE", help="show what a capture holds")
+    ap.add_argument("--response", metavar="FILE",
+                    help="analyse a response recording (the Response card's samples file) again; "
+                    "with --ini, against the joint's MAX_VELOCITY and MAX_ACCELERATION")
     ap.add_argument("--capture-c", metavar="FILE",
                     help="print a C header with fake slaves from a capture, for the "
                          "component's tests (component/tests)")
@@ -216,6 +219,8 @@ def main(argv=None):
         sys.exit(0)
     if args.capture_info:
         sys.exit(capture_info(args.capture_info))
+    if args.response:
+        sys.exit(response_info(args.response, args.ini))
     if args.from_capture:
         use_capture(args)
     if args.capture is not None:
@@ -413,6 +418,28 @@ def write_report(args):
     with open(path, "w") as f:
         f.write(text)
     print("Wrote %s (%d lines). Look it through before posting it." % (path, text.count("\n")))
+    return 0
+
+
+def response_info(path, ini_path=None):
+    """Print what a response recording shows (response.py)."""
+    from . import response
+    try:
+        rec = response.Recording.load(path)
+    except (OSError, ValueError, KeyError) as e:
+        print("cannot read %s: %s" % (path, e), file=sys.stderr)
+        return 1
+    ini = None
+    if ini_path:
+        try:
+            cfg_path = os.path.join(os.path.dirname(os.path.abspath(ini_path)), "ethercat.yaml")
+            cfg = config.load(cfg_path) if os.path.exists(cfg_path) else {}
+        except Exception:      # noqa: BLE001 - only the joint's limits are looked up
+            cfg = {}
+        ini = response.ini_values(ini_path, cfg, rec.meta.get("drive")) or None
+    res = response.analyse(rec, ini)
+    print("%s, %s" % (rec.meta.get("drive"), rec.meta.get("when", "")))
+    print("\n".join(response.report(res, rec)))
     return 0
 
 

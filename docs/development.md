@@ -1584,6 +1584,69 @@ and by hand), one place for both kinds, sharing results between users (a pull re
 the shipped files is the way now), checking by running that a shipped result still holds
 (needs the device).
 
+## Tuning a drive (2026-11-16)
+
+Why: following errors of 3-6 mm on the plasma cutter's ECT60 jogs
+("The servo period" above), and a LinuxCNC forum question about the same on
+StepperOnline A6 servos (4.6 mm in CSP; A6-EC manual: velocity feedforward
+off, C01.13 = 0, and a position gain of 40 rad/s from the factory). In CSP the
+position loop is in the drive: LinuxCNC's following error is the transport
+delay (about two cycles, no setting removes it) plus the drive's own lag
+(velocity / position gain without feedforward), plus a part that follows the
+acceleration. The plan, agreed with the user:
+
+1. **Measure** without changing the drive (part 1, built): the *Response* card
+   (`ecatsetup/response.py`, docs/ecatsetup.md "Measuring a drive's
+   response").
+2. **Change the drive's gains** (part 2, not built): the originals read and kept
+   first; a quirk key `tuning:` with the vendor's gain objects, their units
+   where known (raw values else), which are changed only at standstill, and
+   groups chosen by a mode object (ECT60: `0x2011` 1 -> `0x2023`, 2 (FOC) ->
+   `0x2026`, 0 is open loop with nothing to tune; A6: `Cgg.xx` = `0x20gg:(xx+1)`,
+   a guide of inertia, speed loop, Kp, velocity and torque feedforward);
+   before/after on the same move; the result kept as settings in
+   `ethercat.yaml` (written at every start), storing in the drive (ECT60
+   `0x1010:01` = 1; the A6 has no `0x1010` in its ESI and seems to write SDOs
+   to its EEPROM itself: alarm ALF1.3 "too frequent writing") a separate step.
+3. **Maybe**: velocity / torque feedforward from LinuxCNC through `0x60B1` /
+   `0x60B2`, for drives that take it there (A6 with C01.13/C01.16 = 5; the
+   ECT60 has neither object).
+
+### Part 1: how the measurement works
+
+- The test's HAL file has a `sampler` channel per CSP drive (`loadrt sampler
+  depth=16384,... cfg=ffb[s][s]`), `addf` after the jog's limit3 and before
+  `ecat.write-all`, its pins on the jog's existing signals (`ecatjogN-cmd`,
+  `-fb`, `-enabled`) and on `0x60F4` / `0x6077` pins where the drive has them
+  in its inputs; `enable` 0 until a measurement. Tried in a bus-less halrun:
+  the lines load, `halsampler -c 0 -t` reads the columns, and ends on SIGTERM
+  with everything written.
+- `Measurement` is a state machine stepped by the window's 25 ms timer
+  (enabling, settle 0.3 s, moving / dwell per target, draining the FIFO,
+  done): the targets are the drive test's start and start + distance (cut to
+  the travel); the limit3's `maxv` / `maxa` are the measurement's while it
+  runs and the drive test's afterwards. A drive that leaves "Operation
+  enabled", a released button or a stopped test ends it early; the samples
+  are kept and analysed.
+- `analyse()`: velocity and acceleration from the command (central
+  differences); the lag *T* from the mean error at constant speed both ways
+  (the least-squares fit of *T v + K a + c* gives *K* and the rest, and *T*
+  when there is no constant speed both ways); with `0x60F4` the transport
+  delay is the *k* for which LinuxCNC's error less the drive's is best
+  `cmd[n] - cmd[n-k]`, and the drive's lag is its own error per velocity;
+  without it the delay is the turn-around (`ecat.0.turnaround-cycles`, 2 if
+  unknown). Stops from where the command holds a target exactly.
+- Tested against a simulated drive (tests/test_response.py: k cycles of delay,
+  a first-order loop with gain and feedforward, a second-order one that
+  overshoots): transport 2 and 3 cycles found, drive lag 1/Kp within 1.5 ms
+  for Kp 40 when the move is long enough (a 10 mm move at 50 mm/s gives 23.4
+  instead of 25 ms, and the card says the move was short). Mutation-checked.
+- **Not tried on a drive yet.** First, with the user at the machine: X of the
+  plasma cutter (ECT60, servo mode 1, `0x2023:01` Kp 4000, `0x2023:04` Kvff
+  30), with `0x60F4` added to its inputs (`TxPdo Fixed="0"` in the ECT60 ESI).
+  Then one change by hand, `Kvff` 30 -> 60, to see whether part 2 is worth
+  building.
+
 ## EoE
 
 Use case (the user, 2026-11-15): web pages for a drive's settings through
