@@ -26,7 +26,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ecatsetup import coe, drivetest, response, testmode, tool  # noqa: E402
+from ecatsetup import coe, config, drivetest, response, testmode, tool  # noqa: E402
 from test_drivetest import ECT60, FakeDrive  # noqa: E402
 import test_testmode  # noqa: E402
 from test_testmode import PINS, cfg  # noqa: E402
@@ -317,6 +317,47 @@ class TestOnTheBus(unittest.TestCase):
         lines = response.compare(off, r0, on, r1)
         self.assertIn("feedforward velocity 0 -> 1 (cia402.feedforward)", lines[0])
         self.assertIn("lag 26.53 -> 1.87 ms", "\n".join(lines))
+
+
+def ff_drive(objects=(0x60B1, 0x60B2), **kw):
+    """A cia402 slave with these feedforward objects as use: profile in its outputs."""
+    s = dict(copy.deepcopy(ECT60), **kw)
+    s["process-data"] = {"outputs": [{"pdo": "0x1600", "sm": 2, "entries": [
+        {"object": "0x6040:00", "bits": 16, "type": "UINT", "use": "profile"},
+        {"object": "0x607A:00", "bits": 32, "type": "DINT", "use": "profile"}] + [
+        {"object": "0x%04X:00" % i, "bits": 32, "type": "DINT", "use": "profile"} for i in objects]}],
+        "inputs": []}
+    return s
+
+
+class TestFeedforward(unittest.TestCase):
+    def test_which_objects(self):
+        self.assertEqual(response.feedforward_objects(ff_drive()), {"velocity": True, "torque": True})
+        self.assertEqual(response.feedforward_objects(ff_drive((0x60B1,))),
+                         {"velocity": True, "torque": False})
+        self.assertEqual(response.feedforward_objects(ECT60), {"velocity": False, "torque": False})
+        # two axes: each needs its own (index + 0x800)
+        two = ff_drive((0x60B1, 0x60B2, 0x68B1))
+        two["cia402"] = {"mode": "csp", "axes": ["a", "b"]}
+        self.assertEqual(response.feedforward_objects(two), {"velocity": True, "torque": False})
+
+    def test_setp(self):
+        self.assertEqual(response.feedforward_setp("x", {"velocity": 1, "torque": 0.05}),
+                         {"x.ff-velocity-gain": "1.0", "x.ff-torque-per-accel": "0.05"})
+
+    def test_keep(self):
+        s = ff_drive((0x60B1,))
+        # only what the drive has objects for; the default limit is not written
+        self.assertEqual(response.keep_feedforward(s, {"velocity": 1.0, "torque": 0.05,
+                                                       "torque-max": 30.0}), {"velocity": 1.0})
+        s = ff_drive()
+        self.assertEqual(response.keep_feedforward(s, {"velocity": 0.9, "torque": 0.05,
+                                                       "torque-max": 60.0}),
+                         {"velocity": 0.9, "torque": 0.05, "torque-max": 60.0})
+        self.assertEqual([e for e in config.check({"ecat": 1, "slaves": [s]}) if "feedforward" in e], [])
+        # nothing left: the key goes
+        self.assertIsNone(response.keep_feedforward(s, {"velocity": 0.0, "torque": 0.0}))
+        self.assertNotIn("feedforward", s["cia402"])
 
 
 class TestCompare(unittest.TestCase):
@@ -801,9 +842,77 @@ class TestResponseCard(unittest.TestCase):
         self.assertTrue(card.result.text().startswith(
             "Since the last measurement: 0x2009:00 25600 -> 2000"))
         s.saved = copy.deepcopy(s.cfg)    # closing would ask about saving
+        self.assertTrue(card.ff_box.isHidden())     # the ECT60 has no 0x60B1 / 0x60B2
         # hidden without a prepared CSP drive
         card.show_drive(ECT60)
         self.assertTrue(card.isHidden())
+
+    def test_feedforward_from_linuxcnc(self):
+        s = session.Session()
+        s.cfg = {"slaves": [ff_drive(name="x", position=0)]}
+        s.saved = copy.deepcopy(s.cfg)
+        w = gui.MainWindow(s)
+        self.addCleanup(w.close)
+        card = w.test_page.response
+        set_ = {}
+
+        class Run:
+            watching = False
+            setp_many = staticmethod(set_.update)
+        w.test = Run()
+        self.addCleanup(setattr, w, "test", None)    # before the window closes: no test to stop
+
+        class DT:
+            name = "x"
+            position = 0
+            slave = s.cfg["slaves"][0]
+        card.drive = lambda: DT
+        now = {"velocity": 0.0, "torque": 0.0, "torque-max": 30.0}
+        p = mock.patch.object(response, "feedforward_now", lambda name: dict(now))
+        p.start()
+        self.addCleanup(p.stop)
+        card.show_feedforward(DT.slave, DT)
+        self.assertFalse(card.ff_box.isHidden())
+        self.assertEqual([card.ff_fields[k].text() for k in ("velocity", "torque", "torque-max")],
+                         ["0", "0", "30"])
+        self.assertIn("In the configuration: none", card.ff_now.text())
+        # a measurement with the torque recorded fills in the torque per acceleration
+        rec = recording(kp=40.0, with_de=False, feedforward={"velocity": 0.0, "torque": 0.0})
+        global SCALE
+        keep, SCALE = SCALE, 1e9
+        try:
+            x, _de = drive(rec.data["cmd"], 2, 40.0)
+        finally:
+            SCALE = keep
+        ax = [0.0] + [(x[n + 1] - 2 * x[n] + x[n - 1]) / P ** 2 for n in range(1, len(x) - 1)] + [0.0]
+        rec.data["torque"] = [round(10 * 0.02 * an) for an in ax]
+
+        class Done:
+            recording = rec
+            ended = None
+            path = "x.samples"
+        card.finished(Done())
+        self.assertAlmostEqual(float(card.ff_fields["torque"].text()), 0.02, delta=0.0006)
+        # tried in the test's HAL
+        card.ff_fields["velocity"].setText("1,0")      # a decimal comma is taken
+        card.try_feedforward()
+        self.assertEqual(set_["x.ff-velocity-gain"], "1.0")
+        self.assertAlmostEqual(float(set_["x.ff-torque-per-accel"]), 0.02, delta=0.0006)
+        self.assertEqual(set_["x.ff-torque-max"], "30.0")
+        card.feedforward_off()
+        self.assertEqual((set_["x.ff-velocity-gain"], set_["x.ff-torque-per-accel"]), ("0.0", "0.0"))
+        # a value out of range is not set
+        set_.clear()
+        card.ff_fields["velocity"].setText("5")
+        card.try_feedforward()
+        self.assertEqual(set_, {})
+        # kept in the configuration
+        card.ff_fields["velocity"].setText("1")
+        card.ff_fields["torque"].setText("0.02")
+        card.keep_feedforward()
+        self.assertEqual(s.cfg["slaves"][0]["cia402"]["feedforward"], {"velocity": 1.0, "torque": 0.02})
+        self.assertIn("In the configuration: velocity 1, torque 0.02", card.ff_now.text())
+        s.saved = copy.deepcopy(s.cfg)
 
 
 if __name__ == "__main__":

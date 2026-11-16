@@ -1039,7 +1039,8 @@ CiA 402 drives can take them from the controller instead: `0x60B1`
   C01.16 = 5 (torque). Without that the drive ignores them. Leave the
   drive's own feedforward off when it takes LinuxCNC's.
 - `torque` is what the Response card in EtherCAT Setup measures as torque
-  per acceleration (with `0x6077` recorded); it prints the line to use
+  per acceleration (with `0x6077` recorded); its *Feedforward from
+  LinuxCNC* row tries the values in the test and keeps them in the file
   ([tuning a servo drive, step by step](ecatsetup.md#tuning-a-servo-drive-step-by-step)).
   The card also shows whether the lag went: its comparison names the
   feedforward that changed between two measurements.

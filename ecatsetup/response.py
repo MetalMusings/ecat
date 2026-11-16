@@ -56,6 +56,82 @@ DEFAULTS = {"distance": 10.0, "velocity": 20.0, "acceleration": 200.0, "repeats"
             "dwell": 0.5}
 
 
+# -- LinuxCNC's feedforward (cia402.feedforward, the profile's ff-* parameters)
+
+FF_OBJECTS = {"velocity": 0x60B1, "torque": 0x60B2}
+FF_PARAMS = {"velocity": "ff-velocity-gain", "torque": "ff-torque-per-accel",
+             "torque-max": "ff-torque-max"}
+FF_TORQUE_MAX = 30.0    # % of rated torque: the profile's default limit
+
+
+def feedforward_objects(slave):
+    """Which of LinuxCNC's feedforward the slave can take: {"velocity": bool,
+    "torque": bool}, 0x60B1 / 0x60B2 with use: profile in its outputs for
+    every axis (config.feedforward_errors asks the same)."""
+    owned = set()
+    for pdo in (slave.get("process-data") or {}).get("outputs") or []:
+        for e in pdo.get("entries") or []:
+            if e.get("use") == "profile":
+                try:
+                    index, sub = config.parse_obj(e.get("object"))
+                except ValueError:
+                    continue
+                if sub == 0:
+                    owned.add(index)
+    n = len(config.axes(slave))
+    return {k: all(i + a * config.AXIS_OFFSET in owned for a in range(n))
+            for k, i in FF_OBJECTS.items()}
+
+
+def feedforward_now(axis_name):
+    """The profile's feedforward parameters of an axis in the running HAL:
+    {"velocity", "torque", "torque-max"} (those it has), or {}."""
+    try:
+        params = testmode.parse_pins(testmode.halcmd("-s", "show", "param", "%s.ff-" % axis_name,
+                                                     check=False))
+    except (OSError, testmode.TestError):
+        return {}
+    out = {}
+    for key, name in FF_PARAMS.items():
+        p = params.get("%s.%s" % (axis_name, name))
+        try:
+            if p is not None:
+                out[key] = float(p.value)
+        except ValueError:
+            pass
+    return out
+
+
+def feedforward_setp(axis_name, values):
+    """{parameter: value text} that sets an axis's feedforward in HAL: values
+    {"velocity", "torque", "torque-max"}, those given."""
+    return {"%s.%s" % (axis_name, FF_PARAMS[k]): repr(float(v))
+            for k, v in values.items() if k in FF_PARAMS and v is not None}
+
+
+def keep_feedforward(slave, values):
+    """Writes values {"velocity", "torque", "torque-max"} into the slave's
+    cia402.feedforward, for what it has objects for. A velocity or torque of
+    0 is left out, and so is a torque-max at the default with no torque;
+    with neither left the key is removed. Returns what is in the file now
+    (a dict, or None)."""
+    can = feedforward_objects(slave)
+    c = slave.setdefault("cia402", {})
+    ff = {}
+    for key in ("velocity", "torque"):
+        v = values.get(key)
+        if can.get(key) and v:
+            ff[key] = float(v)
+    tmax = values.get("torque-max")
+    if "torque" in ff and tmax is not None and float(tmax) != FF_TORQUE_MAX:
+        ff["torque-max"] = float(tmax)
+    if ff:
+        c["feedforward"] = ff
+    else:
+        c.pop("feedforward", None)
+    return c.get("feedforward")
+
+
 # -- the test's HAL
 
 @dataclass
@@ -392,21 +468,10 @@ class Measurement:
 
     def _feedforward(self):
         """The profile's feedforward parameters while measuring (cia402.feedforward,
-        set with setp between measurements): {"velocity": gain, "torque": % per
-        unit/s2}, or {} when the drive has none."""
-        try:
-            params = testmode.parse_pins(testmode.halcmd("-s", "show", "param", "%s.ff-" % self.dt.name,
-                                                         check=False))
-        except (OSError, testmode.TestError):
-            return {}
-        out = {}
-        for key, name in (("velocity", "ff-velocity-gain"), ("torque", "ff-torque-per-accel")):
-            p = params.get("%s.%s" % (self.dt.name, name))
-            try:
-                out[key] = float(p.value) if p is not None else None
-            except ValueError:
-                pass
-        return {k: v for k, v in out.items() if v is not None}
+        set between measurements): {"velocity": gain, "torque": % per unit/s2},
+        or {} when the drive has none."""
+        now = feedforward_now(self.dt.name)
+        return {k: now[k] for k in ("velocity", "torque") if k in now}
 
     def _turnaround(self):
         try:

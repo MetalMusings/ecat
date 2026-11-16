@@ -1695,6 +1695,23 @@ the end of its range. *Look for settings in the drive* lists such settings (quir
 file `tuning:` first, then by name), what the diagnosis points at first; one
 change and a measurement before and after decides.
 
+### The Response card's feedforward row (2026-11-16)
+
+On the user's request after the guide was written (until then feedforward
+was tried with `halcmd setp` and kept by editing the file): *Feedforward
+from LinuxCNC* on the Response card, shown for a drive with `0x60B1` or
+`0x60B2` as `use: profile` (`response.feedforward_objects`, every axis).
+Fields velocity / torque per acceleration / limit, read from the test's
+HAL (`feedforward_now`, `halcmd show param <drive>.ff-`); *Try in the test*
+(`feedforward_setp`, the test's `setp_many`), *Off*, *Keep in the
+configuration* (`keep_feedforward`: only keys the drive has objects for, the
+default limit not written, the key removed when both are 0). A measurement
+with `0x6077` fills in the torque per acceleration while the test runs
+without torque feedforward. Tests: TestFeedforward and
+TestResponseCard.test_feedforward_from_linuxcnc (mutation-checked);
+`feedforward_now` / `feedforward_setp` tried against the simulated drive in
+halrun. The window's buttons were not pressed on a real screen.
+
 ### Feedforward tried on a simulated drive (2026-11-16)
 
 No drive here has `0x60B1` / `0x60B2`, so the EaserCAT 3000 (slave 4 on the

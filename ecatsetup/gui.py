@@ -3534,6 +3534,50 @@ class ResponseCard(Card):
         self.saved = label("", "hint", wrap=True)
         self.saved.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.add(self.saved)
+        # LinuxCNC's feedforward (0x60B1 / 0x60B2): tried in the test's HAL, kept in the file
+        self.ff_box = QWidget()
+        fl = QVBoxLayout(self.ff_box)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.addWidget(label("Feedforward from LinuxCNC", "rule"))
+        frow = QHBoxLayout()
+        self.ff_fields = {}
+        for key, text, tip in (
+                ("velocity", "Velocity", "ff-velocity-gain: the share of the command's velocity "
+                 "written to 0x60B1 (1.0 for all of it)"),
+                ("torque", "Torque per acceleration (% per mm/s²)",
+                 "ff-torque-per-accel: written to 0x60B2 times the command's acceleration; a "
+                 "measurement with the torque (0x6077) recorded fills it in"),
+                ("torque-max", "Limit (%)", "ff-torque-max: the torque offset's limit, % of rated")):
+            frow.addWidget(QLabel(text))
+            box = QLineEdit()
+            box.setMaximumWidth(110)
+            box.setToolTip(tip)
+            frow.addWidget(box)
+            self.ff_fields[key] = box
+        frow.addStretch(1)
+        fl.addLayout(frow)
+        brow = QHBoxLayout()
+        self.ff_try = QPushButton("Try in the test")
+        self.ff_try.setToolTip("Sets the drive's ff-* parameters in the test's HAL; measure again "
+                               "to see the difference. The drive must be set to use 0x60B1 / 0x60B2 "
+                               "(a vendor setting in its Settings).")
+        self.ff_try.clicked.connect(self.try_feedforward)
+        brow.addWidget(self.ff_try)
+        self.ff_off = QPushButton("Off")
+        self.ff_off.setToolTip("Feedforward 0 in the test")
+        self.ff_off.clicked.connect(self.feedforward_off)
+        brow.addWidget(self.ff_off)
+        self.ff_keep = QPushButton("Keep in the configuration")
+        self.ff_keep.setToolTip("Writes the values as cia402.feedforward of the slave (save the "
+                                "file); Apply then sets the joint's velo-scale for it")
+        self.ff_keep.clicked.connect(self.keep_feedforward)
+        brow.addWidget(self.ff_keep)
+        brow.addStretch(1)
+        fl.addLayout(brow)
+        self.ff_now = label("", "hint", wrap=True)
+        fl.addWidget(self.ff_now)
+        self.ff_box.hide()
+        self.add(self.ff_box)
         # the drive's settings that may explain the result (tuning.py)
         row = QHBoxLayout()
         self.look = QPushButton("Look for settings in the drive")
@@ -3636,6 +3680,94 @@ class ResponseCard(Card):
             text += " Not in the process data: %s." % ", ".join(w for _i, _c, w in missing)
         self.objects.setText(text)
         self.add_button.setVisible(bool(missing))
+        self.show_feedforward(slave, dt)
+
+    # -- LinuxCNC's feedforward
+
+    def show_feedforward(self, slave, dt):
+        """The feedforward row, for a drive with 0x60B1 or 0x60B2: the fields from
+        the test's HAL when they are empty, and what the test runs with now."""
+        can = response.feedforward_objects(slave)
+        self.ff_box.setVisible(any(can.values()))
+        if not any(can.values()):
+            return
+        self.ff_fields["velocity"].setEnabled(can["velocity"])
+        for k in ("torque", "torque-max"):
+            self.ff_fields[k].setEnabled(can["torque"])
+        now = response.feedforward_now(dt.name)
+        for key, box in self.ff_fields.items():
+            if not box.text().strip():
+                v = now.get(key, response.FF_TORQUE_MAX if key == "torque-max" else 0.0)
+                box.setText("%g" % v)
+        self.show_feedforward_now(dt, now)
+
+    def show_feedforward_now(self, dt, now=None):
+        now = response.feedforward_now(dt.name) if now is None else now
+        if not now:
+            self.ff_now.setText("")
+            return
+        ff = (self.win.session.slave(dt.position) or {}).get("cia402", {}).get("feedforward") or {}
+        self.ff_now.setText("In the test now: velocity %g, torque %g %% per mm/s², limit %g %%. "
+                            "In the configuration: %s." % (
+                                now.get("velocity", 0.0), now.get("torque", 0.0),
+                                now.get("torque-max", response.FF_TORQUE_MAX),
+                                ", ".join("%s %g" % (k, v) for k, v in ff.items()) or "none"))
+
+    def feedforward_values(self):
+        """The fields as numbers, or None (a status message says which is wrong)."""
+        out = {}
+        for key, box in self.ff_fields.items():
+            if not box.isEnabled():
+                continue
+            text = box.text().strip().replace(",", ".")
+            try:
+                v = float(text) if text else 0.0
+            except ValueError:
+                self.win.status("Feedforward: %r is not a number" % box.text())
+                return None
+            if key == "velocity" and not 0.0 <= v <= 2.0:
+                self.win.status("Feedforward: the velocity share is 0 to 2 (1.0 for all of it)")
+                return None
+            if key == "torque-max" and not 0.0 <= v <= 300.0:
+                self.win.status("Feedforward: the limit is 0 to 300 % of rated torque")
+                return None
+            out[key] = v
+        return out
+
+    def try_feedforward(self, values=None):
+        dt = self.drive()
+        if dt is None or (self.measurement is not None and self.measurement.active):
+            return
+        values = self.feedforward_values() if values is None else values
+        if values is None:
+            return
+        try:
+            self.win.test.setp_many(response.feedforward_setp(dt.name, values))
+        except testmode.TestError as e:
+            self.win.status("Feedforward not set: %s" % e)
+            return
+        self.win.status("Feedforward in the test: %s; measure again to compare"
+                        % ", ".join("%s %g" % kv for kv in values.items()))
+        self.show_feedforward_now(dt)
+
+    def feedforward_off(self):
+        values = {k: 0.0 for k, box in self.ff_fields.items() if box.isEnabled() and k != "torque-max"}
+        self.try_feedforward(values)
+
+    def keep_feedforward(self):
+        dt = self.drive()
+        values = self.feedforward_values()
+        if dt is None or values is None:
+            return
+        s = self.win.session.slave(dt.position)
+        if s is None:
+            return
+        ff = response.keep_feedforward(s, values)
+        self.win.changed()
+        self.win.status("cia402.feedforward of %s: %s; save the configuration, then Apply writes "
+                        "the joint's velo-scale" % (s.get("name"), ", ".join(
+                            "%s %g" % kv for kv in (ff or {}).items()) or "removed"))
+        self.show_feedforward_now(dt)
 
     def spec(self):
         out = {k: box.value() for k, box in self.fields.items()}
@@ -3864,6 +3996,13 @@ class ResponseCard(Card):
         if self.last is not None and self.last_res is not None:
             lines = response.compare(self.last, self.last_res, rec, res) + [""] + lines
         self.result.setText("\n".join(lines))
+        # the torque per acceleration measured, for feedforward from LinuxCNC (not set yet)
+        box = self.ff_fields["torque"]
+        if res.torque_per_accel and box.isEnabled() and m.recording.meta.get("feedforward", {}).get(
+                "torque", 0.0) == 0.0:
+            box.setText("%.4g" % res.torque_per_accel)
+            self.ff_now.setText(self.ff_now.text() + " Torque per acceleration measured: %.4g "
+                                "(in the field; Try in the test to use it)." % res.torque_per_accel)
         self.last_res = res
         self.saved.setText("Samples: %s (ecatsetup --response FILE shows this again)" % m.path)
         self.last = rec

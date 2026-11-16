@@ -1059,20 +1059,25 @@ without touching the drive's gains.
   be told to use them: a vendor setting, such as StepperOnline A6's
   C01.13 = 5 and C01.16 = 5. Add that setting to the slave's Settings, and
   turn the drive's own feedforward off.
-- Measure without it first. With `0x6077` recorded, the card gives the
-  torque per acceleration as the line to use: *as feedforward from
-  LinuxCNC: cia402: {feedforward: {torque: 0.05}}*.
-- Try it while the test runs, in a terminal (the window has no field for
-  it yet):
-
-  ```
-  halcmd setp <drive>.ff-velocity-gain 1.0
-  halcmd setp <drive>.ff-torque-per-accel 0.05
-  ```
-
-  and measure again: the comparison names the change (*feedforward
-  velocity 0 -> 1*). `velo-scale` is set by the test.
-- Keep it in the configuration by hand: in `ethercat.yaml`, on the slave,
+- The card then has a **Feedforward from LinuxCNC** row: *Velocity* (the
+  share of the command's velocity, 1.0 for all of it), *Torque per
+  acceleration* and *Limit* (the torque offset's, % of rated; 30 unless the
+  file says otherwise). A field is greyed out when the drive lacks its
+  object. The line under it says what the test runs with now, and what
+  the configuration has.
+- Measure without it first. With `0x6077` recorded, the measurement puts
+  the torque per acceleration it found in the field (and the result shows
+  it as *as feedforward from LinuxCNC: cia402: {feedforward: {torque:
+  0.05}}*).
+- Set *Velocity* to 1, press **Try in the test**, and measure again: the
+  comparison names the change (*feedforward velocity 0 -> 1*). **Off**
+  sets both to 0 in the test. A measurement with a large acceleration may
+  need a higher *Limit*.
+- **Keep in the configuration** writes the values as the slave's
+  `cia402.feedforward` (only those the drive has objects for; both 0
+  removes it). Save the file; *Apply* (HAL & LinuxCNC page) then writes
+  `setp <drive>.velo-scale` with the joint's scale, which `0x60B1` needs
+  (counts per second). In the file it looks like
 
   ```yaml
   cia402:
@@ -1080,8 +1085,9 @@ without touching the drive's gains.
     feedforward: {velocity: 1.0, torque: 0.05}
   ```
 
-  *Apply* (HAL & LinuxCNC page) then writes `setp <drive>.velo-scale`
-  with the joint's scale, which `0x60B1` needs (counts per second).
+- Without the window, the same while a test or LinuxCNC runs:
+  `halcmd setp <drive>.ff-velocity-gain 1.0`, `halcmd setp
+  <drive>.ff-torque-per-accel 0.05`.
 
 **4. Measure again until nothing is left to tune**
 
@@ -1218,6 +1224,13 @@ first part of tuning, the measuring.
   **Undo** writes the drive's own value back. Values still being tried are
   written back when the test stops or the window closes, and offered back
   at the next start if the program ended without that.
+- **Feedforward from LinuxCNC** (drives with `0x60B1` / `0x60B2` as
+  `use: profile`): *Try in the test* sets the drive's `ff-velocity-gain`,
+  `ff-torque-per-accel` and `ff-torque-max` in the test's HAL, *Off* sets
+  the first two to 0, *Keep in the configuration* writes
+  `cia402.feedforward`. A measurement with the torque recorded fills in
+  the torque per acceleration while the test runs without it. See
+  [Feedforward from LinuxCNC](#feedforward-from-linuxcnc).
 - **Make the move long enough**: the drive's lag settles only after a few
   of its time constants at constant speed. The card says when constant
   speed lasted less than five times the lag; use a longer distance or a

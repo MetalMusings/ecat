@@ -181,6 +181,12 @@ class Shots:
         card.objects.setText("Recorded: pos-cmd, pos-fb, the drive's own following error (0x60F4), "
                              "the drive's torque (0x6077).")
         card.add_button.hide()
+        # the feedforward row as it was for the second measurement (no test runs here)
+        card.ff_fields["velocity"].setText("1")
+        card.ff_fields["torque-max"].setText("100")
+        card.ff_now.setText("In the test now: velocity 1, torque %s %% per mm/s², limit 100 %%. "
+                            "In the configuration: none." % card.ff_fields["torque"].text())
+        card.ff_box.show()
         # the card sits in the test page's drive part, hidden without a prepared drive:
         # taken out as a window of its own for the picture
         card.setParent(None)
