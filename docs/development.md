@@ -1780,10 +1780,15 @@ counts at 2 Hz on `pos-cmd` all the time, a sampler on `velocity-ff`,
 - Not tried: a mode change (`opmode-cmd`) and homing: the card has no
   0x60FF and its model runs CSP only (unit-tested in test_cia402.c).
 
-Still the model's: with velocity feedforward it is a cycle ahead of its
-target (it steps to the target instead of interpolating), so the card shows
-the drive's loop lag as -1.00 ms and the lag as 1.00 ms, less than the
-bus's 2.00.
+The model then stepped to each target, and with velocity feedforward ran a
+cycle ahead of it: the card showed the drive's loop lag as -1.00 ms and the
+lag as 1.00 ms, less than the bus's 2.00. It now runs 8 substeps per cycle
+with the target interpolated between cycles, as drives do (Firmware
+"Drive model: 8 substeps"); with full feedforward its 0x60F4 is 17 counts
+(was 128), an offline copy matches within 1 count, and the Response card at
+1000 counts/mm gives: lag 26.53 -> 1.87 ms with the card's line (the bus's
+2 cycles), the drive's loop -0.13 ms, torque per acceleration 0.04988
+(model 0.05).
 
 Found on the way, in the card's firmware (not in ecat): the EaserCAT 3000's
 firmware polled SOES from `loop()` (`use_interrupt = 0`) and never ran on
