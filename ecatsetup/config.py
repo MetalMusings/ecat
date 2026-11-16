@@ -184,6 +184,44 @@ def from_proposals(proposals, interface=None, transport="raw", servo_period=None
 REF_SYNC_MAX = 100
 
 
+def ref_clock(cfg):
+    """The slave (its dict) that the component makes the DC reference clock:
+    after ETG.1020 (21.1), "the first device that should be synchronized",
+    the used slave with dc: (assign-activate not 0x0000) that comes first on
+    the bus. None when no slave has DC (the master's own choice then)."""
+    best = None
+    for s in (cfg or {}).get("slaves") or []:
+        dc = s.get("dc")
+        if s.get("unused") or not isinstance(dc, dict) or not isinstance(s.get("position"), int):
+            continue
+        if _assign_value(dc.get("assign-activate")) == 0:
+            continue
+        if best is None or s["position"] < best["position"]:
+            best = s
+    return best
+
+
+def _assign_value(v):
+    """assign-activate as a number, read as the component reads it (strtoll
+    with base 0: 0x hex, a leading 0 octal); 0 when missing, None when
+    unreadable."""
+    if v is None:
+        return 0
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    t = str(v).strip()
+    try:
+        if t.lower().startswith(("0x", "-0x", "+0x")):
+            return int(t, 16)
+        if len(t.lstrip("+-")) > 1 and t.lstrip("+-").startswith("0"):
+            return int(t, 8)
+        return int(t, 10)
+    except ValueError:
+        return None
+
+
 def dc_warnings(cfg):
     """Texts about the master's DC settings that work but are not advised."""
     mdc = ((cfg or {}).get("master") or {}).get("dc")

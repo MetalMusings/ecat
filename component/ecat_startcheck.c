@@ -100,3 +100,11 @@ int ecat_kernel_master_uses(const char *conf_text, const char *ifname, const cha
   }
   return 0;
 }
+
+int ecat_ref_clock_choice(const int *position, const int *has_dc, int n) {
+  int i, best = -1;
+  for (i = 0; i < n; i++) {
+    if (has_dc[i] && (best < 0 || position[i] < position[best])) best = i;
+  }
+  return best;
+}

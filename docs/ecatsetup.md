@@ -624,6 +624,10 @@ AssignActivate, typed in the field beside it. Nothing is forbidden. With
 the bus read, the page, the check list and `ecatsetup --check FILE` (with a
 master running) warn:
 
+- the slave is the DC reference clock (the first used slave with DC on,
+  after ETG.1020; `--check` names it, with or without the bus), but its chip
+  has no DC system time: the bus has no reference clock
+  ([dc](component.md#dc));
 - DC is on, but the chip has no DC clock: the slave will not reach OP
   with DC (an EL2008: the master says "Slave seems not to support
   distributed clocks!" and "Failed to set DC cycle times", and the slave

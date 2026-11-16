@@ -44,4 +44,14 @@ int ecat_startcheck_compare(const ecat_expect_t *expect, int n_expect, const eca
 /// (ff:ff:ff:ff:ff:ff). Returns 1 and the value in what, or 0.
 int ecat_kernel_master_uses(const char *conf_text, const char *ifname, const char *mac, char *what, int what_len);
 
+/// The DC reference clock, after ETG.1020 (21.1): "The first device that
+/// should be synchronized is used as the reference clock". Of the
+/// configured slaves (positions, and whether each has `dc:` with an
+/// assign-activate other than 0x0000), the one with DC that comes first on
+/// the bus; slaves the file does not use (`unused`,
+/// or not in it) are never chosen, where the master's own choice is the
+/// first DC-capable slave on the bus, used or not. Returns the index into
+/// the arrays, or -1 when no slave has DC (the master's choice stands).
+int ecat_ref_clock_choice(const int *position, const int *has_dc, int n);
+
 #endif

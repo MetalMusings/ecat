@@ -246,7 +246,7 @@ run in.
 | `cpu` | The CPU for the master's own threads (default: not bound). |
 | `start-check` | `true` (default): the component stops at load when the bus differs from the file (below). `false`: it only warns, and starts with the slaves that match. |
 | `dc.ref-clock-sync-cycles` | How often the DC clocks are synchronised, in cycles. With `servo-thread-follows-ref-clock: false` keep it small (1 to 100): at 1000 the slaves' clock wandered by microseconds within two minutes, at 1 or 100 it stayed within about one (measured 2026-11-14, docs/development.md "DC clock variants"). |
-| `dc.servo-thread-follows-ref-clock` | `true`: LinuxCNC's servo thread is steered to follow the DC reference clock (the first DC slave); `false`: the slaves' clocks follow the PC's clock (measured 2026-11-13 with ECT60 drives, 1 ms: the slaves' clock drifted ~20 us/s against the thread although the reference clock was synchronised every 1000 cycles, so SYNC0 wandered through the whole period and the turn-around alternated between 2 and 3 cycles; under load (stress-ng, 10 min) the master's DC sync check also failed; use `true` when drives count on 2; `scripts/dc-jitter-measure` repeats the measurement). Called `sync-to-ref-clock` before; that name is an error now. |
+| `dc.servo-thread-follows-ref-clock` | `true`: LinuxCNC's servo thread is steered to follow the DC reference clock (the first slave with `dc:`, see [dc](#dc)); `false`: the slaves' clocks follow the PC's clock (measured 2026-11-13 with ECT60 drives, 1 ms: the slaves' clock drifted ~20 us/s against the thread although the reference clock was synchronised every 1000 cycles, so SYNC0 wandered through the whole period and the turn-around alternated between 2 and 3 cycles; under load (stress-ng, 10 min) the master's DC sync check also failed; use `true` when drives count on 2; `scripts/dc-jitter-measure` repeats the measurement). Called `sync-to-ref-clock` before; that name is an error now. |
 | `dc.sync0-shift-ns` | Time from the nominal start of the servo period to SYNC0, for all DC slaves, in ns; or `auto` (below). *Global shift time* in EtherCAT Setup, `globalShiftTime` in lcec. |
 
 A configuration without an `interface` gets the one the master read the
@@ -374,6 +374,22 @@ An entry with neither `pin` nor `split` is mapped but has no pin.
 | `assign-activate` | The slave's AssignActivate word, from its ESI file or SII, such as `"0x0300"`. EtherCAT Setup offers the slave's own DC modes and warns about a value the slave does not describe, or a slave whose chip cannot take SYNC0 ([Distributed clocks](ecatsetup.md#distributed-clocks)). |
 | `sync0-cycles` | SYNC0 period in servo periods. |
 | `sync0-shift-ns` | The slave's own SYNC0 shift. |
+
+The **DC reference clock** is the used slave with `dc:` (an
+`assign-activate` other than `0x0000`) that comes first on the bus: ETG.1020
+(Protocol Enhancements, 21.1) has "the first device that should be
+synchronized is used as the reference clock". The component tells the
+master so (`ecrt_master_select_reference_clock`). Without that the master
+takes the first DC-capable slave on the bus, also one the file leaves
+`unused` or does not have, and requests OP of it, which an unconfigured
+drive refuses. So a coupler without `dc:` (an EK1100) is not the reference
+clock; slaves before the reference clock are not synchronized, which is
+right for slaves without `dc:`. Without any slave with `dc:` the master's
+own choice stands. `ecatsetup --check` names the reference clock and warns
+when it has no DC system time (a chip with delay measurement only). The
+choice needs the master package 1.4+git20261116.52eabcf4 or later (fork
+52eabcf4; before it the selection counted only from the next bus scan, so
+the master's own choice stayed).
 
 #### eoe
 

@@ -384,8 +384,9 @@ class Session:
             if s.get("eoe") and b is not None and same_kind(s, b.info) and not getattr(b.proposal, "has_eoe", True):
                 out.append(("warning", "slave %s (%s): has an eoe: block, but its SII does not list the EoE "
                             "mailbox protocol: the master cannot set its IP address" % (s["position"], s.get("name"))))
+        ref = config.ref_clock(self.cfg)
         for s in (self.cfg or {}).get("slaves") or []:
-            for level, text in (dcinfo.problems(s, self.dc_info(s.get("position")), self.period)
+            for level, text in (dcinfo.problems(s, self.dc_info(s.get("position")), self.period, ref_clock=ref is s)
                                 + (measured.problems(s, self.period) if s.get("dc") else [])):
                 out.append((level, "slave %s (%s): %s" % (s["position"], s.get("name"), text)))
         return out

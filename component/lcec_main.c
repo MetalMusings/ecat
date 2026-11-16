@@ -909,6 +909,43 @@ static void ecat_config_eoe(lcec_master_t *master) {
 #endif
 }
 
+/// The DC reference clock: the first slave of the file with `dc:` (ETG.1020
+/// 21.1, see ecat_ref_clock_choice). Without this the master takes the first
+/// DC-capable slave on the bus, which may be one the file leaves unused: it
+/// then requests OP of it (the reference clock always gets OP), which an
+/// unconfigured drive refuses.
+static void ecat_select_ref_clock(lcec_master_t *master) {
+  lcec_slave_t *slave;
+  int *position, *has_dc;
+  int n = 0, i;
+
+  for (slave = master->first_slave; slave != NULL; slave = slave->next) n++;
+  if (n == 0) return;
+  position = LCEC_ALLOCATE_ARRAY(int, n);
+  has_dc = LCEC_ALLOCATE_ARRAY(int, n);
+  if (position == NULL || has_dc == NULL) {
+    if (position != NULL) lcec_free(position);
+    if (has_dc != NULL) lcec_free(has_dc);
+    return;
+  }
+  for (i = 0, slave = master->first_slave; slave != NULL; slave = slave->next, i++) {
+    position[i] = slave->index;
+    has_dc[i] = slave->dc_conf != NULL && slave->dc_conf->assignActivate != 0;  // 0x0000: free run
+  }
+  i = ecat_ref_clock_choice(position, has_dc, n);
+  lcec_free(position);
+  lcec_free(has_dc);
+  if (i < 0) return;
+  for (slave = master->first_slave; i > 0; slave = slave->next) i--;
+  if (ecrt_master_select_reference_clock(master->master, slave->config) != 0) {
+    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s: could not make slave %s (position %d) the DC reference clock\n",
+        master->name, slave->name, slave->index);
+    return;
+  }
+  rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "master %s: DC reference clock is slave %s (position %d), the first with dc:\n",
+      master->name, slave->name, slave->index);
+}
+
 static void ecat_config_dc(lcec_master_t *master) {
   lcec_slave_t *slave;
 
@@ -2113,6 +2150,7 @@ void lcec_read_master(void *arg, long period) {
     master->app_time_period = period;
     if (master->events != NULL) master->events->period_ns = (uint32_t)period;
     ecat_config_dc(master);
+    ecat_select_ref_clock(master);
     ecat_config_eoe(master);
   }
 

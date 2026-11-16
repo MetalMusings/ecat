@@ -109,6 +109,28 @@ static void test_kernel_master_conf(void) {
   CHECK_EQ(ecat_kernel_master_uses("#MASTER0_DEVICE=enp1s0\n", "enp1s0", NULL, what, sizeof(what)), 0);
 }
 
+static void test_ref_clock_choice(void) {
+  // today's test bus: slaves 0-3 unused (not among the configured ones),
+  // slave 4 with dc: is the reference clock, not the master's slave 0
+  int pos1[] = {4}, dc1[] = {1};
+  CHECK_EQ(ecat_ref_clock_choice(pos1, dc1, 1), 0);
+  // the plasma cutter: X, Y, Z with dc:, the E7000 without: X
+  int pos2[] = {0, 1, 2, 3}, dc2[] = {1, 1, 1, 0};
+  CHECK_EQ(ecat_ref_clock_choice(pos2, dc2, 4), 0);
+  // turner: an EK1100, EL1008, EL2008, EL5101 without dc:, two ECT60 with
+  // dc: the first ECT60 at position 4 (ETG.1020: the first device that
+  // should be synchronized), not the coupler
+  int pos3[] = {0, 1, 2, 3, 4, 5}, dc3[] = {0, 0, 0, 0, 1, 1};
+  CHECK_EQ(ecat_ref_clock_choice(pos3, dc3, 6), 4);
+  // the first on the bus, whatever the order in the file
+  int pos4[] = {5, 2, 7}, dc4[] = {1, 1, 1};
+  CHECK_EQ(ecat_ref_clock_choice(pos4, dc4, 3), 1);
+  // no slave with dc: the master's own choice stands
+  int pos5[] = {0, 1}, dc5[] = {0, 0};
+  CHECK_EQ(ecat_ref_clock_choice(pos5, dc5, 2), -1);
+  CHECK_EQ(ecat_ref_clock_choice(pos5, dc5, 0), -1);
+}
+
 RUN_TESTS("startcheck", test_startcheck_matching_bus, test_startcheck_other_slave, test_startcheck_same_vendor_other_product,
     test_startcheck_missing_slaves,
-    test_startcheck_revision_and_extra, test_kernel_master_conf)
+    test_startcheck_revision_and_extra, test_kernel_master_conf, test_ref_clock_choice)

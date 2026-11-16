@@ -1732,12 +1732,59 @@ most of the cycle. All fixed in the work copy (step generators off there);
 the drive model ran on 1000 of 1000 SYNC0s afterwards, with no cycle
 without new outputs.
 
-Found in the master (not fixed): with slave 0 `unused`, the master still
-takes it as the DC reference clock (the first DC-capable slave) and, as
-upstream IgH does, requests OP of the reference clock whatever its
-configuration (`ec_master_request_op`); the unconfigured ECT60 refuses
-SAFEOP (AL 0x001E) and stays PREOP + ERROR, with two ERROR lines in the event
-log. DC works (the clock runs in PREOP).
+Found in the master: with slave 0 `unused`, the master still took it as
+the DC reference clock (the first DC-capable slave) and, as upstream IgH
+does (ceec75bf, 2009, no reason given), requested OP of the reference clock
+whatever its configuration (`ec_master_request_op`); the unconfigured ECT60
+refused SAFEOP (AL 0x001E) and stayed PREOP + ERROR, with two ERROR lines in
+the event log. DC worked (the clock runs in PREOP). Fixed the same day:
+"The DC reference clock" below.
+
+### The DC reference clock (2026-11-16)
+
+What the references say:
+
+- ETG.1020 Protocol Enhancements (V1.2.0, 21.1): "The first device that
+  should be synchronized is used as the reference clock for that segment."
+  Its System Time is distributed to the others by a read-multiple-write,
+  which writes only to the slaves after it: the clock must come first.
+- ETG.2000 (ESI, V1.0.6, table 47): `Dc@PotentialReferenceClock`; every
+  device that supports a DC mode can be the reference clock.
+- Beckhoff (TwinCAT): the first DC-capable slave by default; couplers
+  (EK1100, CU1128) may be and are even advised as reference clocks; manual
+  selection only "in exceptional circumstances". The pages do not cover a
+  slave the application does not use.
+- IgH: the first slave with DC support unless the application calls
+  `ecrt_master_select_reference_clock()`; the reference clock is always
+  requested to OP (ceec75bf).
+
+Decided with the user: follow ETG.1020. The component selects the used
+slave with `dc:` (assign-activate not 0x0000) that comes first on the bus
+(`ecat_ref_clock_choice()` in ecat_startcheck.c, `config.ref_clock()` in
+Python; tests in component/tests/test_startcheck.c and tests/test_dcinfo.py,
+mutation-checked). `--check` prints it and warns when it has no DC system
+time. Changes the clock only where the first DC-capable slave has no `dc:`
+or is unused: on turner (`dc:` only on the two ECT60 at 4 and 5) the clock
+becomes the ECT60 at 4 instead of the first DC-capable slave before it (the
+EK1100 or a terminal, if their chips have a DC clock).
+
+The master needed a fix too (fork 52eabcf4, on uspace-tool-ipc-fixes, not
+pushed, no release): the selection only set `dc_ref_config`, and the clock
+was found again only after the next bus scan; the component selects after
+creating its slave configurations, which is after the scan, so the first
+attempt changed nothing ("Using slave 0" again). Now the selection finds the
+clock and the transmission delays at once when the slaves are scanned and
+the master is not active; activation writes the offsets and delays again
+(`config_changed`). tests/test_sim_dc_ref_select.c (fails without the fix:
+slave 0 in OP and given the time). Fork `make check`: 31 pass, 1 skip.
+
+Tried on the plasma bus (package 1.4+git20261116.52eabcf4 installed here,
+dev ecat.so in rtlib): with slaves 0-3 `unused` and the EaserCAT 3000 as a
+simulated drive with `dc:`: "Using slave 4 as DC reference clock", slaves
+0-3 PREOP without error, no ERROR lines, SYNC0 shift 514 us, two cycles,
+pll-err -4 ns, the drive model's results as before. With every slave used
+(`bus5-serial.yaml`, X with `dc:` at 0): slave 0 as before. Not tried on
+turner (its clock would move to the ECT60 at position 4).
 
 ## EoE
 

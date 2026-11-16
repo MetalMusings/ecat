@@ -223,13 +223,18 @@ def parse_assign(value):
         return None
 
 
-def problems(s, d, period_ns=None):
+def problems(s, d, period_ns=None, ref_clock=False):
     """[(level, text)] about slave s's DC setting (its dict in the file)
     against what the slave can do (DcInfo d): level "warning" or "note".
-    Nothing is forbidden."""
+    ref_clock: s is the DC reference clock (config.ref_clock). Nothing is
+    forbidden."""
     out = []
     if d is None:
         return out
+    if ref_clock and d.clock in ("none", "delay"):
+        out.append(("warning", "it is the DC reference clock (the first slave with dc:), but its "
+                    "EtherCAT chip has no DC system time: the bus will have no reference clock and no "
+                    "slave is synchronized; take dc: off it, or put a DC slave first"))
     dc = s.get("dc")
     if dc is not None:
         assign = parse_assign(dc.get("assign-activate", ""))

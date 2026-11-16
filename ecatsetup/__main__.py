@@ -598,6 +598,9 @@ def check_file(path, esi_paths=()):
     if errors:
         return 1
     print("%s: %d slaves, no errors in the file" % (path, len(cfg["slaves"])))
+    ref = config.ref_clock(cfg)
+    if ref is not None:
+        print("DC reference clock: slave %s (%s), the first with dc: (ETG.1020)" % (ref["position"], ref.get("name")))
     for text in config.dc_warnings(cfg):
         print("Warning: %s" % text)
     for text in config.serial_notes(cfg):
@@ -630,7 +633,7 @@ def check_file(path, esi_paths=()):
                 continue
         except tool.ToolError:
             continue
-        for level, text in dcinfo.problems(s, d):
+        for level, text in dcinfo.problems(s, d, ref_clock=ref is s):
             print("%s: slave %s (%s): %s" % (level.capitalize(), s["position"], s.get("name"), text))
     bad = len(problems)
     if not bad:

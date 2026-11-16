@@ -201,6 +201,46 @@ class TestProblems(unittest.TestCase):
         self.assertEqual(self.found(slave("0x0300"), None), [])
 
 
+class TestReferenceClock(unittest.TestCase):
+    """The DC reference clock (ETG.1020 21.1): the first used slave with dc:,
+    as the component chooses it (component/ecat_startcheck.c)."""
+
+    def cfg(self, *slaves):
+        return {"slaves": list(slaves)}
+
+    def at(self, pos, dc=None, **kw):
+        s = {"position": pos, "name": "s%d" % pos}
+        if dc is not None:
+            s["dc"] = {"assign-activate": dc}
+        s.update(kw)
+        return s
+
+    def test_the_first_used_slave_with_dc(self):
+        from ecatsetup import config
+        # the drive test today: 0-3 unused, 4 with dc
+        c = self.cfg(*[self.at(i, "0x0300", unused=True) for i in range(4)], self.at(4, "0x0300"))
+        self.assertEqual(config.ref_clock(c)["position"], 4)
+        # turner: a coupler and I/O without dc first, two drives with: the first drive
+        c = self.cfg(self.at(0), self.at(1), self.at(2), self.at(3), self.at(4, "0x0300"), self.at(5, "0x0300"))
+        self.assertEqual(config.ref_clock(c)["position"], 4)
+        # by position, not by the order in the file
+        c = self.cfg(self.at(5, "0x0300"), self.at(2, "0x0300"))
+        self.assertEqual(config.ref_clock(c)["position"], 2)
+        # 0x0000 is free run, as the component reads it (strtoll base 0)
+        c = self.cfg(self.at(1, "0x0000"), self.at(2, "0"), self.at(3, "0300"))
+        self.assertEqual(config.ref_clock(c)["position"], 3)
+        self.assertIsNone(config.ref_clock(self.cfg(self.at(0), self.at(1, "0x0000"))))
+        self.assertIsNone(config.ref_clock(None))
+
+    def test_a_reference_clock_without_system_time(self):
+        found = dcinfo.problems(slave("0x0300"), el2008(), ref_clock=True)
+        self.assertEqual(len(found), 2)
+        self.assertIn("it is the DC reference clock (the first slave with dc:), but its EtherCAT chip has "
+                      "no DC system time", found[0][1])
+        self.assertEqual(len(dcinfo.problems(slave("0x0300"), el2008())), 1)
+        self.assertEqual(dcinfo.problems(slave("0x0320", "EL5101"), el5101(), ref_clock=True), [])
+
+
 class TestPropose(unittest.TestCase):
     def test_no_dc_for_a_chip_without_a_clock(self):
         from ecatsetup import coe, propose
@@ -222,7 +262,9 @@ class TestSession(unittest.TestCase):
         p = propose.Proposal(2, 2, 0x07D83052, 0x00120000, 0, "EL2008", dc_info=el2008())
         info = {"position": 2, "vendor_id": 2, "product_code": 0x07D83052}
         ses.bus = {2: session.BusSlave(info, None, p)}
-        [(level, text)] = ses.dc_problems()
+        # the only slave with dc: it is the reference clock as well
+        [(level, ref), (level2, text)] = ses.dc_problems()
+        self.assertTrue(ref.startswith("slave 2 (slave-2): it is the DC reference clock"), ref)
         self.assertTrue(text.startswith("slave 2 (slave-2): DC SYNC0 is on"), text)
         # another kind of slave there: what it can do says nothing about the file's
         info["product_code"] = 0x03F03052
