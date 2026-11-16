@@ -152,5 +152,5 @@ def record(slave, period_ns, result, al_status=None, note="", today=None):
     with open(path, "w") as f:
         f.write("# Measured by EtherCAT Setup (Test page, Remember this period). See\n"
                 "# ecatsetup/measured/sync0.yaml for what the lines mean.\n")
-        yaml.safe_dump(entries, f, sort_keys=False, default_flow_style=None, allow_unicode=True)
+        yaml.safe_dump(entries, f, sort_keys=False, default_flow_style=None, allow_unicode=True, width=1000)
     return path

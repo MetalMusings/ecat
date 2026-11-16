@@ -1329,6 +1329,21 @@ class TestWindow(WindowBase):
             self.assertIn("AL 0x0036", asked[-1])
             r = [r for r in gui.measured.results(s) if r["period-us"] == 90][0]
             self.assertEqual((r["result"], r["al-status"]), ("refused", "0x0036"))
+            # the slave's own code cleared by the master's acknowledgement: the master's kept code is used
+            w.session.period = 85000
+            with mock.patch.object(gui.diagnose, "al_status", lambda pos: (2, False, 0)), \
+                    mock.patch.object(gui.tool, "slave_info", lambda pos: {"al_status_code": 0x36}):
+                tp.remember_period()
+            self.assertIn("refused the servo period 85 us", asked[-1])
+            self.assertEqual([r["al-status"] for r in gui.measured.results(s) if r["period-us"] == 85], ["0x0036"])
+            # no code anywhere (or the master cannot say): nothing is kept
+            w.session.period = 82000
+            n = len(asked)
+            with mock.patch.object(gui.diagnose, "al_status", lambda pos: (2, False, 0)), \
+                    mock.patch.object(gui.tool, "slave_info", mock.Mock(side_effect=RuntimeError("no master"))):
+                tp.remember_period()
+            self.assertEqual(len(asked), n)
+            self.assertIn("AL status 0x0000", told[-1])
             # not in OP for another reason: nothing is kept
             w.session.period = 80000
             n = len(asked)

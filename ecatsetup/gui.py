@@ -3562,6 +3562,12 @@ class TestPage(QWidget):
             except Exception as e:                      # the master tool or a register read failed
                 QMessageBox.warning(self, TITLE, "Could not read slave %s's state: %s" % (s["position"], e))
                 return
+            if st != 8 and not code:
+                # the master acknowledged the slave's error, which cleared its own code: the master keeps it
+                try:
+                    code = int(tool.slave_info(s["position"]).get("al_status_code") or 0)
+                except Exception:
+                    code = 0
             states[s["position"]] = (st, code)
         # one entry per kind of device
         kinds = {}

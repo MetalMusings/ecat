@@ -664,7 +664,10 @@ slaves that use SYNC0 in OP for a minute or more and the turn-around at two
 cycles (the text beside the button says for how long it has run well), it
 records that the period works for each kind of drive; when a drive is not in
 OP with an AL status that is about the SYNC0 cycle (0x0030, 0x0035, 0x0036,
-0x0037) it records that it refused the period; any other reason is not kept.
+0x0037) it records that it refused the period (the master acknowledges the
+slave's error and so clears the slave's own code; the code the master kept,
+`ethercat slaves -v` "Last AL status code", is used then); any other reason is
+not kept.
 It asks first. The results go to your own file,
 `~/.config/ecatsetup/measured/sync0.yaml`, are added to the ones that come
 with the program (`ecatsetup/measured/sync0.yaml`: the ECT60, 100 to 250 us,
