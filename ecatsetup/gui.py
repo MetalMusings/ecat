@@ -719,6 +719,22 @@ class MasterView(QWidget):
         choose.clicked.connect(win.choose_ini)
         ini.addWidget(choose)
         form.addRow("Servo period", ini)
+        self.irq_cpu = QSpinBox()
+        self.irq_cpu.setRange(-1, 1023)
+        self.irq_cpu.setSpecialValueText("not pinned")
+        self.irq_cpu.setToolTip("Pin the network card's interrupts to this CPU when the master "
+                                "starts: the servo thread's (isolcpus). Needs the privilege "
+                                "rtapi_app has. master: irq-cpu")
+        self.irq_cpu.valueChanged.connect(self.edited)
+        form.addRow("Interrupts on CPU", self.irq_cpu)
+        self.cpu = QSpinBox()
+        self.cpu.setRange(-1, 1023)
+        self.cpu.setSpecialValueText("not bound")
+        self.cpu.setToolTip("The CPU for the master's own threads. master: cpu")
+        self.cpu.valueChanged.connect(self.edited)
+        form.addRow("Master threads on CPU", self.cpu)
+        self.cpu_hint = label("", "hint", wrap=True)
+        form.addRow("", self.cpu_hint)
         card.add(form)
         lay.addWidget(card)
 
@@ -815,6 +831,9 @@ class MasterView(QWidget):
             "from %s" % s.ini_path if s.period_from_ini else
             "typed in: no INI file chosen" if not s.ini_path else
             "typed in: no SERVO_PERIOD in %s" % s.ini_path)
+        self.irq_cpu.setValue(int(m.get("irq-cpu", -1)))
+        self.cpu.setValue(int(m.get("cpu", -1)))
+        self.cpu_hint.setText(self.cpu_text())
         dc = m.get("dc")
         self.dc_on.setChecked(dc is not None)
         dc = dc or {}
@@ -827,6 +846,21 @@ class MasterView(QWidget):
         self._show_xdp()
         self.setEnabled(s.cfg is not None)
         self.loading = False
+
+    @staticmethod
+    def cpu_text(sys="/sys"):
+        """The isolated CPUs, as advice for the two CPU fields."""
+        try:
+            with open(os.path.join(sys, "devices", "system", "cpu", "isolated")) as f:
+                isolated = _cpu_set(f.read())
+        except (OSError, ValueError):
+            isolated = set()
+        if not isolated:
+            return ("No CPU is isolated for real time on this computer (isolcpus): pinning "
+                    "the interrupts helps most on the servo thread's own CPU.")
+        return ("CPU %s isolated for real time: give the interrupts the servo thread's CPU "
+                "(a lost cycle at 250 us and shorter was seen with them elsewhere)."
+                % _cpu_text(isolated))
 
     def period_edited(self, value):
         s = self.win.session
@@ -845,6 +879,11 @@ class MasterView(QWidget):
         else:
             m.pop("interface", None)
         m["transport"] = self.transport.currentText()
+        for key, box in (("irq-cpu", self.irq_cpu), ("cpu", self.cpu)):
+            if box.value() >= 0:
+                m[key] = box.value()
+            else:
+                m.pop(key, None)
         if self.dc_on.isChecked():
             dc = m.setdefault("dc", {})
             if dc.get("servo-thread-follows-ref-clock", True) and not self.follows and \

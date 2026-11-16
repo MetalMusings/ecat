@@ -16,10 +16,11 @@ import errno
 import os
 import sys
 import tempfile
+import time
 from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-status", "gui-settings",
+NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-sync", "gui-status", "gui-settings",
          "gui-settings-picker", "gui-hal", "gui-hal-apply"]
 
 # English system messages (strerror) and no display: set before anything loads
@@ -126,9 +127,42 @@ class Shots:
         self.page(w, w.bus_page, "gui-bus", gui.MASTER_ITEM)
         self.page(w, w.bus_page, "gui-slave", 0)
         self.page(w, w.test_page, "gui-test")
+        if self.want("gui-sync"):
+            self.sync(w)
         if self.want("gui-settings") or self.want("gui-settings-picker"):
             self.settings(w)
         self.close(w)
+
+    def sync(self, w):
+        """The Synchronisation card as it looks while a test runs: made from pins a
+        250 us run gave (no bus test is started)."""
+        cfg = w.session.cfg
+        cfg["master"] = {"interface": "enp2s0", "transport": "xdp-native", "irq-cpu": 3,
+                         "dc": {"servo-thread-follows-ref-clock": True, "sync0-shift-ns": "auto"}}
+        s = w.session.slave(0)
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}      # an ECT60
+        s["dc"] = {"assign-activate": "0x0300", "sync0-cycles": 1}
+        s["name"], s["device"] = "x", "Rtelligent ECT60"
+        pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
+                "shift-time": "144000", "turnaround-cycles": "2",
+                "auto-shift-margin": "41666", "auto-shift-input-margin": "41666"}
+        page = w.test_page
+        page.ok_since = time.monotonic() - 125
+        real = gui.irq_row
+        gui.irq_row = lambda iface: (True, "enp2s0's interrupts are on CPU 3, isolated for real "
+                                           "time (the servo thread's)")
+        try:
+            for i in range(50):
+                pins["send-offset"] = str(9000 + (i * 7919) % 31000)
+                pins["pll-err"] = str(((i * 37) % 11 - 5) * 600)
+                page.show_sync(pins.get, 250000)
+        finally:
+            gui.irq_row = real
+        page.ok_since = time.monotonic() - 125
+        page.show_sync(pins.get, 250000)
+        self.settle()
+        page.sync_card.resize(900, page.sync_card.sizeHint().height())
+        self.save(page.sync_card, "gui-sync")
 
     def settings(self, w):
         """The Settings card of slave 0 with one setting, and the picker."""

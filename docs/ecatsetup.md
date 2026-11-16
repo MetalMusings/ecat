@@ -104,7 +104,10 @@ to propose from.
 The **Master** page (on the right) holds the network interface, the
 transport, the servo period (taken from the INI file once you have chosen
 one; without an INI file, or one without `SERVO_PERIOD`, typed in, 1 ms
-until then: enough to try slaves on their own with the I/O test) and **Distributed clocks**: whether to use them, *Who sets the time*
+until then: enough to try slaves on their own with the I/O test), **Interrupts on CPU** and **Master threads on CPU**
+(`irq-cpu` and `cpu`: pin the network card's interrupts, and the master's own threads, to a CPU; the line
+under them names the CPUs isolated for real time on this computer; "not pinned" leaves them where the
+system put them) and **Distributed clocks**: whether to use them, *Who sets the time*
 (the slaves follow the servo thread, or the servo thread follows the
 reference clock, which is recommended; the fields of the other choice are
 greyed out), how often the reference clock is synchronised (choosing "the
@@ -639,6 +642,8 @@ has DC 0x0300 and free run. With DC 0x0300 on the EL1008 and EL2008,
 to OP, as described above.
 
 ### Synchronisation, in the test mode
+
+![The Synchronisation card during a 250 us run](images/gui-sync.png)
 
 While a test runs (*Test* page), the *Synchronisation* card shows, from
 the master's pins (`ecat.0.*`):

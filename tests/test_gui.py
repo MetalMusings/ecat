@@ -1250,6 +1250,32 @@ class TestWindow(WindowBase):
         m.ref_cycles.setValue(10)
         self.assertEqual(config.dc_warnings(w.session.cfg), [])
 
+    def test_master_cpu_fields(self):
+        import tempfile
+        w = self.window()
+        w.select_slave(gui.MASTER_ITEM)
+        m = w.master_page
+        self.assertNotIn("irq-cpu", w.session.cfg.get("master", {}))
+        m.irq_cpu.setValue(3)
+        m.cpu.setValue(2)
+        self.assertEqual(w.session.cfg["master"]["irq-cpu"], 3)
+        self.assertEqual(w.session.cfg["master"]["cpu"], 2)
+        self.assertEqual([e for e in config.check(w.session.cfg) if "master" in e], [])
+        m.irq_cpu.setValue(-1)          # "not pinned": the key goes away
+        self.assertNotIn("irq-cpu", w.session.cfg["master"])
+        self.assertEqual(w.session.cfg["master"]["cpu"], 2)
+        # a file's values are shown
+        w.session.cfg["master"]["irq-cpu"] = 1
+        m.show_config()
+        self.assertEqual(m.irq_cpu.value(), 1)
+        # the advice follows the isolated CPUs
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "devices", "system", "cpu"))
+            self.assertIn("No CPU is isolated", m.cpu_text(d))
+            with open(os.path.join(d, "devices", "system", "cpu", "isolated"), "w") as f:
+                f.write("3\n")
+            self.assertIn("CPU 3 isolated", m.cpu_text(d))
+
     def test_sync0_cycle_and_measured_lines(self):
         w = self.window()
         s = w.session.slave(0)
