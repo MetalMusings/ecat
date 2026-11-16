@@ -1526,12 +1526,18 @@ the 250 us run.
   2 cycles. The start-up burst is still there (about 170 events in 1.4 s, 3 s after the bus
   was activated, when the automatic SYNC0 shift takes effect; the machine is in E-stop then, so
   nothing is shut down that was running): it is not the interrupts. Wait for it before enabling.
+- **100 us in LinuxCNC** (2026-11-16, the user): the first ECT60 refused SAFEOP, AL status 0x0036
+  "DC Sync0 Cycle Time", so the bus never reached OP and LinuxCNC showed "amplifier fault" on
+  all joints. The drive does not accept a SYNC0 cycle of 100 us (125 us and up were accepted).
+  This is the hard limit on this bus and explains why 100 and 80 us never became stable in
+  `halrun` either. The drive's own object `0x1C32:05` (minimum cycle time) reads the bytes
+  `00 00 48 E8`, which is not a value that fits (the drive seems to mis-order it), so the limit
+  cannot be read from the drive: a SYNC0 cycle shorter than the drives take is found by trying.
 - **In practice:** 1 ms is what the machine runs, 250 us is tried (and worked), 200 us is the
   shortest where the bus is clean from the start, 150 and 125 us work after a start-up burst
   that matters only if the drives are enabled then, and 100 us and below does not work on this
-  bus. What sets the limit is not known: not the servo thread's own time (4-13 us), more
-  likely the round trip of a frame (224 bytes through five slaves, the driver and the XDP
-  path) against the period, or the drives. With LinuxCNC's motion code and QtPlasmaC in the
+  bus. What sets the limit: the ECT60 drives refuse a SYNC0 cycle of 100 us (above); not the
+  servo thread's own time (4-13 us on average). With LinuxCNC's motion code and QtPlasmaC in the
   same thread, 67 us at most, a period below about 150 us would leave little margin
   in any case.
 
