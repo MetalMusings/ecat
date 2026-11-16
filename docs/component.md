@@ -29,6 +29,12 @@ addf ecat.write-all servo-thread
 
 - Slave pins are `<slave name>.<pin>` as named in the file; the master's
   are `ecat.0.*` (`ecat.0.all-op`, ...) and `ecat.*`.
+- Only the slaves of the file take part. A slave that is on the bus but not
+  in the file, or in it with `unused: true` ([slaves](#slaves)), is left
+  alone: no configuration, no pins, it stays in PREOP (its state is not
+  touched). `ecat.0.all-op` means that every slave of the file is in OP (the
+  `state-*` pins still tell the states of the whole bus), so a slave that
+  only sits on the bus does not keep it false, nor stop a drive.
 - The bus stops in order by itself when LinuxCNC (or `halcmd stop`)
   stops the threads. Otherwise the slaves would lose their process data
   in OP and stop with an error (sync manager watchdog 0x001B,
@@ -258,6 +264,7 @@ file each stopped the load with their own line.
 | `cia402.modes` | For `cia402`: other modes the drive may change to: `hm` for homing by the drive's own method, and `csp`, `csv`, `pv`, `pp` to choose with the `opmode-cmd` pin. It needs `0x6060` and `0x6061`, and each mode's objects, in the process data. |
 | `homing` | For `cia402` with `hm`: the homing method chosen in the window, `{method: 17, fast: 3000, slow: 1000, accel: 5000, offset: 0}` (a list of them, `null` for an axis without, for a drive with several axes). The master ignores it. The window writes the same choice to `settings` (0x6098, 0x6099, 0x609A, 0x607C and what the drive needs besides, from its quirk file), which is what the drive gets at start; the drive test writes it too, so a test homes as LinuxCNC will ([quirk files](ecatsetup.md#homing)). |
 | `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder channels](#encoder-channels). |
+| `unused` | `true`: the slave is on the bus but LinuxCNC does not use it: the component compares its `identity` with the bus at start (so a swapped slave is noticed) and does nothing else with it: no pins, no configuration, no state change. Everything else the entry holds is kept, unread, for a later `false`. Not with `eoe` (a slave with a network address is used). Default `false`. A slave that is not in the file at all is treated the same way, but an `unused` entry keeps the place (and the identity check), and the window and `--check` still know it. |
 | `configure-pdos` | `true`: the master writes the PDO assignment and mapping below to the slave; `false`: the slave's own mapping is used and the entries below are only located in it. |
 | `process-data` | `outputs` (master to slave) and `inputs` (slave to master): lists of PDOs. |
 | `dc` | Distributed clocks; leave out for none. |

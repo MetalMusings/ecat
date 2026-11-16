@@ -919,7 +919,34 @@ static void test_serial_errors(void) {
   CHECK_FAILS(el6021("", "", 0), "a serial channel's PDO");
 }
 
+// ---- slaves that are only on the bus --------------------------------
+
+static void test_unused(void) {
+  // an unused slave is one record: identity for the start check, nothing else
+  CHECK_EQ(load("ecat: 1\nslaves:\n"
+                "- position: 0\n  name: a\n  device: EK1100\n  identity: {vendor: '0x2', product: '0x44c2c52', revision: '0x110000'}\n  profile: generic\n  unused: true\n"
+                "  process-data:\n    inputs:\n    - {pdo: '0x1a00', sm: 3, entries: [{object: '0x6000:01', bits: 8, type: USINT, pin: x}]}\n  settings:\n  - {object: '0x2000:00', type: UDINT, value: 1}\n"
+                "- position: 1\n  name: b\n  profile: generic\n"),
+           0);
+  CHECK_EQ(count(lcecConfTypeSlave), 2);
+  CHECK_EQ(SLAVE(0)->unused, 1);
+  CHECK_EQ(SLAVE(1)->unused, 0);
+  CHECK_EQ(SLAVE(0)->vid, 2);
+  CHECK_EQ(SLAVE(0)->pid, 0x44c2c52);
+  CHECK_EQ(SLAVE(0)->revision, 0x110000);
+  CHECK_EQ(SLAVE(0)->syncManagerCount, 0);
+  CHECK_EQ(SLAVE(0)->pdoMappingCount, 0);
+  CHECK_EQ(SLAVE(0)->sdoConfigLength, 0);
+  CHECK_EQ(count(lcecConfTypePdoEntry), 0);
+  CHECK_EQ(count(lcecConfTypeSdoConfig), 0);
+  // the default: used
+  CHECK_EQ(load("ecat: 1\nslaves:\n- position: 0\n  name: a\n  profile: generic\n  unused: false\n"), 0);
+  CHECK_EQ(SLAVE(0)->unused, 0);
+  // a slave with a network address is used
+  CHECK_FAILS("ecat: 1\nslaves:\n- position: 0\n  name: a\n  profile: generic\n  unused: true\n  eoe: {ip: 10.0.0.2/24}\n", "unused: true and eoe");
+}
+
 RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
-    test_too_many_encoders, test_serial, test_serial_errors)
+    test_too_many_encoders, test_serial, test_serial_errors, test_unused)

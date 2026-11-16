@@ -417,6 +417,17 @@ static int lcec_start_check(lcec_master_t *master) {
     if (slave->index + 1 > need) need = slave->index + 1;
     n_expect++;
   }
+  // slaves marked unused are not configured, but must still be the ones the file says
+  for (i = 0; i < master->n_unused && n_expect < LCEC_START_CHECK_MAX; i++) {
+    expect[n_expect].position = master->unused[i].position;
+    expect[n_expect].vid = master->unused[i].vid;
+    expect[n_expect].pid = master->unused[i].pid;
+    expect[n_expect].revision = master->unused[i].revision;
+    expect[n_expect].device = master->unused[i].device;
+    expect[n_expect].name = master->unused[i].name;
+    if (master->unused[i].position + 1 > need) need = master->unused[i].position + 1;
+    n_expect++;
+  }
   for (;;) {
     if (ecrt_master(master->master, &info) != 0) {
       rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "start check: cannot read the master's state\n");
@@ -1368,6 +1379,22 @@ int lcec_parse_config(void) {
           goto fail2;
         }
 
+        // a slave that is only on the bus: kept for the start check, never configured
+        if (slave_conf->unused) {
+          if (master->n_unused >= LCEC_UNUSED_MAX) {
+            rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "more than %d unused slaves\n", LCEC_UNUSED_MAX);
+            goto fail2;
+          }
+          master->unused[master->n_unused].position = slave_conf->index;
+          master->unused[master->n_unused].vid = slave_conf->vid;
+          master->unused[master->n_unused].pid = slave_conf->pid;
+          master->unused[master->n_unused].revision = slave_conf->revision;
+          snprintf(master->unused[master->n_unused].device, LCEC_CONF_STR_MAXLEN, "%s", slave_conf->device);
+          snprintf(master->unused[master->n_unused].name, LCEC_CONF_STR_MAXLEN, "%s", slave_conf->name);
+          master->n_unused++;
+          break;
+        }
+
         // ecat configures every slave from its process data (generic)
         type = NULL;
 
@@ -1927,7 +1954,6 @@ void lcec_update_master_hal(lcec_master_data_t *hal_data, ec_master_state_t *ms)
   hal_set_bool(hal_data->state_safeop, (ms->al_states & 0x04) != 0);
   hal_set_bool(hal_data->state_op, (ms->al_states & 0x08) != 0);
   hal_set_bool(hal_data->link_up, ms->link_up);
-  hal_set_bool(hal_data->all_op, (ms->al_states == 0x08));
 }
 
 /// @brief Update generic HAL pins for a slave.
@@ -2123,10 +2149,6 @@ void lcec_read_master(void *arg, long period) {
   lcec_update_master_hal(master->hal_data, &master->ms);
   // the flight recorder: what changed
   ecat_events_wc(master->events, &master->ev_last, master->domain_state.wc_state);
-  if (check_states) {
-    ecat_events_master(master->events, &master->ev_last, master->ms.link_up, master->ms.al_states,
-        master->ms.slaves_responding);
-  }
 
   // update global state
   global_ms.slaves_responding += master->ms.slaves_responding;
@@ -2158,6 +2180,26 @@ void lcec_read_master(void *arg, long period) {
     if (slave->proc_read != NULL) {
       slave->proc_read(slave, period);
     }
+  }
+
+  // all-op: every slave of the configuration is in OP. Slaves that are on
+  // the bus but not in the file (or `unused`) stay in PREOP and do not count:
+  // the master's own al_states covers the whole bus.
+  if (check_states) {
+    int all_op = master->ms.link_up && master->first_slave != NULL;
+    for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+      if (!slave->state.operational) all_op = 0;
+    }
+    master->all_op = all_op;
+  }
+  hal_set_bool(master->hal_data->all_op, master->all_op);
+  // the event log's AL states are those of the slaves of the file: a slave that is only on the bus stays in
+  // PREOP, which is not a change to report
+  if (check_states) {
+    unsigned int al_states = 0;
+    for (slave = master->first_slave; slave != NULL; slave = slave->next) al_states |= slave->state.al_state;
+    ecat_events_master(master->events, &master->ev_last, master->ms.link_up,
+        master->first_slave != NULL ? al_states : master->ms.al_states, master->ms.slaves_responding);
   }
 
   // a slave whose DC sync check timed out, as of the last state check

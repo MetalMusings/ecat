@@ -981,6 +981,14 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   sc->revision = get_int(c, ident, "revision", 0);
   copy_str(sc->device, get_str(c, s, "device"));
   sc->configPdos = get_bool(c, s, "configure-pdos", 1);
+  // A slave that is only on the bus: its identity is still compared at
+  // start, nothing else is read or done (what else the entry has is kept
+  // for a later `unused: false`).
+  sc->unused = get_bool(c, s, "unused", 0);
+  if (sc->unused) {
+    if (get(c, s, "eoe") != NULL) error(c, "unused: true and eoe: a slave with a network address is used (the master configures it)");
+    return;
+  }
   c->cia402 = profile != NULL && !strcmp(profile, "cia402");
   c->cia402_modes = 0;
   c->cia402_all = 0;

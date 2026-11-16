@@ -1187,6 +1187,13 @@ class SlaveView(QWidget):
         self.again.clicked.connect(self.propose_again)
         again.addWidget(self.again)
         op.add(again)
+        self.used = QCheckBox("Used by LinuxCNC")
+        self.used.setToolTip("Untick for a slave that is only on the bus: ecat checks that it is the slave "
+                             "the file says (at start), and then leaves it alone (no configuration, no pins, "
+                             "it stays in PREOP). What the entry holds is kept for when you tick this again. "
+                             "A slave with a network address (EoE) is used.")
+        self.used.toggled.connect(self.general_edited)
+        op.add(self.used)
         self.configure_pdos = QCheckBox("Write the PDO mapping to the slave (configure-pdos)")
         self.configure_pdos.toggled.connect(self.general_edited)
         op.add(self.configure_pdos)
@@ -1469,7 +1476,7 @@ class SlaveView(QWidget):
             text.setText(t)
         self.esi_button.setVisible(bool(p) and not p.esi_path)
 
-        editable = (self.cia402, self.pdo_set, self.configure_pdos, self.dc_mode, self.pd, self.st)
+        editable = (self.cia402, self.pdo_set, self.used, self.configure_pdos, self.dc_mode, self.pd, self.st)
         for w in editable:
             w.setEnabled(s is not None)
         if s is None:
@@ -1505,6 +1512,7 @@ class SlaveView(QWidget):
             for m in chips:
                 self.supported.insertWidget(self.supported.count() - 1, pill(m.upper(), "grey"))
 
+        self.used.setChecked(s.get("unused") is not True)
         self.configure_pdos.setChecked(bool(s.get("configure-pdos", True)))
         self.pdo_set.clear()
         self.pdo_set.addItem("PDO assignment: the ESI file's default" if p and p.pdo_sets
@@ -2093,6 +2101,10 @@ class SlaveView(QWidget):
             else:
                 c.pop("zero-at-start", None)
         s["configure-pdos"] = self.configure_pdos.isChecked()
+        if self.used.isChecked():
+            s.pop("unused", None)
+        else:
+            s["unused"] = True
         choice = self.dc_mode.currentData()
         if choice != DC_FREE:
             dc = s.setdefault("dc", {})

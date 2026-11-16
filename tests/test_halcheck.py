@@ -80,6 +80,18 @@ class TestPinList(unittest.TestCase):
         self.assertIn("x.opmode-cmd", halpins.pins(c))
         self.assertIn("x.at-speed", halpins.pins(c))
 
+    def test_unused_slave_has_no_pins(self):
+        c = cfg()
+        self.assertIn("io.out-1", halpins.pins(c))
+        io = next(s for s in c["slaves"] if s["name"] == "io")
+        io["unused"] = True
+        p = halpins.pins(c)
+        self.assertNotIn("io.out-1", p)
+        self.assertFalse([n for n in p if n.startswith("io.")])
+        self.assertIn("x.pos-fb", p)                       # the others are unchanged
+        io["unused"] = False
+        self.assertIn("io.out-1", halpins.pins(c))
+
 
 class TestCheck(Folder):
     def check(self, c=None):

@@ -497,6 +497,16 @@ def check(cfg):
         profile = s.get("profile")
         if profile not in ("cia402", "mdp", "generic"):
             err("%s: unknown profile %r" % (where, profile))
+        # unused: true: on the bus, in the file for its identity (compared at
+        # start), but not configured and left alone by the component, which
+        # reads nothing else of the entry (it stays for a later unused: false)
+        if "unused" in s and not isinstance(s["unused"], bool):
+            err("%s: unused must be true or false" % where)
+        if s.get("unused") is True:
+            if s.get("eoe") is not None:
+                err("%s: unused: true and eoe: a slave with a network address is used (the master configures it)"
+                    % where)
+            continue
         if profile == "cia402" and (s.get("cia402") or {}).get("mode") not in CIA402_MODES:
             err("%s: cia402 mode must be one of %s" % (where, ", ".join(sorted(CIA402_MODES))))
         other_modes = (s.get("cia402") or {}).get("modes") or [] if profile == "cia402" else []

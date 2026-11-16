@@ -125,7 +125,10 @@ Choosing a slave shows:
   would improve the proposal (usually an ESI file). *Choose ESI files...*
   and *Save as quirk file...* (what you chose, kept for the device, see
   [quirk files](#quirk-files)) are here;
-- **Operation and sync**: the PDO assignment (the box shows the ESI's
+- **Operation and sync**: *Used by LinuxCNC* (untick it for a slave that
+  is only on the bus: `unused: true`, the slave is left alone, in PREOP,
+  with no pins; ecat still checks at start that it is the slave the file
+  says), the PDO assignment (the box shows the ESI's
   predefined assignment the file uses; choosing another proposes the slave
   again with it, after asking), `configure-pdos`, the Sync
   choice (free run, one of the slave's DC modes, or DC mode with user settings; see
@@ -703,7 +706,7 @@ explains the fault.
 
    | Code | Usually | What to do |
    |---|---|---|
-   | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*PDO assignment*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). |
+   | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*PDO assignment*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). If LinuxCNC does not use the slave at all, untick *Used by LinuxCNC* on its page: the slave is then left alone. A slave of the file that does not reach OP stops every drive (the working counter is incomplete), a slave that is not used does not. |
    | 0x0026, 0x0043 | A setting (start-up SDO) was refused, or does not fit the others. | Read the master's messages for the object; check it in the Settings card (*Read present values*), take it out and try again. |
    | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period. | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings. |
    | 0x001B | Sync manager watchdog: the process data stopped. | LinuxCNC or the test stopped, or the servo thread missed cycles: see the event log. |

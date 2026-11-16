@@ -78,6 +78,7 @@ extern "C" {
 
 // State update period (ns)
 #define LCEC_STATE_UPDATE_PERIOD 1000000000LL
+#define LCEC_UNUSED_MAX 64  ///< slaves marked `unused: true`, per master
 
 // The stop guard (userspace master): see lcec_guard_tick() in lcec_main.c.
 #define LCEC_GUARD_IDLE 0     ///< the servo thread runs the bus
@@ -241,6 +242,15 @@ typedef struct lcec_master {
   int process_data_len;
   lcec_slave_t *first_slave;
   lcec_slave_t *last_slave;
+  /// Slaves in the file marked `unused: true`: on the bus, not configured
+  /// and left alone. Only the start check looks at them.
+  struct {
+    int position;
+    uint32_t vid, pid, revision;
+    char device[LCEC_CONF_STR_MAXLEN];
+    char name[LCEC_CONF_STR_MAXLEN];
+  } unused[LCEC_UNUSED_MAX];
+  int n_unused;
   lcec_master_data_t *hal_data;
   uint64_t app_time_base;
   uint32_t app_time_period;
@@ -250,6 +260,7 @@ typedef struct lcec_master {
   int sync_to_ref_clock;
   uint32_t global_shift_time;       ///< SYNC0 offset from the nominal servo thread start (ns).
   int auto_shift;                   ///< globalShiftTime="auto": global_shift_time is chosen at run time.
+  int all_op;                       ///< Every slave of the configuration is in OP (the all-op pin).
   int dc_sync_failed;               ///< A slave's DC sync check timed out (see ec_slave_config_state_t).
   int taking_down;                  ///< take-down was set in the last cycle.
   long long last_cycle;             ///< Userspace master: rtapi_get_time() at the end of the last write (atomic).

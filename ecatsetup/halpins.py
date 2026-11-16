@@ -113,7 +113,7 @@ def pins(cfg):
     add("ecat.0", MASTER_GLOBAL + MASTER)
     for s in (cfg or {}).get("slaves") or []:
         name = s.get("name")
-        if not name:
+        if not name or s.get("unused") is True:  # an unused slave is not configured: no pins
             continue
         add(name, SLAVE)
         for kind in ("outputs", "inputs"):

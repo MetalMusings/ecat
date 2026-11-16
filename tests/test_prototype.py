@@ -537,6 +537,30 @@ class TestEsi(unittest.TestCase):
              "eoe": {"ip": "10.0.0.5", "bogus": 1}}]}
         self.assertTrue(any("slave 0" in e and "bogus" in e for e in config.check(cfg)))
 
+    def test_unused_slave(self):
+        # as ecat_config.c (component/tests/test_config.c test_unused)
+        def cfg(**extra):
+            slave = {"position": 1, "name": "u", "profile": "generic", "identity": {"vendor": "0x2", "product": "0x1"}}
+            slave.update(extra)
+            return {"ecat": 1, "master": {}, "slaves": [
+                {"position": 0, "name": "d", "profile": "generic", "identity": {"vendor": "0x2", "product": "0x1"}},
+                slave]}
+        self.assertEqual(config.check(cfg()), [])
+        self.assertEqual(config.check(cfg(unused=True)), [])
+        self.assertEqual(config.check(cfg(unused=False)), [])
+        self.assertTrue(any("unused must be true or false" in e for e in config.check(cfg(unused="yes"))))
+        # what the entry holds is not checked while it is unused ...
+        junk = {"process-data": {"inputs": [{"pdo": "0x1a00", "sm": 3, "entries": [
+            {"object": "0x6000:01", "bits": 8, "type": "USINT", "pin": "x y", "hal-type": "bogus"}]}]}}
+        self.assertEqual(config.check(cfg(unused=True, **junk)), [])
+        # ... and is, once it is used again
+        self.assertNotEqual(config.check(cfg(**junk)), [])
+        # a slave with a network address is used
+        self.assertTrue(any("unused: true and eoe" in e for e in config.check(cfg(unused=True, eoe={"ip": "10.0.0.5/24"}))))
+        # it is still a slave of the file: its identity and position count
+        self.assertTrue(any("position used twice" in e for e in config.check(
+            {"ecat": 1, "master": {}, "slaves": [cfg()["slaves"][0], dict(cfg()["slaves"][0], name="e", unused=True)]})))
+
     def test_eoe_warnings(self):
         def slave(pos, **eoe):
             return {"position": pos, "name": "s%d" % pos, "eoe": eoe}

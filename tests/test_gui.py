@@ -963,6 +963,23 @@ class TestWindow(WindowBase):
             w.select_slave(0)
             self.assertFalse(page.serial_widgets[0]["half"].isEnabled())
 
+    def test_used_checkbox(self):
+        w = self.window()
+        s = w.session.slave(1)
+        page = w.slave_page
+        w.select_slave(1)
+        self.assertTrue(page.used.isChecked())
+        self.assertNotIn("unused", s)
+        page.used.setChecked(False)
+        self.assertIs(s["unused"], True)
+        self.assertEqual(config.check(w.session.cfg), [])
+        self.assertTrue(config.yaml.safe_load(config.dumps(w.session.cfg))["slaves"][1]["unused"])
+        w.select_slave(0)                                  # another slave, then back: kept
+        w.select_slave(1)
+        self.assertFalse(page.used.isChecked())
+        page.used.setChecked(True)
+        self.assertNotIn("unused", s)                      # the default is not written
+
     def test_eoe_card(self):
         w = self.window()
         s, other = w.session.slave(0), w.session.slave(1)

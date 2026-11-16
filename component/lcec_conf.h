@@ -100,6 +100,7 @@ typedef struct {
   char name[LCEC_CONF_STR_MAXLEN];
   uint32_t revision;                    ///< identity.revision, 0 if not given (for the start check).
   char device[LCEC_CONF_STR_MAXLEN];    ///< The device name in the file (for the start check).
+  int unused;  ///< `unused: true`: on the bus and in the file, but not used by LinuxCNC: left alone (no more records follow).
 } LCEC_CONF_SLAVE_T;
 
 typedef struct {
