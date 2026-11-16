@@ -1757,6 +1757,29 @@ lag. Three faults found and fixed on the way (all in EtherCAT Setup):
   a recording keeps the feedforward parameters now (`meta.feedforward`)
   and the comparison names their change.
 
+At the edges (`test-scripts/drive/kick.sh`, `kick.py`; `drive-ff.yaml`,
+feedforward velocity 1.0 and torque 5e-5 from the file, a sine of 10000
+counts at 2 Hz on `pos-cmd` all the time, a sampler on `velocity-ff`,
+`torque-ff`, `stat-op-enabled`, `drv-fault` and 0x6077):
+
+- not following (not enabled, or in a fault): `velocity-ff` and
+  `torque-ff` exactly 0 in all 3168 samples;
+- never more than the command's own: `velocity-ff` at most 125660 counts/s
+  (the sine's peak), `torque-ff` at most 79.0 % (5e-5 × its peak
+  acceleration);
+- enabled mid-sine (three times: first, after a fault reset, after an
+  enable dropped mid-move): 0 in the first cycle, then the command's
+  velocity at once (65322 against the command's 65994 counts/s); torque 0,
+  then 5e-5 × the acceleration (-67.71 % against -67.19 %): no spike;
+- a following-error fault (0x6065 = 50 counts written mid-move: 0x8611)
+  and an enable dropped mid-move: 0 in the same cycle.
+- The drive itself hits its torque limit (0x6077 -3000) at an enable
+  mid-sine: that is the position step (`pos-cmd` ran on while it stood),
+  not the feedforward; in LinuxCNC `pos-cmd` follows `pos-fb` while a joint
+  is disabled, so it starts from standstill.
+- Not tried: a mode change (`opmode-cmd`) and homing: the card has no
+  0x60FF and its model runs CSP only (unit-tested in test_cia402.c).
+
 Still the model's: with velocity feedforward it is a cycle ahead of its
 target (it steps to the target instead of interpolating), so the card shows
 the drive's loop lag as -1.00 ms and the lag as 1.00 ms, less than the
