@@ -706,6 +706,11 @@ class TestResponseCard(unittest.TestCase):
                                              25600, 0, 25600)])
         card.settings_table.selectRow(0)
         self.assertFalse(card.try_row.isHidden())
+        # the field and what is being tried come above the list, which can be
+        # taller than the window (under it they were out of sight at the machine)
+        order = [card.lay.indexOf(x) for x in (card.try_row, card.trials_table,
+                                                 card.settings_table)]
+        self.assertEqual(order, sorted(order))
         self.assertEqual(card.try_value.text(), "25600")
         card.try_value.setText("2000")
         card.try_setting()

@@ -3544,18 +3544,8 @@ class ResponseCard(Card):
         row.addWidget(self.look)
         row.addStretch(1)
         self.add(row)
-        self.settings_table = QTableWidget(0, 4)
-        self.settings_table.setHorizontalHeaderLabels(["Object", "Name", "Now", "Why look at it"])
-        self.settings_table.verticalHeader().hide()
-        self.settings_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.settings_table.horizontalHeader().setStretchLastSection(True)
-        self.settings_table.setWordWrap(True)
-        self.settings_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.settings_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.settings_table.itemSelectionChanged.connect(self.setting_chosen)
-        self.settings_table.hide()
-        self.add(self.settings_table)
-        # trying the chosen one: written in RAM, the drive's own value kept
+        # trying the chosen one: written in RAM, the drive's own value kept;
+        # above the table, which can be taller than the window (it was under it, out of sight)
         self.try_row = QWidget()
         tr = QHBoxLayout(self.try_row)
         tr.setContentsMargins(0, 0, 0, 0)
@@ -3585,6 +3575,17 @@ class ResponseCard(Card):
         self.trials_table.horizontalHeader().setStretchLastSection(True)
         self.trials_table.hide()
         self.add(self.trials_table)
+        self.settings_table = QTableWidget(0, 4)
+        self.settings_table.setHorizontalHeaderLabels(["Object", "Name", "Now", "Why look at it"])
+        self.settings_table.verticalHeader().hide()
+        self.settings_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.settings_table.horizontalHeader().setStretchLastSection(True)
+        self.settings_table.setWordWrap(True)
+        self.settings_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.settings_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.settings_table.itemSelectionChanged.connect(self.setting_chosen)
+        self.settings_table.hide()
+        self.add(self.settings_table)
         self.found = []         # the candidates shown in the settings table
         self.last_res = None    # the analysis of self.last
         self.settings_hint = label("Try one at a time: write it in the SDO card on this page (the "
