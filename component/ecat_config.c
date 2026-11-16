@@ -1194,6 +1194,10 @@ char *ecat_config_load(const char *path, size_t *length) {
   copy_str(mc->interface, get_str(&c, master, "interface"));
   copy_str(mc->transport, get_str(&c, master, "transport"));
   mc->startCheck = get_bool(&c, master, "start-check", 1);
+  mc->irqCpu = get_int(&c, master, "irq-cpu", -1);
+  mc->cpu = get_int(&c, master, "cpu", -1);
+  if (mc->irqCpu < -1 || mc->irqCpu > 1023) error(&c, "master.irq-cpu: %d is not a CPU number", mc->irqCpu);
+  if (mc->cpu < -1 || mc->cpu > 1023) error(&c, "master.cpu: %d is not a CPU number", mc->cpu);
   mc->appTimePeriod = 0;  // the servo thread's period, see ecat_config.h
   mc->refClockSyncCycles = get_int(&c, mdc, "ref-clock-sync-cycles", 0);
   // true: the servo thread follows the DC reference clock (lcec's

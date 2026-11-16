@@ -1508,6 +1508,17 @@ the 250 us run.
     itself.
   - 100 and 80 us: working counter lost again and again (360 and 800 skipped cycles in 40 s)
     and the bus not in OP at the end: not usable.
+- **The network card's interrupts** (found the same day, 200 us in LinuxCNC): the interrupts of
+  `enp2s0` were on CPUs 0-2, the servo thread on the isolated CPU 3, and ecat passed no CPU to
+  the master (`irq_cpu` -1). With the QtPlasmaC GUI and a program running (the mouse moved),
+  one cycle was lost at 250 us and one at 200 us (working counter 0 for one cycle, "datagram
+  SKIPPED 1 time"); in halrun without a GUI, 270 s at 200 us under `stress-ng` lost none, and
+  the thread's latency was within +-33 us under the same load (`latency-histogram`, 280 s).
+  `master: irq-cpu: 3` (new; and `cpu` for the master's threads) pins the card's five interrupts
+  to the servo thread's CPU when the master starts (this needs root: ecat takes the fsuid for
+  the call). With it: 3 minutes at 200 us in LinuxCNC with a program running and the mouse used,
+  no lost cycle. One run, so not proof: before it, the loss came about once in 100 s to 10
+  minutes.
 - **In practice:** 1 ms is what the machine runs, 250 us is tried (and worked), 200 us is the
   shortest where the bus is clean from the start, 150 and 125 us work after a start-up burst
   that matters only if the drives are enabled then, and 100 us and below does not work on this

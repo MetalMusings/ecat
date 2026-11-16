@@ -81,6 +81,8 @@ typedef struct {
   char interface[LCEC_CONF_STR_MAXLEN];  ///< Network interface for the userspace master (lcec_uspace); empty if not given.
   char transport[LCEC_CONF_STR_MAXLEN];  ///< Transport for the userspace master (lcec_uspace), such as raw; empty if not given.
   int startCheck;  ///< master.start-check: 1 (default) stops when the bus differs, 0 only warns.
+  int irqCpu;      ///< master.irq-cpu: CPU for the network card's interrupts, -1 (default) leaves them.
+  int cpu;         ///< master.cpu: CPU for the master's own threads, -1 (default) leaves them.
 } LCEC_CONF_MASTER_T;
 
 typedef struct {

@@ -537,7 +537,13 @@ static ec_master_t *lcec_request_master(lcec_master_t *master) {
         RTAPI_MSG_ERR, LCEC_MSG_PFX "userspace master: cannot create transport %s on %s\n", transport_name, interface);
     return NULL;
   }
-  if ((ec_master = ecrt_startup_master(master->index, transport, NULL, 0, -1, -1)) == NULL) {
+  // Pinning the network card's interrupts writes under /proc/irq, which needs root: the fsuid of
+  // rtapi_app is the user's.
+  uid_t user_fsuid = 0;
+  if (master->irq_cpu >= 0) user_fsuid = (uid_t)setfsuid(0);
+  ec_master = ecrt_startup_master(master->index, transport, NULL, 0, master->cpu, master->irq_cpu);
+  if (master->irq_cpu >= 0) setfsuid(user_fsuid);
+  if (ec_master == NULL) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "userspace master: cannot start master on %s\n", interface);
     ec_transport_destroy(transport);
     return NULL;
@@ -1363,6 +1369,8 @@ int lcec_parse_config(void) {
         // sync0-shift-ns: auto, see ecat_config_dc
         master->auto_shift = master_conf->autoShift;
         master->start_check = master_conf->startCheck;
+        master->irq_cpu = master_conf->irqCpu;
+        master->cpu = master_conf->cpu;
 
         // add master to list
         LCEC_LIST_APPEND(first_master, last_master, master);

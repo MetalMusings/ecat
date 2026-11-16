@@ -233,6 +233,8 @@ typedef struct lcec_master {
   char interface[LCEC_CONF_STR_MAXLEN];  ///< Network interface for the userspace master; empty if not given.
   char transport[LCEC_CONF_STR_MAXLEN];  ///< Transport for the userspace master; empty if not given.
   int start_check;                       ///< Stop at load when the bus differs from the configuration.
+  int irq_cpu;                           ///< Userspace master: CPU for the NIC interrupts, -1 to leave them.
+  int cpu;                               ///< Userspace master: CPU for the master's threads, -1 to leave them.
   ec_master_t *master;              ///< EtherCAT master structure.
   unsigned long mutex;              ///< Mutex for locking operations.
   ec_pdo_entry_reg_t *pdo_entry_regs;

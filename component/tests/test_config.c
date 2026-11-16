@@ -919,6 +919,17 @@ static void test_serial_errors(void) {
   CHECK_FAILS(el6021("", "", 0), "a serial channel's PDO");
 }
 
+static void test_master_cpus(void) {
+  CHECK_EQ(load("ecat: 1\nslaves:\n- position: 0\n  name: a\n  profile: generic\n"), 0);
+  CHECK_EQ(MASTER->irqCpu, -1);
+  CHECK_EQ(MASTER->cpu, -1);
+  CHECK_EQ(load("ecat: 1\nmaster: {irq-cpu: 3, cpu: 1}\nslaves:\n- position: 0\n  name: a\n  profile: generic\n"), 0);
+  CHECK_EQ(MASTER->irqCpu, 3);
+  CHECK_EQ(MASTER->cpu, 1);
+  CHECK_FAILS("ecat: 1\nmaster: {irq-cpu: -2}\nslaves:\n- position: 0\n  name: a\n  profile: generic\n", "master.irq-cpu");
+  CHECK_FAILS("ecat: 1\nmaster: {cpu: 5000}\nslaves:\n- position: 0\n  name: a\n  profile: generic\n", "master.cpu");
+}
+
 // ---- slaves that are only on the bus --------------------------------
 
 static void test_unused(void) {
@@ -949,4 +960,4 @@ static void test_unused(void) {
 RUN_TESTS("config", test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
-    test_too_many_encoders, test_serial, test_serial_errors, test_unused)
+    test_too_many_encoders, test_serial, test_serial_errors, test_unused, test_master_cpus)

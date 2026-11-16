@@ -537,6 +537,18 @@ class TestEsi(unittest.TestCase):
              "eoe": {"ip": "10.0.0.5", "bogus": 1}}]}
         self.assertTrue(any("slave 0" in e and "bogus" in e for e in config.check(cfg)))
 
+    def test_master_cpus(self):
+        # as ecat_config.c (component/tests/test_config.c test_master_cpus)
+        def errs(**master):
+            return config.check({"ecat": 1, "master": master, "slaves": [
+                {"position": 0, "name": "d", "profile": "generic", "identity": {"vendor": "0x2", "product": "0x1"}}]})
+        self.assertEqual(errs(), [])
+        self.assertEqual(errs(**{"irq-cpu": 3, "cpu": 1}), [])
+        self.assertEqual(errs(**{"irq-cpu": -1}), [])
+        for bad in (-2, 5000, "3", True, 1.5):
+            self.assertTrue(any("master.irq-cpu" in e for e in errs(**{"irq-cpu": bad})), bad)
+        self.assertTrue(any("master.cpu" in e for e in errs(cpu=-3)))
+
     def test_unused_slave(self):
         # as ecat_config.c (component/tests/test_config.c test_unused)
         def cfg(**extra):

@@ -460,6 +460,10 @@ def check(cfg):
         err("master: unknown transport %r" % master.get("transport"))
     if not isinstance(master.get("start-check", True), bool):
         err("master.start-check: must be true or false")
+    for key in ("irq-cpu", "cpu"):
+        v = master.get(key, -1)
+        if isinstance(v, bool) or not isinstance(v, int) or not -1 <= v <= 1023:
+            err("master.%s: %r is not a CPU number (0 and up, or -1 to leave it)" % (key, v))
     mdc = master.get("dc") or {}
     if "sync-to-ref-clock" in mdc:
         err("master.dc.sync-to-ref-clock is now called servo-thread-follows-ref-clock")
