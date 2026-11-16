@@ -1381,11 +1381,11 @@ class TestCards(unittest.TestCase):
                                  "sync0-shift-ns": "auto"}},
                "slaves": [{"name": "d", "dc": {"assign-activate": "0x0300"}}]}
         rows = gui.sync_rows(cfg, pins.get, [100000 + i * 1000 for i in range(10)], 1000000)
-        self.assertEqual([r[0] for r in rows], [True] * 5, rows)
+        self.assertEqual([r[0] for r in rows], [True] * 6, rows)       # + the room for two cycles
         self.assertIn("SYNC0 500 us after the start of the cycle, turn-around 2", rows[3][1])
         pins.update({"dc-sync-failed": "TRUE", "turnaround-cycles": "3", "dc-phased": "FALSE"})
         rows = gui.sync_rows(cfg, pins.get, [0, 0, 0, 0, 400000], 1000000)
-        self.assertEqual([r[0] for r in rows], [True, False, False, False, False], rows)
+        self.assertEqual([r[0] for r in rows], [True, False, False, False, False, True], rows)
         pins["turnaround-cycles"] = "0"
         self.assertIsNone(gui.sync_rows(cfg, pins.get, [], 1000000)[3][0])
         cfg["master"]["dc"] = {"servo-thread-follows-ref-clock": False, "sync0-shift-ns": 500000}
@@ -1393,6 +1393,98 @@ class TestCards(unittest.TestCase):
         self.assertTrue(any("slaves follow the servo thread" in r[1] for r in rows), rows)
         rows = gui.sync_rows({"slaves": [{"name": "io"}]}, pins.get, [], 1000000)
         self.assertEqual([r[0] for r in rows], [True, None])
+
+    def test_sync_rows_pll_and_room(self):
+        pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
+                "pll-err": "281", "shift-time": "80000", "turnaround-cycles": "2",
+                "auto-shift-margin": "20833", "auto-shift-input-margin": "20833"}
+        cfg = {"master": {"dc": {"servo-thread-follows-ref-clock": True, "sync0-shift-ns": "auto"}},
+               "slaves": [{"name": "d", "dc": {"assign-activate": "0x0300"}}]}
+        text = lambda rows, key: next(r for r in rows if key in r[1])
+        # the pll-err as a spread when there are samples
+        rows = gui.sync_rows(cfg, pins.get, [], 125000, pll=[-1900, 400, 2100, 0, 281])
+        self.assertIn("pll-err 281 ns, -1900..2100 ns over the last 5 samples", text(rows, "pll-err")[1])
+        rows = gui.sync_rows(cfg, pins.get, [], 125000, pll=[1, 2])
+        self.assertEqual(text(rows, "pll-err")[1].split("(")[1], "pll-err 281 ns)")
+        # the room for two cycles: 125 - 20.8 - 20.8 - 43 = 40 us; with the old 50 us margins -18 us
+        offs = [8000, 20000, 51000, 30000, 12000]
+        rows = gui.sync_rows(cfg, pins.get, offs, 125000)
+        r = text(rows, "Room for two cycles")
+        self.assertTrue(r[0])
+        self.assertIn("+40 us (20.833 + 20.833 us of margin, the frames' send time spreads 43 us)", r[1])
+        pins.update({"auto-shift-margin": "50000", "auto-shift-input-margin": "50000"})
+        r = text(gui.sync_rows(cfg, pins.get, offs, 125000), "Room for two cycles")
+        self.assertFalse(r[0])
+        self.assertIn("Room for two cycles: -18 us (50 + 50 us of margin", r[1])
+        self.assertIn("three-cycle position", r[1])
+        # without the margin pins: the defaults for the period
+        for k in ("auto-shift-margin", "auto-shift-input-margin"):
+            pins.pop(k)
+        r = text(gui.sync_rows(cfg, pins.get, offs, 125000), "Room for two cycles")
+        self.assertIn("20.833 + 20.833 us", r[1])
+        self.assertTrue(r[0])
+        self.assertEqual(gui.room_for_two(125000, offs, 50000, 50000), -18000)
+        self.assertEqual(gui.room_for_two(1000000, [50000, 80000], 50000, 50000), 870000)
+
+    def test_sync_rows_measured_and_irq(self):
+        pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
+                "pll-err": "0", "shift-time": "80000", "turnaround-cycles": "2"}
+        ect = {"name": "x", "device": "ECT60", "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
+               "dc": {"assign-activate": "0x0300"}}
+        cfg = {"master": {"dc": {"servo-thread-follows-ref-clock": True, "sync0-shift-ns": "auto"}},
+               "slaves": [ect, dict(ect, name="y")]}
+        find = lambda rows, key: [r for r in rows if key in r[1]]
+        for period, level in ((250000, True), (110000, None), (100000, False)):
+            r = find(gui.sync_rows(cfg, pins.get, [], period), "measured on the bus")
+            self.assertEqual(len(r), 1, period)                # one row for the two drives
+            self.assertEqual(r[0][0], level, (period, r))
+            self.assertIn("ECT60 (x, y)", r[0][1])
+        self.assertIn("refused at 100 us (AL 0x0036)", r[0][1])
+        # an extra row for the interrupts, as given
+        rows = gui.sync_rows(cfg, pins.get, [], 125000, irq=(False, "NIC interrupts elsewhere"))
+        self.assertIn((False, "NIC interrupts elsewhere"), rows)
+
+    def test_irq_row(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            def write(path, text):
+                os.makedirs(os.path.dirname(os.path.join(d, path)), exist_ok=True)
+                with open(os.path.join(d, path), "w") as f:
+                    f.write(text)
+            write("proc/interrupts", "           CPU0       CPU1\n"
+                  "  1:        10          0  IO-APIC   1-edge      i8042\n"
+                  "133:         1          0  PCI-MSIX-0000:02:00.0   0-edge      enp2s0\n"
+                  "134:       100          0  PCI-MSIX-0000:02:00.0   1-edge      enp2s0-TxRx-0\n"
+                  "135:       100          0  PCI-MSIX-0000:02:00.0   2-edge      enp2s0-TxRx-1\n"
+                  "140:         5          0  PCI-MSI   other      enp2s0x-TxRx-0\n")
+            for n in (133, 134, 135):
+                write("proc/irq/%d/smp_affinity_list" % n, "0-2\n")
+            write("sys/devices/system/cpu/isolated", "3\n")
+            proc, sys = os.path.join(d, "proc"), os.path.join(d, "sys")
+            ok, text = gui.irq_row("enp2s0", proc, sys)
+            self.assertFalse(ok)
+            self.assertIn("are on CPU 0-2, while CPU 3 is the isolated one", text)
+            self.assertIn("irq-cpu: 3", text)
+            for n in (133, 134, 135):
+                write("proc/irq/%d/smp_affinity_list" % n, "3\n")
+            ok, text = gui.irq_row("enp2s0", proc, sys)
+            self.assertTrue(ok)
+            self.assertIn("are on CPU 3, isolated for real time", text)
+            write("proc/irq/135/smp_affinity_list", "2-3\n")        # one of them is not on the isolated CPU
+            ok, text = gui.irq_row("enp2s0", proc, sys)
+            self.assertFalse(ok)
+            self.assertIn("are on CPU 2-3", text)
+            write("proc/irq/135/smp_affinity_list", "3\n")
+            write("sys/devices/system/cpu/isolated", "\n")
+            ok, text = gui.irq_row("enp2s0", proc, sys)
+            self.assertIsNone(ok)
+            self.assertIn("no CPU is isolated", text)
+            self.assertIsNone(gui.irq_row("enp9s0", proc, sys))               # not found
+            self.assertIsNone(gui.irq_row(None, proc, sys))
+            self.assertIsNone(gui.irq_row("enp2s0", os.path.join(d, "nowhere"), sys))
+        self.assertEqual(gui._cpu_text({0, 1, 2, 5}), "0-2,5")
+        self.assertEqual(gui._cpu_set("0-2,5"), {0, 1, 2, 5})
+        self.assertEqual(gui._cpu_set(""), set())
 
 
 class TestSteps(unittest.TestCase):

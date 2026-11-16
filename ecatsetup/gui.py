@@ -3355,10 +3355,73 @@ def _us_text(ns):
     return "%g us" % (ns / 1000.0)
 
 
-def sync_rows(cfg, get, offsets, period):
+def _cpu_text(cpus):
+    """{0, 1, 2, 3} -> "0-3", {3} -> "3"."""
+    out, run = [], []
+    for c in sorted(cpus) + [None]:
+        if run and (c is None or c != run[-1] + 1):
+            out.append("%d" % run[0] if len(run) == 1 else "%d-%d" % (run[0], run[-1]))
+            run = []
+        if c is not None:
+            run.append(c)
+    return ",".join(out)
+
+
+def _cpu_set(text):
+    """"0-2,5" -> {0, 1, 2, 5}."""
+    out = set()
+    for part in (text or "").strip().split(","):
+        a, _, b = part.partition("-")
+        if a.strip().isdigit():
+            out |= set(range(int(a), int(b if b.strip().isdigit() else a) + 1))
+    return out
+
+
+def irq_row(interface, proc="/proc", sys="/sys"):
+    """(ok, text) about where the network card's interrupts are handled
+    against the CPUs that are isolated for real time, or None when they cannot
+    be found. proc and sys are the roots to read (for the tests)."""
+    if not interface:
+        return None
+    pat = re.compile(r"(^|\s)%s(-\S+)?\s*$" % re.escape(interface))
+    cpus = set()
+    try:
+        with open(os.path.join(proc, "interrupts")) as f:
+            irqs = [ln.split(":")[0].strip() for ln in f if pat.search(ln.rstrip()) and ln.split(":")[0].strip().isdigit()]
+        for n in irqs:
+            with open(os.path.join(proc, "irq", n, "smp_affinity_list")) as f:
+                cpus |= _cpu_set(f.read())
+    except OSError:
+        return None
+    if not cpus:
+        return None
+    try:
+        with open(os.path.join(sys, "devices", "system", "cpu", "isolated")) as f:
+            isolated = _cpu_set(f.read())
+    except OSError:
+        isolated = set()
+    name = "NIC interrupts (%s)" % interface
+    if isolated and cpus <= isolated:
+        return True, "%s are on CPU %s, isolated for real time (the servo thread's)" % (name, _cpu_text(cpus))
+    if isolated:
+        return False, ("%s are on CPU %s, while CPU %s is the isolated one: a frame's arrival waits behind "
+                       "the GUI and other work (master: irq-cpu: %d pins them there)"
+                       % (name, _cpu_text(cpus), _cpu_text(isolated), min(isolated)))
+    return None, "%s are on CPU %s; no CPU is isolated for real time (isolcpus=)" % (name, _cpu_text(cpus))
+
+
+def room_for_two(period, offsets, margin, input_margin):
+    """The room the automatic SYNC0 shift has for two cycles of turn-around, in ns:
+    the period less both margins less the spread of the frames' send time (negative
+    when it has to place SYNC0 for three)."""
+    return period - margin - input_margin - (max(offsets) - min(offsets))
+
+
+def sync_rows(cfg, get, offsets, period, pll=(), irq=None):
     """[(ok, text)] about the bus's synchronisation while the test runs.
     get(name): an ecat.0 pin's value as text, or None; offsets: send-offset
-    samples (ns); period: the servo period (ns)."""
+    samples (ns); period: the servo period (ns); pll: pll-err samples (ns);
+    irq: irq_row's result."""
     rows = []
     all_op = get("all-op") == "TRUE"
     rows.append((all_op, "All slaves in OP" if all_op else "Not all slaves in OP"))
@@ -3376,11 +3439,11 @@ def sync_rows(cfg, get, offsets, period):
     follows = ((m.get("dc") or {}).get("servo-thread-follows-ref-clock") is True)
     if follows:
         phased = get("dc-phased") == "TRUE"
-        rows.append((phased, "The servo thread follows the reference clock%s (pll-err %s ns)"
-                     % ("" if phased else ": not locked yet", get("pll-err") or "?")))
+        rows.append((phased, "The servo thread follows the reference clock%s (%s)"
+                     % ("" if phased else ": not locked yet", pll_text(get, pll))))
     else:
         rows.append((True, "The slaves follow the servo thread (the servo period is not adjusted; "
-                     "pll-err %s ns is only measured)" % (get("pll-err") or "?")))
+                     "%s is only measured)" % pll_text(get, pll)))
     try:
         shift = int(get("shift-time") or 0)
     except ValueError:
@@ -3406,7 +3469,39 @@ def sync_rows(cfg, get, offsets, period):
         rows.append((ok, "Frame sent %d..%d us into the cycle (%d samples)%s" % (
             lo // 1000, hi // 1000, len(offsets),
             "" if ok else ": it varies by more than a quarter cycle, check the latency")))
+        # the room the automatic shift has: what decided "three cycles" on the plasma cutter at 125 us
+        try:
+            margin = int(get("auto-shift-margin"))
+            input_margin = int(get("auto-shift-input-margin"))
+        except (TypeError, ValueError):
+            margin = input_margin = min(50000, period // 6)
+        room = room_for_two(period, offsets, margin, input_margin)
+        rows.append((room >= period // 10, "Room for two cycles: %+d us (%g + %g us of margin, the frames' send time "
+                     "spreads %g us)%s" % (room // 1000, margin / 1000, input_margin / 1000,
+                                           (max(offsets) - min(offsets)) / 1000,
+                                           "" if room >= period // 10 else
+                                           ": with less than a tenth of the period left, a late frame puts SYNC0 in the three-cycle position")))
+    if irq is not None:
+        rows.append(irq)
+    # what was measured on the kinds of device that run with SYNC0 here
+    seen = {}
+    for s in dc_slaves:
+        res = measured.results(s)
+        v = measured.verdict(res, period)
+        if v is not None:
+            seen.setdefault((s.get("device") or s.get("name"), v), []).append(s.get("name"))
+    for (dev, v), names in seen.items():
+        rows.append(({"ok": True, "unknown": None, "bad": False}[v[0]],
+                     "%s (%s), measured on the bus: %s" % (dev, ", ".join(n for n in names if n), v[1])))
     return rows
+
+
+def pll_text(get, pll):
+    """"pll-err 120 ns, -800..900 ns over the last 50 samples"."""
+    now = get("pll-err") or "?"
+    if len(pll) >= 5:
+        return "pll-err %s ns, %d..%d ns over the last %d samples" % (now, min(pll), max(pll), len(pll))
+    return "pll-err %s ns" % now
 
 
 class TestPage(QWidget):
@@ -3416,7 +3511,12 @@ class TestPage(QWidget):
             self.offsets = (self.offsets + [int(get("send-offset"))])[-50:]
         except (TypeError, ValueError):
             pass
-        rows = sync_rows(self.win.session.cfg, get, self.offsets, period)
+        try:
+            self.pll = (self.pll + [int(get("pll-err"))])[-50:]
+        except (TypeError, ValueError):
+            pass
+        iface = ((self.win.session.cfg or {}).get("master") or {}).get("interface")
+        rows = sync_rows(self.win.session.cfg, get, self.offsets, period, self.pll, irq_row(iface))
         for (mark, text), row in zip(self.sync_rows, rows + [None] * len(self.sync_rows)):
             mark.setVisible(row is not None)
             text.setVisible(row is not None)
@@ -3482,7 +3582,7 @@ class TestPage(QWidget):
                                                  "cycle and when the frame is sent; from the "
                                                  "component's ecat.0 pins.")
         self.sync_rows = []
-        for _ in range(7):
+        for _ in range(12):
             r = QHBoxLayout()
             mark = pill()
             mark.setFixedWidth(26)
@@ -3493,6 +3593,7 @@ class TestPage(QWidget):
             self.sync_card.add(r)
             self.sync_rows.append((mark, text))
         self.offsets = []
+        self.pll = []
         lay.addWidget(self.sync_card)
         self.sync_card.hide()
 
@@ -5878,6 +5979,7 @@ class MainWindow(QMainWindow):
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
+            self.test_page.pll = []
             if watched:
                 self.set_messages([(GREY, "", ["Stopped watching; LinuxCNC was not touched."])])
                 self.refresh()
@@ -5976,6 +6078,7 @@ class MainWindow(QMainWindow):
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
+            self.test_page.pll = []
             if run.watching:
                 self.set_messages([(AMBER, "", ["LinuxCNC has stopped: the watching ended."])])
             else:
@@ -6138,6 +6241,7 @@ class MainWindow(QMainWindow):
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
+            self.test_page.pll = []
         event.accept()
 
 
