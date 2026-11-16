@@ -1417,6 +1417,70 @@ Built so far:
 Still to do: a capture from a real terminal (in particular of
 send-continuous: when exactly SW.2 drops).
 
+### Tried on a slave of our own (2026-11-16)
+
+We have no terminal, so an EaserCAT 3000 (STM32F407 + AX58100, SOES) was
+given a serial channel that behaves towards the master as an EL6021's
+(work copy `~/src/easercat-3000-eoe` on the plasma PC, `src/serial_chan.cpp`):
+the same process data (control byte, length, 22 data bytes; status byte,
+length, 22 data bytes; the entries named as the terminal's), 0x8000:11 baud,
+:15 data frame and :04 send continuous taken at an init request, a 128 byte
+send buffer that loses what does not fit, an 864 byte receive buffer. Its
+UART goes to a USB serial adapter on the PC, so the bytes cross a real
+wire. The firmware was written from the same manual as the simulator, by
+the same hand: **this does not show that the manual was read right**, only
+that everything around it works on a real bus. No error bits (parity,
+framing), no half duplex.
+
+The card as slave 4 on the plasma bus (three ECT60, EaserCAT 7000), 1 ms,
+`sync0-shift-ns: auto`, ecat in halrun, master
+1.3+git20261115.79e91fc1; nothing in ecat had to be changed:
+
+- EtherCAT Setup proposed the channel from the card's ESI file (`serial:
+  [{name: port, output-pdo: '0x160B', input-pdo: '0x1A08', port:
+  /dev/ttyECAT4, ...}]`), `/dev/ttyECAT4` was made by the component.
+- Bytes both ways (all 256 values, then 2048 bytes; the far end's parity
+  check on), the baud rate set on the port by the program each time and
+  written to the card by the channel: 2400, 4800, 9600, 19200, 38400, 57600
+  and 115200 at 8N1, all complete, at the line's rate up to 57600 (240 ...
+  5700 bytes/s) and about 7500 bytes/s at 115200 (a window of 22 bytes per
+  handshake, three cycles). 8E1, 8O1, 8N2 and 7E1 (the frame from the
+  file) at 19200, 8E1 at 115200 too: complete.
+- mb2hal reading registers 0-4 and writing 5-9 of a Modbus RTU slave
+  (libmodbus) on the USB adapter: 9600 to 115200 at 8N1, 19200 and 115200
+  at 8E1, 19200 at 8O1 and 8N2: 175-380 requests in 6 to 10 s each, no error in
+  mb2hal or in the slave.
+- `send-continuous: true`, 8E1 at 19200, 57600 and 115200: bytes and
+  mb2hal complete, `burst-timeouts` 0 (throughput to the wire 1300, 2560
+  and 3400 bytes/s: a buffer at a time).
+- The card reset (its processor, by the debug probe) during mb2hal at
+  19200 8E1: working counter incomplete for 124 ms, the channel in
+  `state` 1 (settings written again) and back in 3 within a second, the
+  card at 19200 8E1 again, mb2hal went on (896 requests in 30 s, no error
+  counted).
+- With EoE traffic on the same slave (1472-byte pings every 50 ms, 100 kB
+  downloads): mb2hal 601 requests in 20 s without an error, 2048 bytes
+  both ways complete.
+
+Found on the way, none of it in ecat:
+
+- The card's processor ran from its internal oscillator, 4 % slow, so its
+  UART sent 4.5 % slower than the baud rate. The channel gives the terminal
+  bytes at the baud rate and no more than the 128 it holds, so a "terminal"
+  that sends slower fills up: 18 bytes of 2048 were lost at 2400 and 4800
+  (the card counts them; ecat's `tx-bytes` said all were taken). With the
+  clock from the card's crystal: none lost. A real terminal's rate comes
+  from a crystal; the pacing has no margin for one that is off by percents.
+- SOES stops answering its mailbox when the master asks it to describe a
+  subindex that is missing in the middle of an object (0x8000 with only
+  :04, :06, :11, :15): the card has every subindex up to :15.
+- EtherCAT Setup takes a slave's PDOs from its ESI file or its SII, not
+  from 0x1C12/0x1C13: a slave whose SII is older than its firmware needs
+  its ESI file.
+
+Not tried: LinuxCNC (halrun only), the window's *Serial ports* card on the
+bus, a real terminal.
+
 ## EoE
 
 Use case (the user, 2026-11-15): web pages for a drive's settings through

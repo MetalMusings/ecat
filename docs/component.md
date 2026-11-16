@@ -1206,6 +1206,10 @@ those are not handled here.
 ## Serial channels
 
 Status: first version (2026-11-15), not tried on a terminal: we have none.
+Tried 2026-11-16 on a real bus against a slave of our own that behaves as
+an EL6021 (bytes and mb2hal over a real wire, 2400 to 115200 baud; see
+[development.md](development.md)): that shows the function, the port and
+the settings at work, not that Beckhoff's manual was read right.
 Built from Beckhoff's manual (EL600x, EL602x 6.2.0) and ESI files. The
 handshake, the function and the port are tested against a simulated
 terminal (component/tests/sim_el60xx.c), with libmodbus, and mb2hal in
