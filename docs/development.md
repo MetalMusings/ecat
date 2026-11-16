@@ -1481,6 +1481,42 @@ Found on the way, none of it in ecat:
 Not tried: LinuxCNC (halrun only), the window's *Serial ports* card on the
 bus, a real terminal.
 
+## The servo period (2026-11-16)
+
+How short can LinuxCNC's servo period be on the plasma cutter's bus (three ECT60 drives, the
+EaserCAT 7000, an N100 with an igc card on `xdp-native`, PREEMPT_RT, the servo thread on an
+isolated core; `sync0-shift-ns: auto`, `servo-thread-follows-ref-clock: true`)? A first guess,
+not a limit found: the bus and the component were measured, not LinuxCNC's own load beyond
+the 250 us run.
+
+- **250 us in LinuxCNC** (QtPlasmaC, the machine on, the user homing and jogging, `stress-ng`
+  with 4 cpu workers, a vm and 2 io workers for 10 minutes): the servo thread 9-13 us on
+  average and 67.6 us at most, PLL error within 8 us, SYNC0 shift 145 us, turn-around 2
+  cycles, the largest following error 2.85 mm in the jogs. **One** cycle with working counter 0
+  at the start of the load (8 s after `stress-ng` started: "datagram SKIPPED 2 times"); the
+  drives were shut down, as they are on any lost cycle, and stayed so until the user enabled
+  them. Nothing more in the next 9.5 minutes. The cause is not known (the user moved the mouse
+  about then); a lost cycle is more likely the shorter the period.
+- **ecat in halrun** (no motion, the drives not enabled, 40 s per run, with `stress-ng` unless
+  said): the servo thread takes only 4-5 us on average here and 17-39 us at most.
+  - 250, 200 and 175 us: clean from the start (the only event is the first cycles before the
+    slaves are in OP).
+  - 150 and 125 us, with and without load: about 150 cycles (1.4 s, 230 without load) with
+    working counter 0 around 3.1 s after the bus was activated, when the automatic SYNC0
+    shift takes effect, then clean for the rest of the run. A fixed `sync0-shift-ns` (0.56
+    times the period, what auto chooses) did not remove it, so it is not the automatic choice
+    itself.
+  - 100 and 80 us: working counter lost again and again (360 and 800 skipped cycles in 40 s)
+    and the bus not in OP at the end: not usable.
+- **In practice:** 1 ms is what the machine runs, 250 us is tried (and worked), 200 us is the
+  shortest where the bus is clean from the start, 150 and 125 us work after a start-up burst
+  that matters only if the drives are enabled then, and 100 us and below does not work on this
+  bus. What sets the limit is not known: not the servo thread's own time (4-13 us), more
+  likely the round trip of a frame (224 bytes through five slaves, the driver and the XDP
+  path) against the period, or the drives. With LinuxCNC's motion code and QtPlasmaC in the
+  same thread, 67 us at most, a period below about 150 us would leave little margin
+  in any case.
+
 ## EoE
 
 Use case (the user, 2026-11-15): web pages for a drive's settings through
