@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from datetime import date
 
-from ecatsetup import measured
+from ecatsetup import measured, quirks
 
 ECT = {"name": "x", "device": "ECT60", "identity": {"vendor": "0x00000A88", "product": "0x0A880002"}}
 OTHER = {"name": "y", "identity": {"vendor": "0x00000002", "product": "0x03F03052"}}
@@ -27,6 +27,10 @@ class Base(unittest.TestCase):
         else:
             os.environ["ECATSETUP_DEVICES"] = self.old_dev
         self.tmp.cleanup()
+        # report() loads the quirk files of this test's folder into the cache: the
+        # next module must not get them (an ECT60 file here hid the shipped one's lcec
+        # translations from test_prototype when all ran in one process)
+        quirks.load(reload=True)
 
 
 class TestMeasured(Base):
