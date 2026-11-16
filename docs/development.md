@@ -1595,11 +1595,34 @@ The card shows this slave's errors and warnings of the check
 (mutation-checked). An unquoted MAC address that YAML reads as a number
 (`12:00:00:00:10:21`) now gets a message that says so.
 
+### Tried in LinuxCNC (2026-11-16)
+
+With the user at the plasma cutter: LinuxCNC 2.10 (QtPlasmaC) on a copy of the
+configuration with the EaserCAT 3000 as slave 4 and `eoe: {ip:
+192.168.77.2/24, host-ip: 192.168.77.1, ...}`, 1 ms, `sync0-shift-ns: auto`.
+All five slaves in OP 3.0 s after LinuxCNC was started, the device up with
+the host's address without a command by hand; with the machine off 100 of
+100 pings of 1472 bytes, the web page in 73 ms, 30 of 30 SDO reads on the
+EoE slave and 30 of 30 on a drive.
+
+Then EoE traffic all the time (a 1472-byte ping every 50 ms and 200 kB
+downloads from the card's page, one after the other) for six minutes while
+the user switched the machine on, homed and jogged: 7458 of 7458 pings
+answered (median 108 ms, longest 157 ms, with the downloads in the way), 51
+of 51 downloads complete (27 kB/s beside the pings), the card's `txdrop` and
+`rxnobuf` 0, all slaves in OP throughout, nothing in the event log after the
+start (SYNC0 shift 539 us, turn-around 2 cycles), no following error from
+LinuxCNC; the user saw nothing unusual. The *Network (EoE)* card was tried
+by the user on the screen at the same time, beside the running LinuxCNC.
+
+Not measured: the following error against a run without EoE (sampled about
+every 7 s only; the largest sample was 3.9 mm on Y in a jog, limit 10).
+
 ### Not built
 
 - The EoE firmware as part of the card's own code: it lives in a work copy
   (`~/src/easercat-3000-eoe` on the plasma PC), not in MyOwnEtherCATDevice.
-- EoE in LinuxCNC (only halrun so far), and a device that was not made here.
+- Not tried: a device that was not made here, and two EoE slaves on one bus.
 
 ## Start time: the XDP program stays on the card
 
