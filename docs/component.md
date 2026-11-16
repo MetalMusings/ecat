@@ -352,7 +352,7 @@ a note in its proposal. A slave that does not take the parameters only gives
 an error line in the master's log: the bus starts anyway.
 
 The frames to and from the slave are carried by the master's own EoE, which
-needs a master newer than the released one: see [Not yet](#not-yet-eoe).
+needs the master package 1.4 or later: see [Not yet](#not-yet-eoe).
 
 #### settings
 
@@ -1566,15 +1566,13 @@ or `and2` (HAL loads a component once).
 
 ### Not yet (eoe)
 
-- The network device carries traffic only with a master that puts EoE in
-  the cyclic frames (the fork after uspace-v1.3; not released yet). With
-  1.3 and earlier, the master's log says "No EoE processing because of
-  missing callbacks!" and the device is silent.
-- SDOs to the same slave need the same master: before it, the EoE traffic
-  took the slave's SDO responses, and a slave with `settings:` did not
-  reach OP ([development.md](development.md#eoe)).
-- `host-ip` needs the same unreleased master; with an older one `ecat`
-  says so in an error line and the device is left down.
+- EoE needs the master package 1.4 (uspace-v1.4) or later, which carries
+  the Ethernet frames in the cyclic frames, keeps a slave's SDO responses
+  apart from them and sets `host-ip`. With 1.3 and earlier the master's log
+  says "No EoE processing because of missing callbacks!", the device is
+  silent, a slave with `settings:` may not reach OP, and for `host-ip`
+  `ecat` prints that this master cannot set it
+  ([development.md](development.md#eoe)).
 - Tried on one slave, an EaserCAT 3000 with SOES and lwIP, without motion
   ([development.md](development.md#eoe)): ping, a web page and SDO reads
   while the bus was in OP, about 0.5 Mbit/s each way at 1 ms, no change in
