@@ -1614,9 +1614,9 @@ acceleration. The plan, agreed with the user:
    and test_config.c, mutation-checked; config.check, halpins, the Response
    card prints `cia402.feedforward.torque` from a torque measurement). Not
    tried on a drive: the ECT60 has neither object; the A6 has `0x60B1` in its
-   flexible 0x1600 and `0x60B2` in the fixed 0x1705 (C01.13/C01.16 = 5). Next
-   for it: an EaserCAT 3000 firmware that acts as a CiA 402 drive with them, to
-   try the chain on a bus.
+   flexible 0x1600 and `0x60B2` in the fixed 0x1705 (C01.13/C01.16 = 5). Tried
+   on a bus with a simulated drive (below, "Feedforward tried on a simulated
+   drive").
 
 ### Part 1: how the measurement works
 
@@ -1691,6 +1691,53 @@ later than the bus explains; the drive's dictionary has `0x2009 "Filter Time"` a
 the end of its range. *Look for settings in the drive* lists such settings (quirk
 file `tuning:` first, then by name), what the diagnosis points at first; one
 change and a measurement before and after decides.
+
+### Feedforward tried on a simulated drive (2026-11-16)
+
+No drive here has `0x60B1` / `0x60B2`, so the EaserCAT 3000 (slave 4 on the
+plasma bus) got a firmware that acts as a CiA 402 drive in CSP: a model of a
+servo drive's cascade (position loop Kp 40 /s, velocity loop Kv 200 /s,
+torque from the acceleration, the offsets used only when its settings
+0x2100:04/:05 say so, as real drives), run once per SYNC0. Work copy
+`~/src/easercat-3000-eoe` (Firmware commit 0dae00c, README.md "The simulated
+CiA 402 drive", test scripts in `test-scripts/drive/`). ecat was the dev build
+of fb74dc0 in halrun, 1 ms, DC with `sync0-shift-ns: auto` (shift 520 us,
+two cycles), slaves 0-3 `unused`; `pos-cmd` a sine of 10000 counts at 2 Hz
+(125660 counts/s, 1.58e6 counts/s2 at the peaks), `pos-scale` and
+`velo-scale` 1:
+
+| Feedforward | `pos-cmd` - `pos-fb` | drive's 0x60F4 | lag (best shift) |
+|---|---|---|---|
+| none | 3173 counts | 2930 | 26 cycles |
+| velocity 1.0 | 260 | 195 | 1 cycle |
+| velocity 1.0, torque 5e-5 %/(count/s2) | 124 | 128 | 1 cycle, rest 4 counts |
+
+- The same with `cia402.feedforward` in the file as with `setp` (the
+  parameters take the file's values at load).
+- An offline copy of the model fed the recorded `pos-cmd` and the profile's
+  feedforward (`offline.py`) gives the card's 0x60F4 within 1-6 counts, so the
+  values, their units (0x60B2 per mille) and their timing (the same frame as
+  the target) reach the drive as designed.
+- What is left (128 counts) is the model's: it steps its target once per
+  cycle. A drive that interpolates between targets (most do, at their own
+  faster loop) would be left with about 17 counts on the same data.
+- The `velocity-ff` / `torque-ff` pins show what is written.
+
+Found on the way, in the card's firmware (not in ecat): the EaserCAT 3000's
+firmware polled SOES from `loop()` (`use_interrupt = 0`) and never ran on
+SYNC0, also with DC on; the SYNC0 interrupt read the ESC over SPI (into a
+transfer of the main loop); its "no SYNC0 for 5 ms" fallback compared an
+unsigned age and polled ~500 extra times a second; the step generators took
+most of the cycle. All fixed in the work copy (step generators off there);
+the drive model ran on 1000 of 1000 SYNC0s afterwards, with no cycle
+without new outputs.
+
+Found in the master (not fixed): with slave 0 `unused`, the master still
+takes it as the DC reference clock (the first DC-capable slave) and, as
+upstream IgH does, requests OP of the reference clock whatever its
+configuration (`ec_master_request_op`); the unconfigured ECT60 refuses
+SAFEOP (AL 0x001E) and stays PREOP + ERROR, with two ERROR lines in the event
+log. DC works (the clock runs in PREOP).
 
 ## EoE
 

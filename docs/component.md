@@ -1026,8 +1026,9 @@ CiA 402 drives can take them from the controller instead: `0x60B1`
   machine runs (`setp x.ff-velocity-gain 0.8`).
 
 Built and unit-tested (component/tests: values, scaling, limits, no kick,
-CSP only); not tried on a drive with these objects (the ECT60 has
-neither).
+CSP only); tried on a bus against a simulated drive (an EaserCAT 3000
+firmware, docs/development.md "Feedforward tried on a simulated drive"),
+not yet on a real drive with these objects (the ECT60 has neither).
 
 ### Homing by the drive
 
