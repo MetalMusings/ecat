@@ -160,6 +160,9 @@ def main(argv=None):
     ap.add_argument("--frames-seconds", type=float, default=3.0, metavar="S",
                     help="for --capture, seconds of frames on the wire (0: none; needs "
                          "tcpdump and root)")
+    ap.add_argument("--device-data", action="store_true",
+                    help="list the quirk files and measured results, yours and the shipped ones, and "
+                         "what looks stale or wrong")
     ap.add_argument("--capture-info", metavar="FILE", help="show what a capture holds")
     ap.add_argument("--capture-c", metavar="FILE",
                     help="print a C header with fake slaves from a capture, for the "
@@ -206,6 +209,10 @@ def main(argv=None):
             sys.stdout.write(capturec.header(args.capture_c, args.c_name, args.c_cycles))
         except capture.CaptureError as e:
             sys.exit(str(e))
+        sys.exit(0)
+    if args.device_data:
+        from . import measured
+        print(measured.report())
         sys.exit(0)
     if args.capture_info:
         sys.exit(capture_info(args.capture_info))

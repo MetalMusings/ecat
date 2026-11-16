@@ -13,13 +13,19 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.old = os.environ.get("ECATSETUP_MEASURED")
+        self.old_dev = os.environ.get("ECATSETUP_DEVICES")
         os.environ["ECATSETUP_MEASURED"] = self.tmp.name
+        os.environ["ECATSETUP_DEVICES"] = os.path.join(self.tmp.name, "devices")
 
     def tearDown(self):
         if self.old is None:
             os.environ.pop("ECATSETUP_MEASURED", None)
         else:
             os.environ["ECATSETUP_MEASURED"] = self.old
+        if self.old_dev is None:
+            os.environ.pop("ECATSETUP_DEVICES", None)
+        else:
+            os.environ["ECATSETUP_DEVICES"] = self.old_dev
         self.tmp.cleanup()
 
 
@@ -32,6 +38,42 @@ class TestMeasured(Base):
         self.assertEqual(measured.results(OTHER), [])
         self.assertEqual(measured.results({"name": "z"}), [])
         self.assertEqual(measured.results((0xA88, 0x0A880002)), r)       # a (vendor, product) too
+
+    def test_revisions(self):
+        mine = dict(ECT, identity=dict(ECT["identity"], revision="0x00000202"))
+        newer = dict(ECT, identity=dict(ECT["identity"], revision="0x00000300"))
+        self.assertEqual(measured.other_revisions(mine, measured.results(mine)), [])
+        self.assertEqual(measured.other_revisions(newer, measured.results(newer)), [0x202])
+        self.assertEqual(measured.other_revisions(ECT, measured.results(ECT)), [])   # unknown: no claim
+        self.assertNotIn("check it again", measured.line(mine, 250000))
+        self.assertIn("revision 0x00000202, this one is 0x00000300: check it again",
+                      measured.line(newer, 250000))
+        self.assertTrue(any("may differ" in t for lv, t in measured.problems(newer, 250000)))
+        self.assertEqual(measured.problems(mine, 250000), [])
+        # a result recorded now says which revision it was measured on
+        path = measured.record(newer, 140000, "ok", today=date(2026, 12, 1))
+        self.assertEqual(measured._read(path)[0]["results"][0]["revision"], "0x00000300")
+        self.assertNotIn("revision", measured._read(measured.record(
+            OTHER, 140000, "ok", today=date(2026, 12, 1)))[1]["results"][0])
+
+    def test_report(self):
+        text = measured.report(today=date(2026, 12, 1))
+        self.assertIn("Rtelligent ECT60: 250 us ok", text)
+        self.assertIn("Nothing to look at.", text)
+        text = measured.report(today=date(2028, 1, 1))
+        self.assertIn("measured 411 days ago, check it again", text)
+        # a result of yours that contradicts a shipped one, and one without a revision or date
+        with open(measured.user_file(), "w") as f:
+            f.write("- name: Rtelligent ECT60\n  match: {vendor: '0x00000A88', product: '0x0A880002'}\n"
+                    "  results:\n  - {period-us: 100, result: ok, date: 2026-12-01}\n"
+                    "  - {period-us: 90, result: refused}\n")
+        os.makedirs(os.environ["ECATSETUP_DEVICES"])
+        with open(os.path.join(os.environ["ECATSETUP_DEVICES"], "mine.yaml"), "w") as f:
+            f.write("name: mine\nmatch: {vendor: '0x00000A88', product: '0x0A880002'}\n")
+        text = measured.report(today=date(2026, 12, 2))
+        self.assertIn("your mine.yaml replaces the shipped rtelligent-ect60.yaml", text)
+        self.assertIn("100 us: you found ok, the shipped result is refused", text)
+        self.assertIn("90 us: no valid date", text)
 
     def test_verdict(self):
         r = measured.results(ECT)

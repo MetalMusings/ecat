@@ -1508,6 +1508,9 @@ the 250 us run.
     itself.
   - 100 and 80 us: working counter lost again and again (360 and 800 skipped cycles in 40 s)
     and the bus not in OP at the end: not usable.
+- **0.20 installed, 250 us in halrun** (2026-11-16, `irq-cpu: 3`, no motion, `stress-ng --cpu 4 --vm 1
+  --io 1`): 600 s, thread time 5 us on average and 40.5 us at most, all slaves in OP, no lost cycle
+  (the one working-counter event is the start-up's); the same as the 10 minutes in LinuxCNC above.
 - **The network card's interrupts** (found the same day, 200 us in LinuxCNC): the interrupts of
   `enp2s0` were on CPUs 0-2, the servo thread on the isolated CPU 3, and ecat passed no CPU to
   the master (`irq_cpu` -1). With the QtPlasmaC GUI and a program running (the mouse moved),
@@ -1558,18 +1561,28 @@ the 250 us run.
   same thread, 67 us at most, a period below about 150 us would leave little margin
   in any case.
 
-### Possible later: making and keeping device data
+### Device data: making and keeping it (2026-11-16)
 
 What EtherCAT Setup knows about a device beyond its ESI file, SII and dictionary is in
-two kinds of file today: quirk files (pins, settings, limits, homing, HAL lines:
+two kinds of file: quirk files (pins, settings, limits, homing, HAL lines:
 `ecatsetup/devices`, written by hand or from a configured slave with *Save as quirk
 file...*) and the measured SYNC0 results (`ecatsetup/measured/sync0.yaml`, written by
 *Remember this period* on the Test page). A user's quirk file for a device replaces the
 one that came with the program, so a file with one new fact would drop the others; that
-is why the measured results are a store of their own. Not decided or built: how this
-data is made and kept up to date as a whole (a guided way to write a quirk file, one
-place for both kinds of data, sharing results between users, dating or expiring a result
-when a firmware or a revision changes, checking that a shipped result still holds).
+is why the measured results are a store of their own.
+
+Built: a result carries the slave's revision (`record`; the shipped ECT60 results say
+0x00000202), the slave page and the check list say when a result is for another revision
+(`measured.other_revisions`), and `ecatsetup --device-data` (`measured.report`) lists both
+kinds, yours and shipped, with what looks stale or wrong: unreadable files, results over
+a year old or without a date, a user result that contradicts a shipped one, a user quirk
+file that hides a shipped one, results without a revision. Tested in tests/test_measured.py
+(mutation-checked).
+
+Not built: a guided way to write a quirk file from scratch (today: *Save as quirk file...*
+and by hand), one place for both kinds, sharing results between users (a pull request on
+the shipped files is the way now), checking by running that a shipped result still holds
+(needs the device).
 
 ## EoE
 

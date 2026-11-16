@@ -12,6 +12,7 @@ Only the periods that were tried count: a result "ok at 125 us" and
 """
 
 import datetime
+import glob
 import os
 
 import yaml
@@ -93,6 +94,30 @@ def verdict(res, period_ns):
     return "unknown", "no period tried ok yet"
 
 
+def revision(slave):
+    """The revision of a configuration's slave as an int, or None."""
+    try:
+        return int(str((slave.get("identity") or {}).get("revision")), 16)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _rev(r):
+    try:
+        return int(str(r.get("revision")), 16)
+    except (TypeError, ValueError):
+        return None
+
+
+def other_revisions(slave, res):
+    """The revisions (ints) some results were measured on that differ from the slave's:
+    a new revision may behave differently. Results without a revision say nothing."""
+    mine = revision(slave)
+    if mine is None:
+        return []
+    return sorted({_rev(r) for r in res if _rev(r) not in (None, mine)})
+
+
 def describe(res):
     """The results as one line: "250 us ok, 100 us refused (AL 0x0036); 2026-11-16"."""
     if not res:
@@ -108,10 +133,16 @@ def problems(slave, period_ns):
     """[(level, text)] about a slave's servo period against what was measured
     on this kind of device ("warning" when it was refused at or above the
     period, "note" when the period lies between the ones that were tried)."""
-    v = verdict(results(slave), period_ns)
-    if v is None or v[0] == "ok":
-        return []
-    return [("warning" if v[0] == "bad" else "note", "this device was measured: " + v[1])]
+    res = results(slave)
+    v = verdict(res, period_ns)
+    out = []
+    if v is not None and v[0] != "ok":
+        out.append(("warning" if v[0] == "bad" else "note", "this device was measured: " + v[1]))
+    other = other_revisions(slave, res)
+    if other:
+        out.append(("note", "measured on revision %s; this slave is 0x%08X, so the result may differ"
+                    % (", ".join("0x%08X" % r for r in other), revision(slave))))
+    return out
 
 
 def line(slave, period_ns):
@@ -120,7 +151,11 @@ def line(slave, period_ns):
     if not res:
         return ""
     v = verdict(res, period_ns)
-    return "Measured on the bus: %s%s" % (describe(res), "" if v is None else " (%s)" % v[1])
+    other = other_revisions(slave, res)
+    return "Measured on the bus: %s%s%s" % (
+        describe(res), "" if v is None else " (%s)" % v[1],
+        "; some on revision %s, this one is 0x%08X: check it again" % (
+            ", ".join("0x%08X" % r for r in other), revision(slave)) if other else "")
 
 
 def record(slave, period_ns, result, al_status=None, note="", today=None):
@@ -142,6 +177,8 @@ def record(slave, period_ns, result, al_status=None, note="", today=None):
            "date": (today or datetime.date.today()).isoformat()}
     if new["period-us"] == int(new["period-us"]):
         new["period-us"] = int(new["period-us"])
+    if revision(slave) is not None:
+        new["revision"] = "0x%08X" % revision(slave)
     if al_status is not None:
         new["al-status"] = "0x%04X" % al_status
     if note:
@@ -154,3 +191,71 @@ def record(slave, period_ns, result, al_status=None, note="", today=None):
                 "# ecatsetup/measured/sync0.yaml for what the lines mean.\n")
         yaml.safe_dump(entries, f, sort_keys=False, default_flow_style=None, allow_unicode=True, width=1000)
     return path
+
+
+def report(today=None):
+    """What device data there is, as text for `ecatsetup --device-data`: quirk files and
+    measured results, the user's and those that came with the program, and what looks
+    wrong: files that could not be read, results without a revision or older than a
+    year, a user quirk file that hides a shipped one, a user result that differs from a
+    shipped result for the same period."""
+    today = today or datetime.date.today()
+    lines, notes = [], []
+    quirks.load(reload=True)
+    lines.append("Quirk files (pins, settings, limits, HAL lines):")
+    shipped = {os.path.basename(p) for p in glob.glob(os.path.join(quirks.SHIPPED, "*.yaml"))}
+    for label_, d in (("yours", quirks.user_dir()), ("shipped", quirks.SHIPPED)):
+        names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(d, "*.yaml")))
+        lines.append("  %s (%s): %s" % (label_, d, ", ".join(names) or "none"))
+    def matches(d):
+        out = {}
+        for path in sorted(glob.glob(os.path.join(d, "*.yaml"))):
+            try:
+                with open(path) as f:
+                    out[quirks.parse(yaml.safe_load(f), path).get("match")] = os.path.basename(path)
+            except (OSError, yaml.YAMLError, TypeError, ValueError, AttributeError):
+                pass
+        return out
+    theirs = matches(quirks.SHIPPED)
+    for key, name in matches(quirks.user_dir()).items():
+        if key in theirs:
+            notes.append("your %s replaces the shipped %s for the same device: what only the "
+                         "shipped file says is not used" % (name, theirs[key]))
+    for pr in quirks.problems:
+        notes.append("quirk file not read: " + pr)
+    lines.append("Measured SYNC0 results:")
+    for label_, path in (("shipped", SHIPPED), ("yours", user_file())):
+        entries = _read(path)
+        lines.append("  %s (%s): %s" % (label_, path, "" if entries else "none"))
+        for e in entries:
+            res = [r for r in e.get("results") or [] if isinstance(r, dict)]
+            revs = sorted({str(r.get("revision")) for r in res if r.get("revision")})
+            lines.append("    %s: %s" % (e.get("name", "?"), describe(
+                [dict(r, **{"period-us": float(r.get("period-us", 0))}) for r in res])))
+            if res and len(revs) == 0:
+                notes.append("%s: no result says which revision it was measured on" % e.get("name"))
+            for r in res:
+                try:
+                    age = (today - datetime.date.fromisoformat(str(r.get("date")))).days
+                except ValueError:
+                    notes.append("%s %s us: no valid date" % (e.get("name"), r.get("period-us")))
+                    continue
+                if age > 365:
+                    notes.append("%s %s us: measured %d days ago, check it again"
+                                 % (e.get("name"), r.get("period-us"), age))
+    shipped_by = {}
+    for e in _read(SHIPPED):
+        for r in e.get("results") or []:
+            shipped_by[(_key(e), r.get("period-us"))] = r.get("result")
+    for e in _read(user_file()):
+        for r in e.get("results") or []:
+            old = shipped_by.get((_key(e), r.get("period-us")))
+            if old and old != r.get("result"):
+                notes.append("%s %s us: you found %s, the shipped result is %s (yours is used)"
+                             % (e.get("name"), r.get("period-us"), r.get("result"), old))
+    if notes:
+        lines.append("To look at:")
+        lines += ["  - " + n for n in notes]
+    else:
+        lines.append("Nothing to look at.")
+    return "\n".join(lines)

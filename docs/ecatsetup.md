@@ -1844,6 +1844,19 @@ nonsense, so for it the measurements are the only thing there is. See
 [Synchronisation, in the test mode](#synchronisation-in-the-test-mode) for how
 they are recorded.
 
+A result is kept with the slave's revision (the number in its identity), and the
+slave page says when it was measured on another one ("some on revision
+0x00000202, this one is 0x00000300: check it again"): a new revision may
+behave differently, and a result without a revision says nothing either way.
+
+`ecatsetup --device-data` lists what device data there is, yours and what came
+with the program (quirk files and measured results), and what to look at: a
+file that cannot be read, a result more than a year old or without a date, a
+result of yours that contradicts a shipped one for the same period (yours is
+used), a quirk file of yours that replaces a shipped one for the same device
+(what only the shipped file says is then not used), results that do not say
+which revision they are for.
+
 ## Quirk files
 
 A quirk file tells EtherCAT Setup what it cannot read from a device's ESI
