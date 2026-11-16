@@ -1790,6 +1790,27 @@ with the target interpolated between cycles, as drives do (Firmware
 2 cycles), the drive's loop -0.13 ms, torque per acceleration 0.04988
 (model 0.05).
 
+In LinuxCNC 2.10 (2026-11-16; `~/linuxcnc/configs/sim-ff-drive`, untracked:
+a copy of 2.10's `sim/axis/axis_mm.ini` with the simulated drive as joint 0
+by *Apply*, scale 1000, `cia402.feedforward: {velocity: 1.0, torque: 0.05,
+torque-max: 100}` (the Response card's value) and the drive's "use the
+offsets" (0x2100:04/:05) as `settings`; X at 100 mm/s and 1000 mm/s²,
+FERROR 5, MIN_FERROR 1, homing at once; LinuxCNC under Xvfb, driven by the
+`linuxcnc` Python module; scripts in `test-scripts/drive/lcnc`):
+
+- *Apply* wrote `setp drv.velo-scale 1000.0` beside the `pos-scale`;
+- with the feedforward from the file (the settings written at start, 0 ->
+  1): `joint.0.f-error` at most 0.087 mm through four 40 mm moves back and
+  forth (`G1 X40 F6000`), no error;
+- with `ff-velocity-gain` and `ff-torque-per-accel` set to 0: the error
+  grew to 2.59 mm in the first move and LinuxCNC stopped with "joint 0
+  following error" (the limit is scaled with the velocity, so the
+  deceleration of a lagging drive trips it);
+- `ferror_highmark` showed 9 and 39 mm: at LinuxCNC's start the drive's
+  remembered position comes into `pos-fb` while the machine is off. Homing
+  (`motor-pos-cmd` still, f-error 0) and machine on (the same) were
+  recorded: nothing moves.
+
 Found on the way, in the card's firmware (not in ecat): the EaserCAT 3000's
 firmware polled SOES from `loop()` (`use_interrupt = 0`) and never ran on
 SYNC0, also with DC on; the SYNC0 interrupt read the ESC over SPI (into a

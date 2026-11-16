@@ -1049,7 +1049,7 @@ CiA 402 drives can take them from the controller instead: `0x60B1`
 Built and unit-tested (component/tests: values, scaling, limits, no kick,
 CSP only); tried on a bus against a simulated drive (an EaserCAT 3000
 firmware, docs/development.md "Feedforward tried on a simulated drive",
-with the Response card at 100 and 1000 counts/mm),
+with the Response card at 100 and 1000 counts/mm, and in LinuxCNC 2.10),
 not yet on a real drive with these objects (the ECT60 has neither).
 
 ### Homing by the drive
