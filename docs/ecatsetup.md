@@ -1032,11 +1032,19 @@ first part of tuning, the measuring.
   - at each stop, the overshoot and the time until the position stays
     within a band (3 counts, at least 0.002 mm);
   - the torque at constant speed (friction) and per acceleration, when
-    `0x6077` is recorded; whether it reached the test's torque limit (then
-    the result is the limit's, not the drive's);
+    `0x6077` is recorded, with the `cia402.feedforward` line for it; whether
+    it reached the test's torque limit (then the result is the limit's, not
+    the drive's). The torque is set against the motor's acceleration, from
+    `pos-fb` (smoothed so that a count's step is at most 1 % of the
+    acceleration measured), not the command's, which a drive that lags
+    follows late;
   - how much of the drive's following-error window (the test's and the
     drive's own) the error used: where a stepper drive with an encoder
     (such as the ECT60) loses steps or stops;
+  - after a second measurement, how the numbers moved and what changed in
+    between: settings being tried in the drive, and LinuxCNC's feedforward
+    (`setp <drive>.ff-velocity-gain` / `ff-torque-per-accel` in the test's
+    halrun);
   - `FERROR` and `MIN_FERROR` for LinuxCNC: twice the error the result
     predicts at the joint's `MAX_VELOCITY` and `MAX_ACCELERATION` (from the
     INI file, when the drive is a joint: the configuration's Joints, or

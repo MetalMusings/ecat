@@ -1021,10 +1021,14 @@ CiA 402 drives can take them from the controller instead: `0x60B1`
   velocity is the step since the last cycle over the period, the
   acceleration the change of that. They come from the same stream as the
   target, so they are in step with it; nothing needs connecting in HAL.
-- `0x60B1` gets `ff-velocity-gain` × velocity × `velo-scale` (set
-  `velo-scale` to the drive's velocity unit per machine unit/s: counts
-  per second for most drives, the same as `pos-scale`). `0x60B2` gets
-  `ff-torque-per-accel` × acceleration, within ± `ff-torque-max`.
+- `0x60B1` gets `ff-velocity-gain` × velocity × `velo-scale`: the drive's
+  velocity unit per machine unit/s, counts per second for most drives,
+  the same as `pos-scale`. EtherCAT Setup's *Apply* writes `setp
+  <drive>.velo-scale` with the joint's `pos-scale` for a drive with
+  `feedforward.velocity`, and its drive test sets it in CSP too. Left at
+  its default 1, `0x60B1` is `pos-scale` times too small and does nearly
+  nothing. `0x60B2` gets `ff-torque-per-accel` × acceleration, within ±
+  `ff-torque-max`.
 - Both are 0 unless the drive follows `pos-cmd` in CSP in "Operation
   enabled": while enabling, after a fault, during a mode change or
   homing, in other modes. The first cycle of following starts from
@@ -1036,14 +1040,16 @@ CiA 402 drives can take them from the controller instead: `0x60B1`
   drive's own feedforward off when it takes LinuxCNC's.
 - `torque` is what the Response card in EtherCAT Setup measures as torque
   per acceleration (with `0x6077` recorded); it prints the line to use.
-  The card also shows whether the lag went.
+  The card also shows whether the lag went: its comparison names the
+  feedforward that changed between two measurements.
 - `0x60B1` and `0x60B2` are always the profile's when mapped (written 0
   without `feedforward`), and the parameters can be changed while the
   machine runs (`setp x.ff-velocity-gain 0.8`).
 
 Built and unit-tested (component/tests: values, scaling, limits, no kick,
 CSP only); tried on a bus against a simulated drive (an EaserCAT 3000
-firmware, docs/development.md "Feedforward tried on a simulated drive"),
+firmware, docs/development.md "Feedforward tried on a simulated drive",
+with the Response card at 100 and 1000 counts/mm),
 not yet on a real drive with these objects (the ECT60 has neither).
 
 ### Homing by the drive

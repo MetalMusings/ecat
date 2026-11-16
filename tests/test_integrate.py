@@ -215,6 +215,22 @@ class TestPlan(Folder):
         integrate.set_joint(c, 0, "x", 100.0)
         self.assertEqual(integrate.propose_joints(self.ini, c), {})
 
+    def test_feedforward_sets_velo_scale(self):
+        # 0x60B1 is in counts/s: with feedforward the drive's velo-scale is set with
+        # its pos-scale, and a user's own velo-scale line is commented
+        self.write("machine.hal", MACHINE + "setp x.velo-scale 1\n")
+        c = cfg()
+        c["slaves"][0]["cia402"]["feedforward"] = {"velocity": 1.0}
+        integrate.set_joint(c, 0, "x", 100.0)
+        integrate.set_joint(c, 1, "y", 50.0)
+        p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        integrate.apply(p)
+        main = self.read("ethercat.hal")
+        self.assertIn("setp x.pos-scale 100.0\nsetp x.velo-scale 100.0\n", main)
+        self.assertNotIn("y.velo-scale", main)       # y has no feedforward
+        self.assertIn(integrate.COMMENT + "setp x.velo-scale 1", self.read("machine.hal"))
+
     def test_plan_and_apply(self):
         c = cfg()
         integrate.set_joint(c, 0, "x", 100.0)

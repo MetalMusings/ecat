@@ -376,7 +376,7 @@ class Measurement:
                 "period-ns": self.run.period, "scale": self.dt.settings["scale"],
                 "spec": self.spec, "ended": self.ended, "limits": lim,
                 "turnaround-cycles": self._turnaround(), "ini": self.ini,
-                "trials": self._trials(),
+                "trials": self._trials(), "feedforward": self._feedforward(),
                 "when": time.strftime("%Y-%m-%d %H:%M:%S")}
         self.recording = Recording(meta, data, lost)
         if len(self.recording):
@@ -389,6 +389,24 @@ class Measurement:
         pos = self.dt.slave.get("position")
         return {config.obj(e["index"], e["subindex"]): [e["original"], e["value"]]
                 for e in tuning.pending() if e["position"] == pos}
+
+    def _feedforward(self):
+        """The profile's feedforward parameters while measuring (cia402.feedforward,
+        set with setp between measurements): {"velocity": gain, "torque": % per
+        unit/s2}, or {} when the drive has none."""
+        try:
+            params = testmode.parse_pins(testmode.halcmd("-s", "show", "param", "%s.ff-" % self.dt.name,
+                                                         check=False))
+        except (OSError, testmode.TestError):
+            return {}
+        out = {}
+        for key, name in (("velocity", "ff-velocity-gain"), ("torque", "ff-torque-per-accel")):
+            p = params.get("%s.%s" % (self.dt.name, name))
+            try:
+                out[key] = float(p.value) if p is not None else None
+            except ValueError:
+                pass
+        return {k: v for k, v in out.items() if v is not None}
 
     def _turnaround(self):
         try:
@@ -491,6 +509,20 @@ def _diff(x, p):
         v[n] = (x[n + 1] - x[n - 1]) / (2 * p)
         a[n] = (x[n + 1] - 2 * x[n] + x[n - 1]) / (p * p)
     return v, a
+
+
+def _box(x, w):
+    """x averaged over 2w+1 samples, centred (the ends as they are)."""
+    n = len(x)
+    if w < 1 or n < 2 * w + 1:
+        return list(x)
+    out = list(x)
+    run = sum(x[:2 * w + 1])
+    for i in range(w, n - w):
+        out[i] = run / (2 * w + 1)
+        if i + w + 1 < n:
+            run += x[i + w + 1] - x[i - w]
+    return out
 
 
 def _enabled_span(rec):
@@ -641,7 +673,22 @@ def analyse(rec, ini=None):
             cs = [tq[n] for n in idx if sign * v[n] > res.vmax * 0.98 and abs(a[n]) < res.amax * 0.01]
             if len(cs) >= 5:
                 res.torque_const[sign] = sum(cs) / len(cs)
-        tc = lstsq([[a[n], 1.0 if v[n] > 0 else -1.0, 1.0] for n in idx], [tq[n] for n in idx])
+        # torque per acceleration: against the motor's acceleration (pos-fb), which the
+        # torque makes, not the command's, which a drive with lag follows late and
+        # smeared (fitted against the command it came out a quarter low on a drive
+        # lagging 25 ms). pos-fb is in whole counts, and noise in what a fit is made
+        # against pulls the result towards 0: both are smoothed alike (two boxes of
+        # 2w+1 samples) so that a count's step is at most 1 % of the acceleration
+        # measured (w 5 at 1000 counts/mm, 1000 mm/s2, 1 ms; at most 50 ms)
+        need = math.sqrt((1.0 / scale) / (0.01 * max(res.amax, 1e-9)))   # (2w+1) * p
+        w = min(max(1, int(math.ceil((need / p - 1) / 2))), max(1, int(round(0.05 / p))))
+        fbs = _box(_box(fb, w), w)
+        afb = [0.0] * len(fb)
+        for n in range(1, len(fb) - 1):
+            afb[n] = (fbs[n + 1] - 2 * fbs[n] + fbs[n - 1]) / (p * p)
+        tqs = _box(_box(tq, w), w)
+        inner = [n for n in idx if lo + 2 * w <= n < hi - 2 * w]
+        tc = lstsq([[afb[n], 1.0 if v[n] > 0 else -1.0, 1.0] for n in inner], [tqs[n] for n in inner])
         if tc:
             res.torque_per_accel = tc[0]
     limits = meta.get("limits") or {}
@@ -851,6 +898,10 @@ def compare(prev, prev_res, rec, res):
         after = t[obj][1] if obj in t else pt[obj][0]
         if before != after:
             changes.append("%s %d -> %d%s" % (obj, before, after, "" if obj in t else " (put back)"))
+    pf, f = prev.meta.get("feedforward") or {}, rec.meta.get("feedforward") or {}
+    for key in ("velocity", "torque"):
+        if key in pf and key in f and pf[key] != f[key]:
+            changes.append("feedforward %s %g -> %g (cia402.feedforward)" % (key, pf[key], f[key]))
     out.append("Since the last measurement: %s" % ("; ".join(changes) if changes else
                                                    "no setting changed in the drive"))
     if not same:

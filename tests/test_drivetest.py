@@ -149,6 +149,7 @@ class TestDriveTest(TestTestMode):
         log = self.setp_log()
         self.assertIn("x.enable FALSE", log)
         self.assertIn("ecatjog0.maxv 5.0", log)
+        self.assertIn("x.velo-scale 100.0", log)   # velocity-fb, and 0x60B1 in counts/s
         self.assertIn("ecatjog0.min 30.0", log)    # pos-fb 50 - 20 mm
         self.assertIn("ecatjog0.max 70.0", log)
         self.assertEqual(dt.start, 50.0)
@@ -175,6 +176,26 @@ class TestDriveTest(TestTestMode):
             dt.enable(True)
         with self.assertRaises(testmode.TestError):
             dt.jog(1.0)
+
+    def test_limits_without_the_dictionary(self):
+        # the tool refuses an upload of another size than the object's: without the
+        # dictionary each size is tried, so 0x6065 (32 bit) and 0x6072 (16 bit) are found
+        sizes = {(0x6065, 0): "uint32", (0x6072, 0): "uint16", (0x607D, 1): "int32",
+                 (0x607D, 2): "int32"}
+        self.drive.sdos.update({(0x6065, 0): 100000, (0x6072, 0): 3000})
+
+        def strict(pos, index, sub, dtype):
+            want = sizes.get((index, sub))
+            if want is not None and want[-2:] != dtype[-2:] and not (want[-1] == "8" and dtype[-1] == "8"):
+                return None
+            return self.drive.sdos.get((index, sub))
+        with mock.patch.object(tool, "upload", strict):
+            run = self.started()
+            dt = drivetest.DriveTest(run, dict(ECT60, identity=OTHER["identity"]), None,
+                                     {"scale": 1000.0, "following-error": 2.0, "max-torque": 30.0})
+            dt.prepare()
+        self.assertEqual(sorted(lim.name for lim in dt.limits),
+                         ["following-error", "max-torque", "travel-max", "travel-min"])
 
     def test_refused_limit_puts_the_others_back(self):
         run = self.started()

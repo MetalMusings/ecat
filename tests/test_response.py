@@ -219,6 +219,28 @@ class TestAnalyse(unittest.TestCase):
         self.assertFalse(res.ferror["extrapolated"])
         self.assertIn("no joint", res.ferror["source"])
 
+    def test_torque_per_acceleration_of_a_drive_that_lags(self):
+        # a soft drive (Kp 40 /s, no feedforward: 25 ms behind) whose torque makes its
+        # motor's acceleration: 0.02 % per mm/s2 and 5 % friction. Against the command's
+        # acceleration the fit came out about a quarter low; against pos-fb's it is right,
+        # although pos-fb is in whole counts, also coarse ones (100 counts/mm)
+        global SCALE
+        keep = SCALE
+        for counts in (1000.0, 100.0):
+            try:
+                SCALE = counts
+                rec = recording(kp=40.0, with_de=False)
+                SCALE = 1e9           # the motor's own path, not in counts
+                x, _de = drive(rec.data["cmd"], 2, 40.0)
+            finally:
+                SCALE = keep
+            vx = [0.0] + [(x[n + 1] - x[n - 1]) / (2 * P) for n in range(1, len(x) - 1)] + [0.0]
+            ax = [0.0] + [(x[n + 1] - 2 * x[n] + x[n - 1]) / P ** 2 for n in range(1, len(x) - 1)] + [0.0]
+            rec.data["torque"] = [round(10 * (0.02 * an + (5.0 if vn > 1 else -5.0 if vn < -1 else 0.0)))
+                                  for vn, an in zip(vx, ax)]
+            res = response.analyse(rec)
+            self.assertAlmostEqual(res.torque_per_accel, 0.02, delta=0.0006, msg="%g counts/mm" % counts)
+
     def test_torque(self):
         rec = recording(kp=200.0, ff=1.0, with_de=False,
                         limits={"max-torque": [300, 1000], "following-error": [2000, 4000]})
@@ -239,7 +261,8 @@ class TestAnalyse(unittest.TestCase):
         text = "\n".join(response.report(res, rec))
         self.assertIn("Torque: peak 15", text)
         # what the profile's torque feedforward would need (cia402.feedforward.torque)
-        self.assertIn("cia402: {feedforward: {torque: 0.02}}", text)
+        line = text[text.index("cia402: {feedforward: {torque: "):]
+        self.assertAlmostEqual(float(line.split("torque: ")[1].split("}")[0]), 0.02, delta=0.0005)
         self.assertIn("of the drive's own window (4.000 mm)", text)
         # at the test's limit the result is not the drive's own
         rec.meta["limits"]["max-torque"] = [150, 1000]
@@ -286,6 +309,15 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(response.compare(plain, response.analyse(plain), plain,
                                           response.analyse(plain))[0],
                          "Since the last measurement: no setting changed in the drive")
+
+    def test_feedforward_changed(self):
+        # LinuxCNC's feedforward (HAL parameters, not the drive's settings) between them
+        before = recording(kp=40.0, feedforward={"velocity": 0.0, "torque": 0.0})
+        after = recording(kp=40.0, ff=1.0, feedforward={"velocity": 1.0, "torque": 0.0})
+        lines = response.compare(before, response.analyse(before), after, response.analyse(after))
+        self.assertEqual(lines[0], "Since the last measurement: feedforward velocity 0 -> 1 "
+                                   "(cia402.feedforward)")
+        self.assertRegex("\n".join(lines), r"lag 2\d\.\d\d -> \d\.\d\d ms")
 
     def test_another_move_is_not_compared(self):
         a, b = recording(kp=80.0), recording(kp=80.0, v=40.0)

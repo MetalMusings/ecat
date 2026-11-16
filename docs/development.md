@@ -1723,6 +1723,45 @@ two cycles), slaves 0-3 `unused`; `pos-cmd` a sine of 10000 counts at 2 Hz
   faster loop) would be left with about 17 counts on the same data.
 - The `velocity-ff` / `torque-ff` pins show what is written.
 
+With the Response card (the same calls as the window: the I/O test, the
+drive test, the measurement stepped every 25 ms with the heartbeat, without
+the window; `test-scripts/drive/response-test.py SCALE`), 40 mm at 100
+mm/s, 1000 mm/s², pos-scale 1000 counts/mm, then the card's feedforward line
+set with `setp`:
+
+| | lag | error at constant speed | peak error | torque per acceleration |
+|---|---|---|---|---|
+| without feedforward | 25.65 ms | 2.565 mm | 2.600 mm | 0.04979 %/(mm/s²) (model 0.05) |
+| velocity 1.0, torque 0.04979 | 1.00 ms | 0.100 mm | 0.101 mm | |
+
+At 100 counts/mm: torque per acceleration 0.004977 (model 0.005), the same
+lag. Three faults found and fixed on the way (all in EtherCAT Setup):
+
+- The drive test set `velo-scale` only in PP and PV, so in CSP 0x60B1 got
+  machine units/s: 1000 times too little, and feedforward did nothing.
+  The drive test sets it in CSP now, and *Apply* writes `setp
+  <drive>.velo-scale` with the `pos-scale` for a drive with
+  `feedforward.velocity` (before, a LinuxCNC configuration had the same
+  fault unless the user set it by hand).
+- Torque per acceleration was fitted against the command's acceleration:
+  a quarter low on a drive that lags 25 ms (0.0368 here). It is fitted
+  against `pos-fb`'s now, both smoothed alike so that a count's step is at
+  most 1 % of the acceleration (with a fixed 7 ms it was still 5 % low at
+  100 counts/mm).
+- Without a dictionary read from the bus the drive test asked the drive for
+  an object as `uint8`; the tool refuses another size, so 0x6065 and
+  0x6072 counted as missing and no limits were written. It tries each size
+  now. (The window passes the dictionary it read, so this was hit only
+  where a CoE slave's dictionary had not been read.)
+- The comparison said "no setting changed in the drive" between the two;
+  a recording keeps the feedforward parameters now (`meta.feedforward`)
+  and the comparison names their change.
+
+Still the model's: with velocity feedforward it is a cycle ahead of its
+target (it steps to the target instead of interpolating), so the card shows
+the drive's loop lag as -1.00 ms and the lag as 1.00 ms, less than the
+bus's 2.00.
+
 Found on the way, in the card's firmware (not in ecat): the EaserCAT 3000's
 firmware polled SOES from `loop()` (`use_interrupt = 0`) and never ran on
 SYNC0, also with DC on; the SYNC0 interrupt read the ESC over SPI (into a

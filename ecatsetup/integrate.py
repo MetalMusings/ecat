@@ -988,6 +988,17 @@ class Plan:
     edited: list = field(default_factory=list)      # ecatsetup's files changed by hand
 
 
+def feedforward_velo(cfg, name):
+    """Whether drive `name` feeds velocity forward (cia402.feedforward), so
+    that its velo-scale must turn machine units/s into the drive's velocity
+    unit (counts/s, the same as pos-scale): ethercat.hal sets it with the
+    pos-scale. Without it 0x60B1 gets machine units/s, pos-scale times too
+    little."""
+    s = drives(cfg).get(name) or {}
+    ff = (s.get("cia402") or {}).get("feedforward")
+    return isinstance(ff, dict) and bool(ff.get("velocity"))
+
+
 def _managed(cfg):
     """[(joint, letter, drive name, scale, [(joint pin, drive pin, arrow, suffix)])]."""
     out = []
@@ -1078,6 +1089,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
     managed_pins |= {pin for n in io for pin in n["pins"]}
     postgui = set(user_hal_files(ini_path, postgui=True))
     scale_pins = {"%s.pos-scale" % name for _, name, _, _ in managed}
+    scale_pins |= {"%s.velo-scale" % name for _, name, _, _ in managed if feedforward_velo(cfg, name)}
 
     # an lcec configuration: its old pins are replaced by the ones chosen
     # (fromlcec.py), and the cia402 component by the profile
@@ -1366,6 +1378,9 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             ("%s%d" % (letter.lower(), n) if letter else "j%d" % n)
         body.append("# joint %d%s: %s" % (n, " (%s)" % letter if letter else "", name))
         body.append("setp %s.pos-scale %r" % (name, float(scale)))
+        if feedforward_velo(cfg, name):
+            # 0x60B1 is in the drive's velocity unit, counts/s like pos-scale's counts
+            body.append("setp %s.velo-scale %r" % (name, float(scale)))
         for jpin, dpin, arrow, suffix in conns:
             a, b = sig_of_pin.get(jpin), sig_of_pin.get(dpin)
             cmd_sig = sig_of_pin.get("joint.%d.motor-pos-cmd" % n)

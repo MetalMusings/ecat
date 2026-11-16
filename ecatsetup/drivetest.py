@@ -261,7 +261,10 @@ class DriveTest:
     def _has(self, index, subindex):
         if self.coe is not None and self.coe.objects:
             return (index, subindex) in self.coe.entries
-        return tool.upload(self.position, index, subindex, "uint8") is not None
+        # without the dictionary, ask the drive: the tool refuses a type of
+        # another size ("Data type mismatch"), so try each size
+        return any(tool.upload(self.position, index, subindex, t) is not None
+                   for t in ("uint8", "uint16", "uint32"))
 
     HOMING_TYPES = {"SINT": "int8", "INT": "int16", "DINT": "int32",
                     "USINT": "uint8", "UINT": "uint16", "UDINT": "uint32"}
@@ -299,8 +302,9 @@ class DriveTest:
             raise testmode.TestError("the scale (counts per mm) cannot be 0")
         first = {"%s.enable" % self.name: "FALSE",
                  "%s.pos-scale" % self.name: repr(float(s["scale"]))}
-        if self.mode in ("pp", "pv"):
-            # the drive's velocity units taken as counts per second
+        if self.mode in ("pp", "pv", "csp"):
+            # the drive's velocity units taken as counts per second (in CSP for
+            # velocity-fb and the feedforward's 0x60B1)
             first["%s.velo-scale" % self.name] = repr(float(s["scale"]))
         if self.mode == "pv":
             first["%s.velocity-cmd" % self.name] = "0"
