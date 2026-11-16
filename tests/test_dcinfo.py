@@ -16,6 +16,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+os.environ["ECATSETUP_MEASURED"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 if "ECATSETUP_TEST_STATE" not in os.environ:
     # one folder for the whole run: the state, and every temporary file of the

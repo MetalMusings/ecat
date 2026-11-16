@@ -15,6 +15,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # quirk files: only those that come with the program
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+os.environ["ECATSETUP_MEASURED"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 # state (test lock, drive limits): never the user's own
 if "ECATSETUP_TEST_STATE" not in os.environ:
@@ -1247,6 +1248,45 @@ class TestWindow(WindowBase):
         self.assertTrue(any("every 1 to 100 cycles" in t for lv, t in w.session.dc_problems()))
         m.ref_cycles.setValue(10)
         self.assertEqual(config.dc_warnings(w.session.cfg), [])
+
+    def test_sync0_cycle_and_measured_lines(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}   # an ECT60: results ship
+        s["dc"] = {"assign-activate": "0x0300", "sync0-cycles": 2, "sync0-shift-ns": 0}
+        page = w.slave_page
+        w.session.period = 125000
+        w.select_slave(0)
+        text = page.dc_cycle.text()
+        self.assertIn("SYNC0 every 250 us: the servo period 125 us times cycle 2.", text)
+        self.assertIn("Measured on the bus: 250 us ok", text)
+        self.assertIn("100 us refused (AL 0x0036)", text)
+        self.assertIn("tried ok at this period", text)
+        self.assertTrue(page.dc_warn.isHidden() or "measured" not in page.dc_warn.text())
+        # a period that was refused: a warning here and in the session's list
+        w.session.period = 100000
+        page.show_dc_warnings(s)
+        self.assertIn("this device was measured: refused at 100 us (AL 0x0036)", page.dc_warn.text())
+        self.assertTrue(any("measured" in t and "refused at 100 us" in t for lv, t in w.session.dc_problems()))
+        # between what was tried: a note, not a warning
+        w.session.period = 110000
+        page.show_dc_warnings(s)
+        self.assertTrue(page.dc_warn.text().startswith("Note: this device was measured: not tried between 100 and 125"))
+        # without SYNC0, and without a period
+        s.pop("dc")
+        w.session.period = 125000
+        page.show_dc_warnings(s)
+        self.assertEqual(page.dc_cycle.text().splitlines()[0], "Servo period 125 us; this slave runs without SYNC0.")
+        self.assertTrue(all("measured" not in t for lv, t in w.session.dc_problems()))     # no DC: not about SYNC0
+        w.session.period = None
+        page.show_dc_warnings(s)
+        self.assertIn("servo period is not known", page.dc_cycle.text())
+        # a device nothing was measured on
+        s["identity"] = {"vendor": "0x00000002", "product": "0x03F03052"}
+        w.session.period = 125000
+        s["dc"] = {"assign-activate": "0x0300"}
+        page.show_dc_warnings(s)
+        self.assertNotIn("Measured", page.dc_cycle.text())
 
     def test_message_selects_slave(self):
         w = self.window()

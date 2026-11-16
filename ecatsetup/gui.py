@@ -38,7 +38,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
 from . import (config, dcinfo, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
-               integrate, lcnc_env, masterstart,
+               integrate, lcnc_env, masterstart, measured,
                netif, pindocs, propose, quirks, settings, symptoms, tasks, testmode, tool, update, wiring)
 from .session import Session, servo_period
 
@@ -1232,6 +1232,7 @@ class SlaveView(QWidget):
         sync.addWidget(self.sync0_shift)
         op.add(sync)
         self.dc_hint = op.add(label("", "hint", wrap=True))
+        self.dc_cycle = op.add(label("", "hint", wrap=True))
         self.dc_warn = op.add(label("", wrap=True))
         self.dc_warn.setObjectName("warnText")
         op.lay.addStretch(1)
@@ -1800,8 +1801,31 @@ class SlaveView(QWidget):
         for w in (self.sync0_cycles, self.sync0_shift):
             w.setEnabled(on and choice != DC_FREE)
 
+    def dc_cycle_text(self, s):
+        """The SYNC0 cycle this slave gets (the servo period times its factor), and what was
+        measured on this kind of device at servo periods that were tried ("" for none)."""
+        period = self.win.session.period
+        dc = s.get("dc")
+        out = []
+        if dc is not None and period and dcinfo.parse_assign(dc.get("assign-activate", "")):
+            n = int(dc.get("sync0-cycles") or 1)
+            out.append("SYNC0 every %s: the servo period %s times cycle %d."
+                       % (_us_text(period * n), _us_text(period), n))
+        elif period:
+            out.append("Servo period %s; this slave runs without SYNC0." % _us_text(period))
+        else:
+            out.append("The servo period is not known (choose the INI file on the HAL page, or "
+                       "type it on the Master page).")
+        m = measured.line(s, period)
+        if m:
+            out.append(m + ".")
+        return "\n".join(out)
+
     def show_dc_warnings(self, s):
+        self.dc_cycle.setText(self.dc_cycle_text(s))
         found = dcinfo.problems(s, self.win.session.dc_info(self.position), self.win.session.period)
+        if s.get("dc"):
+            found = found + measured.problems(s, self.win.session.period)
         self.dc_warn.setText("\n".join(("Warning: " if lv == "warning" else "Note: ") + t
                                         for lv, t in found))
         self.dc_warn.setVisible(bool(found))
@@ -3322,6 +3346,13 @@ class MoveCard(Card):
                                        "error" if v("home-error") == "TRUE" else
                                        "homed" if v("stat-homed") == "TRUE" else "not homed")
         self.where.setText(text)
+
+
+def _us_text(ns):
+    """A time in ns as microseconds, or milliseconds from 1 ms."""
+    if ns >= 1000000:
+        return "%g ms" % (ns / 1e6)
+    return "%g us" % (ns / 1000.0)
 
 
 def sync_rows(cfg, get, offsets, period):

@@ -16,7 +16,7 @@ import os
 
 import yaml
 
-from . import config, quirks
+from . import quirks
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "measured", "sync0.yaml")
 
@@ -102,6 +102,25 @@ def describe(res):
              for r in sorted(res, key=lambda r: -r["period-us"])]
     dates = sorted({str(r["date"]) for r in res if r.get("date")})
     return ", ".join(parts) + ("; measured %s" % ", ".join(dates) if dates else "")
+
+
+def problems(slave, period_ns):
+    """[(level, text)] about a slave's servo period against what was measured
+    on this kind of device ("warning" when it was refused at or above the
+    period, "note" when the period lies between the ones that were tried)."""
+    v = verdict(results(slave), period_ns)
+    if v is None or v[0] == "ok":
+        return []
+    return [("warning" if v[0] == "bad" else "note", "this device was measured: " + v[1])]
+
+
+def line(slave, period_ns):
+    """The slave page's line about what was measured, or "" when nothing was."""
+    res = results(slave)
+    if not res:
+        return ""
+    v = verdict(res, period_ns)
+    return "Measured on the bus: %s%s" % (describe(res), "" if v is None else " (%s)" % v[1])
 
 
 def record(slave, period_ns, result, al_status=None, note="", today=None):

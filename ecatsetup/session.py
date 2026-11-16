@@ -11,7 +11,7 @@ import shutil
 
 import yaml
 
-from . import coe as coe_mod, config, dcinfo, esi, guidance, importxml, integrate, lcecxml, netif, propose, \
+from . import coe as coe_mod, config, dcinfo, esi, guidance, importxml, integrate, lcecxml, measured, netif, propose, \
     quirks, sii as sii_mod, tool, update
 
 
@@ -378,7 +378,8 @@ class Session:
                 out.append(("warning", "slave %s (%s): has an eoe: block, but its SII does not list the EoE "
                             "mailbox protocol: the master cannot set its IP address" % (s["position"], s.get("name"))))
         for s in (self.cfg or {}).get("slaves") or []:
-            for level, text in dcinfo.problems(s, self.dc_info(s.get("position")), self.period):
+            for level, text in (dcinfo.problems(s, self.dc_info(s.get("position")), self.period)
+                                + (measured.problems(s, self.period) if s.get("dc") else [])):
                 out.append((level, "slave %s (%s): %s" % (s["position"], s.get("name"), text)))
         return out
 
