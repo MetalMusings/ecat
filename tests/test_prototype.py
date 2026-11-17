@@ -464,6 +464,78 @@ ENCODER_ESI = """<?xml version="1.0"?>
 """
 
 
+# A drive without SDO information (StepperOnline A6): the profile per
+# channel, the dictionary only in the ESI file.
+NO_SDO_INFO_ESI = """<?xml version="1.0"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00400000</Id></Vendor>
+  <Descriptions><Devices>
+    <Device>
+      <Type ProductCode="#x00000715" RevisionNo="#x00002EF8">A6N Servo Driver</Type>
+      <Name>A6N</Name>
+      <Profile>
+        <ChannelInfo><ProfileNo>402</ProfileNo></ChannelInfo>
+        <Dictionary>
+          <DataTypes><DataType><Name>UDINT</Name><BitSize>32</BitSize></DataType></DataTypes>
+          <Objects>
+            <Object><Index>#x1000</Index><Name>Device type</Name><Type>UDINT</Type><BitSize>32</BitSize>
+              <Flags><Access>ro</Access></Flags></Object>
+            <Object><Index>#x6502</Index><Name>Supported drive modes</Name><Type>UDINT</Type><BitSize>32</BitSize>
+              <Flags><Access>ro</Access></Flags></Object>
+          </Objects>
+        </Dictionary>
+      </Profile>
+      <RxPdo Sm="2" Fixed="1"><Index>#x1701</Index><Name>Outputs</Name>
+        <Entry><Index>#x6040</Index><SubIndex>0</SubIndex><BitLen>16</BitLen><Name>Control word</Name><DataType>UINT</DataType></Entry>
+        <Entry><Index>#x607A</Index><SubIndex>0</SubIndex><BitLen>32</BitLen><Name>Target position</Name><DataType>DINT</DataType></Entry>
+      </RxPdo>
+      <TxPdo Sm="3" Fixed="1"><Index>#x1B01</Index><Name>Inputs</Name>
+        <Entry><Index>#x6041</Index><SubIndex>0</SubIndex><BitLen>16</BitLen><Name>Status word</Name><DataType>UINT</DataType></Entry>
+        <Entry><Index>#x6064</Index><SubIndex>0</SubIndex><BitLen>32</BitLen><Name>Position actual value</Name><DataType>DINT</DataType></Entry>
+      </TxPdo>
+    </Device>
+  </Devices></Descriptions>
+</EtherCATInfo>
+"""
+
+
+class TestNoSdoInformation(unittest.TestCase):
+    def test_profile_per_channel_in_the_esi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "a6.xml")
+            with open(path, "w") as f:
+                f.write(NO_SDO_INFO_ESI)
+            self.assertEqual(esi.load_file(path)[0].profile, 402)
+
+    def test_drive_read_from_the_esi_dictionary(self):
+        from ecatsetup import session, sii as sii_mod, tool
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "a6.xml")
+            with open(path, "w") as f:
+                f.write(NO_SDO_INFO_ESI)
+            devices = esi.load_file(path)
+            the_sii = sii_mod.Sii(vendor_id=0x400000, product_code=0x715, revision=0x2EF8,
+                                  serial=0, mailbox_protocols=0x04)
+            asked = []
+
+            def upload(pos, index, sub, dtype):
+                asked.append(index)
+                return {0x1000: 0x20192, 0x6502: 0x80}.get(index)
+            info = {"position": 4, "dc": True, "dc_clock": "64", "coe": True, "vendor_id": 0x400000,
+                    "product_code": 0x715, "revision": 0x2EF8, "serial": 0, "state": "PREOP",
+                    "al_status_code": None}
+            with mock.patch.object(tool, "slave_info", lambda pos: info), \
+                    mock.patch.object(tool, "sii", lambda pos: b""), \
+                    mock.patch.object(sii_mod, "parse", lambda data: the_sii), \
+                    mock.patch.object(tool, "sdos_settled", lambda pos, **kw: ""), \
+                    mock.patch.object(tool, "upload", upload):
+                _info, _coe, p = session.read_slave(4, devices, "csp")
+        self.assertEqual(p.profile, 402)
+        self.assertEqual(p.drive_modes, ["CSP"])
+        # only what the ESI's dictionary lists is asked for
+        self.assertEqual(sorted(set(asked)), [0x1000, 0x6502])
+
+
 class TestEsi(unittest.TestCase):
     def test_parsed_files_are_kept_between_runs(self):
         with tempfile.TemporaryDirectory() as tmp:

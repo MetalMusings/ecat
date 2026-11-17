@@ -586,7 +586,7 @@ they are in the process data:
 |---|---|---|
 | `0x6040` control word | output | always |
 | `0x6041` status word | input | always |
-| `0x6060` modes of operation | output | no; written every cycle if mapped |
+| `0x6060` modes of operation | output | no; written every cycle if mapped, else written by SDO at start and read back (below) |
 | `0x6061` modes of operation display | input | no; checked before enabling if mapped |
 | `0x607A` target position | output | `csp`, `pp` |
 | `0x6064` position actual value | input | `csp`, `pp` |
@@ -596,6 +596,15 @@ they are in the process data:
 | `0x60B1` velocity offset | output | no; feedforward in `csp`, 0 without it |
 | `0x60B2` torque offset | output | no; feedforward in `csp`, 0 without it |
 | `0x603F` error code | input | no |
+
+When `0x6060` is not in the process data (StepperOnline A6's default PDOs
+`0x1701`/`0x1B01`, for example), the profile writes the mode to `0x6060` by
+SDO when the component loads, reads it back, and the master writes it again
+whenever it configures the slave (after a power cycle or a lost link). If
+the drive refuses the mode or does not keep it, the component does not
+load: "0x6060 is not in the process data and the drive did not take mode
+... by SDO". Without this the drive would be enabled in whatever mode it
+had, and with `0x6061` not mapped either, nothing would notice.
 
 Other entries of the drive, such as torque or digital inputs, get ordinary
 pins.
