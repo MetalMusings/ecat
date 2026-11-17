@@ -2194,8 +2194,10 @@ ecat 0.11 did):
 Tests: the C tests run twice, against a fake 2.10 HAL and against a fake
 2.9 HAL through `ecat_hal.h` (the layer is what is tested; mutation-check
 it); the Python tests with both series. At the machine: halrun on the
-plasma bus here with 2.9.7 (no motion); zx45 (2.9, Mesa, no EtherCAT) for
-the window and Apply. CI: {2.9, 2.10} x {debian12, debian13} for the
+plasma bus here with 2.9.7 (no motion), and on turner's bus (2.9.7 from
+linuxcnc.org's packages beside its 2.10 run-in-place, which must keep
+working: turner's own Turner configuration runs on that). The window and
+Apply on copies of configurations, on either. CI: {2.9, 2.10} x {debian12, debian13} for the
 2.10 archive, debian13 for the 2.9 deb (debian12 if linuxcnc.org has 2.9.7
 for it).
 
@@ -2712,9 +2714,10 @@ results are gathered from users is the same open question as device data
 - **This computer** (N100, igc, EtherCAT): the network layer, the IRQ
   placement found by hand on 2026-11-16 as the check that the tool finds a
   known cause.
-- **zx45** (i3-6100 the user thinks, Mesa Ethernet, LinuxCNC 2.9 installed
-  the user thinks, RT settings to be read at start; not in production, the
-  user's to restart): no EtherCAT. The measuring part must run without the
+- **zx45**, only now and then when an extra computer is needed (the user,
+  2026-11-17: kept out of the regular work; turner is the free one).
+  i3-6100 the user thinks, Mesa Ethernet, LinuxCNC 2.9 the user thinks, no
+  EtherCAT. The measuring part must run without the
   ecat component and on 2.9 (halrun, `timedelta`, `sampler` are in both;
   to be checked: ecatsetup's Python starting without a 2.10 tree). The
   network layer is `hm2_eth`'s. ecat may be installed there if it helps
@@ -2738,7 +2741,7 @@ that tests can point at fake `/proc` and `/sys` trees (as `gui.irq_row`).
 3. Improve mode at run time: change log, undo commands and script.
 4. Permanent changes (grub, systemd) and the before/after-restart pairing;
    turner leave-one-out.
-5. Mesa Ethernet and 2.9: zx45.
+5. Mesa Ethernet and 2.9 (zx45, when the user brings it in).
 6. With the bus: ecat's layers joined to the Synchronisation card.
 
 ### Open
