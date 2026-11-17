@@ -90,7 +90,7 @@ jobs:
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
-          url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
+          url=$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
             | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p')
           test -n "$url" || { echo "no ${{ matrix.id }} package in $MASTER_RELEASE"; exit 1; }
           curl -fsSL -o /tmp/master.deb "$url"
@@ -174,7 +174,7 @@ jobs:
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
-          url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
+          url=$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
             | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p')
           test -n "$url" || { echo "no ${{ matrix.id }} package in $MASTER_RELEASE"; exit 1; }
           curl -fsSL -o /tmp/master.deb "$url"
