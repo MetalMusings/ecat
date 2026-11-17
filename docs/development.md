@@ -2244,6 +2244,16 @@ Done (2026-11-17):
   `mux2`, `not`, `sampler`, `timedelta`, `net a <=> b`) are 2.9's as well, and
   the pin help (`pindocs`) links to linuxcnc.org's current documentation.
   `tests/test_series.py`, 10 mutations caught.
+- (4) `scripts/build-deb.sh` finds the series (a run-in-place tree's `VERSION`, else
+  `linuxcnc-uspace-dev`'s version): a 2.9 package has `+lcnc2.9` before the Debian
+  release in its version and `Depends: linuxcnc-uspace (>= 1:2.9.7),
+  linuxcnc-uspace (<< 1:2.10~)` (`LINUXCNC29_MIN`); built here from the working
+  tree against 2.9.4 (in a shell without the run-in-place environment) and against
+  2.10, all tests passing in both. CI: job `deb29` (Debian 12 and 13) installs
+  `linuxcnc-uspace-dev` 1:2.9.7 from linuxcnc.org's archive, whose key is the one
+  LinuxCNC's own `linuxcnc-install.sh` takes (0CE3...2927, checked by fingerprint;
+  the trixie `InRelease` verified with it here). Not yet run on GitHub (needs a
+  push); there is no container tool here to run it locally.
 
 ### Old decision (2026-11-11, replaced): ecat moves to 2.10 only
 

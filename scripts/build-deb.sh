@@ -13,11 +13,14 @@
 #
 # Otherwise the committed state of this repository is built, from a fresh
 # clone, so uncommitted changes are not packaged. The package is built for the Debian
-# release and LinuxCNC that this machine has.
+# release and LinuxCNC that this machine has: for LinuxCNC 2.10 (a run-in-place
+# build's environment read, or its package) or 2.9 (linuxcnc-uspace-dev 2.9.x
+# from linuxcnc.org, in a shell without a run-in-place environment). A 2.9
+# package's version has "+lcnc2.9" before the Debian release.
 #
 # Build dependencies: build-essential git dpkg-dev libyaml-dev libmodbus-dev (C tests)
-#   LinuxCNC 2.10 (linuxcnc-uspace-dev, or a run-in-place build: source its
-#   scripts/rip-environment first; halcompile must be on the PATH), and
+#   LinuxCNC 2.10 or 2.9 (linuxcnc-uspace-dev, or a 2.10 run-in-place build: source
+#   its scripts/rip-environment first; halcompile must be on the PATH), and
 #   linuxcnc-ethercat-uspace 1.5 or newer (its headers in
 #   /opt/linuxcnc-ethercat-uspace/include).
 
@@ -28,6 +31,8 @@ BASE_VERSION=0.21
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
 MASTER_MIN=1.5
+# The oldest 2.9 a 2.9 package asks for (the user's decision, 2026-11-17).
+LINUXCNC29_MIN=2.9.7
 OUTDIR=$PWD
 WORKTREE=
 
@@ -43,6 +48,21 @@ if [ ! -f "$MASTER/include/ecrt.h" ]; then
     echo "$MASTER/include/ecrt.h is missing: install $MASTER_PKG $MASTER_MIN or newer." >&2
     exit 1
 fi
+
+# The LinuxCNC this builds against: a run-in-place tree's VERSION, else the
+# installed development package's version.
+if [ -n "${EMC2_HOME:-}" ] && [ -f "$EMC2_HOME/VERSION" ]; then
+    LINUXCNC_VERSION=$(cat "$EMC2_HOME/VERSION")
+else
+    LINUXCNC_VERSION=$(dpkg-query -W -f='${Version}' linuxcnc-uspace-dev 2>/dev/null | sed 's/^[0-9]*://')
+fi
+case "$LINUXCNC_VERSION" in
+    2.9.*) SERIES=2.9 ;;
+    2.1[0-9]*|2.[2-9][0-9]*) SERIES=2.10 ;;
+    *) echo "LinuxCNC's version is unknown (\"$LINUXCNC_VERSION\"): install linuxcnc-uspace-dev," \
+            "or read a run-in-place tree's scripts/rip-environment" >&2; exit 1 ;;
+esac
+echo "LinuxCNC $LINUXCNC_VERSION ($SERIES): $(command -v halcompile || echo 'no halcompile on the PATH')"
 
 SRC=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 WORK=$(mktemp -d -t $PKG.XXXXXX)
@@ -109,7 +129,9 @@ step "Control file"
 ARCH=$(dpkg --print-architecture)
 # The date is UTC, as on the CI machines, so that a local build late in the
 # evening does not get a later date than a release built at the same time.
-VERSION=$BASE_VERSION+git$(date -u +%Y%m%d)$WORKTREE.$REV~$ID$VERSION_ID
+SERIES_MARK=
+[ "$SERIES" = 2.9 ] && SERIES_MARK=+lcnc2.9
+VERSION=$BASE_VERSION+git$(date -u +%Y%m%d)$WORKTREE.$REV$SERIES_MARK~$ID$VERSION_ID
 MAINTAINER="$(git -C "$SRC" log -1 --format='%an <%ae>')"
 
 # Library dependencies of ecat.so, without libethercat.so.2 (from
@@ -121,11 +143,16 @@ SHLIBS=$(cd "$WORK/shlibs" && dpkg-shlibdeps -O --ignore-missing-info \
     | sed -n 's/^shlibs:Depends=//p')
 # The master's library comes from its package, not from a shlibs file.
 SHLIBS=$(echo "$SHLIBS" | sed -E 's/(^|, )[^,]*ethercat[^,]*//g; s/^, //')
-# ecat needs LinuxCNC 2.10's HAL API: whatever dpkg-shlibdeps found for
+# ecat.so is built for one series' HAL API: whatever dpkg-shlibdeps found for
 # linuxcnc-uspace (it may be an older package installed beside a run-in-place
 # build) is replaced by this.
 SHLIBS=$(echo "$SHLIBS" | sed -E 's/(^|, )linuxcnc-uspace [^,]*//g; s/^, //')
-SHLIBS="linuxcnc-uspace (>= 1:2.10~)${SHLIBS:+, $SHLIBS}"
+if [ "$SERIES" = 2.9 ]; then
+    LINUXCNC_DEP="linuxcnc-uspace (>= 1:$LINUXCNC29_MIN), linuxcnc-uspace (<< 1:2.10~)"
+else
+    LINUXCNC_DEP="linuxcnc-uspace (>= 1:2.10~)"
+fi
+SHLIBS="$LINUXCNC_DEP${SHLIBS:+, $SHLIBS}"
 
 cat >"$ROOT/DEBIAN/control" <<EOF
 Package: $PKG
@@ -137,7 +164,7 @@ Recommends: python3-pyqt5
 Section: misc
 Priority: optional
 Homepage: https://github.com/MetalMusings/ecat
-Description: EtherCAT for LinuxCNC configured without XML, experimental
+Description: EtherCAT for LinuxCNC $SERIES configured without XML, experimental
  The ecat HAL component, which runs the userspace IgH EtherCAT master in
  LinuxCNC and is configured from ethercat.yaml, and EtherCAT Setup
  (ecatsetup), which proposes, checks, updates and diagnoses that file from
