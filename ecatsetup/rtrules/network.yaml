@@ -1,7 +1,7 @@
 # The network card of the I/O (EtherCAT, Mesa Ethernet).
 
 - id: ethercat-nic-irq-cpu
-  title: "EtherCAT's network card interrupts are handled on CPU {item.affinity_text}, not on the real-time CPU"
+  title: "EtherCAT's network card interrupts are not handled on the real-time CPU"
   each: irqs
   when: "ethercat and item.io_nic and not item.on_rt and rt_isolated and (period_us is None or period_us <= 500 or (measured and late_max_us > 20))"
   evidence: "IRQ {item.irq} ({item.name}) on CPU {item.affinity_text}; servo thread on CPU {rt_cpus_text}"

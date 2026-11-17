@@ -306,7 +306,12 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(inv.data["io_nics"], ["enp2s0"])
         ctx = rtrules.evidence(inv, None)
         found = [f for f in rtrules.analyse(ctx, self.rules) if f.id == "ethercat-nic-irq-cpu"]
-        self.assertEqual(sorted(f.item["irq"] for f in found), ["125", "126"])
+        # one finding for the card, every interrupt in its evidence
+        self.assertEqual(len(found), 1)
+        self.assertEqual(sorted(i["irq"] for i in found[0].items), ["125", "126"])
+        self.assertIn("IRQ 125", found[0].evidence)
+        self.assertIn("IRQ 126", found[0].evidence)
+        self.assertEqual(sorted(found[0].keys), ["irq:125", "irq:126"])
         self.assertIn("irq-cpu: 3", found[0].action)
         # with irq-cpu set (on the real-time CPU), nothing to say, and the
         # general "move it off" rule leaves EtherCAT's card alone

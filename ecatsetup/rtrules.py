@@ -585,6 +585,30 @@ class Unexplained:
         return "%s  [advice]\n  Seen: %s\n  What to do: %s" % (self.title, self.evidence, self.what())
 
 
+def merge_same(found):
+    """One finding for the items of a rule that say the same with nothing to
+    run per item (five queue interrupts of one network card on the wrong
+    CPU): the evidence and keys of all, the first one's item."""
+    out = []
+    by = {}
+    for f in found:
+        if f.item is None or f.commands or f.undo_commands:
+            out.append(f)
+            continue
+        k = (f.id, f.title, f.action, f.kernel_param)
+        if k in by:
+            first = by[k]
+            if f.evidence and f.evidence not in (first.evidence or ""):
+                first.evidence = "%s; %s" % (first.evidence, f.evidence) if first.evidence else f.evidence
+            first.keys += [x for x in f.keys if x not in first.keys]
+            first.items.append(f.item)
+            continue
+        f.items = [f.item]
+        by[k] = f
+        out.append(f)
+    return out
+
+
 def analyse(ctx, rules=None):
     """The findings for this evidence, ranked: [Finding or Unexplained]."""
     rules = load() if rules is None else rules
@@ -605,6 +629,7 @@ def analyse(ctx, rules=None):
                         matched.setdefault(r.each, set()).add(i)
         elif evaluate(r.when, ctx):
             found.append(Finding(r, ctx))
+    found = merge_same(found)
     explained = set()
     for f in found:
         for k in f.keys:
