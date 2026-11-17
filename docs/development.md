@@ -2258,6 +2258,17 @@ Done (2026-11-17):
   `linuxcnc-install.sh` takes (0CE3...2927, checked by fingerprint; the trixie
   `InRelease` verified with it here). Not yet run on GitHub (needs a
   push); there is no container tool here to run it locally.
+- Tried with the package (2026-11-17): the 2.9 package built from the working
+  tree installed here over 0.11 (0.11's release package kept in
+  `~/ecat-0.11-backup` as the way back); from a shell without the run-in-place
+  environment and settings without `linuxcnc:`: `ecatsetup --check` with the
+  bus ("installed LinuxCNC 2.9.4"), and the I/O test (`testmode.TestRun`,
+  halrun 2.9) on the plasma bus: all OP, turn-around 2, every one of the 219
+  pins and params `halpins` predicts there with its type, nothing more but
+  HAL's function times; stop clean.
+- (5) README and getting-started name the three ways (2.9 package, 2.10
+  run-in-place archive, 2.10 package). Release, and closing `0.11.x`, wait for
+  the user's word (after the real-time check).
 
 ### Old decision (2026-11-11, replaced): ecat moves to 2.10 only
 

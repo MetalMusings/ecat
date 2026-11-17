@@ -38,24 +38,29 @@ ecat has two parts:
 
 ## Install
 
-For Debian 12 and 13 with **LinuxCNC 2.10**. 2.10 is not released yet and has
-no Debian packages, so most people run it run-in-place (built from source, see
-[Developing ecat](docs/development.md#linuxcnc-210)): ecat then comes as an
-archive with an installer, tested against one LinuxCNC commit (named in the
-release notes). With LinuxCNC 2.9, use ecat 0.11 (tag `ecat-v0.11`), the last
-for 2.9.
+For Debian 12 and 13 with **LinuxCNC 2.9** (2.9.4 or newer, as packages) or
+**LinuxCNC 2.10**. The same ecat is built for both. 2.10 is not released yet
+and has no Debian packages, so most people run it run-in-place (built from
+source, see [Developing ecat](docs/development.md#linuxcnc-210)): ecat then
+comes as an archive with an installer, tested against one LinuxCNC commit
+(named in the release notes). On 2.9 the integer pins have 32 bits instead of
+64 ([the component](docs/component.md)); otherwise ecat does the same on both.
 
 1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace`, from the
    `uspace-v*` releases of
    [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases);
 2. ecat from this repository's `ecat-v*`
-   [releases](https://github.com/MetalMusings/ecat/releases): for a
-   run-in-place LinuxCNC `ecat-rip-*-debian12|13.tar.gz` (unpack, `./install`),
-   for a packaged LinuxCNC `linuxcnc-ecat_*.deb`.
+   [releases](https://github.com/MetalMusings/ecat/releases):
+   - LinuxCNC 2.9 (Debian's or linuxcnc.org's packages):
+     `linuxcnc-ecat_*+lcnc2.9~debian12|13_amd64.deb`;
+   - LinuxCNC 2.10 run-in-place: `ecat-rip-*-debian12|13.tar.gz` (unpack,
+     `./install`);
+   - LinuxCNC 2.10 as a package: `linuxcnc-ecat_*.deb` without `+lcnc2.9`.
 
 ```
 sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb
-tar xzf ecat-rip-*-debian13.tar.gz && cd ecat-rip-*-debian13 && ./install
+sudo apt install ./linuxcnc-ecat_*+lcnc2.9~debian13_amd64.deb       # LinuxCNC 2.9
+tar xzf ecat-rip-*-debian13.tar.gz && cd ecat-rip-*-debian13 && ./install   # 2.10 run-in-place
 ```
 
 [Getting started](docs/getting-started.md) says what gets installed and how

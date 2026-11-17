@@ -42,7 +42,7 @@ gone at the next boot).
 
 ## Install
 
-ecat needs LinuxCNC 2.10 (2.9: use ecat 0.11) and the userspace master
+ecat needs LinuxCNC 2.9 (2.9.4 or newer) or 2.10, and the userspace master
 `linuxcnc-ethercat-uspace` (1.5 or newer, from the
 [releases](https://github.com/MetalMusings/ethercat/releases) of the master).
 Both are for Debian 12 or 13. Install the master first:
@@ -51,8 +51,22 @@ Both are for Debian 12 or 13. Install the master first:
 sudo apt install ./linuxcnc-ethercat-uspace_*_amd64.deb
 ```
 
-Then ecat, one of two ways ([README](../README.md#install) says where to
+Then ecat, one of three ways ([README](../README.md#install) says where to
 download):
+
+**LinuxCNC 2.9 as a package** (Debian 13's own `linuxcnc-uspace`, or
+linuxcnc.org's on Debian 12 or 13). Install the package with `+lcnc2.9` in its
+name, for your Debian:
+
+```
+sudo apt install ./linuxcnc-ecat_*+lcnc2.9~debian13_amd64.deb
+```
+
+It puts `ecat.so` in `/usr/lib/linuxcnc/modules` and `ecatsetup` in
+`/usr/bin`. EtherCAT Setup sees that it works with 2.9 (the status bar says
+which LinuxCNC): 2.9's integer pins have 32 bits, so it proposes a 64-bit
+entry as a `real` pin and does not extend 32-bit counters
+([which LinuxCNC](ecatsetup.md#which-linuxcnc)).
 
 **LinuxCNC 2.10 built run-in-place** (there are no 2.10 packages yet). Unpack
 `ecat-rip-<version>-debian13.tar.gz` (or `-debian12`) and run its installer:
@@ -74,10 +88,11 @@ the release, or build ecat for yours
 ([Developing ecat](development.md#build-and-test)). It never touches your
 configurations. `./install --uninstall` takes it away again.
 
-**LinuxCNC 2.10 as a package.** Install the package:
+**LinuxCNC 2.10 as a package** (when 2.10 has Debian packages). Install the
+package without `+lcnc2.9` in its name:
 
 ```
-sudo apt install ./linuxcnc-ecat_*_amd64.deb
+sudo apt install ./linuxcnc-ecat_*~debian13_amd64.deb
 ```
 
 To remove ecat again: `./install --uninstall` (run-in-place), or
