@@ -2870,13 +2870,59 @@ for `/proc` and `/sys` that tests point at fake trees. It runs on 2.9 and
 ### Order of work
 
 1. Inventory, Look measurement (threads only and attach), the budget, the
-   statistics; tests on fake trees.
+   statistics; tests on fake trees. **Built 2026-11-17** (see "Step 1:
+   built" below).
 2. The poller and per-spike analysis; `rtla` and the SMI counter as root.
 3. The rule catalogue with its tests, general cases included.
 4. The guided page; Improve mode at run time: change log, undo commands and
    script; Save report and `--from-run`.
 5. Permanent changes (GRUB, systemd), the flow across a restart.
 6. Training cases here and on turner; then the user's test on zx45.
+
+### Step 1: built (2026-11-17)
+
+`ecatsetup/rtcheck.py` and `ecatsetup --rt-check` / `--from-run`
+(docs/ecatsetup.md "Command line"); tests/test_rtcheck.py on fake `/proc` and
+`/sys` trees and a fake halcmd/halsampler (mutation-checked).
+
+- **Inventory**: `Roots` (proc, sys, and how a program such as `ethtool` is
+  run) so that tests point it at a fake tree; `Inventory` holds facts to
+  show, each with its source, and the data for the analysis (interrupt rows
+  with their affinity, idle states per CPU, network cards with their IRQs).
+  `ethtool -c` and `--show-eee` work without root (it is in /usr/sbin, not
+  on a user's PATH: looked for there too).
+- **Measurement**: a timedelta first in each thread (`addf ... 1`) and one
+  sampler channel per thread; `halsampler` per channel read as it comes into
+  `CycleStats` (1 us histogram, worst 20, counts over 10-500 us), so a 25 us
+  base thread over a long run costs little memory. Threads only:
+  `halrun -I` with `threads_hal()`; the thread and function `tmax` are set to
+  0 before recording (it is our own HAL). Attach: the same lines through
+  halcmd, taken out at the end (delf before unloadrt), the user's `tmax` not
+  touched (noted "since LinuxCNC started").
+- **Tried here** (N100, 2.10 run-in-place and the installed 2.9.4): threads
+  only at 50 us + 1 ms, both series; attach beside a halrun with its own
+  threads and functions, which was left as it was. 10 s at rest: 99.99 %
+  within 10-16 us, largest 13-21 us on both threads, real-time threads on
+  CPU 3 (the isolated one). Not tried beside LinuxCNC itself (needs the
+  user) or on turner.
+
+Found while building it:
+
+- 2.10 gives a thread's and a function's `time`/`tmax` as `real` pins in
+  seconds; 2.9 as `s32` (`time` a pin, `tmax` a parameter) in ns (uspace).
+- `addf <f> <thread> 1` puts a function first in a running thread; `delf`
+  and `unloadrt` of what was added work while the threads run, on 2.9 and
+  2.10 (the open point below is answered).
+- HAL loads a component once, and `sampler` and halcompile's `timedelta`
+  have no second instance; `unloadrt timedelta` removes every instance. So
+  attach refuses a HAL that has either loaded already, and says to measure
+  the threads only. A comp of our own (the open point on time stamps) would
+  remove this limit.
+- timedelta gives the time between two starts, not how late a start is: two
+  late cycles in a row look like an on-time one. The budget says "the start
+  moved by at most ... from one cycle to the next" and that the absolute
+  wake-up latency is not measured yet (step 2: `rtla timerlat`, or our own
+  comp against the thread's nominal start).
 
 ### Open
 
@@ -2885,7 +2931,5 @@ for `/proc` and `/sys` that tests point at fake trees. It runs on 2.9 and
   poller's monotonic clock closely enough (else a small comp of our own that
   writes `rtapi_get_time()` with each sample).
 - What `hm2_eth` exposes in 2.9 vs 2.10 for the read's time and packet errors.
-- Adding to a running LinuxCNC's threads (attach): `addf` while running is
-  allowed in HAL; check on 2.9 and 2.10 that removing it again at the end
-  (`delf`, `unloadrt`) is too (2.10 refuses `unloadrt` of a component whose
-  function is in a running thread: delf first).
+- (Answered 2026-11-17: `addf`, `delf` and `unloadrt` work in running
+  threads on 2.9 and 2.10; delf first.)

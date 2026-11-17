@@ -164,6 +164,21 @@ def main(argv=None):
                     help="list the quirk files and measured results, yours and the shipped ones, and "
                          "what looks stale or wrong")
     ap.add_argument("--capture-info", metavar="FILE", help="show what a capture holds")
+    ap.add_argument("--rt-check", nargs="?", const="", metavar="INI",
+                    help="the real-time check (Look: changes nothing): what the computer is, how its "
+                         "real-time threads keep time, and the period's budget. With LinuxCNC "
+                         "running it measures beside it; else halrun with the INI's threads")
+    ap.add_argument("--rt-way", choices=("auto", "threads", "attach", "inventory"), default="auto",
+                    help="--rt-check: threads only (halrun), attach (beside a running HAL), "
+                         "inventory (no measurement); auto: attach when HAL runs")
+    ap.add_argument("--rt-seconds", type=float, default=60.0, metavar="S",
+                    help="--rt-check: how long each measurement runs (default 60)")
+    ap.add_argument("--rt-load", choices=("rest", "stress", "as-used"), default=None,
+                    help="--rt-check: at rest, under stress-ng, or as the computer is used "
+                         "(default: rest for threads only, as-used beside LinuxCNC)")
+    ap.add_argument("--rt-twice", action="store_true",
+                    help="--rt-check: measure twice, to see how much the numbers move by chance")
+    ap.add_argument("--from-run", metavar="FILE", help="show a saved real-time check run")
     ap.add_argument("--response", metavar="FILE",
                     help="analyse a response recording (the Response card's samples file) again; "
                     "with --ini, against the joint's MAX_VELOCITY and MAX_ACCELERATION")
@@ -219,6 +234,10 @@ def main(argv=None):
         sys.exit(0)
     if args.capture_info:
         sys.exit(capture_info(args.capture_info))
+    if args.from_run:
+        sys.exit(from_run(args.from_run))
+    if args.rt_check is not None:
+        sys.exit(rt_check(args))
     if args.response:
         sys.exit(response_info(args.response, args.ini))
     if args.from_capture:
@@ -418,6 +437,74 @@ def write_report(args):
     with open(path, "w") as f:
         f.write(text)
     print("Wrote %s (%d lines). Look it through before posting it." % (path, text.count("\n")))
+    return 0
+
+
+def from_run(path):
+    from . import rtcheck
+    try:
+        run = rtcheck.Run.load_file(path)
+    except (OSError, ValueError, KeyError) as e:
+        print("Cannot read %s: %s" % (path, e))
+        return 1
+    if run.inventory:
+        print(rtcheck.inventory_text(run.inventory))
+        print()
+    print(run.text())
+    return 0
+
+
+def rt_check(args):
+    """--rt-check: the inventory, a measurement (or two) and the budget."""
+    from . import rtcheck
+    ini = args.rt_check or args.ini or os.environ.get("INI_FILE_NAME") or None
+    if ini and not os.path.exists(ini):
+        print("No such INI file: %s" % ini)
+        return 1
+    inv = rtcheck.inventory(ini=ini)
+    print(rtcheck.inventory_text(inv))
+    print()
+    way = args.rt_way
+    if way == "inventory":
+        return 0
+    running = rtcheck.hal_running()
+    if way == "auto":
+        way = "attach" if running else "threads"
+    threads = inv.data.get("threads") or []
+    if way == "threads" and not threads:
+        print("No INI file with [EMCMOT]SERVO_PERIOD: measuring a 1 ms servo thread")
+        threads = [("servo-thread", 1000000)]
+    load = args.rt_load or ("as-used" if way == "attach" else "rest")
+    print("Measuring %s for %s %s%s; Ctrl-C ends it early" % (
+        "beside the running HAL" if way == "attach" else "the threads only (halrun)",
+        rtcheck.duration_text(args.rt_seconds), "twice" if args.rt_twice else "",
+        ", with stress-ng" if load == "stress" else ""))
+    runs = []
+    try:
+        for i in range(2 if args.rt_twice else 1):
+            def progress(text, i=i):
+                print("\r  run %d: %s   " % (i + 1, text), end="", flush=True)
+            if way == "attach":
+                r = rtcheck.measure_attach(args.rt_seconds, load, inv, progress)
+            else:
+                r = rtcheck.measure_threads(threads, args.rt_seconds, load, inv, progress)
+            print()
+            runs.append(r)
+            print(r.text())
+            print("Saved: %s" % r.save())
+            print()
+    except rtcheck.RtError as e:
+        print("\n%s" % e)
+        return 1
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        return 1
+    if len(runs) == 2:
+        for a, b in zip(runs[0].stats, runs[1].stats):
+            n = rtcheck.noise(a.summary(), b.summary())
+            print("%s, the two runs differ by: 99 %% %.0f us, 99.99 %% %.0f us, max %.1f us: a change "
+                  "counts as one only when it moves more than that" % (
+                      a.thread, n["p99_us"], n["p9999_us"], n["max_abs_us"]))
     return 0
 
 

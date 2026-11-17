@@ -2311,6 +2311,8 @@ ecatsetup --report --ini <machine>.ini
 ecatsetup --capture --esi <ESI folder>
 ecatsetup --response ~/.local/state/ecatsetup/responses/<file>.samples [--ini <machine>.ini]
 ecatsetup --from-capture ecat-capture-<time>.tar.gz --diagnose
+ecatsetup --rt-check <machine>.ini [--rt-seconds 900] [--rt-load stress] [--rt-twice]
+ecatsetup --from-run ~/.local/state/ecatsetup/rt-runs/<file>.json
 ecatsetup --apply ethercat.yaml --ini <machine>.ini
 ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
 ```
@@ -2344,6 +2346,29 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   ([A capture of the bus](#a-capture-of-the-bus)).
 - `--response` analyses a recording of the Response card again
   ([Measuring a drive's response](#measuring-a-drives-response)).
+- `--rt-check` is the first part of the real-time check: it changes
+  nothing and needs no sudo. It lists what the computer is (kernel and
+  PREEMPT_RT, isolated CPUs, frequency governor and turbo, idle states,
+  where every interrupt goes, network cards with their coalescing, EEE and
+  ASPM, graphics driver, BIOS, virtual machine or not, the INI's threads and
+  I/O, the CPU LinuxCNC's threads run on), each fact with where it was
+  read. Then it measures how evenly the real-time threads start, every
+  cycle: with LinuxCNC running, beside it (`timedelta` and `sampler` put
+  first into its threads and taken out again at the end; nothing that talks
+  to your I/O card); otherwise in `halrun` with the INI's threads alone
+  (`--rt-way threads|attach|inventory` chooses). It prints the spread
+  (99 % and 99.99 % of the cycles, the largest), the cycles over 20, 50 and
+  100 us with what the length of the run can say ("none in 15 min: fewer
+  than 12 per hour"), and the period's budget: what is left of the period
+  after the start's spread and the thread's longest run, and how much of
+  that run is the I/O driver's. `--rt-load stress` runs `stress-ng`
+  meanwhile; `--rt-twice` measures twice and says how much the numbers
+  move by chance, so that a later change is judged against that. Every run
+  is saved in `~/.local/state/ecatsetup/rt-runs/`; `--from-run` shows one
+  again. A running HAL that has `sampler` or `timedelta` loaded already
+  cannot be measured beside (HAL loads a component once): measure the
+  threads only then. Analysis of the causes and changes to the computer
+  come in later steps (docs/development.md).
 - Other options: `--mode` chooses the mode proposed for CiA 402 drives,
   `-p` limits the proposal to some slaves, `--json` prints it as JSON,
   `--transport` and `--interface` set the master's for `--write`.
