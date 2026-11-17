@@ -233,7 +233,7 @@
 
 - id: pcie-aspm
   title: PCIe links save power (ASPM policy {aspm_policy})
-  when: "aspm_policy in ['default', 'powersave', 'powersupersave'] and (io_nics or (measured and late_max_us > 50))"
+  when: "aspm_policy in ['default', 'powersave', 'powersupersave'] and cmd['pcie_aspm'] != 'off' and (io_nics or (measured and late_max_us > 50))"
   evidence: "/sys/module/pcie_aspm/parameters/policy = {aspm_policy}"
   gain: low
   cause: >
@@ -255,7 +255,7 @@
   source:
     - text: The kernel's parameters (pcie_aspm, pcie_aspm.policy)
       url: https://docs.kernel.org/admin-guide/kernel-parameters.html
-  seen-here: "here: pcie_aspm.policy=performance on the command line"
+  seen-here: "here: pcie_aspm.policy=performance on the command line; turner 2026-11-17: was reported with pcie_aspm=off (no link had ASPM), fixed"
   tests:
     present: {aspm_policy: default, io_nics: [eno1]}
-    absent: {aspm_policy: performance, io_nics: [eno1]}
+    absent: {aspm_policy: default, io_nics: [eno1], cmd: {pcie_aspm: "off"}}

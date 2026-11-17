@@ -208,13 +208,14 @@
 
 - id: rcu-nocbs-missing
   title: RCU callbacks run on the real-time CPU (no rcu_nocbs)
-  when: "rt_isolated and not (set(rt_cpus) & set(rcu_nocbs)) and (not measured or rcu_rate > 1)"
+  when: "rt_isolated and not (set(rt_cpus) & (set(rcu_nocbs) | set(nohz_full))) and (not measured or rcu_rate > 1)"
   evidence: "rcu_nocbs does not hold CPU {rt_cpus_text}"
   keys: ["softirq:RCU"]
   gain: low
   cause: >
     The kernel's RCU callbacks run on each CPU, the real-time one too, unless
-    rcu_nocbs moves them to kernel threads elsewhere.
+    rcu_nocbs moves them to kernel threads elsewhere. A CPU in nohz_full has
+    them moved already (the kernel adds nohz_full's CPUs to rcu_nocbs).
   action:
     kind: permanent
     text: Add rcu_nocbs for the real-time CPU, run update-grub and restart.
@@ -228,10 +229,13 @@
   source:
     - text: LinuxCNC documentation, Tuning Preempt-RT for latency (rcu_nocbs)
       url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
-  seen-here: "turner 2026-11-14, as one of six parameters added at once (its part not known)"
+  seen-here: >
+    turner 2026-11-14, as one of six parameters added at once; 2026-11-17 taken
+    away alone (nohz_full=1 kept): no change, as the kernel offloads nohz_full's
+    CPUs anyway
   tests:
-    present: {rcu_nocbs: [], measured: true, rcu_rate: 50}
-    absent: {rcu_nocbs: [3], measured: true, rcu_rate: 50}
+    present: {rcu_nocbs: [], nohz_full: [], measured: true, rcu_rate: 50}
+    absent: {rcu_nocbs: [], nohz_full: [3], measured: true, rcu_rate: 50}
 
 - id: vm-stat-interval
   title: Memory statistics are gathered every second on every CPU

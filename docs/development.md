@@ -3086,6 +3086,42 @@ run-time rule has a lasting form, keep validation, the log), TestTimingPage
 (the dialog and Save); mutation-checked. Not built: the flow across a
 restart (the next measurement after a restart is an ordinary one).
 
+### Step 6: training cases (2026-11-17)
+
+**Here** (N100, the plasma bus, ecat in halrun, no drive enabled; 60 s
+beside it under stress-ng): with the card's interrupts on CPUs 0-2 as after a
+start with irqaffinity=0-2 and no `irq-cpu`, the check found "EtherCAT's
+network card interrupts are not handled on the real-time CPU" with `irq-cpu:
+3` as the fix; with `irq-cpu: 3`, not. Found on the way: the EtherCAT
+master's own FIFO thread (`irq_work`) made its CPU a "real-time CPU" (now
+only the HAL threads, `rtapi_app:T#<n>`), and the finding came once per queue
+interrupt (now merged). Interrupt placement lasts until a restart: the case
+needs the interrupts put where a fresh start has them.
+
+**turner** (i3-7100, 2 CPUs, 1 ms + 100 us base thread, threads only under
+stress-ng, as root, 3 min each; the user allowed the restarts). Its working
+set taken away one at a time, a restart each, then put back (/proc/cmdline
+compared with the original: the same; the free master started again):
+
+| Taken away | Late max / 99.99 % (us) | What the check said |
+|---|---|---|
+| nothing (the full set) | 16.4 / 13 | EEE on enp1s0 (true: the EtherCAT card has it on); ASPM (false, below) |
+| rt-cpu-performance (governor, turbo) | 21.5 / 16 | governor powersave: right; turbo not (late under 30 us) |
+| acpi_mask_gpe=0x6F | 17.7 / 14 | nothing: the GPE storm did not come (gpe66 fired 5 times); the ~300 us spikes of 2026-11-14 came with LinuxCNC and its GUI, not in a threads-only run |
+| i915.enable_dc=0 | 16.6 / 14 | nothing (the rule waits for more than 50 us) |
+| irqaffinity=0 | 18.5 / 15 | no irqaffinity, and the disk's (ahci) interrupt on the real-time CPU: right |
+| isolcpus | 13.9 / 10 | no isolated CPU: right |
+| nohz_full | 15.7 / 11 | the tick on the real-time CPU (no nohz_full): right |
+| rcu_nocbs | 18.5 / 14 | nothing: right, nohz_full offloads RCU anyway (the rule now says so; it was quiet for the wrong reason: no RCU softirq on PREEMPT_RT) |
+| intel_idle/processor.max_cstate=1 | 16.4 / 14 | nothing, though C8 (200 us) was enabled: LinuxCNC (rtapi_app) holds /dev/cpu_dma_latency at 0 while it runs, so the deep states were not used |
+| pcie_aspm=off | 18.4 / 14 | ASPM: right this time, but it was reported in every case: the policy file says "default" also with pcie_aspm=off (no link had ASPM). Fixed: not with pcie_aspm=off |
+
+On this computer, under load with the threads alone, no single parameter
+moved the numbers beyond the noise (14-22 us): the set's value showed with
+LinuxCNC and its GUI running (2026-11-14). The GPE case needs a measurement
+beside LinuxCNC on turner. Scripts: the session's scratchpad (train-here,
+train-turner).
+
 ### The probe: `ecat_rtprobe` (2026-11-17)
 
 Beside the user's LinuxCNC the check failed at once: the plasma cutter's
