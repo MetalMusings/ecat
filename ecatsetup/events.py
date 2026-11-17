@@ -47,7 +47,8 @@ FAULT_REASONS = {
     5: "watchdog (the heartbeat stopped)", 6: "mode not reported, not changed or not stopped in time",
     7: "a command that is not a number (NaN, infinite) or a mode not in the file",
     8: "homing error", 9: "homing not done in time", 10: "PP move not done in time",
-    11: "the master's DC sync check timed out"}
+    11: "the master's DC sync check timed out",
+    12: "moved more than home-max-travel while homing"}
 
 
 class EventsError(Exception):

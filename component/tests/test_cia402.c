@@ -668,6 +668,78 @@ static void test_homing_by_the_home_pin(void) {
   CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
 }
 
+// The drive moves 5 counts a cycle while it homes, and sets its position
+// to hm.home when done.
+static unsigned hm_cycle_moving(void) {
+  unsigned cw;
+  if (hm.active) fake_set(S, 0x6064, 0, (uint32_t)((int32_t)fake_get(S, 0x6064, 0) + 5));
+  cw = hm_cycle();
+  return cw;
+}
+
+static void test_homing_travel_and_actual_position(void) {
+  int i;
+  homing_drive();
+  hm.home = 0;
+  PIN_FLOAT("x.pos-scale") = 10;
+  fake_set(S, 0x6064, 0, 1000000);
+  PIN_FLOAT("x.pos-cmd") = 100000;
+  hm_enable();
+  CHECK(fake_find("x.pos-actual") && fake_find("x.home-travel") && fake_find("x.home-max-travel"));
+  CHECK_NEAR(PIN_FLOAT("x.home-max-travel"), 0, 0);
+  PIN_FLOAT("x.home-max-travel") = 50;
+  PIN_BIT("x.index-enable") = 1;
+  for (i = 0; i < 12; i++) hm_cycle_moving();
+  // motion sees pos-cmd, pos-actual is the drive's real position
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 100000, 0);
+  CHECK(PIN_FLOAT("x.pos-actual") > 100000);
+  CHECK_NEAR(PIN_FLOAT("x.pos-actual"), (int32_t)fake_get(S, 0x6064, 0) / 10.0, 1e-9);
+  CHECK(PIN_FLOAT("x.home-travel") > 1);
+  for (i = 0; i < 40 && PIN_BIT("x.index-enable"); i++) hm_cycle_moving();
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  // 30 cycles of 5 counts at 10 counts per unit; the jump to 0 is not a move
+  CHECK_NEAR(PIN_FLOAT("x.home-travel"), 15, 0.6);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
+static void test_homing_travel_limit(void) {
+  int i;
+  homing_drive();
+  hm.cycles = 1000;
+  PIN_FLOAT("x.pos-scale") = 10;
+  hm_enable();
+  PIN_FLOAT("x.home-max-travel") = 5;  // 50 counts: 10 cycles
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 12; i++) hm_cycle_moving();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  for (i = 0; i < 4; i++) hm_cycle_moving();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 12);
+  CHECK_EQ(PIN_BIT("x.home-error"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 0);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+  CHECK_EQ(hm_cycle() & 0x0F, 0x06);  // shut down
+}
+
+static void test_homing_travel_both_ways(void) {
+  int i;
+  homing_drive();
+  hm.cycles = 1000;
+  hm_enable();
+  PIN_FLOAT("x.home-max-travel") = 100;
+  PIN_FLOAT("x.home-travel") = 99;  // from an earlier homing
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 4; i++) hm_cycle();
+  // forth and back 30 counts each: 60 travelled, net 0
+  for (i = 0; i < 6; i++) { fake_set(S, 0x6064, 0, (uint32_t)((int32_t)fake_get(S, 0x6064, 0) + 5)); hm_cycle(); }
+  for (i = 0; i < 6; i++) { fake_set(S, 0x6064, 0, (uint32_t)((int32_t)fake_get(S, 0x6064, 0) - 5)); hm_cycle(); }
+  CHECK_NEAR(PIN_FLOAT("x.home-travel"), 60, 0);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  for (i = 0; i < 9; i++) { fake_set(S, 0x6064, 0, (uint32_t)((int32_t)fake_get(S, 0x6064, 0) + 5)); hm_cycle(); }
+  CHECK_EQ(PIN_S32("x.fault-reason"), 12);
+}
+
 static void test_homing_error(void) {
   int i;
   homing_drive();
@@ -2413,7 +2485,8 @@ RUN_TESTS("cia402", test_ff_pins_only_with_the_objects, test_ff_velocity, test_f
     test_no_fault_reset_on_enable_without_auto, test_fault_reset_is_held_at_most_100_ms,
     test_fault_reset_pin_without_enable, test_drive_leaving_enabled, test_bus_loss, DC_SYNC_TESTS test_watchdog,
     test_command_not_a_number, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
-    test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_error, test_homing_timeout,
+    test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_travel_and_actual_position,
+    test_homing_travel_limit, test_homing_travel_both_ways, test_homing_error, test_homing_timeout,
     test_homing_abandoned_by_motion, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
     test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_pv_pins, test_pv_needs_target_velocity,
     test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,

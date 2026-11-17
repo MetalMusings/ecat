@@ -235,15 +235,17 @@ def ini_help(cfg, slave, axis=0):
            ("HOME_SEARCH_VEL = 0", True),
            ("HOME_LATCH_VEL = 1", True),
            ("HOME_USE_INDEX = YES", True),
-           ("# HOME_OFFSET is the machine coordinate of the place where the drive homes;", False),
-           ("# with HOME equal to it there is no final move.", False),
+           ("# HOME_OFFSET is the machine coordinate where the drive's position is 0 after", False),
+           ("# homing; the drive gives the home point the position of its home offset", False),
+           ("# (0x607C) or 0. HOME is where the joint goes after homing.", False),
            ("HOME_OFFSET = 0", True),
            ("HOME = 0", True),
            ("# Joints with the same number home together, lower numbers first.", False),
            ("HOME_SEQUENCE = 0", True)]
     if m.moves:
         out.insert(3, ("# The axis MOVES at the drive's speeds (0x6099) and must reach its "
-                       "end within home-timeout-ms (60 s).", False))
+                       "end within home-timeout-ms (60 s). Motion does not see the move:", False))
+        out.insert(4, ("# limit it with %s.home-max-travel in HAL (see the docs)." % drive, False))
     else:
         out.insert(3, ("# This method does not move the axis.", False))
     out.append(("# And in HAL: net %s-index  joint.%s.index-enable <=> %s.index-enable"

@@ -178,6 +178,7 @@ enum {
   WHY_HOMING_TIMEOUT,    // homing not done within home-timeout-ms
   WHY_PP_TIMEOUT,        // a PP move not done within pp-timeout-ms
   WHY_DC_SYNC,           // the master's DC sync check timed out: SYNC0 on an unsynchronized clock
+  WHY_HOMING_TRAVEL,     // the drive moved more than home-max-travel while homing
 };
 
 // Profile position (PP): the set-point handshake.
@@ -261,6 +262,8 @@ typedef struct {
   hal_bool_t stat_homing;
   hal_bool_t stat_homed;
   hal_bool_t home_error;
+  hal_real_t pos_actual;     // the drive's position, also while pos-fb follows pos-cmd
+  hal_real_t home_travel;    // distance covered in this homing, machine units
   // PV only
   hal_bool_t at_speed;
   hal_bool_t zero_speed;
@@ -289,6 +292,7 @@ typedef struct {
   hal_uint_t watchdog_ms;
   hal_sint_t mode;  // read only: 8 CSP, 9 CSV
   hal_uint_t home_timeout_ms;
+  hal_real_t home_max_travel;  // 0: no limit
   hal_uint_t stop_timeout_ms;
   hal_uint_t pp_timeout_ms;
   hal_bool_t pp_immediate;   // PP: "change set immediately" (bit 5) with every set-point; the ECT60 acknowledges and then does not move with it
@@ -325,6 +329,7 @@ typedef struct {
   int hs_seen;          // the drive was seen homing (not yet attained and reached)
   int hs_index;         // started by index-enable
   int hs_cycles;        // cycles in HS_STOP
+  int32_t hs_last;      // the drive's position last cycle, counts (home-travel)
   int index_old, home_old;
   long long stop_ns;    // PV, PP: time halting before switching off
   int stop_cycles;      // PV, PP: cycles halting
@@ -395,11 +400,14 @@ static const lcec_pindesc_t homing_pins[] = {
     {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_homing), "%s.stat-homing"},
     {HAL_BOOL, HAL_OUT, offsetof(cia402_t, stat_homed), "%s.stat-homed"},
     {HAL_BOOL, HAL_OUT, offsetof(cia402_t, home_error), "%s.home-error"},
+    {HAL_REAL, HAL_OUT, offsetof(cia402_t, pos_actual), "%s.pos-actual"},
+    {HAL_REAL, HAL_OUT, offsetof(cia402_t, home_travel), "%s.home-travel"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
 static const lcec_paramdesc_t homing_params[] = {
     {HAL_UINT, HAL_RW, offsetof(cia402_t, home_timeout_ms), "%s.home-timeout-ms"},
+    {HAL_REAL, HAL_RW, offsetof(cia402_t, home_max_travel), "%s.home-max-travel"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -739,6 +747,7 @@ static void axis_read(lcec_slave_t *slave, cia402_t *d) {
     hal_set_real(d->pos_fb, d->zero_at_start && !d->zeroed ? 0 : from_drive(d, hal_get_sint(d->drv_actual_position)) / scale_or_one(hal_get_real(d->pos_scale)));
     if (d->pos_zero != NULL) hal_set_sint(d->pos_zero, d->zero);
   }
+  if (d->pos_actual != NULL) hal_set_real(d->pos_actual, hal_get_real(d->pos_fb));
   // homing for motion: no following error until index-enable is cleared
   if (d->hs != HS_IDLE && d->hs_index) hal_set_real(d->pos_fb, hal_get_real(d->pos_cmd));
   if (d->actual_velocity_o.mapped) {
@@ -782,6 +791,21 @@ static void block(cia402_t *d, int why) {
   }
 }
 
+/// Homing: the distance the drive covers (home-travel), and the limit on
+/// it (home-max-travel). Both ways count. A step of more than half the
+/// limit in one cycle is the drive setting its position at home, not a
+/// move, and is left out. Returns 1 when the limit is passed.
+static int homing_travel(cia402_t *d) {
+  int32_t now = hal_get_sint(d->drv_actual_position);
+  double max = d->home_max_travel ? hal_get_real(d->home_max_travel) : 0;
+  double step = fabs((double)(int32_t)((uint32_t)now - (uint32_t)d->hs_last)) / fabs(scale_or_one(hal_get_real(d->pos_scale)));
+
+  d->hs_last = now;
+  if (max > 0 && step > max / 2) return 0;
+  hal_set_real(d->home_travel, hal_get_real(d->home_travel) + step);
+  return max > 0 && hal_get_real(d->home_travel) > max;
+}
+
 /// Homing: start, follow and end it; called while the drive may run.
 /// Returns the control word bits to add.
 static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
@@ -799,7 +823,11 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
     return 0;
   }
   d->hs_ns += period;
-  switch (d->hs) {
+  if ((d->hs == HS_TO_HM || d->hs == HS_HOMING || d->hs == HS_BACK) && homing_travel(d)) {
+    hal_set_bool(d->home_error, 1);
+    block(d, WHY_HOMING_TRAVEL);
+  }
+  if (!d->blocked) switch (d->hs) {
     case HS_IDLE:
       if (index_edge || home_edge) {
         // a running PV or PP drive is halted first
@@ -809,6 +837,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
         d->hs_index = index_edge;
         hal_set_bool(d->stat_homed, 0);
         hal_set_bool(d->home_error, 0);
+        hal_set_real(d->home_travel, 0);
+        d->hs_last = hal_get_sint(d->drv_actual_position);
       }
       if (d->hs != HS_STOP) break;
       // fall through
@@ -822,6 +852,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       } else if (d->hs_cycles > STATUS_CYCLES && standing_still(d)) {
         d->hs = HS_TO_HM;
         d->hs_ns = 0;
+        d->hs_last = hal_get_sint(d->drv_actual_position);  // travel counts from here
       } else if (opt_uint(d->stop_timeout_ms) != 0 && d->hs_ns > (long long)opt_uint(d->stop_timeout_ms) * 1000000LL) {
         block(d, WHY_WRONG_MODE);
       }

@@ -667,7 +667,8 @@ infinite), and in PP `pp-target` or `pp-velocity`, or `opmode-cmd` asks
 for a mode that is not in the file,
 8 the drive reports a homing error, 9 homing not done within
 `home-timeout-ms`, 10 a PP move not done within `pp-timeout-ms`, 11 the
-master's DC sync check for the drive timed out (see Behaviour).
+master's DC sync check for the drive timed out (see Behaviour), 12 the
+drive moved more than `home-max-travel` while homing.
 
 ### Behaviour
 
@@ -1081,11 +1082,14 @@ Extra pins and parameter:
 | `home` | bool | in | A rising edge starts homing: for a drive that is not a joint (from an M-code, ladder or a tool changer), or for tests without motion. |
 | `stat-homing` | bool | out | Homing is in progress. |
 | `stat-homed` | bool | out | The drive has homed; until homing starts again. |
-| `home-error` | bool | out | The last homing failed or timed out. |
+| `home-error` | bool | out | The last homing failed, timed out or went beyond `home-max-travel`. |
+| `pos-actual` | real | out | The drive's position, as `pos-fb` but also while `pos-fb` follows `pos-cmd` during homing: what the axis really does. |
+| `home-travel` | real | out | The distance the drive has covered in this homing, both ways counted, in machine units; 0 when the next homing starts. |
 
 | Parameter | Default | |
 |---|---|---|
 | `home-timeout-ms` | 60000 | Time allowed for homing; 0 for no limit. |
+| `home-max-travel` | 0 | The longest distance the drive may cover while homing, both ways counted, in machine units; 0 for no limit. |
 
 Homing is started only while the drive is enabled, in "Operation
 enabled", and only by a new rising edge. The profile then:
@@ -1115,19 +1119,52 @@ Until then, while homing was started by `index-enable`, `pos-fb` follows
 `pos-cmd`, so that motion sees no following error while it moves the
 joint slowly in its index search. When `index-enable` is cleared, `pos-fb`
 becomes the drive's position after homing, as an encoder's count resets
-at its index, and motion takes it as the home position.
+at its index, and motion counts the joint from it (below).
 
 In the INI file, home the joint on an index pulse: `HOME_USE_INDEX =
 YES`, `HOME_SEARCH_VEL = 0` to start the index search where the joint
-is, and a small `HOME_LATCH_VEL`. As with an encoder's index, motion
-gives the joint the position `HOME_OFFSET` where the drive has homed,
-whatever position the drive itself reports there: it sets the motor
-offset to the drive's position minus `HOME_OFFSET`. So `HOME_OFFSET`
-places the machine coordinates. The drive's home offset (`0x607C`) does
-not change them; whether the drive applies it at all depends on the
-drive and the method (an ECT60 with method 35 does not), and it matters
-only for the drive's own counts, such as its software limits (`0x607D`).
-With `HOME` equal to `HOME_OFFSET` there is no final move.
+is, and a small `HOME_LATCH_VEL`. As with an encoder whose count is
+reset at its index, motion then takes the drive's position as counted
+from the index: it sets the motor offset to `-HOME_OFFSET` (LinuxCNC's
+`homing.c`, state `HOME_SET_INDEX_POSITION`), so the joint is
+`HOME_OFFSET` where the drive's position is 0, and the drive's position
+plus `HOME_OFFSET` everywhere else. Where the drive stands after homing
+does not matter. Most drives give the home point the position of their
+home offset `0x607C` (the sign and whether it is applied depend on the
+drive and the method: an ECT60 with method 35 gives it 0 whatever
+`0x607C` is), so the home point is at `HOME_OFFSET` plus that offset in
+machine coordinates. A drive that stops past its home point, or moves to
+its zero, is still placed right: motion counts on the drive's position,
+not on where the move ended. Motion's final move then goes to `HOME`;
+it is 0 long when the drive stands at its position 0 and `HOME` equals
+`HOME_OFFSET`. (With `HOME_INDEX_NO_ENCODER_RESET = YES` motion instead
+gives the joint `HOME_OFFSET` where it stands when `index-enable` is
+cleared.)
+
+### What motion sees while the drive homes
+
+Motion does not see the move. From the rising edge of `index-enable`
+until the profile clears it, `pos-fb` follows `pos-cmd`, which motion
+moves slowly at `HOME_LATCH_VEL`; the display shows that, not the axis.
+Motion's following error check sees nothing, and neither do its soft
+limits (which it does not apply before homing anyway). What stops a
+homing that goes wrong, for example a method that searches for a switch
+that is not wired:
+
+- the drive itself: its limit switches, following error and torque
+  limit;
+- `home-max-travel`: the profile counts the distance the drive covers
+  (`home-travel`, both ways) and shuts it down with `fault-reason` 12
+  past the limit. Set it a little above what one homing needs, at most
+  the axis length. A step of more than half the limit in one cycle is
+  taken as the drive setting its position at home and is not counted;
+  so read `home-travel` after a homing with the limit set (say, to the
+  axis length) to choose the value;
+- `home-timeout-ms`;
+- `enable` from motion (E-stop, machine off), as always.
+
+`pos-actual` shows the real position meanwhile, for halscope or a
+display pin.
 
 ```
 [JOINT_0]
@@ -1148,7 +1185,8 @@ objects it needs to `settings`, and shows the INI lines above for the
 joint that uses the drive, with the `index-enable` net, ready to copy.
 It does not change the INI file.
 
-A homing error (status word bit 13) or a timeout shuts the drive down,
+A homing error (status word bit 13), a timeout or more than
+`home-max-travel` shuts the drive down,
 like the faults above, and sets `home-error`. If motion abandons homing
 (clears `index-enable`), or `enable` goes false, the profile stops the
 drive's homing and returns to the configured mode without a fault.
