@@ -2147,6 +2147,16 @@ class TestTimingPage(WindowBase):
             self.assertEqual(f.read(), text + "\n")
         self.assertEqual(d.saved, path)
 
+    def test_the_list_failing_does_not_end_the_window(self):
+        w = self.window()
+        tp = self.page(w)
+        with mock.patch("ecatsetup.rttodo.text", side_effect=AttributeError("x")), \
+                mock.patch.object(gui.QMessageBox, "warning") as warn, \
+                mock.patch.object(gui.TodoDialog, "exec_") as shown:
+            tp.todo_button.click()
+        self.assertIn("could not be made: AttributeError: x", warn.call_args[0][2])
+        self.assertFalse(shown.called)
+
     def test_report(self):
         w = self.window()
         tp = self.page(w)

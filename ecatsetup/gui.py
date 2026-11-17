@@ -6667,7 +6667,13 @@ class TimingPage(QWidget):
 
     def show_todo(self):
         from . import rttodo
-        TodoDialog(self, rttodo.text(self.flow)).exec_()
+        try:
+            text = rttodo.text(self.flow)
+        except Exception as e:      # a list that cannot be made must not end the window
+            QMessageBox.warning(self, TITLE, "The list could not be made: %s: %s\n\nPlease tell the "
+                                "developers, with Save report." % (type(e).__name__, e))
+            return
+        TodoDialog(self, text).exec_()
 
     def write_report(self):
         from . import rtflow

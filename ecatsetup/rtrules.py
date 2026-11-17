@@ -565,6 +565,14 @@ class Unexplained:
         self.evidence = "%d of %d spikes, by chance about %.0f %%" % (c["with"], c["of"], 100 * c["expected"])
         self.keys = [c["key"]]
         self.commands, self.undo_commands = [], []
+        # the same fields as a Finding, for whatever lists findings
+        self.item = self.kernel_param = self.keep = self.check = None
+        self.action = self.what()
+
+    def what(self):
+        if self.c["key"].startswith("irq:"):
+            return "move that interrupt off the real-time CPU (the general action), and look up its driver"
+        return "find out what drives this counter; tell the developers, with the report"
 
     def rank(self):
         return (1, 1, KINDS.index("advice"))
@@ -574,10 +582,7 @@ class Unexplained:
                 "gain": self.gain, "keys": self.keys}
 
     def text(self):
-        what = ("move that interrupt off the real-time CPU (the general action), and look up its "
-                "driver" if self.c["key"].startswith("irq:") else
-                "find out what drives this counter; tell the developers, with the report")
-        return "%s  [advice]\n  Seen: %s\n  What to do: %s" % (self.title, self.evidence, what)
+        return "%s  [advice]\n  Seen: %s\n  What to do: %s" % (self.title, self.evidence, self.what())
 
 
 def analyse(ctx, rules=None):

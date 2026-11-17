@@ -247,6 +247,17 @@ class TestRuleKeep(unittest.TestCase):
             self.rule({"kind": "runtime", "commands": ["c"], "keep": {"file": {"path": "/x"}}})
 
 
+class TestUnexplained(unittest.TestCase):
+    def test_a_spike_no_rule_knows(self):
+        u = rtrules.Unexplained({"label": "RES: Rescheduling interrupts", "with": 19, "of": 23,
+                                 "expected": 0.4, "key": "res"}, {})
+        flow = FakeFlow([u])
+        self.assertEqual(rtflow.item_key(u), "")
+        t = rttodo.text(flow, grub_path=os.path.join(os.path.dirname(__file__), "no-such-file"))
+        self.assertIn("- **Spikes came with RES: Rescheduling interrupts, and no rule knows it**: find out what "
+                      "drives this counter", t)
+
+
 class TestCommandLine(unittest.TestCase):
     def test_rt_todo(self):
         import io
