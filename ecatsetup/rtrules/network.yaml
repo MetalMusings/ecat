@@ -36,6 +36,59 @@
       period_us: 250
       irqs: [{irq: "133", name: "enp2s0", on_rt: true, io_nic: true, affinity_text: "3", rate_rt: 500}]
 
+- id: mesa-nic-irq-cpu
+  title: "The Mesa board's network card interrupt (IRQ {item.irq}) is not handled on the real-time CPU"
+  each: irqs
+  when: "mesa_eth and item.io_nic and not item.on_rt and not item.managed and rt_isolated and (not measured or late_max_us > 20 or item.suspect)"
+  evidence: "IRQ {item.irq} ({item.name}) on CPU {item.affinity_text}; servo thread on CPU {rt_cpus_text}"
+  keys: ["irq:{item.irq}"]
+  gain: medium
+  cause: >
+    hm2_eth sends its request and then sleeps in the servo thread until the
+    board's answer comes (ppoll). The answer reaches the thread through the
+    card's interrupt: handled on the CPUs that run the GUI, the mouse and the
+    graphics, it can wait behind them, and the read is late or times out. On
+    the real-time CPU it runs while the servo thread sleeps, and wakes it
+    there.
+  action:
+    kind: runtime
+    text: >
+      Handle the card's interrupt on the servo thread's CPU (for this boot).
+      Only for a card that carries the Mesa board alone: other traffic on it
+      would then interrupt the real-time CPU too.
+    commands: ["echo {rt_cpus_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+    keep:
+      boot: true
+      note: >
+        An interrupt's number can change when hardware or the kernel changes:
+        a start-up script should look it up by the card's name in
+        /proc/interrupts.
+    risk: >
+      Low. If the write is refused, the interrupt is managed by the kernel; a
+      card with several queues can be set to one (ethtool -L {item.nic} combined 1).
+    cost: None.
+  effect: The board's answer wakes the servo thread without waiting for the other CPUs.
+  check: The late maximum and hm2_eth's read time and errors, in use (attach), at the machine's period.
+  undo:
+    commands: ["echo {item.affinity_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+  source:
+    - text: LinuxCNC documentation, hm2_eth(9)
+      url: https://linuxcnc.org/docs/stable/html/man/man9/hm2_eth.9.html
+    - text: The kernel's documentation, SMP IRQ affinity
+      url: https://docs.kernel.org/core-api/irq/irq-affinity.html
+  seen-here: "not tried on a Mesa card; the same placement removed lost cycles with EtherCAT here (ethercat-nic-irq-cpu)"
+  tests:
+    present:
+      mesa_eth: true
+      rt_isolated: true
+      measured: false
+      irqs: [{irq: "125", name: "enp3s0", on_rt: false, managed: false, io_nic: true, nic: enp3s0, affinity_text: "0", rate_rt: 0, suspect: false}]
+    absent:
+      mesa_eth: true
+      rt_isolated: true
+      measured: false
+      irqs: [{irq: "125", name: "enp3s0", on_rt: true, managed: false, io_nic: true, nic: enp3s0, affinity_text: "3", rate_rt: 1000, suspect: false}]
+
 - id: mesa-nic-coalescing
   title: "{item.name} waits before it reports a received packet (rx-usecs {item.rx_usecs})"
   each: nics

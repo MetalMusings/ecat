@@ -357,6 +357,52 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("io-nic-eee", ids)
         self.assertNotIn("io-nic-carries-lan", ids)
 
+    def test_isolated_cpu_no_thread_uses(self):
+        """zx45 (blind test): an i3 with siblings 0+2 and 1+3, isolcpus=1,2,3,
+        the threads on 3: CPU 2 is isolated for nothing; 1 is 3's sibling."""
+        for isolated, flags, want in (("1-3", "", "isolcpus=1,3"),
+                                      ("1-3", "managed_irq,domain,", "isolcpus=managed_irq,domain,1,3"),
+                                      ("1,3", "", None)):
+            with self.subTest(isolated=isolated, flags=flags):
+                roots = fake_tree(os.path.join(self.root, isolated + flags), isolated=isolated, smt=True)
+                write(roots.proc, "cmdline", "ro quiet isolcpus=%s%s\n" % (flags, isolated.replace("-", ",2,")
+                                                                             if "-" in isolated else isolated))
+                inv = rtcheck.inventory(roots)
+                found = {f.id: f for f in rtrules.analyse(rtrules.evidence(inv, good_run(inv)), self.rules)}
+                self.assertNotIn("smt-sibling", found)
+                if want is None:
+                    self.assertNotIn("isolated-cpu-unused", found)
+                else:
+                    self.assertEqual(found["isolated-cpu-unused"].kernel_param, want)
+                    self.assertIn("CPU 2 is isolated", found["isolated-cpu-unused"].title)
+        # before a run the threads' CPU is only a guess: nothing said yet
+        inv = rtcheck.inventory(fake_tree(os.path.join(self.root, "guess"), isolated="1-3", smt=True))
+        inv.data.pop("rt_cpu", None)            # no HAL running, no run
+        self.assertNotIn("isolated-cpu-unused", [f.id for f in rtrules.analyse(rtrules.evidence(inv, None),
+                                                                                  self.rules)])
+
+    def test_mesa_card_interrupt_to_the_real_time_cpu(self):
+        roots = fake_tree(self.root)
+        write(roots.proc, "net/route", "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+              "enp2s0\t000A0A0A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n")
+        write(roots.proc, "irq/125/effective_affinity_list", "0-2\n")
+        cfg = os.path.join(self.root, "cfg")
+        write(cfg, "m.ini", "[EMCMOT]\nSERVO_PERIOD = 1000000\n[HAL]\nHALFILE = m.hal\n")
+        write(cfg, "m.hal", 'loadrt hostmot2\nloadrt hm2_eth board_ip="10.10.10.10"\n')
+        inv = rtcheck.inventory(roots, ini=os.path.join(cfg, "m.ini"))
+        found = {f.id: f for f in rtrules.analyse(rtrules.evidence(inv, None), self.rules)}
+        f = found["mesa-nic-irq-cpu"]
+        self.assertEqual(f.commands, ["echo 3 > /proc/irq/125/smp_affinity_list"])
+        self.assertEqual(f.undo_commands, ["echo 0-2 > /proc/irq/125/smp_affinity_list"])
+        self.assertEqual(f.item["irq"], "125")         # not the managed queue 126
+        # once there, neither this rule nor the general "move it off" says anything
+        write(roots.proc, "irq/125/effective_affinity_list", "3\n")
+        inv = rtcheck.inventory(roots, ini=os.path.join(cfg, "m.ini"))
+        ids = [f.id for f in rtrules.analyse(rtrules.evidence(inv, good_run(inv, late_us=40, poll={"counters": {
+            "irq:125": {"label": "IRQ 125 (enp2s0)", "total": 1000, "per_s": 1000}}, "values": {}})), self.rules)]
+        self.assertNotIn("mesa-nic-irq-cpu", ids)
+        self.assertNotIn("irq-on-rt-cpu", ids)
+
     def test_run_from_json(self):
         """A saved run gives the same findings (a user's file becomes a test)."""
         roots = fake_tree(self.root)

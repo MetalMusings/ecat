@@ -4,7 +4,7 @@
   title: "IRQ {item.irq} ({item.name}) is handled on the real-time CPU"
   each: irqs
   fallback: true
-  when: "item.on_rt and item.rate_rt >= 1 and not item.managed and not (ethercat and item.io_nic)"
+  when: "item.on_rt and item.rate_rt >= 1 and not item.managed and not item.io_nic"
   evidence: "{item.rate_rt:.1f} per second on CPU {rt_cpus_text} (affinity {item.affinity_text})"
   keys: ["irq:{item.irq}"]
   gain: medium
@@ -31,7 +31,7 @@
   source:
     - text: The kernel's documentation, SMP IRQ affinity
       url: https://docs.kernel.org/core-api/irq/irq-affinity.html
-  seen-here: "here 2026-11-16: the network card's interrupts and lost cycles (the opposite case: see ethercat-nic-irq-cpu)"
+  seen-here: "here 2026-11-16: the network card's interrupts and lost cycles (the opposite case: see ethercat-nic-irq-cpu and mesa-nic-irq-cpu)"
   tests:
     present:
       irqs: [{irq: "40", name: "xyz", on_rt: true, managed: false, rate_rt: 40, affinity_text: "3", io_nic: false}]

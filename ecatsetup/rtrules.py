@@ -322,6 +322,15 @@ def evidence(inv, run=None):
         "pstate": inv.fact("pstate").value if inv.fact("pstate") else None,
         "last_cpu": cpus[-1] if cpus else 0,
     }
+    # isolated CPUs that neither run a real-time thread nor share its core:
+    # they give the timing nothing and take a CPU from everything else
+    iso = d.get("isolated") or []
+    keep = sorted(c for c in iso if c in rt_cpus or c in siblings)
+    spare = sorted(c for c in iso if c not in keep)
+    flags = [f for f in (d.get("isolcpus_flags") or []) if not str(f).isdigit()]
+    ctx.update(spare_isolated=spare, spare_isolated_text=rtcheck.list_text(spare),
+               isolated_keep_text=rtcheck.list_text(keep),
+               isolcpus_keep=",".join([str(f) for f in flags] + [",".join(str(c) for c in keep)]))
     sc = d.get("sysctl") or {}
     ctx.update(stat_interval=sc.get("vm.stat_interval"), timer_migration=sc.get("kernel.timer_migration"),
                thp=sc.get("thp"))

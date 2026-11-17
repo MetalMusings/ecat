@@ -84,10 +84,57 @@
     present: {isolated: [], ncpus: 4}
     absent: {isolated: [3], ncpus: 4}
 
+- id: isolated-cpu-unused
+  title: "CPU {spare_isolated_text} is isolated but runs no real-time thread"
+  when: "rt_isolated and spare_isolated and not rt_cpus_guessed"
+  evidence: "isolated: {isolated}; real-time threads on CPU {rt_cpus_text}; sharing its core: {rt_siblings_text}"
+  gain: low
+  cause: >
+    isolcpus keeps tasks off a CPU. It helps the CPU of the real-time threads,
+    and that CPU's hyperthread sibling (which shares its core). An isolated CPU
+    that is neither does nothing for the timing: it sits idle while the
+    desktop, the GUI, the interrupts and the kernel's own threads share the
+    CPUs that are left.
+  action:
+    kind: permanent
+    text: >
+      Isolate only CPU {isolated_keep_text} (the parameter below replaces
+      isolcpus), run update-grub and restart. If nohz_full or rcu_nocbs name
+      CPU {spare_isolated_text} too, take it out of them as well. Not worth a
+      restart on its own: the gain is a freer desktop, not the timing.
+    kernel-param: "isolcpus={isolcpus_keep}"
+    risk: Low. The timing should not change; measure again to see it.
+    cost: A restart.
+  effect: "CPU {spare_isolated_text} carries part of the rest of the work; the real-time CPU's lateness stays the same."
+  check: The late maximum, under load and in use (attach), against the run before.
+  undo:
+    text: *kparam_undo
+  source:
+    - text: The kernel's parameters (isolcpus)
+      url: https://docs.kernel.org/admin-guide/kernel-parameters.html
+    - text: LinuxCNC documentation, Tuning Preempt-RT for latency
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: "zx45 2026-11-17 (blind test, user's report): isolcpus=1,2,3 on an i3 with siblings 0+2 and 1+3, threads on CPU 3"
+  tests:
+    present:
+      rt_cpus: [3]
+      rt_siblings: [1]
+      isolated: [1, 2, 3]
+      spare_isolated: [2]
+      rt_isolated: true
+      rt_cpus_guessed: false
+    absent:
+      rt_cpus: [3]
+      rt_siblings: [1]
+      isolated: [1, 3]
+      spare_isolated: []
+      rt_isolated: true
+      rt_cpus_guessed: false
+
 - id: isolcpus-without-managed-irq
   title: Managed interrupts may still land on the isolated CPU
   each: irqs
-  when: "rt_isolated and 'managed_irq' not in isolcpus_flags and item.on_rt and item.managed and item.rate_rt >= 1 and not (ethercat and item.io_nic)"
+  when: "rt_isolated and 'managed_irq' not in isolcpus_flags and item.on_rt and item.managed and item.rate_rt >= 1 and not item.io_nic"
   evidence: "IRQ {item.irq} ({item.name}) {item.rate_rt:.0f}/s on CPU {rt_cpus_text}; isolcpus flags: {isolcpus_flags}"
   keys: ["irq:{item.irq}"]
   gain: medium

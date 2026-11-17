@@ -3122,6 +3122,30 @@ LinuxCNC and its GUI running (2026-11-14). The GPE case needs a measurement
 beside LinuxCNC on turner. Scripts: the session's scratchpad (train-here,
 train-turner).
 
+### Step 7: the blind test on zx45 (2026-11-17)
+
+The user installed ecat's 2.9 package (Debian 13, LinuxCNC 2.9.4, a working-tree
+build of main, not a release) and the master package on zx45 (i3-6100, Mesa
+Ethernet, `isolcpus=1,2,3`, siblings 0+2 and 1+3, threads on CPU 3) and went
+through the Timing tab alone. "Works well". Shortcomings found, each fixed:
+
+- *With load (stress-ng)* ran at rest because stress-ng was not installed,
+  and only a note in the result said so. Now the page says so under *Load*
+  and *Measure* does not start; the package recommends stress-ng.
+- Nothing was said about `isolcpus=1,2,3`: no rule looked for too much
+  isolation. Rule `isolated-cpu-unused` (gain low, permanent): an isolated CPU
+  that neither runs a real-time thread nor shares its core with one gives the
+  timing nothing and takes a CPU from the rest; the kernel parameter keeps the
+  real-time CPUs and their siblings with the flags as they were
+  (`isolcpus=1,3` on zx45). Only after a run (the threads' CPU known).
+- No rule for the Mesa card's interrupt: `ethercat-nic-irq-cpu` covered
+  EtherCAT only. hm2_eth sleeps in ppoll() in the servo thread until the
+  board answers, so the same placement applies: rule `mesa-nic-irq-cpu`
+  (runtime, `echo <rt> > /proc/irq/N/smp_affinity_list`, managed queues left
+  out). Not tried on a Mesa card. `irq-on-rt-cpu` and
+  `isolcpus-without-managed-irq` now leave every I/O card's interrupt alone,
+  not EtherCAT's only.
+
 ### The probe: `ecat_rtprobe` (2026-11-17)
 
 Beside the user's LinuxCNC the check failed at once: the plasma cutter's
