@@ -1975,7 +1975,9 @@ and *The whole result* lead to the rest.
 2. **Baseline: measure twice the same way.** *Way*: beside LinuxCNC while it
    runs (offered first then: run the machine as usual meanwhile; nothing that
    talks to your I/O card is loaded), or the INI's threads alone in halrun.
-   *Load*: as the computer is used, at rest, or with `stress-ng`. *Length*:
+   *Load*: as the computer is used, at rest, or with `stress-ng` (the package
+   recommends it; when it is missing the page says so under *Load* and
+   *Measure* does not start: `sudo apt install stress-ng`). *Length*:
    the line under it says what a run of that length can show ("no spike in
    15 min means fewer than 12 per hour"). *As root* counts SMIs and runs
    `rtla timerlat` (only when sudo needs no password; otherwise use the

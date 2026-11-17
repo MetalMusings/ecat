@@ -2100,6 +2100,26 @@ class TestTimingPage(WindowBase):
         self.assertEqual(calls[-1], "echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo")
         self.assertEqual(tp.change_table.item(0, 1).text(), "undone")
 
+    def test_load_without_stress_ng(self):
+        # zx45: "with load" ran at rest because stress-ng was missing; now the
+        # page says so under Load and Measure does not start
+        w = self.window()
+        tp = self.page(w)
+        tp.refresh()
+        with mock.patch("shutil.which", return_value=None), \
+                mock.patch("ecatsetup.rtcheck.measure_threads") as run:
+            tp.load.setCurrentIndex(tp.load.findData("stress"))
+            self.assertTrue(tp.load_warn.isVisibleTo(tp))
+            self.assertIn("sudo apt install stress-ng", tp.load_warn.text())
+            tp.measure()
+            self.assertIsNone(tp.worker)
+            run.assert_not_called()
+            tp.load.setCurrentIndex(tp.load.findData("rest"))
+            self.assertFalse(tp.load_warn.isVisibleTo(tp))
+        with mock.patch("shutil.which", return_value="/usr/bin/stress-ng"):
+            tp.load.setCurrentIndex(tp.load.findData("stress"))
+            self.assertFalse(tp.load_warn.isVisibleTo(tp))
+
     def test_password_asks_for_a_terminal(self):
         from ecatsetup import rtflow
         w = self.window()

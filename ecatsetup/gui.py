@@ -6165,6 +6165,10 @@ class TimingPage(QWidget):
         for key, text in RT_LOADS:
             self.load.addItem(text, key)
         form.addRow("Load", self.load)
+        self.load_warn = label("", "warnText", wrap=True)
+        self.load_warn.hide()
+        self.load.currentIndexChanged.connect(self.show_load_warning)
+        form.addRow("", self.load_warn)
         self.length = QuietCombo()
         for secs, text in RT_LENGTHS:
             self.length.addItem(text, secs)
@@ -6278,6 +6282,18 @@ class TimingPage(QWidget):
 
     # -- showing
 
+    def show_load_warning(self, *_):
+        """With load chosen and stress-ng missing, say so before the run: the
+        run would otherwise be measured at rest. Looked up again each time, so
+        it goes away once stress-ng is installed."""
+        import shutil
+        missing = self.load.currentData() == "stress" and shutil.which("stress-ng") is None
+        self.load_warn.setText("\u26a0 stress-ng is not installed, so there is no load to measure with. "
+                               "Install it (sudo apt install stress-ng) or choose another load."
+                               if missing else "")
+        self.load_warn.setVisible(missing)
+        return missing
+
     def show_bound(self, *_):
         from . import rtcheck
         secs = self.length.currentData() or 60
@@ -6313,6 +6329,7 @@ class TimingPage(QWidget):
         if self.sudo_ok is None:
             self.sudo_ok = rtflow.can_sudo()
         self.root.setEnabled(bool(self.sudo_ok) and not running and not lock)
+        self.show_load_warning()
         if not self.sudo_ok:
             self.root.setChecked(False)
             self.root.setToolTip("sudo would ask for a password, which the window cannot give: "
@@ -6547,6 +6564,8 @@ class TimingPage(QWidget):
         import threading
         from . import rtcheck
         if self.worker is not None or self.flow.inventory is None:
+            return
+        if self.show_load_warning():
             return
         way, load, secs = self.way.currentData(), self.load.currentData(), self.length.currentData()
         root = self.root.isChecked() and self.root.isEnabled()
