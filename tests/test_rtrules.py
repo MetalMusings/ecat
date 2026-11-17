@@ -100,6 +100,13 @@ class TestCatalogue(Base, unittest.TestCase):
                 absent = rtrules.analyse(self.ctx(r["tests"]["absent"]), {r.id: r})
                 self.assertEqual([f.id for f in absent if f.id == r.id], [], "absent")
 
+    def test_threads_without_stress_are_measured_again_under_load(self):
+        r = {"measure-under-load": self.rules["measure-under-load"]}
+        for load, way, want in (("as-used", "threads", True), ("rest", "threads", True),
+                                ("stress", "threads", False), ("as-used", "attach", False)):
+            found = rtrules.analyse(self.ctx({"measured": True, "load": load, "way": way}), r)
+            self.assertEqual(bool(found), want, (load, way))
+
     def test_texts_have_every_name_filled(self):
         for r in self.rules.values():
             with self.subTest(rule=r.id):

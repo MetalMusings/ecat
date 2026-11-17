@@ -69,8 +69,8 @@
     absent: {base_left_share: 0.6, base_period_us: 25, base_late_max_us: 5}
 
 - id: measure-under-load
-  title: Measured at rest only
-  when: "measured and load == 'rest' and way == 'threads'"
+  title: Measured without load
+  when: "measured and load in ['rest', 'as-used'] and way == 'threads'"
   gain: medium
   cause: >
     A computer at rest hides most delays: they come with the GUI, the mouse,
