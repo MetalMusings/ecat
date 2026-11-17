@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from dataclasses import asdict
 
@@ -178,6 +179,9 @@ def main(argv=None):
                          "(default: rest for threads only, as-used beside LinuxCNC)")
     ap.add_argument("--rt-twice", action="store_true",
                     help="--rt-check: measure twice, to see how much the numbers move by chance")
+    ap.add_argument("--rt-root", action="store_true",
+                    help="--rt-check: also what needs root (sudo asks): the SMI count and rtla "
+                         "timerlat's wake-up latency with its analysis of the first spike")
     ap.add_argument("--from-run", metavar="FILE", help="show a saved real-time check run")
     ap.add_argument("--response", metavar="FILE",
                     help="analyse a response recording (the Response card's samples file) again; "
@@ -451,7 +455,18 @@ def from_run(path):
         print(rtcheck.inventory_text(run.inventory))
         print()
     print(run.text())
+    if run.inventory:
+        print()
+        print(rt_findings(run.inventory, run))
     return 0
+
+
+def rt_findings(inv, run):
+    """The rule catalogue applied to an inventory and a run (or None)."""
+    from . import rtrules
+    ctx = rtrules.evidence(inv, run)
+    found = rtrules.analyse(ctx)
+    return "Findings (most to gain first):\n" + rtrules.report(found, ctx)
 
 
 def rt_check(args):
@@ -466,6 +481,7 @@ def rt_check(args):
     print()
     way = args.rt_way
     if way == "inventory":
+        print(rt_findings(inv, None))
         return 0
     running = rtcheck.hal_running()
     if way == "auto":
@@ -479,15 +495,19 @@ def rt_check(args):
         "beside the running HAL" if way == "attach" else "the threads only (halrun)",
         rtcheck.duration_text(args.rt_seconds), "twice" if args.rt_twice else "",
         ", with stress-ng" if load == "stress" else ""))
+    if args.rt_root and subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0 \
+            and subprocess.run(["sudo", "-v"]).returncode != 0:
+        print("sudo refused: measuring without root")
+        args.rt_root = False
     runs = []
     try:
         for i in range(2 if args.rt_twice else 1):
             def progress(text, i=i):
                 print("\r  run %d: %s   " % (i + 1, text), end="", flush=True)
             if way == "attach":
-                r = rtcheck.measure_attach(args.rt_seconds, load, inv, progress)
+                r = rtcheck.measure_attach(args.rt_seconds, load, inv, progress, args.rt_root)
             else:
-                r = rtcheck.measure_threads(threads, args.rt_seconds, load, inv, progress)
+                r = rtcheck.measure_threads(threads, args.rt_seconds, load, inv, progress, args.rt_root)
             print()
             runs.append(r)
             print(r.text())
@@ -499,12 +519,14 @@ def rt_check(args):
     except KeyboardInterrupt:
         print("\nStopped.")
         return 1
+    print(rt_findings(inv, runs[-1]))
+    print()
     if len(runs) == 2:
         for a, b in zip(runs[0].stats, runs[1].stats):
             n = rtcheck.noise(a.summary(), b.summary())
-            print("%s, the two runs differ by: 99 %% %.0f us, 99.99 %% %.0f us, max %.1f us: a change "
+            print("%s, the two runs differ by: lateness 99.99 %% %.0f us, largest %.1f us: a change "
                   "counts as one only when it moves more than that" % (
-                      a.thread, n["p99_us"], n["p9999_us"], n["max_abs_us"]))
+                      a.thread, n["late_p9999_us"], n["late_max_us"]))
     return 0
 
 

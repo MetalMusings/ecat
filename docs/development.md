@@ -2873,7 +2873,9 @@ for `/proc` and `/sys` that tests point at fake trees. It runs on 2.9 and
    statistics; tests on fake trees. **Built 2026-11-17** (see "Step 1:
    built" below).
 2. The poller and per-spike analysis; `rtla` and the SMI counter as root.
-3. The rule catalogue with its tests, general cases included.
+   **Built 2026-11-17** (see "Steps 2 and 3: built").
+3. The rule catalogue with its tests, general cases included. **Built
+   2026-11-17**.
 4. The guided page; Improve mode at run time: change log, undo commands and
    script; Save report and `--from-run`.
 5. Permanent changes (GRUB, systemd), the flow across a restart.
@@ -2924,9 +2926,87 @@ Found while building it:
   wake-up latency is not measured yet (step 2: `rtla timerlat`, or our own
   comp against the thread's nominal start).
 
+### Steps 2 and 3: built (2026-11-17)
+
+**Each cycle's time and lateness, without root.** `rtapi_get_time()` in uspace
+is `CLOCK_MONOTONIC` (uspace_posix.cc), the clock of Python's
+`time.monotonic_ns()`. The sum of timedelta's deltas is each sample's time
+since the first one; the first one's time is fixed by enabling the sampler
+channel (`sampler.N.enable`, false until halsampler reads) from a halcmd that
+stays running (`halcmd -kf`: a setp + getp takes ~20 us; starting halcmd takes
+~3 ms), to within that and one period. The same sum gives the lateness: the
+thread wakes on a grid (`nextstart += period + pll_correction`), so
+sum(delta - period) is the lateness plus a constant; against its smallest value
+in the 50 ms before (the least late cycle) it is the lateness. A PLL moving
+the period by ppm adds well under 1 us over 50 ms; a delay longer than 50 ms is
+under-counted. The budget now uses this lateness, not the cycle-to-cycle move.
+Lost samples (halsampler "overrun") end the time line for that run.
+
+**The poller** (`ecatsetup/rtpoll.py`, standalone so that it runs as
+`sudo python3 -I`): every 10 ms on the other CPUs it writes the changes of
+the real-time CPUs' interrupts and softirqs, idle state entries, frequency,
+thermal throttling, ACPI GPE/SCI counts and, as root, the SMI count (MSR 0x34
+through the `msr` module, loaded if missing). `PollData` reads its file;
+`correlate()` takes the spikes (later than 10 us and than 99.9 % of the
+cycles; bursts within 2 ms as one) and counts, per counter, the spikes whose
+time window (the anchor's uncertainty, and the poll after the spike) holds a
+growth, against how often it grows in any window by chance. A counter in at
+least half the spikes (and 3), twice as often as by chance, is a suspect.
+Counters that grow in every poll (the local timer, a busy network card) can
+never be told apart this way at 10 ms: for them the rate on the real-time CPU
+is the evidence, which the rules use.
+
+**rtla** (Debian package `rtla`, 6.12 here; installed 2026-11-17): as root,
+`rtla timerlat top -q -c <rt cpus> -H <others> -d <s> -T 50` beside the run;
+its per-CPU maxima, and when a wake-up exceeds 50 us it stops and its own
+analysis of that spike (IRQ latency, blocking thread, interference) is kept
+with the run. Its timer thread runs on the real-time CPU (noted in the run).
+
+**The catalogue** (`ecatsetup/rtrules/*.yaml`, `ecatsetup/rtrules.py`): 37
+rules in five files (kernel, cpu, devices, network, linuxcnc), each with
+`when` (a safe expression over the evidence: no names but its own, no
+attributes but keys, a few functions), the cause, the action (kind runtime /
+permanent / bios / advice / measure, commands, `kernel-param` for step 5,
+risk, cost), the effect, the check, the undo (commands for run-time changes,
+text for kernel parameters, including the GRUB `e` way back), the source and
+"seen here". `each:` tries a rule on every interrupt, card or function;
+`fallback:` gives the general "move this interrupt off the real-time CPU" only
+where no specific rule matched. A suspect counter no rule explains becomes an
+"unexplained" finding. `rtrules.evidence(inventory, run)` builds the names; the
+findings are ranked (gain, then run-time before restart; BIOS and advice last).
+
+EtherCAT is the exception to "interrupts off the real-time CPU": the userspace
+master reads the frame back in the servo thread, so its card's interrupts
+belong on that CPU (`master: irq-cpu`); the rule `ethercat-nic-irq-cpu` says so
+and the general rule leaves that card alone.
+
+**Tests**: tests/test_rtrules.py applies every rule's own `tests: present /
+absent` to "a good computer" built as a real run is (fake tree, measured run),
+on which no rule applies; checks that every name and item field a rule uses
+exists in real evidence and that every template is filled; end to end: a GPE
+storm, the irq-cpu training case, a Mesa card found by its address, a run read
+back from JSON giving the same findings. tests/test_rtcheck.py: lateness, the
+time line, the poller on a fake tree, correlation (SMIs with the spikes, SMIs
+20-30 ms later not counted), rtla's output (recorded here). Mutation-checked.
+
+**Tried here** (2026-11-17, threads only at 1 ms, 30 s under stress-ng, as
+root): late at most 56 us (rtla: 30 us thread latency), no SMI; the findings:
+governor powersave, i915.enable_dc, turbo, sound power saving,
+vm.stat_interval, timer_migration, and "spikes came with rescheduling
+interrupts (15 of 23, by chance 20 %), no rule knows it". The network card's
+queue interrupts (enp2s0-TxRx-0/1) ran on CPU 3 at 234/s each with only the
+idle master running: right for EtherCAT (irq-cpu), and the general rule
+leaves them alone.
+
+Packaging: build-deb.sh now installs `ecatsetup/rtrules/*.yaml`, and
+`ecatsetup/measured/*.yaml`, which it had missed since 0.20 (the window's
+measured SYNC0 results were empty in the deb; the rip archive copies the whole
+folder and had them).
+
 ### Open
 
-- `rtla` package and version on Debian 12/13; MSR access (`msr` module).
+- MSR access needs root and the `msr` module (loaded by the check when
+  missing); AMD has no SMI counter.
 - Whether a cycle's time stamp from `halsampler` can be tied to the
   poller's monotonic clock closely enough (else a small comp of our own that
   writes `rtapi_get_time()` with each sample).

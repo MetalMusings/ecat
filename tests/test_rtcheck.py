@@ -331,6 +331,171 @@ class TestStatistics(unittest.TestCase):
         self.assertTrue(rtcheck.rate_differs(40, 600, 0, 600))
 
 
+class TestTimeline(unittest.TestCase):
+    def test_lateness(self):
+        s = rtcheck.CycleStats("servo-thread", 1000000)
+        # on time, then one cycle 80 us late (the next comes 80 us early), on time again
+        s.feed("1000000\n" * 100 + "1080000\n920000\n" + "1000000\n" * 100)
+        self.assertEqual(s.late_max, 80000)
+        self.assertEqual(s.summary()["late_max_us"], 80.0)
+        self.assertEqual(s.summary()["max_abs_us"], 80.0)
+        # two late cycles in a row: the second moved 0 from the first, but is still late
+        t = rtcheck.CycleStats("servo-thread", 1000000)
+        t.feed("1000000\n" * 100 + "1050000\n1000000\n950000\n" + "1000000\n" * 10)
+        self.assertEqual(t.late_max, 50000)
+        late = [e for e in t.events if e[2] >= 50000]
+        self.assertEqual(len(late), 2)
+        # times: the sum of the deltas since the first sample
+        self.assertEqual(late[0][0], 99 * 1000000 + 1050000)
+        self.assertEqual(late[1][0], late[0][0] + 1000000)
+
+    def test_slow_drift_is_not_lateness(self):
+        # a PLL that lengthens every period by 20 ns: no lateness worth the name
+        s = rtcheck.CycleStats("servo-thread", 1000000)
+        s.feed("1000020\n" * 5000)
+        self.assertLess(s.late_max, 1100)
+
+    def test_lost_samples_end_the_time_line(self):
+        s = rtcheck.CycleStats("servo-thread", 1000000)
+        s.feed("1000000\n" * 10 + "overrun\n" + "1000000\n1060000\n")
+        self.assertEqual(s.overruns, 1)
+        self.assertIsNone(s.events[-1][0])
+        st = rtcheck.CycleStats("x", 1000000)
+        st.anchor = (0, 0)
+        st.events = [(None, 60000, 60000)]
+        self.assertEqual(rtcheck.spikes(st, 10000), [])
+
+    def test_json_keeps_the_time_line(self):
+        s = rtcheck.CycleStats("servo-thread", 1000000)
+        s.anchor = (5000000000, 300000)
+        s.feed("1000000\n" * 10 + "1070000\n930000\n")
+        back = rtcheck.CycleStats.from_json(json.loads(json.dumps(s.to_json())))
+        self.assertEqual(back.anchor, s.anchor)
+        self.assertEqual(back.events, s.events)
+        self.assertEqual(back.summary(), s.summary())
+
+
+POLL = """\
+# rtpoll 1 10000000 3
+K 0 irq:LOC LOC: Local timer interrupts
+K 1 smi SMIs (system management interrupts)
+K 2 freq:3 CPU 3 frequency (kHz)
+1000000000 0:1 2=800000
+"""
+
+
+def poll_text(n=1000, smi_at=(), loc_every=1):
+    lines = [POLL.rstrip("\n")]
+    for i in range(1, n):
+        t = 1000000000 + i * 10000000
+        parts = []
+        if i % loc_every == 0:
+            parts.append("0:1")
+        if i in smi_at:
+            parts.append("1:1")
+        lines.append(" ".join([str(t)] + parts))
+    return "\n".join(lines) + "\nE SMI count not read: test\n"
+
+
+class TestCorrelation(unittest.TestCase):
+    def test_parse(self):
+        p = rtcheck.PollData.parse(poll_text(100, smi_at=(10, 20)))
+        self.assertEqual(p.interval, 10000000)
+        self.assertEqual(p.cpus, [3])
+        self.assertEqual(len(p.times), 100)
+        self.assertEqual(p.labels["smi"], "SMIs (system management interrupts)")
+        self.assertEqual([d for _, d in p.changes["smi"]], [1, 1])
+        self.assertEqual(p.values["freq:3"], [(1000000000, 800000)])
+        self.assertEqual(p.errors, ["SMI count not read: test"])
+        tot = p.totals()
+        self.assertEqual(tot["smi"][1], 2)
+        self.assertAlmostEqual(tot["irq:LOC"][2], 100 / 0.99, places=0)
+
+    def stats_with_spikes(self, times_ms):
+        """A 1 ms thread whose first sample is at 1.0 s, late by 80 us at times_ms (after it)."""
+        s = rtcheck.CycleStats("servo-thread", 1000000)
+        s.anchor = (1000000000, 50000)
+        deltas = []
+        for i in range(10000):
+            deltas.append(1080000 if i in times_ms else 920000 if i - 1 in times_ms else 1000000)
+        s.feed("\n".join(str(d) for d in deltas) + "\n")
+        return s
+
+    def test_spikes_line_up_with_smis(self):
+        spikes_at = (1005, 3005, 5005, 7005)
+        s = self.stats_with_spikes(spikes_at)
+        # an SMI in the poll right after each spike (poll i covers ((i-1)*10, i*10] ms after 1 s)
+        p = rtcheck.PollData.parse(poll_text(1000, smi_at=(101, 301, 501, 701, 900)))
+        c = rtcheck.correlate(s, p)
+        self.assertEqual(c["spikes"], 4)
+        by = {x["key"]: x for x in c["counters"]}
+        self.assertEqual(by["smi"]["with"], 4)
+        self.assertTrue(rtcheck.strong(by["smi"]))
+        # the timer interrupt grows in every poll: with every spike, but by chance
+        self.assertEqual(by["irq:LOC"]["with"], 4)
+        self.assertFalse(rtcheck.strong(by["irq:LOC"]))
+        text = "\n".join(rtcheck.correlation_text(c))
+        self.assertIn("4 of 4 with SMIs", text)
+        self.assertIn("<- suspect", text)
+
+    def test_smis_elsewhere_are_not_suspects(self):
+        s = self.stats_with_spikes((1005, 3005, 5005, 7005))
+        p = rtcheck.PollData.parse(poll_text(1000, smi_at=(150, 350, 550, 750)))
+        c = rtcheck.correlate(s, p)
+        self.assertNotIn("smi", [x["key"] for x in c["counters"]])
+        # nor 20-30 ms after them: the window is one poll after the spike, and the anchor's uncertainty
+        p = rtcheck.PollData.parse(poll_text(1000, smi_at=(103, 303, 503, 703)))
+        c = rtcheck.correlate(s, p)
+        self.assertNotIn("smi", [x["key"] for x in c["counters"]])
+        self.assertAlmostEqual(c["window_ms"], 10.1, places=1)
+
+    def test_bursts_are_one_spike(self):
+        s = rtcheck.CycleStats("servo-thread", 1000000)
+        # late by 80 us for three cycles, then on time; again 10 ms later
+        block = "1000000\n" * 10 + "1080000\n1000000\n1000000\n920000\n"
+        s.feed(block * 2 + "1000000\n" * 10)
+        sp = rtcheck.spikes(s, 10000)
+        self.assertEqual(len(sp), 2)
+        self.assertEqual(sp[0][1], 80000)
+
+    def test_rtla(self):
+        d = os.path.join(os.path.dirname(__file__), "data", "rt")
+        with open(os.path.join(d, "rtla-hit.txt")) as f:
+            hit = rtcheck.parse_rtla(f.read())
+        self.assertTrue(hit["hit"])
+        # the spike it stopped at (12.03 us) is larger than the table's 9
+        self.assertEqual(hit["cpus"]["3"]["thread_max_us"], 13)
+        self.assertIn("Blocking thread", hit["analysis"])
+        with open(os.path.join(d, "rtla-nohit.txt")) as f:
+            no = rtcheck.parse_rtla(f.read())
+        self.assertFalse(no["hit"])
+        self.assertEqual(no["cpus"]["3"], {"count": 2998, "irq_max_us": 5, "thread_max_us": 18})
+        hit["threshold_us"] = 12
+        self.assertIn("first wake-up over 12 us", "\n".join(rtcheck.rtla_text(hit)))
+
+
+class TestPoller(unittest.TestCase):
+    def test_on_a_fake_tree(self):
+        from ecatsetup import rtpoll
+        with tempfile.TemporaryDirectory() as root:
+            roots = fake_tree(root)
+            write(roots.sys, "firmware/acpi/interrupts/gpe_all", "  100\n")
+            p = rtpoll.Poller([3], proc=roots.proc, sys_=roots.sys, dev=os.path.join(root, "dev"), smi=True)
+            self.assertTrue(any("SMI count not read" in x for x in p.out))
+            p.step(1000)
+            write(roots.proc, "interrupts", INTERRUPTS.replace("91234", "91334"))
+            write(roots.sys, "firmware/acpi/interrupts/gpe_all", "  103\n")
+            write(roots.sys, "devices/system/cpu/cpu3/cpuidle/state1/usage", "107\n")
+            p.step(2000)
+            data = rtcheck.PollData.parse("# rtpoll 1 10000000 3\n" + "\n".join(p.out) + "\n")
+        self.assertEqual(data.changes["irq:125"], [(2000, 100)])
+        self.assertEqual(data.labels["irq:125"], "IRQ 125 (enp2s0)")
+        self.assertEqual(data.changes["gpe:all"], [(2000, 3)])
+        self.assertEqual(data.changes["idle:3:C1E"], [(2000, 7)])
+        # CPU 0's counts are not this poller's business
+        self.assertNotIn("irq:126", data.changes)
+
+
 class TestHal(unittest.TestCase):
     def test_threads_hal(self):
         text = rtcheck.threads_hal([("base-thread", 25000), ("servo-thread", 1000000)])
@@ -400,6 +565,13 @@ if args and args[0] == "-s":
     args = args[1:]
 with open(state + ".cmds", "a") as f:
     f.write(" ".join(args) + "\\n")
+if args and args[0] == "-kf":
+    for line in sys.stdin:
+        with open(state + ".cmds", "a") as f:
+            f.write(line)
+        if line.startswith("getp"):
+            print("TRUE", flush=True)
+    sys.exit(0)
 if args[:2] == ["show", "comp"]:
     for c in st["comps"]:
         print("    9  RT    %s   ready" % c)
@@ -430,6 +602,16 @@ sys.stdout.flush()
 time.sleep(60)
 """
 
+# the poller: a file of its format, written at once; then it waits to be stopped
+FAKE_RTPOLL = """\
+#!/usr/bin/python3
+import os, sys, time
+out = sys.argv[sys.argv.index("--out") + 1]
+with open(out, "w") as f:
+    f.write(open(os.environ["FAKE_RTPOLL_DATA"]).read())
+time.sleep(60)
+"""
+
 THREADS_USER = """\
 Realtime Threads:
      Period  FP     Name               (     Time [s], Max-Time [s] )
@@ -445,14 +627,18 @@ class TestAttach(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         d = self.tmp.name
         self.state = os.path.join(d, "hal.json")
-        for name, text in (("halcmd", FAKE_HALCMD), ("halsampler", FAKE_HALSAMPLER)):
+        for name, text in (("halcmd", FAKE_HALCMD), ("halsampler", FAKE_HALSAMPLER), ("rtpoll", FAKE_RTPOLL)):
             p = os.path.join(d, name)
             with open(p, "w") as f:
                 f.write(text)
             os.chmod(p, os.stat(p).st_mode | stat.S_IEXEC)
         self.env = mock.patch.dict(os.environ, {
             "ECAT_HALCMD": os.path.join(d, "halcmd"), "ECAT_HALSAMPLER": os.path.join(d, "halsampler"),
-            "FAKE_RT_STATE": self.state})
+            "FAKE_RT_STATE": self.state, "ECAT_RTPOLL": os.path.join(d, "rtpoll"),
+            "FAKE_RTPOLL_DATA": os.path.join(d, "poll.txt")})
+        with open(os.path.join(d, "poll.txt"), "w") as f:
+            f.write("# rtpoll 1 10000000 3\nK 0 irq:LOC LOC: Local timer interrupts\n"
+                    "100000000\n110000000 0:12\n")
         self.env.start()
 
     def tearDown(self):
@@ -479,6 +665,13 @@ class TestAttach(unittest.TestCase):
         self.assertEqual(servo.over[50], 1)
         cmds = self.cmds()
         self.assertIn("addf ecatsetup-rt-td-servo-thread servo-thread 1", cmds)
+        # the channels start disabled and are enabled once halsampler reads (the time anchor)
+        self.assertLess(cmds.index("setp sampler.1.enable 0"), cmds.index("addf sampler.1 servo-thread"))
+        self.assertLess(cmds.index("addf sampler.1 servo-thread"), cmds.index("setp sampler.1.enable 1"))
+        self.assertIsNotNone(servo.anchor)
+        self.assertLess(servo.anchor[1], 1e9)
+        # the poller's file was read
+        self.assertEqual(run.poll["counters"]["irq:LOC"]["total"], 12)
         self.assertIn("addf sampler.0 base-thread", cmds)
         # everything the check added is gone again
         self.assertIn("delf ecatsetup-rt-td-servo-thread servo-thread", cmds)

@@ -1,0 +1,309 @@
+# The kernel and its command line. Kernel parameters are permanent changes:
+# the Improve mode's step 5 writes them into /etc/default/grub (kernel-param).
+
+- id: not-preempt-rt
+  title: The kernel is not a PREEMPT_RT kernel
+  when: "rt is not None and not rt"
+  evidence: "kernel {cmdline}"
+  gain: high
+  cause: >
+    Without PREEMPT_RT most of the kernel cannot be interrupted by a real-time
+    thread, so a thread can wait hundreds of microseconds or more. This is the
+    first and largest step on any LinuxCNC computer with uspace.
+  action:
+    kind: permanent
+    text: >
+      Install a PREEMPT_RT kernel (Debian: the package linux-image-rt-amd64) and
+      start the computer with it.
+    commands: ["apt install linux-image-rt-amd64"]
+    risk: Low; the old kernel stays in the GRUB menu.
+    cost: A restart.
+  effect: The thread's lateness drops from hundreds to tens of microseconds.
+  check: The late maximum and 99.99 % of the servo thread, under load.
+  undo:
+    text: >
+      Choose the old kernel under "Advanced options" in the GRUB menu, then
+      remove the package (apt remove linux-image-rt-amd64).
+  source:
+    - text: LinuxCNC documentation, Latency test (PREEMPT_RT and uspace)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: null
+  tests:
+    present: {rt: false}
+    absent: {rt: true}
+
+- id: virtual-machine
+  title: LinuxCNC runs in a virtual machine
+  when: "vm"
+  gain: high
+  cause: >
+    The host decides when the virtual CPU runs; no setting inside the guest
+    gives real-time behaviour.
+  action:
+    kind: advice
+    text: Run LinuxCNC on the computer itself, not in a virtual machine, to drive a machine.
+  source:
+    - text: LinuxCNC documentation, Latency test
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: null
+  tests:
+    present: {vm: true}
+    absent: {vm: false}
+
+- id: no-isolated-cpu
+  title: No CPU is kept for LinuxCNC (isolcpus)
+  when: "rt and not isolated and ncpus > 1"
+  evidence: "/sys/devices/system/cpu/isolated is empty; {ncpus} CPUs"
+  gain: high
+  cause: >
+    Every task and most interrupts may run on the CPU of the real-time threads,
+    and each can delay a cycle. LinuxCNC (uspace) puts its threads on the last
+    isolated CPU when there is one.
+  action:
+    kind: permanent
+    text: >
+      Isolate the last CPU: add the kernel parameter below, run update-grub and
+      restart. LinuxCNC then runs its threads there by itself.
+    kernel-param: "isolcpus=managed_irq,domain,{last_cpu}"
+    risk: Low. The other CPUs carry the rest of the work.
+    cost: A restart; one CPU less for everything else.
+  effect: Less lateness from other tasks and interrupts.
+  check: The late maximum, under load and in use (attach).
+  undo:
+    text: &kparam_undo >
+      Remove the parameter from GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub,
+      run update-grub and restart. If the computer does not start, press e in
+      the GRUB menu and delete it from the line that starts with linux.
+  source:
+    - text: LinuxCNC documentation, Tuning Preempt-RT for latency
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+    - text: The kernel's parameters (isolcpus)
+      url: https://docs.kernel.org/admin-guide/kernel-parameters.html
+  seen-here: "both our computers run with an isolated CPU (here isolcpus=3, turner 1)"
+  tests:
+    present: {isolated: [], ncpus: 4}
+    absent: {isolated: [3], ncpus: 4}
+
+- id: isolcpus-without-managed-irq
+  title: Managed interrupts may still land on the isolated CPU
+  each: irqs
+  when: "rt_isolated and 'managed_irq' not in isolcpus_flags and item.on_rt and item.managed and item.rate_rt >= 1 and not (ethercat and item.io_nic)"
+  evidence: "IRQ {item.irq} ({item.name}) {item.rate_rt:.0f}/s on CPU {rt_cpus_text}; isolcpus flags: {isolcpus_flags}"
+  keys: ["irq:{item.irq}"]
+  gain: medium
+  cause: >
+    Queue interrupts of network cards and NVMe disks are "managed" by the
+    kernel: one per CPU, and their CPU cannot be changed in /proc/irq.
+    isolcpus without the managed_irq flag leaves them on the isolated CPU.
+  action:
+    kind: permanent
+    text: >
+      Add managed_irq to isolcpus (isolcpus=managed_irq,domain,{rt_cpus_text}),
+      run update-grub and restart. For a network card, fewer queues
+      (ethtool -L {item.nic} combined 1) also takes them away, at run time.
+    kernel-param: "isolcpus=managed_irq,domain,{rt_cpus_text}"
+    risk: Low.
+    cost: A restart.
+  effect: The interrupt no longer counts on the real-time CPU.
+  check: "The rate of {item.name} on the real-time CPU, and the late maximum."
+  undo:
+    text: *kparam_undo
+  source:
+    - text: The kernel's parameters (isolcpus, managed_irq)
+      url: https://docs.kernel.org/admin-guide/kernel-parameters.html
+  seen-here: "here 2026-11-17: enp2s0's queue interrupts ran on the isolated CPU 3 with isolcpus=3"
+  tests:
+    present:
+      isolcpus_flags: []
+      irqs: [{irq: "134", name: "eno1-TxRx-0", on_rt: true, managed: true, rate_rt: 240, io_nic: false, nic: eno1}]
+    absent:
+      isolcpus_flags: [managed_irq, domain]
+      irqs: [{irq: "134", name: "eno1-TxRx-0", on_rt: true, managed: true, rate_rt: 240, io_nic: false, nic: eno1}]
+
+- id: no-irqaffinity
+  title: Interrupts may be started on the isolated CPU (no irqaffinity)
+  when: "rt_isolated and not irqaffinity and not cmd.irqaffinity"
+  evidence: "the kernel command line has no irqaffinity="
+  gain: medium
+  cause: >
+    isolcpus keeps tasks off the CPU, not interrupts: without irqaffinity the
+    kernel may place an interrupt on any CPU, the real-time one too.
+  action:
+    kind: permanent
+    text: Add irqaffinity with every CPU but the real-time ones, run update-grub and restart.
+    kernel-param: "irqaffinity={nonrt_text}"
+    risk: Low.
+    cost: A restart.
+  effect: New interrupts start on the other CPUs.
+  check: Interrupts on the real-time CPU (the run's list) and the late maximum.
+  undo:
+    text: *kparam_undo
+  source:
+    - text: LinuxCNC documentation, Tuning Preempt-RT for latency (irqaffinity)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: "here: irqaffinity=0-2 with isolcpus=3"
+  tests:
+    present: {irqaffinity: [], cmd: {}}
+    absent: {irqaffinity: [0, 1, 2]}
+
+- id: irqbalance-running
+  title: irqbalance moves interrupts, possibly onto the real-time CPU
+  when: "irqbalance and rt_isolated"
+  evidence: "irqbalance runs"
+  gain: medium
+  cause: >
+    irqbalance spreads interrupts over the CPUs every few seconds; unless told
+    otherwise it may put them on the isolated CPU, and undo a placement made by
+    hand.
+  action:
+    kind: runtime
+    text: >
+      Stop irqbalance for this boot. To keep it so, disable the service
+      (systemctl disable irqbalance), or set IRQBALANCE_BANNED_CPULIST={rt_cpus_text}
+      in /etc/default/irqbalance.
+    commands: ["systemctl stop irqbalance"]
+    risk: Low; interrupts stay where they are.
+    cost: Nothing measurable on a LinuxCNC computer.
+  effect: Interrupts stay where they are put.
+  check: Interrupts on the real-time CPU over a long run.
+  undo:
+    commands: ["systemctl start irqbalance"]
+  source:
+    - text: irqbalance(1), IRQBALANCE_BANNED_CPULIST
+      url: https://manpages.debian.org/irqbalance
+  seen-here: null
+  tests:
+    present: {irqbalance: true}
+    absent: {irqbalance: false}
+
+- id: nohz-full-missing
+  title: The scheduler tick runs on the real-time CPU (no nohz_full)
+  when: "rt_isolated and not (set(rt_cpus) & set(nohz_full)) and measured and loc_rate > 100"
+  evidence: "local timer interrupts {loc_rate:.0f}/s on CPU {rt_cpus_text}"
+  keys: ["irq:LOC", "softirq:TIMER", "softirq:SCHED"]
+  gain: low
+  cause: >
+    The scheduler tick interrupts the CPU at the kernel's HZ even when only one
+    real-time thread runs there. nohz_full stops it while a single task runs.
+  action:
+    kind: permanent
+    text: Add nohz_full for the real-time CPU, run update-grub and restart.
+    kernel-param: "nohz_full={rt_cpus_text}"
+    risk: Low.
+    cost: A restart; a little more work on the other CPUs.
+  effect: Fewer local timer interrupts on the real-time CPU, a smaller spread.
+  check: The run's local timer rate (LOC) on the real-time CPU and the 99.99 %.
+  undo:
+    text: *kparam_undo
+  source:
+    - text: The kernel's documentation, NO_HZ (nohz_full)
+      url: https://docs.kernel.org/timers/no_hz.html
+  seen-here: "turner 2026-11-14, as one of six parameters added at once (its part not known)"
+  tests:
+    present: {nohz_full: [], loc_rate: 1000}
+    absent: {nohz_full: [3], loc_rate: 1000}
+
+- id: rcu-nocbs-missing
+  title: RCU callbacks run on the real-time CPU (no rcu_nocbs)
+  when: "rt_isolated and not (set(rt_cpus) & set(rcu_nocbs)) and (not measured or rcu_rate > 1)"
+  evidence: "rcu_nocbs does not hold CPU {rt_cpus_text}"
+  keys: ["softirq:RCU"]
+  gain: low
+  cause: >
+    The kernel's RCU callbacks run on each CPU, the real-time one too, unless
+    rcu_nocbs moves them to kernel threads elsewhere.
+  action:
+    kind: permanent
+    text: Add rcu_nocbs for the real-time CPU, run update-grub and restart.
+    kernel-param: "rcu_nocbs={rt_cpus_text}"
+    risk: Low.
+    cost: A restart.
+  effect: No RCU softirqs on the real-time CPU.
+  check: The run's RCU softirq rate on the real-time CPU, the 99.99 %.
+  undo:
+    text: *kparam_undo
+  source:
+    - text: LinuxCNC documentation, Tuning Preempt-RT for latency (rcu_nocbs)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: "turner 2026-11-14, as one of six parameters added at once (its part not known)"
+  tests:
+    present: {rcu_nocbs: [], measured: true, rcu_rate: 50}
+    absent: {rcu_nocbs: [3], measured: true, rcu_rate: 50}
+
+- id: vm-stat-interval
+  title: Memory statistics are gathered every second on every CPU
+  when: "rt_isolated and stat_interval == 1 and measured and late_max_us > 20"
+  evidence: "vm.stat_interval = 1"
+  gain: low
+  cause: >
+    Every vm.stat_interval seconds a kernel work item runs on each CPU to fold
+    memory statistics, the isolated one too.
+  action:
+    kind: runtime
+    text: Gather them less often (every 10 s); to keep it, put vm.stat_interval = 10 in /etc/sysctl.d/.
+    commands: ["sysctl vm.stat_interval=10"]
+    risk: None for LinuxCNC; memory statistics are updated less often.
+    cost: None.
+  effect: Fewer short interruptions of the real-time CPU, about once a second.
+  check: The late maximum and the 99.99 %.
+  undo:
+    commands: ["sysctl vm.stat_interval={stat_interval}"]
+  source:
+    - text: The kernel's documentation, /proc/sys/vm (stat_interval)
+      url: https://docs.kernel.org/admin-guide/sysctl/vm.html
+  seen-here: null
+  tests:
+    present: {stat_interval: 1, late_max_us: 40}
+    absent: {stat_interval: 10, late_max_us: 40}
+
+- id: timer-migration
+  title: Timers may be moved onto the real-time CPU
+  when: "rt_isolated and timer_migration == 1 and measured and late_max_us > 20"
+  evidence: "kernel.timer_migration = 1"
+  gain: low
+  cause: >
+    With timer migration the kernel may run other CPUs' timers on whichever CPU
+    is busy, the real-time one too.
+  action:
+    kind: runtime
+    text: Switch it off; to keep it so, put kernel.timer_migration = 0 in /etc/sysctl.d/.
+    commands: ["sysctl kernel.timer_migration=0"]
+    risk: None for LinuxCNC; a little more power use on an idle computer.
+    cost: None.
+  effect: Fewer timer softirqs on the real-time CPU.
+  check: The run's TIMER softirq rate on the real-time CPU, the 99.99 %.
+  undo:
+    commands: ["sysctl kernel.timer_migration=1"]
+  source:
+    - text: The kernel's documentation, /proc/sys/kernel (timer_migration)
+      url: https://docs.kernel.org/admin-guide/sysctl/kernel.html
+  seen-here: null
+  tests:
+    present: {timer_migration: 1, late_max_us: 40}
+    absent: {timer_migration: 0, late_max_us: 40}
+
+- id: transparent-hugepages
+  title: Transparent huge pages are always on
+  when: "thp == 'always' and measured and late_max_us > 20"
+  evidence: "transparent_hugepage/enabled = always"
+  gain: low
+  cause: >
+    With "always" the kernel compacts memory to make huge pages, which can hold
+    locks that a real-time thread then waits for.
+  action:
+    kind: runtime
+    text: Use huge pages only where a program asks (madvise).
+    commands: ["echo madvise > /sys/kernel/mm/transparent_hugepage/enabled"]
+    risk: None for LinuxCNC.
+    cost: None.
+  effect: No compaction stalls.
+  check: The late maximum under load (stress-ng's memory workers).
+  undo:
+    commands: ["echo always > /sys/kernel/mm/transparent_hugepage/enabled"]
+  source:
+    - text: The kernel's documentation, Transparent Hugepage Support
+      url: https://docs.kernel.org/admin-guide/mm/transhuge.html
+  seen-here: "no (the Debian RT kernel here is built without it)"
+  tests:
+    present: {thp: always, late_max_us: 40}
+    absent: {thp: madvise, late_max_us: 40}

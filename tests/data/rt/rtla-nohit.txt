@@ -1,0 +1,6 @@
+                                     Timer Latency                                                                                       
+  0 00:00:04   |          IRQ Timer Latency (us)        |         Thread Timer Latency (us)      |    Ret user Timer Latency (us)
+CPU COUNT      |      cur       min       avg       max |      cur       min       avg       max |      cur       min       avg       max
+  3 #2998      |        0         0         0         5 |        2         2         3        18 |        4         4         5        24
+---------------|----------------------------------------|----------------------------------------|---------------------------------------
+ALL #2998   e0 |                  0         0         5 |                  2         3        18 |                  4         5        24

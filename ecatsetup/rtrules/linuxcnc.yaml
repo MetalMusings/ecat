@@ -1,0 +1,87 @@
+# LinuxCNC itself: the period's budget and the threads' work.
+
+- id: budget-too-short
+  title: "The servo period ({period_us:.0f} us) leaves too little room"
+  when: "measured and left_share is not None and left_share < 0.2"
+  evidence: "{left_us:.0f} us left of {period_us:.0f} us after lateness ({late_max_us:.0f} us) and the thread's run ({thread_us:.0f} us)"
+  gain: high
+  cause: >
+    The thread must wake and finish its work within one period; with less than
+    a fifth of it left, a little more delay makes a cycle late.
+  action:
+    kind: advice
+    text: >
+      Remove the causes of lateness found above first; if that is not enough,
+      use a longer SERVO_PERIOD (and for EtherCAT, check what the drives take).
+  source:
+    - text: docs/development.md, "Real-time check", the period's budget
+  seen-here: "here 2026-11-16: below 175 us bursts of lost cycles"
+  tests:
+    present: {measured: true, left_share: 0.1, left_us: 12, period_us: 125, late_max_us: 60, thread_us: 50}
+    absent: {measured: true, left_share: 0.6, period_us: 1000}
+
+- id: long-function
+  title: "{item.name} takes {item.tmax_us:.0f} us of the {period_us:.0f} us period"
+  each: funcs
+  when: "item.share > 0.3"
+  evidence: "longest run {item.tmax_us:.1f} us"
+  gain: medium
+  cause: >
+    One HAL function uses much of the period; what is left for lateness is
+    small, and the function's own spread adds to it.
+  action:
+    kind: advice
+    text: >
+      Look at what the function does (an I/O driver waiting for its card, a
+      large component). For an I/O read, see the network card's findings.
+  source:
+    - text: HAL's function times (halcmd show thread)
+      url: https://linuxcnc.org/docs/stable/html/hal/basic-hal.html
+  seen-here: null
+  tests:
+    present:
+      period_us: 1000
+      funcs: [{name: hm2_7i96s.0.read, tmax_us: 400, share: 0.4}]
+    absent:
+      period_us: 1000
+      funcs: [{name: hm2_7i96s.0.read, tmax_us: 40, share: 0.04}]
+
+- id: base-thread-tight
+  title: "The base thread ({base_period_us:.0f} us) has little room"
+  when: "base_left_share is not None and base_left_share < 0.3"
+  evidence: "late at most {base_late_max_us:.1f} us in a {base_period_us:.0f} us period"
+  gain: high
+  cause: >
+    Software step generation in a base thread needs a small, steady lateness:
+    a late base cycle is a late step pulse.
+  action:
+    kind: advice
+    text: >
+      Remove the causes of lateness found above; else use a longer BASE_PERIOD
+      (lower maximum step rate), or step generation in hardware (a Mesa card,
+      EtherCAT drives).
+  source:
+    - text: LinuxCNC documentation, Latency test (base thread)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: null
+  tests:
+    present: {base_left_share: 0.1, base_period_us: 25, base_late_max_us: 20}
+    absent: {base_left_share: 0.6, base_period_us: 25, base_late_max_us: 5}
+
+- id: measure-under-load
+  title: Measured at rest only
+  when: "measured and load == 'rest' and way == 'threads'"
+  gain: medium
+  cause: >
+    A computer at rest hides most delays: they come with the GUI, the mouse,
+    disks and the network.
+  action:
+    kind: measure
+    text: Measure again under load (stress-ng), and beside LinuxCNC while the machine is used.
+  source:
+    - text: LinuxCNC documentation, Latency test (load while testing)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: null
+  tests:
+    present: {measured: true, load: rest, way: threads}
+    absent: {measured: true, load: stress, way: threads}

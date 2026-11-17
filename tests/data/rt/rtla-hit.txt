@@ -1,0 +1,17 @@
+                                     Timer Latency                                                                                       
+  0 00:00:02   |          IRQ Timer Latency (us)        |         Thread Timer Latency (us)      |    Ret user Timer Latency (us)
+CPU COUNT      |      cur       min       avg       max |      cur       min       avg       max |      cur       min       avg       max
+  3 #29        |        0         0         0         0 |        3         2         3         9 |       12         4         5        12
+---------------|----------------------------------------|----------------------------------------|---------------------------------------
+ALL #29     e0 |                  0         0         0 |                  2         3         9 |                  4         5        12
+rtla timerlat hit stop tracing
+## CPU 3 hit stop tracing, analyzing it ##
+  IRQ handler delay:                                         0.05 us (0.41 %)
+  IRQ latency:                                               0.53 us
+  Timerlat IRQ duration:                                     1.09 us (9.04 %)
+  Blocking thread:                                           0.80 us (6.68 %)
+                       swapper/3:0                           0.80 us
+------------------------------------------------------------------------
+  Thread latency:                                           12.03 us (100%)
+
+Max timerlat IRQ latency from idle: 0.55 us in cpu 3

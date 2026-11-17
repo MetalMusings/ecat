@@ -2311,7 +2311,7 @@ ecatsetup --report --ini <machine>.ini
 ecatsetup --capture --esi <ESI folder>
 ecatsetup --response ~/.local/state/ecatsetup/responses/<file>.samples [--ini <machine>.ini]
 ecatsetup --from-capture ecat-capture-<time>.tar.gz --diagnose
-ecatsetup --rt-check <machine>.ini [--rt-seconds 900] [--rt-load stress] [--rt-twice]
+ecatsetup --rt-check <machine>.ini [--rt-seconds 900] [--rt-load stress] [--rt-twice] [--rt-root]
 ecatsetup --from-run ~/.local/state/ecatsetup/rt-runs/<file>.json
 ecatsetup --apply ethercat.yaml --ini <machine>.ini
 ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
@@ -2356,19 +2356,33 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   cycle: with LinuxCNC running, beside it (`timedelta` and `sampler` put
   first into its threads and taken out again at the end; nothing that talks
   to your I/O card); otherwise in `halrun` with the INI's threads alone
-  (`--rt-way threads|attach|inventory` chooses). It prints the spread
-  (99 % and 99.99 % of the cycles, the largest), the cycles over 20, 50 and
-  100 us with what the length of the run can say ("none in 15 min: fewer
-  than 12 per hour"), and the period's budget: what is left of the period
-  after the start's spread and the thread's longest run, and how much of
-  that run is the I/O driver's. `--rt-load stress` runs `stress-ng`
+  (`--rt-way threads|attach|inventory` chooses). It prints how late the
+  threads started (the largest, and what 99.99 % of the cycles stay within),
+  the cycles over 20, 50 and 100 us with what the length of the run can say
+  ("none in 15 min: fewer than 12 per hour"), and the period's budget: what
+  is left of the period after the lateness and the thread's longest run, and
+  how much of that run is the I/O driver's. Beside it, counters of the
+  real-time CPU are read every 10 ms (interrupts, softirqs, idle states,
+  frequency, heat, ACPI events), and each late cycle is compared with them:
+  "11 of 12 spikes came with the SMI count growing (by chance 3 %)". With
+  `--rt-root` (sudo asks once) it also counts SMIs and runs `rtla timerlat`
+  (package `rtla`), whose own analysis of the first wake-up over 50 us is
+  shown. Then the **findings**: what the rule catalogue makes of the
+  inventory and the run, most to gain first, each with what was seen, why it
+  matters, what to do (the commands, or the kernel parameter), its risk and
+  cost, how to check it worked, how to undo it, where the knowledge comes
+  from, and whether we have seen it on our own computers. Nothing is changed:
+  the commands are for you to run (as root), one at a time, measuring again
+  after each. A late cycle that no rule explains is reported as such, with
+  the counter that came with it. `--rt-load stress` runs `stress-ng`
   meanwhile; `--rt-twice` measures twice and says how much the numbers
   move by chance, so that a later change is judged against that. Every run
   is saved in `~/.local/state/ecatsetup/rt-runs/`; `--from-run` shows one
   again. A running HAL that has `sampler` or `timedelta` loaded already
   cannot be measured beside (HAL loads a component once): measure the
-  threads only then. Analysis of the causes and changes to the computer
-  come in later steps (docs/development.md).
+  threads only then. The rules are data, in `ecatsetup/rtrules/*.yaml`;
+  your own go in `~/.config/ecatsetup/rtrules/` (a rule with the same `id`
+  replaces the shipped one; the format is at the top of `rtrules.py`).
 - Other options: `--mode` chooses the mode proposed for CiA 402 drives,
   `-p` limits the proposal to some slaves, `--json` prints it as JSON,
   `--transport` and `--interface` set the master's for `--write`.

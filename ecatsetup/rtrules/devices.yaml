@@ -1,0 +1,241 @@
+# Devices whose interrupts or power saving delay the real-time CPU.
+
+- id: irq-on-rt-cpu
+  title: "IRQ {item.irq} ({item.name}) is handled on the real-time CPU"
+  each: irqs
+  fallback: true
+  when: "item.on_rt and item.rate_rt >= 1 and not item.managed and not (ethercat and item.io_nic)"
+  evidence: "{item.rate_rt:.1f} per second on CPU {rt_cpus_text} (affinity {item.affinity_text})"
+  keys: ["irq:{item.irq}"]
+  gain: medium
+  cause: >
+    Each of these interrupts stops the real-time CPU for the time its handler
+    runs. No rule of the catalogue knows this source; the general action is to
+    move it to the other CPUs.
+  action:
+    kind: runtime
+    text: Move it to the other CPUs (for this boot; irqaffinity= makes the kernel start interrupts there).
+    commands: ["echo {nonrt_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+    risk: Low. If the write is refused, the interrupt is managed by the kernel (see isolcpus managed_irq).
+    cost: None.
+  effect: "IRQ {item.irq} no longer counts on the real-time CPU."
+  check: "The run's rate of IRQ {item.irq} on the real-time CPU, and the late maximum."
+  undo:
+    commands: ["echo {item.affinity_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+  source:
+    - text: The kernel's documentation, SMP IRQ affinity
+      url: https://docs.kernel.org/core-api/irq/irq-affinity.html
+  seen-here: "here 2026-11-16: the network card's interrupts and lost cycles (the opposite case: see ethercat-nic-irq-cpu)"
+  tests:
+    present:
+      irqs: [{irq: "40", name: "xyz", on_rt: true, managed: false, rate_rt: 40, affinity_text: "3", io_nic: false}]
+    absent:
+      irqs: [{irq: "40", name: "xyz", on_rt: false, managed: false, rate_rt: 40, affinity_text: "0-2", io_nic: false}]
+
+- id: usb-irq-on-rt-cpu
+  title: "The USB controller's interrupt (IRQ {item.irq}) is handled on the real-time CPU"
+  each: irqs
+  when: "item.on_rt and re(item.name, 'xhci|ehci|ohci|uhci') and item.rate_rt >= 1 and not item.managed"
+  evidence: "{item.name}: {item.rate_rt:.0f} per second on CPU {rt_cpus_text}"
+  keys: ["irq:{item.irq}"]
+  gain: medium
+  cause: >
+    The mouse, the keyboard, a touch screen and a USB pendant interrupt for
+    every movement; in use these come in bursts while the machine runs.
+  action:
+    kind: runtime
+    text: Move the USB controller's interrupt to the other CPUs.
+    commands: ["echo {nonrt_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+    risk: Low.
+    cost: None.
+  effect: Mouse and keyboard no longer delay the thread.
+  check: The late maximum measured while the computer is used (attach, moving the mouse).
+  undo:
+    commands: ["echo {item.affinity_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+  source:
+    - text: The kernel's documentation, SMP IRQ affinity
+      url: https://docs.kernel.org/core-api/irq/irq-affinity.html
+  seen-here: "here 2026-11-16: lost cycles came with the GUI and the mouse in use"
+  tests:
+    present:
+      irqs: [{irq: "125", name: "xhci_hcd", on_rt: true, managed: false, rate_rt: 120, affinity_text: "3"}]
+    absent:
+      irqs: [{irq: "125", name: "xhci_hcd", on_rt: false, managed: false, rate_rt: 120, affinity_text: "0-2"}]
+
+- id: wireless-irq-on-rt-cpu
+  title: "A wireless card's interrupt (IRQ {item.irq}, {item.name}) is handled on the real-time CPU"
+  each: irqs
+  when: "item.on_rt and re(item.name, 'iwlwifi|ath[0-9]|ath1|rtw|mt7|brcm|btusb|wlan|wlp|wlx') and item.rate_rt >= 1 and not item.managed"
+  evidence: "{item.name}: {item.rate_rt:.0f} per second on CPU {rt_cpus_text}"
+  keys: ["irq:{item.irq}"]
+  gain: medium
+  cause: >
+    WiFi and Bluetooth drivers do much of their work in interrupts and come in
+    bursts (scans, power saving).
+  action:
+    kind: runtime
+    text: Move it to the other CPUs; better still, use wired Ethernet and switch the radio off while the machine runs.
+    commands: ["echo {nonrt_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+    risk: Low.
+    cost: None.
+  effect: The radio no longer delays the thread.
+  check: The late maximum while the computer is used.
+  undo:
+    commands: ["echo {item.affinity_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+  source:
+    - text: The kernel's documentation, SMP IRQ affinity
+      url: https://docs.kernel.org/core-api/irq/irq-affinity.html
+  seen-here: null
+  tests:
+    present:
+      irqs: [{irq: "150", name: "iwlwifi", on_rt: true, managed: false, rate_rt: 30, affinity_text: "3"}]
+    absent:
+      irqs: [{irq: "150", name: "iwlwifi", on_rt: true, managed: false, rate_rt: 0, affinity_text: "3"}]
+
+- id: acpi-gpe-storm
+  title: "ACPI GPE {top_gpe.name} fires {top_gpe.rate:.0f} times a second"
+  when: "top_gpe and top_gpe.rate >= 5 and (gpe_suspect or not measured or late_max_us > 50)"
+  evidence: "{top_gpe.name}: {top_gpe.count} since boot, {top_gpe.rate:.1f} per second"
+  keys: ["gpe:", "irq:9"]
+  gain: high
+  cause: >
+    A general purpose event goes through the ACPI interrupt (SCI) and runs the
+    BIOS's ACPI code; a GPE that fires all the time (a sensor, an embedded
+    controller) stops a CPU for a long time each time.
+  action:
+    kind: runtime
+    text: >
+      Switch that GPE off for this boot. If it helps, keep it off with the
+      kernel parameter acpi_mask_gpe. Check that nothing you use (a lid, a
+      power button, a temperature alarm) stops working.
+    commands: ["echo disable > /sys/firmware/acpi/interrupts/{top_gpe.name}"]
+    kernel-param: "acpi_mask_gpe=0x{top_gpe.number}"
+    risk: Medium; the event's function (often a laptop's lid, battery or a sensor) is lost.
+    cost: None.
+  effect: The ACPI interrupt stops; its spikes go.
+  check: The ACPI GPE count and the late maximum.
+  undo:
+    commands: ["echo enable > /sys/firmware/acpi/interrupts/{top_gpe.name}"]
+  source:
+    - text: The kernel's parameters (acpi_mask_gpe)
+      url: https://docs.kernel.org/admin-guide/kernel-parameters.html
+    - text: The kernel's documentation, ACPI interrupts in sysfs (gpeXX enable/disable)
+      url: https://docs.kernel.org/admin-guide/acpi/index.html
+  seen-here: "turner 2026-11-12: ~300 us spikes, fixed by acpi_mask_gpe=0x6F"
+  tests:
+    present:
+      top_gpe: {name: gpe6F, number: "6F", count: 50000, rate: 40}
+      measured: true
+      late_max_us: 300
+    absent:
+      top_gpe: {name: gpe6D, number: "6D", count: 36, rate: 0.0}
+
+- id: i915-display-power
+  title: The Intel graphics' display power states may stop the CPU
+  when: "'i915' in graphics and cmd['i915.enable_dc'] != '0' and (not measured or late_max_us > 50)"
+  evidence: "graphics driver i915, i915.enable_dc not set to 0"
+  keys: ["irq:i915"]
+  gain: medium
+  cause: >
+    The display's power-saving states (DC states) on Intel graphics have been
+    seen to stop the processor for hundreds of microseconds when entered or
+    left.
+  action:
+    kind: permanent
+    text: Add i915.enable_dc=0 to the kernel's command line, run update-grub and restart.
+    kernel-param: "i915.enable_dc=0"
+    risk: Low.
+    cost: A restart; slightly more power for the display.
+  effect: The large spikes that came with the display go.
+  check: The late maximum while the computer is used (screen on, GUI running).
+  undo:
+    text: &kparam_undo >
+      Remove the parameter from GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub,
+      run update-grub and restart. If the computer does not start, press e in
+      the GRUB menu and delete it from the line that starts with linux.
+  source:
+    - text: "The i915 driver's module parameter enable_dc (modinfo i915)"
+  seen-here: "turner 2026-11-12: with acpi_mask_gpe, fixed ~300 us spikes"
+  tests:
+    present: {graphics: [i915], cmd: {}, measured: true, late_max_us: 200}
+    absent: {graphics: [i915], cmd: {i915.enable_dc: "0"}, measured: true, late_max_us: 200}
+
+- id: sound-power-save
+  title: The sound card saves power (snd_hda_intel power_save = {snd_power_save} s)
+  when: "snd_power_save is not None and snd_power_save > 0 and measured and late_max_us > 20"
+  evidence: "/sys/module/snd_hda_intel/parameters/power_save = {snd_power_save}"
+  gain: low
+  cause: >
+    The HDA sound card is switched off after a few idle seconds and on again
+    for any sound; both take long register accesses.
+  action:
+    kind: runtime
+    text: Switch it off for this boot (options snd_hda_intel power_save=0 in /etc/modprobe.d/ keeps it so).
+    commands: ["echo 0 > /sys/module/snd_hda_intel/parameters/power_save"]
+    risk: None.
+    cost: Under a watt.
+  effect: No power-up of the sound card during a run.
+  check: The late maximum at rest.
+  undo:
+    commands: ["echo {snd_power_save} > /sys/module/snd_hda_intel/parameters/power_save"]
+  source:
+    - text: The kernel's documentation, HD-Audio (power_save)
+      url: https://docs.kernel.org/sound/hd-audio/notes.html
+  seen-here: null
+  tests:
+    present: {snd_power_save: 10, measured: true, late_max_us: 40}
+    absent: {snd_power_save: 0, measured: true, late_max_us: 40}
+
+- id: nvme-apst
+  title: The NVMe disk saves power on its own (APST)
+  when: "nvme and nvme.apst != 0 and measured and late_max_us > 50"
+  evidence: "NVMe {nvme.disks}, default_ps_max_latency_us = {nvme.apst}"
+  gain: low
+  cause: >
+    With autonomous power state transitions the disk falls asleep and wakes up
+    by itself; some disks and boards stall the bus when they do.
+  action:
+    kind: permanent
+    text: Add nvme_core.default_ps_max_latency_us=0, run update-grub and restart.
+    kernel-param: "nvme_core.default_ps_max_latency_us=0"
+    risk: Low.
+    cost: A restart; the disk uses more power.
+  effect: No stalls when the disk wakes.
+  check: The late maximum with disk work (stress-ng's io workers).
+  undo:
+    text: *kparam_undo
+  source:
+    - text: The kernel's parameters (nvme_core.default_ps_max_latency_us)
+      url: https://docs.kernel.org/admin-guide/kernel-parameters.html
+  seen-here: null
+  tests:
+    present: {nvme: {disks: [nvme0], apst: 100000}, measured: true, late_max_us: 80}
+    absent: {nvme: null, measured: true, late_max_us: 80}
+
+- id: pcie-aspm
+  title: PCIe links save power (ASPM policy {aspm_policy})
+  when: "aspm_policy in ['default', 'powersave', 'powersupersave'] and (io_nics or (measured and late_max_us > 50))"
+  evidence: "/sys/module/pcie_aspm/parameters/policy = {aspm_policy}"
+  gain: low
+  cause: >
+    With ASPM a PCIe link sleeps when idle and the first access after it waits
+    for the link to wake (microseconds), which hits a network card used for the
+    I/O most.
+  action:
+    kind: runtime
+    text: Use the performance policy for this boot; pcie_aspm.policy=performance keeps it so.
+    commands: ["echo performance > /sys/module/pcie_aspm/parameters/policy"]
+    kernel-param: "pcie_aspm.policy=performance"
+    risk: Low; the BIOS may refuse it (the write then fails).
+    cost: A little more power.
+  effect: No link wake-up in the I/O's timing.
+  check: The I/O function's longest run, the late maximum.
+  undo:
+    commands: ["echo {aspm_policy} > /sys/module/pcie_aspm/parameters/policy"]
+  source:
+    - text: The kernel's parameters (pcie_aspm, pcie_aspm.policy)
+      url: https://docs.kernel.org/admin-guide/kernel-parameters.html
+  seen-here: "here: pcie_aspm.policy=performance on the command line"
+  tests:
+    present: {aspm_policy: default, io_nics: [eno1]}
+    absent: {aspm_policy: performance, io_nics: [eno1]}

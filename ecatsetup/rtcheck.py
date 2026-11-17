@@ -18,6 +18,7 @@ halsampler's output is read as it comes and kept as a histogram (1 us bins),
 so that a fast base thread over a long run takes little memory.
 """
 
+import collections
 import json
 import math
 import os
@@ -278,19 +279,18 @@ def ini_threads(ini):
     return out
 
 
-def io_kinds(ini):
-    """What the configuration's I/O is, from the modules its HAL files load."""
+def hal_loads(ini):
+    """The loadrt lines of the configuration's HAL files, as token lists."""
     from . import integrate
-    mods = set()
     try:
         files = integrate.user_hal_files(ini)
     except OSError:
         files = []
     d = os.path.dirname(os.path.abspath(ini))
-    for name in ("ethercat-load.hal",):
-        p = os.path.join(d, name)
-        if os.path.exists(p):
-            files.append(p)
+    p = os.path.join(d, "ethercat-load.hal")
+    if os.path.exists(p):
+        files.append(p)
+    out = []
     for path in files:
         try:
             text = integrate.read_hal(path, ini)
@@ -298,9 +298,73 @@ def io_kinds(ini):
             continue
         for _, _, tok in integrate.statements(text):
             if tok[0] == "loadrt" and len(tok) > 1:
-                mods.add(tok[1])
+                out.append(tok)
+    return out, bool(files)
+
+
+def io_kinds(ini):
+    """What the configuration's I/O is, from the modules its HAL files load."""
+    loads, any_files = hal_loads(ini)
+    mods = {t[1] for t in loads}
     kinds = [label for mod, label in IO_MODULES if label and mod in mods]
-    return kinds or (["none found (a simulated configuration?)"] if files else [])
+    return kinds or (["none found (a simulated configuration?)"] if any_files else [])
+
+
+def _ip(text):
+    try:
+        parts = [int(x) for x in text.split(".")]
+        if len(parts) == 4 and all(0 <= x < 256 for x in parts):
+            return parts[0] << 24 | parts[1] << 16 | parts[2] << 8 | parts[3]
+    except ValueError:
+        pass
+    return None
+
+
+def routes(roots):
+    """/proc/net/route -> [(iface, net, mask)] as ints, and the default route's iface."""
+    out, default = [], None
+    for line in (roots.p("net", "route") or "").splitlines()[1:]:
+        f = line.split()
+        if len(f) < 8:
+            continue
+        try:
+            dst = int.from_bytes(bytes.fromhex(f[1]), "little")
+            mask = int.from_bytes(bytes.fromhex(f[7]), "little")
+        except ValueError:
+            continue
+        if dst == 0 and mask == 0:
+            default = default or f[0]
+        else:
+            out.append((f[0], dst, mask))
+    return out, default
+
+
+def io_nics(ini, roots):
+    """The network cards the I/O uses: ecat's master interface, or the one
+    whose subnet holds hm2_eth's board_ip (192.168.1.121 by default)."""
+    loads, _ = hal_loads(ini)
+    d = os.path.dirname(os.path.abspath(ini))
+    out = []
+    rts, _ = routes(roots)
+    for tok in loads:
+        args = dict(x.split("=", 1) for x in tok[2:] if "=" in x)
+        if tok[1] == "ecat":
+            path = os.path.join(d, args.get("config", "ethercat.yaml"))
+            try:
+                import yaml
+                with open(path) as f:
+                    iface = ((yaml.safe_load(f) or {}).get("master") or {}).get("interface")
+                if iface:
+                    out.append(iface)
+            except (OSError, ValueError, AttributeError, ImportError):
+                pass
+        elif tok[1] == "hm2_eth":
+            for ip in args.get("board_ip", "192.168.1.121").strip('"').split(","):
+                n = _ip(ip.strip())
+                for iface, net, mask in rts:
+                    if n is not None and mask and n & mask == net:
+                        out.append(iface)
+    return sorted(set(out))
 
 
 def inventory(roots=None, ini=None):
@@ -521,6 +585,48 @@ def inventory(roots=None, ini=None):
         inv.add("battery", "On battery", "yes" if battery else "no", "/sys/class/power_supply/*/online",
                 data=battery)
 
+    vendor = ""
+    for line in (r.p("cpuinfo") or "").splitlines():
+        if line.startswith("vendor_id"):
+            v = line.split(":", 1)[1].strip()
+            vendor = {"GenuineIntel": "intel", "AuthenticAMD": "amd"}.get(v, v.lower())
+            break
+    inv.data["cpu_vendor"] = vendor
+    try:
+        inv.data["uptime"] = float((r.p("uptime") or "0").split()[0])
+    except ValueError:
+        inv.data["uptime"] = 0.0
+    gpes = gpe_counts(r)
+    inv.add("gpes", "ACPI GPEs that have fired", ", ".join(
+        "%s %d" % kv for kv in sorted(gpes.items(), key=lambda x: -x[1])[:6]) or "none",
+        "/sys/firmware/acpi/interrupts/gpe*", data=gpes)
+
+    def num(text):
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            return None
+    sysctl = {"vm.stat_interval": num(r.p("sys", "vm", "stat_interval")),
+              "kernel.timer_migration": num(r.p("sys", "kernel", "timer_migration"))}
+    thp = re.search(r"\[(\w+)\]", r.s("kernel", "mm", "transparent_hugepage", "enabled") or "")
+    sysctl["thp"] = thp.group(1) if thp else None
+    inv.add("sysctl", "vm.stat_interval, timer_migration, THP", "%s, %s, %s" % (
+        sysctl["vm.stat_interval"], sysctl["kernel.timer_migration"], sysctl["thp"] or "not built in"),
+        "/proc/sys/vm/stat_interval, /proc/sys/kernel/timer_migration, "
+        "/sys/kernel/mm/transparent_hugepage/enabled", data=sysctl)
+    inv.data["modules"] = sorted(line.split()[0] for line in (r.p("modules") or "").splitlines() if line)
+    ps = r.s("module", "snd_hda_intel", "parameters", "power_save")
+    if ps is not None:
+        inv.add("snd_power_save", "Sound card power saving (snd_hda_intel)", ps + " s" if ps != "0" else "off",
+                "/sys/module/snd_hda_intel/parameters/power_save", data=num(ps))
+    nvme = [n for n in r.ls(S, "class", "nvme")]
+    if nvme:
+        apst = r.s("module", "nvme_core", "parameters", "default_ps_max_latency_us")
+        inv.add("nvme", "NVMe disks", "%s (APST max latency %s us)" % (", ".join(nvme), apst),
+                "/sys/class/nvme, /sys/module/nvme_core/parameters", data={"disks": nvme, "apst": num(apst)})
+    _, default = routes(r)
+    inv.add("default_route", "Default route (the LAN)", default or "none", "/proc/net/route", data=default)
+
     if ini:
         th = ini_threads(ini)
         inv.add("threads", "LinuxCNC threads (INI)",
@@ -528,6 +634,9 @@ def inventory(roots=None, ini=None):
                 "[EMCMOT] of %s" % ini, data=th)
         io = io_kinds(ini)
         inv.add("io", "I/O", ", ".join(io) or "?", "loadrt lines of the INI's HAL files", data=io)
+        nics_io = io_nics(ini, r)
+        inv.add("io_nics", "The I/O's network card", ", ".join(nics_io) or "none or not known",
+                "ethercat.yaml master.interface, hm2_eth board_ip against /proc/net/route", data=nics_io)
     rts = rt_threads(r)
     if rts:
         inv.add("rt_cpu", "Real-time threads run on",
@@ -588,9 +697,22 @@ def seconds_needed(per_hour, conf=0.95):
 class CycleStats:
     """Every cycle's time since the one before (timedelta.out), kept as a
     histogram of the error against the period in 1 us bins, with the worst
-    cycles and the counts over thresholds."""
+    cycles and the counts over thresholds.
+
+    The deltas also give each cycle's time: their sum since the first sample,
+    on CLOCK_MONOTONIC (rtapi_get_time in uspace), the clock of the poller's
+    time stamps. And they give how LATE each cycle started: the thread wakes
+    on a grid (the previous wake-up time plus the period), so the sum of
+    (delta - period) is the lateness plus a constant; against its smallest
+    value in the LATE_WINDOW before (the least late cycle), it is the
+    lateness. A PLL that moves the period (ecat's servo-thread-follows-ref-
+    clock) shifts the grid by a few ns per cycle: over 50 ms that is below
+    a microsecond. A delay longer than the window is under-counted."""
 
     WORST = 20
+    LATE_WINDOW_NS = 50000000
+    SPIKE_NS = 10000             # cycles kept for the per-spike analysis: late or moved > 10 us
+    MAX_EVENTS = 20000
 
     def __init__(self, thread, period):
         self.thread = thread
@@ -605,6 +727,17 @@ class CycleStats:
         self.overruns = 0       # halsampler's "overrun" lines: samples lost
         self.started = None
         self.ended = None
+        # time line and lateness
+        self.t = None           # ns of the latest sample since the first one (None: lost)
+        self.offset = 0
+        self.window = collections.deque()
+        self.win_n = max(8, self.LATE_WINDOW_NS // period)
+        self.late_hist = {}     # lateness in whole us -> count
+        self.late_max = 0
+        self.late_n = 0
+        self.events = []        # [(t ns since the first sample or None, error ns, late ns)]
+        self.events_dropped = 0
+        self.anchor = None      # (monotonic ns of the first sample, uncertainty ns)
 
     def add(self, delta):
         """One cycle: delta = ns since the previous run (0 = first, skipped)."""
@@ -630,6 +763,36 @@ class CycleStats:
             self.worst.append((a, e, idx))
             self.worst.sort(key=lambda x: -x[0])
             del self.worst[self.WORST:]
+        # time and lateness
+        if idx == 0:
+            self.t = 0
+        elif self.t is not None:
+            self.t += delta
+        self.offset += e
+        w = self.window
+        while w and w[-1][1] >= self.offset:
+            w.pop()
+        w.append((idx, self.offset))
+        while w[0][0] <= idx - self.win_n:
+            w.popleft()
+        late = self.offset - w[0][1]
+        lb = late // 1000
+        self.late_hist[lb] = self.late_hist.get(lb, 0) + 1
+        self.late_n += 1
+        if late > self.late_max:
+            self.late_max = late
+        if late > self.SPIKE_NS or a > self.SPIKE_NS:
+            if len(self.events) < self.MAX_EVENTS:
+                self.events.append((self.t, e, late))
+            else:
+                self.events_dropped += 1
+
+    def lost(self):
+        """Samples were lost (sampler full): no time line from here on, and
+        the lateness starts again."""
+        self.overruns += 1
+        self.t = None
+        self.window.clear()
 
     def feed(self, text):
         """halsampler's lines (a value, or "<n> <value>" with -t)."""
@@ -638,7 +801,7 @@ class CycleStats:
             if not f:
                 continue
             if f[0].startswith("overrun"):
-                self.overruns += 1
+                self.lost()
                 continue
             try:
                 self.add(int(f[-1]))
@@ -649,6 +812,18 @@ class CycleStats:
     def seconds(self):
         return self.n * self.period / 1e9
 
+    @staticmethod
+    def _percentile(hist, n, q):
+        if not n:
+            return None
+        need = q * n
+        s = 0
+        for k in sorted(hist):
+            s += hist[k]
+            if s >= need:
+                return k + 1
+        return max(hist) + 1
+
     def abs_percentile(self, q):
         """The |error| (us) that q of the cycles stay within (from the
         histogram: an upper bound good to 1 us)."""
@@ -656,15 +831,12 @@ class CycleStats:
             return None
         ab = {}
         for b, c in self.hist.items():
-            k = b + 1 if b >= 0 else -b       # |e| < k us
+            k = b if b >= 0 else -b - 1      # |e| < k + 1 us
             ab[k] = ab.get(k, 0) + c
-        need = q * self.n
-        s = 0
-        for k in sorted(ab):
-            s += ab[k]
-            if s >= need:
-                return k
-        return max(ab)
+        return self._percentile(ab, self.n, q)
+
+    def late_percentile(self, q):
+        return self._percentile(self.late_hist, self.late_n, q)
 
     def summary(self):
         if not self.n:
@@ -676,25 +848,37 @@ class CycleStats:
             "mean_us": self.sum / self.n / 1000.0,
             "p99_us": self.abs_percentile(0.99), "p9999_us": self.abs_percentile(0.9999),
             "max_abs_us": max(abs(self.min), abs(self.max)) / 1000.0,
+            "late_p99_us": self.late_percentile(0.99), "late_p9999_us": self.late_percentile(0.9999),
+            "late_max_us": self.late_max / 1000.0,
             "over": {str(t): c for t, c in self.over.items()},
             "over_per_hour": {str(t): c / hours for t, c in self.over.items()},
             "overruns": self.overruns,
         }
 
-    def to_json(self):
+    def to_json(self, events=2000):
+        ev = sorted(self.events, key=lambda x: -max(x[2], abs(x[1])))[:events]
         return {"thread": self.thread, "period": self.period, "n": self.n,
                 "hist": {str(k): v for k, v in sorted(self.hist.items())},
+                "late_hist": {str(k): v for k, v in sorted(self.late_hist.items())},
+                "late_max": self.late_max, "late_n": self.late_n,
                 "min": self.min, "max": self.max, "sum": self.sum,
                 "worst": self.worst, "over": {str(k): v for k, v in self.over.items()},
-                "overruns": self.overruns}
+                "overruns": self.overruns, "anchor": self.anchor,
+                "events": sorted(ev, key=lambda x: (x[0] is None, x[0] or 0)),
+                "events_dropped": self.events_dropped + max(0, len(self.events) - events)}
 
     @classmethod
     def from_json(cls, d):
         s = cls(d["thread"], d["period"])
         s.n, s.min, s.max, s.sum, s.overruns = d["n"], d["min"], d["max"], d["sum"], d.get("overruns", 0)
         s.hist = {int(k): v for k, v in d["hist"].items()}
+        s.late_hist = {int(k): v for k, v in d.get("late_hist", {}).items()}
+        s.late_max, s.late_n = d.get("late_max", 0), d.get("late_n", 0)
         s.worst = [tuple(x) for x in d.get("worst", [])]
         s.over = {int(k): v for k, v in d["over"].items()}
+        s.anchor = tuple(d["anchor"]) if d.get("anchor") else None
+        s.events = [tuple(x) for x in d.get("events", [])]
+        s.events_dropped = d.get("events_dropped", 0)
         return s
 
 
@@ -729,7 +913,7 @@ def number_text(x):
 
 
 # comparing two runs: the metrics, and how much they may differ by chance
-COMPARED = ("p99_us", "p9999_us", "max_abs_us")
+COMPARED = ("late_p9999_us", "late_max_us", "p99_us", "p9999_us", "max_abs_us")
 
 
 def noise(a, b):
@@ -770,9 +954,10 @@ IO_FUNCTIONS = re.compile(r"^(ecat\.|lcec\.|hm2_|hostmot2|parport\.|hal_parport|
 
 
 class Budget:
-    def __init__(self, thread, period, late_us, thread_us, io_us, io_funcs):
+    def __init__(self, thread, period, late_us, thread_us, io_us, io_funcs, moved_us=None):
         self.thread, self.period = thread, period
         self.late_us, self.thread_us, self.io_us, self.io_funcs = late_us, thread_us, io_us, io_funcs
+        self.moved_us = moved_us
 
     @property
     def period_us(self):
@@ -800,8 +985,8 @@ class Budget:
         lines = ["%s, period %s: %.0f us left (%.0f %%), %s"
                  % (self.thread, period_text(self.period), self.left_us, 100 * self.share_left,
                     self.verdict())]
-        lines.append("  the start moved by at most %.1f us from one cycle to the next (timedelta; the "
-                     "absolute wake-up latency is not measured yet)" % self.late_us)
+        lines.append("  started at most %.1f us late (against the least late cycle of the 50 ms "
+                     "before it)" % self.late_us)
         if self.thread_us is None:
             lines.append("  the thread's run time: not measured")
         else:
@@ -813,7 +998,7 @@ class Budget:
     def to_json(self):
         return {"thread": self.thread, "period": self.period, "late_us": self.late_us,
                 "thread_us": self.thread_us, "io_us": self.io_us, "io_funcs": self.io_funcs,
-                "left_us": self.left_us, "verdict": self.verdict()}
+                "moved_us": self.moved_us, "left_us": self.left_us, "verdict": self.verdict()}
 
 
 def budget(stats, times):
@@ -824,8 +1009,8 @@ def budget(stats, times):
         return None
     t = times.get(stats.thread) or {}
     io = {f: v for f, v in (t.get("funcs") or {}).items() if IO_FUNCTIONS.match(f) and v is not None}
-    return Budget(stats.thread, stats.period, s["max_abs_us"], t.get("tmax_us"),
-                  sum(io.values()) if io else None, sorted(io))
+    return Budget(stats.thread, stats.period, s["late_max_us"], t.get("tmax_us"),
+                  sum(io.values()) if io else None, sorted(io), s["max_abs_us"])
 
 
 # --------------------------------------------------------------------------
@@ -905,11 +1090,14 @@ def td_name(thread):
 
 def attach_commands(threads):
     """halcmd lines adding a timedelta first in each thread and a sampler
-    channel per thread recording it; sampler channel i = threads[i]."""
+    channel per thread recording it; sampler channel i = threads[i]. The
+    channels start disabled: Recorder enables them once halsampler reads,
+    and the moment it does so is the time of each channel's first sample."""
     names = [td_name(t) for t in threads]
     cmds = ["loadrt timedelta names=%s" % ",".join(names),
             "loadrt sampler depth=%s cfg=%s" % (",".join([str(SAMPLER_DEPTH)] * len(threads)),
                                                 ",".join(["s"] * len(threads)))]
+    cmds += ["setp sampler.%d.enable 0" % i for i in range(len(threads))]
     for i, (t, n) in enumerate(zip(threads, names)):
         cmds += ["addf %s %s 1" % (n, t),
                  "addf sampler.%d %s" % (i, t),
@@ -954,6 +1142,225 @@ def hal_running(run=None):
 
 
 # --------------------------------------------------------------------------
+# the poller's data, and spikes against it
+
+class PollData:
+    """The poller's file: per key the times its counter grew (and by how
+    much), the times of all polls, and what it could not read."""
+
+    def __init__(self):
+        self.interval = 10000000
+        self.cpus = []
+        self.labels = {}        # key -> label
+        self.times = []         # every poll's time, ns
+        self.changes = {}       # key -> [(t, delta)]
+        self.values = {}        # key -> [(t, value)]
+        self.errors = []
+
+    @classmethod
+    def parse(cls, text):
+        p = cls()
+        idx = {}
+        for line in text.splitlines():
+            if line.startswith("# rtpoll"):
+                f = line.split()
+                p.interval = int(f[3])
+                p.cpus = cpu_list(f[4]) if len(f) > 4 else []
+            elif line.startswith("K "):
+                f = line.split(None, 3)
+                idx[f[1]] = f[2]
+                p.labels[f[2]] = f[3] if len(f) > 3 else f[2]
+            elif line.startswith("E "):
+                p.errors.append(line[2:])
+            elif line[:1].isdigit():
+                f = line.split()
+                t = int(f[0])
+                p.times.append(t)
+                for x in f[1:]:
+                    if ":" in x:
+                        i, d = x.split(":", 1)
+                        p.changes.setdefault(idx.get(i, i), []).append((t, int(d)))
+                    elif "=" in x:
+                        i, v = x.split("=", 1)
+                        p.values.setdefault(idx.get(i, i), []).append((t, int(v)))
+        return p
+
+    @property
+    def seconds(self):
+        return (self.times[-1] - self.times[0]) / 1e9 if len(self.times) > 1 else 0.0
+
+    def totals(self):
+        """{key: (label, total growth, per second)} of the counters that grew."""
+        s = self.seconds
+        return {k: (self.labels.get(k, k), sum(d for _, d in v), sum(d for _, d in v) / s if s else 0.0)
+                for k, v in self.changes.items()}
+
+    def summary(self):
+        tot = self.totals()
+        return {"interval": self.interval, "cpus": self.cpus, "seconds": self.seconds, "errors": self.errors,
+                "polls": len(self.times),
+                "counters": {k: {"label": l, "total": t, "per_s": r} for k, (l, t, r) in tot.items()},
+                "values": {k: {"label": self.labels.get(k, k), "changes": len(v) - 1,
+                               "min": min(x for _, x in v), "max": max(x for _, x in v)}
+                           for k, v in self.values.items() if v}}
+
+
+def spikes(stats, threshold_ns, merge_ns=2000000):
+    """The cycles over threshold_ns (lateness, else the cycle-to-cycle move)
+    with a time, bursts within merge_ns taken as one: [(t, late, err)]."""
+    out = []
+    last = None
+    for t, e, late in stats.events:
+        if t is None or max(late, abs(e)) <= threshold_ns:
+            continue
+        if out and t - last <= merge_ns:
+            last = t
+            if max(late, abs(e)) > max(out[-1][1], abs(out[-1][2])):
+                out[-1] = (out[-1][0], late, e)
+            continue
+        last = t
+        out.append((t, late, e))
+    return out
+
+
+def spike_threshold(stats):
+    """Cycles worth explaining: later than 10 us and than 99.9 % of them."""
+    p = stats.late_percentile(0.999) or 0
+    return max(CycleStats.SPIKE_NS, p * 1000)
+
+
+def correlate(stats, poll, threshold_ns=None):
+    """Which counters grew with the spikes: for each, in how many spikes'
+    time windows it grew, and how many to expect by chance from how often it
+    grows in any window. The window is the anchor's uncertainty plus one
+    poll interval each way."""
+    if stats.anchor is None or not poll.times:
+        return None
+    t0, unc = stats.anchor
+    thr = spike_threshold(stats) if threshold_ns is None else threshold_ns
+    sp = spikes(stats, thr)
+    out = {"threshold_us": thr / 1000.0, "spikes": len(sp), "window_ms": 0.0, "counters": []}
+    if not sp:
+        return out
+    iv = poll.interval
+    # a poll at s counts what grew since the poll before: a spike at t shows
+    # in the first poll after it
+    lo_w, hi_w = unc, unc + iv
+    out["window_ms"] = (lo_w + hi_w) / 1e6
+    times = poll.times
+    n_polls = len(times)
+    import bisect
+    span_polls = max(1, (lo_w + hi_w) // max(1, iv))
+    for key, ch in list(poll.changes.items()) + [(k, [(t, 1) for t, _ in v[1:]]) for k, v in poll.values.items()]:
+        ts = [t for t, _ in ch]
+        p = min(1.0, len(ts) / n_polls)
+        expected = 1 - (1 - p) ** span_polls
+        hit = 0
+        for t, late, e in sp:
+            at = t0 + t
+            i = bisect.bisect_left(ts, at - lo_w)
+            if i < len(ts) and ts[i] <= at + hi_w:
+                hit += 1
+        if hit:
+            out["counters"].append({"key": key, "label": poll.labels.get(key, key), "with": hit,
+                                    "of": len(sp), "expected": expected,
+                                    "lift": (hit / len(sp)) / expected if expected > 0 else float("inf")})
+    out["counters"].sort(key=lambda c: (-c["with"], -min(c["lift"], 1e9)))
+    return out
+
+
+def strong(c, min_spikes=3):
+    """A correlation worth naming: in at least half the spikes (and
+    min_spikes of them), at least twice as often as by chance."""
+    return c["with"] >= min_spikes and c["with"] * 2 >= c["of"] and c["lift"] >= 2
+
+
+def correlation_text(corr, top=5):
+    if corr is None:
+        return ["  spikes not compared with the counters (no poller data)"]
+    if not corr["spikes"]:
+        return ["  no spikes over %.0f us to explain" % corr["threshold_us"]]
+    out = ["  %d spike(s) over %.0f us compared with the counters (window %.0f ms):" % (
+        corr["spikes"], corr["threshold_us"], corr["window_ms"])]
+    shown = 0
+    for c in corr["counters"]:
+        if shown >= top:
+            break
+        out.append("    %d of %d with %s (by chance about %.0f %%)%s" % (
+            c["with"], c["of"], c["label"], 100 * c["expected"], "  <- suspect" if strong(c) else ""))
+        shown += 1
+    if not corr["counters"]:
+        out.append("    no counter grew with them")
+    return out
+
+
+# --------------------------------------------------------------------------
+# root: the SMI count and rtla timerlat
+
+SUDO = ["sudo", "-n"]
+
+
+def can_sudo():
+    try:
+        return subprocess.run(SUDO + ["true"], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def parse_rtla(text):
+    """rtla timerlat top -q: per CPU the IRQ and thread latency maxima (us),
+    whether it stopped at its threshold, and its analysis of that spike."""
+    out = {"cpus": {}, "hit": "hit stop tracing" in (text or ""), "analysis": ""}
+    for line in (text or "").splitlines():
+        m = re.match(r"\s*(\d+)\s+#(\d+)\s*\|\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\|"
+                     r"\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)", line)
+        if m:
+            out["cpus"][m.group(1)] = {"count": int(m.group(2)), "irq_max_us": int(m.group(6)),
+                                       "thread_max_us": int(m.group(10))}
+    if out["hit"]:
+        i = text.index("hit stop tracing")
+        out["analysis"] = text[i:].split("\n", 1)[1].strip() if "\n" in text[i:] else ""
+        # the spike it stopped at is not in the table's maximum
+        m = re.search(r"CPU (\d+) hit stop tracing", text)
+        lat = re.search(r"Thread latency:\s*([\d.]+) us", text)
+        if m and lat:
+            c = out["cpus"].setdefault(m.group(1), {"count": 0, "irq_max_us": 0, "thread_max_us": 0})
+            c["thread_max_us"] = max(c["thread_max_us"], int(float(lat.group(1)) + 0.999))
+    return out
+
+
+def rtla_text(r):
+    if not r:
+        return []
+    if r.get("error"):
+        return ["rtla timerlat: %s" % r["error"]]
+    out = []
+    for c, v in sorted(r["cpus"].items()):
+        out.append("rtla timerlat on CPU %s: wake-up latency at most %d us (thread), %d us (IRQ), "
+                   "%d wake-ups" % (c, v["thread_max_us"], v["irq_max_us"], v["count"]))
+    if r["hit"]:
+        out.append("rtla stopped at the first wake-up over %s us; its analysis:" % r.get("threshold_us"))
+        out += ["  " + x for x in r["analysis"].splitlines()]
+    return out
+
+
+def gpe_counts(roots=None):
+    """{gpeXX: count} of the ACPI GPEs that have fired, from /sys/firmware."""
+    r = roots or Roots()
+    out = {}
+    for name in r.ls(r.sys, "firmware", "acpi", "interrupts"):
+        if re.fullmatch(r"gpe[0-9A-Fa-f]{2}", name):
+            v = r.s("firmware", "acpi", "interrupts", name)
+            try:
+                n = int((v or "0").split()[0])
+            except ValueError:
+                continue
+            if n:
+                out[name] = n
+    return out
+
+
+# --------------------------------------------------------------------------
 # a measurement
 
 class Recorder:
@@ -975,8 +1382,30 @@ class Recorder:
             t = threading.Thread(target=self._read, args=(p, st), daemon=True)
             t.start()
             self.readers.append(t)
-        for st in self.stats:
-            st.started = time.time()
+        time.sleep(0.2)          # halsampler attached before the first sample
+        # one halcmd that stays, so that a setp takes microseconds, not the
+        # milliseconds of starting halcmd: the time of each channel's first
+        # sample is known to within that and one period
+        hc = subprocess.Popen([_halcmd(), "-kf"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True, bufsize=1, env=lcnc_env.env())
+        try:
+            hc.stdin.write("getp sampler.0.enable\n")
+            hc.stdin.flush()
+            hc.stdout.readline()
+            for i, st in enumerate(self.stats):
+                st.started = time.time()
+                a = time.monotonic_ns()
+                hc.stdin.write("setp sampler.%d.enable 1\ngetp sampler.%d.enable\n" % (i, i))
+                hc.stdin.flush()
+                hc.stdout.readline()
+                b = time.monotonic_ns()
+                # the first sample comes at the thread's first run after the setp
+                lo, hi = a, b + st.period
+                st.anchor = ((lo + hi) // 2, (hi - lo) // 2)
+        finally:
+            hc.stdin.close()
+            hc.stdout.close()
+            hc.wait(10)
 
     @staticmethod
     def _read(p, st):
@@ -1000,7 +1429,6 @@ class Recorder:
                 p.kill()
         for t in self.readers:
             t.join(5)
-        self.errors = []
         for p, st in zip(self.procs, self.stats):
             err = p.stderr.read().strip() if p.stderr else ""
             if err and not st.n:
@@ -1032,64 +1460,102 @@ def stop_load(p):
             p.kill()
 
 
+POLLER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rtpoll.py")
+
+
 class Run:
     """One measurement: its way, load, length, the inventory it ran under,
-    the cycle statistics per thread, the HAL times and the budgets."""
+    the cycle statistics per thread, the HAL times and the budgets, the
+    poller's counters and the spikes against them, and as root rtla's
+    measurement and the SMI count."""
 
-    def __init__(self, way, load, seconds, inventory=None):
+    def __init__(self, way, load, seconds, inventory=None, root=False):
         self.way, self.load, self.seconds = way, load, seconds
         self.inventory = inventory
+        self.root = root
         self.stats = []
         self.times = {}
         self.times_before = {}
         self.started = None
         self.notes = []
         self.host = socket.gethostname()
+        self.rt_cpus = []
+        self.poll = None            # PollData.summary()
+        self.correlations = {}      # thread -> correlate()
+        self.rtla = None
+        self.smi_measured = False
+        self.gpe_rates = {}         # gpeXX -> per second during the run
+        self.poll_path = None
 
     def budgets(self):
         return [b for b in (budget(s, self.times) for s in self.stats) if b]
 
+    def counter_rate(self, key):
+        c = ((self.poll or {}).get("counters") or {}).get(key)
+        return c["per_s"] if c else 0.0
+
     def text(self):
-        out = ["%s, %s, %s%s" % (
+        out = ["%s, %s, %s%s%s" % (
             {"threads": "Threads only (halrun, no I/O)", "attach": "Beside the running HAL"}[self.way],
             "with load (stress-ng)" if self.load == "stress" else "at rest" if self.load == "rest"
             else "as the computer is used", duration_text(self.stats[0].seconds) if self.stats else "-",
-            "" if not self.started else ", " + time.strftime("%Y-%m-%d %H:%M", time.localtime(self.started)))]
+            "" if not self.started else ", " + time.strftime("%Y-%m-%d %H:%M", time.localtime(self.started)),
+            ", as root" if self.root else "")]
         for s in self.stats:
             m = s.summary()
             if not m["cycles"]:
                 out.append("%s: no cycles recorded" % s.thread)
                 continue
-            out.append("%s (%s): %d cycles, error %.1f .. %+.1f us, 99 %% within %d us, "
-                       "99.99 %% within %d us%s" % (
-                           s.thread, period_text(s.period), m["cycles"], m["min_us"], m["max_us"],
-                           m["p99_us"], m["p9999_us"],
+            out.append("%s (%s): %d cycles; late at most %.1f us (99.99 %% within %d us); moved %.1f .. "
+                       "%+.1f us from cycle to cycle%s" % (
+                           s.thread, period_text(s.period), m["cycles"], m["late_max_us"],
+                           m["late_p9999_us"], m["min_us"], m["max_us"],
                            ", %d samples lost (sampler full)" % m["overruns"] if m["overruns"] else ""))
             for t in (20, 50, 100):
                 if t * 1000 < s.period:
                     out.append("  " + claim_text(s, t))
+            if self.poll is not None or s.thread in self.correlations:
+                out += correlation_text(self.correlations.get(s.thread))
         for b in self.budgets():
             out.append(b.text())
+        out += rtla_text(self.rtla)
+        if self.poll is not None:
+            busy = sorted(((v["per_s"], v["label"]) for k, v in self.poll["counters"].items()
+                           if k.startswith(("irq:", "softirq:")) and v["per_s"] >= 1), reverse=True)
+            if busy:
+                out.append("On the real-time CPU%s %s: %s" % (
+                    "s" if len(self.rt_cpus) > 1 else "", list_text(self.rt_cpus),
+                    ", ".join("%s %s/s" % (l, number_text(r)) for r, l in busy[:8])))
+            if self.smi_measured:
+                out.append("SMIs during the run: %d" % ((self.poll["counters"].get("smi") or {}).get("total", 0)))
+            elif not self.root:
+                out.append("SMIs and rtla: not measured without sudo (--rt-root)")
+        for g, r in sorted(self.gpe_rates.items(), key=lambda x: -x[1]):
+            out.append("ACPI %s fired %s times a second" % (g, number_text(r)))
         for n in self.notes:
             out.append("Note: " + n)
         return "\n".join(out)
 
     def to_json(self):
-        return {"version": 1, "host": self.host, "way": self.way, "load": self.load,
-                "seconds": self.seconds, "started": self.started, "notes": self.notes,
+        return {"version": 2, "host": self.host, "way": self.way, "load": self.load,
+                "seconds": self.seconds, "started": self.started, "notes": self.notes, "root": self.root,
                 "inventory": self.inventory.to_json() if self.inventory else None,
                 "stats": [s.to_json() for s in self.stats], "times": self.times,
-                "times_before": self.times_before,
+                "times_before": self.times_before, "rt_cpus": self.rt_cpus, "poll": self.poll,
+                "correlations": self.correlations, "rtla": self.rtla, "smi_measured": self.smi_measured,
+                "gpe_rates": self.gpe_rates,
                 "summary": [s.summary() for s in self.stats],
                 "budgets": [b.to_json() for b in self.budgets()]}
 
     @classmethod
     def from_json(cls, d):
         r = cls(d["way"], d["load"], d["seconds"],
-                Inventory.from_json(d["inventory"]) if d.get("inventory") else None)
+                Inventory.from_json(d["inventory"]) if d.get("inventory") else None, d.get("root", False))
         r.host, r.started, r.notes = d.get("host"), d.get("started"), d.get("notes", [])
         r.stats = [CycleStats.from_json(s) for s in d["stats"]]
         r.times, r.times_before = d.get("times", {}), d.get("times_before", {})
+        r.rt_cpus, r.poll, r.correlations = d.get("rt_cpus", []), d.get("poll"), d.get("correlations", {})
+        r.rtla, r.smi_measured, r.gpe_rates = d.get("rtla"), d.get("smi_measured", False), d.get("gpe_rates", {})
         return r
 
     def save(self, path=None):
@@ -1100,6 +1566,8 @@ class Run:
                 self.way))
         with open(path, "w") as f:
             json.dump(self.to_json(), f)
+        if self.poll_path and os.path.exists(self.poll_path):
+            shutil.copyfile(self.poll_path, os.path.splitext(path)[0] + ".poll")
         return path
 
     @classmethod
@@ -1108,11 +1576,11 @@ class Run:
             return cls.from_json(json.load(f))
 
 
-def measure_threads(threads, seconds, load="rest", inventory=None, progress=print):
+def measure_threads(threads, seconds, load="rest", inventory=None, progress=print, root=False):
     """Threads only: halrun with the threads, nothing else."""
     if hal_running():
         raise RtError("HAL runs already (LinuxCNC or halrun): measure beside it (attach), or stop it")
-    run = Run("threads", load, seconds, inventory)
+    run = Run("threads", load, seconds, inventory, root)
     d = __import__("tempfile").mkdtemp(prefix="ecatsetup-rt-")
     hal = os.path.join(d, "rt.hal")
     with open(hal, "w") as f:
@@ -1133,7 +1601,7 @@ def measure_threads(threads, seconds, load="rest", inventory=None, progress=prin
             time.sleep(0.2)
         else:
             raise RtError("the threads did not start: see %s" % log.name)
-        _measure(run, rec, threads, seconds, load, progress)
+        _measure(run, rec, threads, seconds, load, progress, d)
     finally:
         rec.stop()
         try:
@@ -1151,41 +1619,129 @@ def measure_threads(threads, seconds, load="rest", inventory=None, progress=prin
     return run
 
 
-def _measure(run, rec, threads, seconds, load, progress):
+def start_poller(run, cpus, seconds, folder):
+    """The poller beside the run, as root when the run is (the SMI count)."""
+    run.poll_path = os.path.join(folder, "poll.txt")
+    argv = ["python3", "-I", POLLER, "--cpus", list_text(cpus), "--seconds", str(seconds + 30),
+            "--out", run.poll_path]
+    if run.root:
+        if not os.path.exists("/dev/cpu/0/msr"):
+            if subprocess.run(SUDO + ["modprobe", "msr"], capture_output=True).returncode == 0:
+                run.notes.append("loaded the msr module to read the SMI count (until the next start)")
+        argv = SUDO + argv + ["--smi"]
+    if os.environ.get("ECAT_RTPOLL"):
+        argv = [os.environ["ECAT_RTPOLL"]] + argv[argv.index("--cpus"):]
+    return subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+
+
+def stop_poller(run, p):
+    if p is None:
+        return
+    if p.poll() is None:
+        p.terminate()
+    try:
+        _, err = p.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        _, err = p.communicate()
+    if err and err.strip():
+        run.notes.append("poller: " + err.strip().splitlines()[-1])
+    try:
+        with open(run.poll_path, errors="replace") as f:
+            data = PollData.parse(f.read())
+    except OSError:
+        run.notes.append("the poller wrote nothing")
+        return
+    run.poll = data.summary()
+    run.smi_measured = "smi" in data.labels
+    for st in run.stats:
+        run.correlations[st.thread] = correlate(st, data)
+    for e in data.errors:
+        run.notes.append("poller: " + e)
+
+
+def start_rtla(run, seconds, threshold_us):
+    if not run.root:
+        return None
+    if shutil.which("rtla") is None and not os.path.exists("/usr/bin/rtla"):
+        run.rtla = {"error": "not installed (sudo apt install rtla)"}
+        return None
+    hk = [c for c in (run.inventory.data.get("cpus") or []) if c not in run.rt_cpus]
+    argv = SUDO + ["rtla", "timerlat", "top", "-q", "-c", list_text(run.rt_cpus), "-d", "%ds" % int(seconds),
+                   "-T", str(int(threshold_us))]
+    if hk:
+        argv += ["-H", list_text(hk)]
+    run.rtla = {"threshold_us": threshold_us, "argv": argv}
+    run.notes.append("rtla's own timer thread ran on CPU %s beside the measured threads"
+                     % list_text(run.rt_cpus))
+    return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+
+def stop_rtla(run, p):
+    if p is None:
+        return
+    try:
+        out, _ = p.communicate(timeout=15)
+    except subprocess.TimeoutExpired:
+        p.terminate()
+        out, _ = p.communicate()
+    r = parse_rtla(out)
+    r.update(threshold_us=run.rtla["threshold_us"], text=out)
+    if not r["cpus"] and not r["hit"]:
+        r["error"] = (out.strip().splitlines() or ["no output"])[-1]
+    run.rtla = r
+
+
+RTLA_THRESHOLD_US = 50
+
+
+def _measure(run, rec, threads, seconds, load, progress, folder):
     run.inventory = run.inventory or inventory()
     # where the threads run, now that they run
     rts = rt_threads(Roots())
-    if rts:
-        run.notes.append("real-time threads on CPU %s" % list_text(c for _, _, c, _ in rts))
+    run.rt_cpus = sorted({c for _, _, c, _ in rts}) or run.inventory.data.get("isolated") or \
+        (run.inventory.data.get("cpus") or [0])[-1:]
     run.times_before = read_times()
     if run.way == "threads":
         # the check's own HAL: the longest runs from now on, not from the start
         for th, d in run.times_before.items():
             for name in [th] + list(d["funcs"]):
                 halcmd("setp", name + ".tmax", 0, check=False)
+    gpe0 = gpe_counts()
     stress = start_load(seconds) if load == "stress" else None
     if load == "stress" and stress is None:
         run.notes.append("stress-ng is not installed: measured without load (sudo apt install stress-ng)")
         run.load = "rest"
+    poller = start_poller(run, run.rt_cpus, seconds, folder)
+    rtla = None
     run.started = time.time()
-    rec.start()
     try:
+        time.sleep(0.3)          # the poller's first line
+        rec.start()
+        rtla = start_rtla(run, seconds, RTLA_THRESHOLD_US)
         t0 = time.monotonic()
         while time.monotonic() - t0 < seconds:
-            time.sleep(min(1.0, seconds - (time.monotonic() - t0)))
+            time.sleep(max(0.0, min(1.0, seconds - (time.monotonic() - t0))))
             done = time.monotonic() - t0
             s = rec.stats[-1].summary()
-            progress("%3.0f %%  %s: %d cycles, worst %.1f us" % (
-                100 * done / seconds, rec.stats[-1].thread, s.get("cycles", 0), s.get("max_abs_us", 0) or 0))
+            progress("%3.0f %%  %s: %d cycles, late at most %.1f us" % (
+                100 * min(done, seconds) / seconds, rec.stats[-1].thread, s.get("cycles", 0),
+                s.get("late_max_us", 0) or 0))
     finally:
         stop_load(stress)
         run.times = read_times()
         rec.stop()
-    run.stats = rec.stats
-    run.notes += rec.errors
+        run.stats = rec.stats
+        run.notes += rec.errors
+        stop_rtla(run, rtla)
+        stop_poller(run, poller)
+        secs = rec.stats[0].seconds if rec.stats else seconds
+        gpe1 = gpe_counts()
+        run.gpe_rates = {g: (n - gpe0.get(g, 0)) / secs for g, n in gpe1.items()
+                         if n > gpe0.get(g, 0) and secs > 0}
 
 
-def measure_attach(seconds, load="as-used", inventory=None, progress=print):
+def measure_attach(seconds, load="as-used", inventory=None, progress=print, root=False):
     """Beside a running HAL: timedelta and sampler into its threads, taken
     out again at the end."""
     if not hal_running():
@@ -1199,15 +1755,16 @@ def measure_attach(seconds, load="as-used", inventory=None, progress=print):
     threads = sorted(((n, d["period"]) for n, d in th.items()), key=lambda x: x[1])
     if not threads:
         raise RtError("the running HAL has no threads")
-    run = Run("attach", load, seconds, inventory)
+    run = Run("attach", load, seconds, inventory, root)
     names = [n for n, _ in threads]
     added = []
     rec = Recorder(threads)
+    folder = __import__("tempfile").mkdtemp(prefix="ecatsetup-rt-")
     try:
         for c in attach_commands(names):
             halcmd(*c.split())
             added.append(c)
-        _measure(run, rec, threads, seconds, load, progress)
+        _measure(run, rec, threads, seconds, load, progress, folder)
         grew = [t for t, d in run.times.items()
                 if (d.get("tmax_us") or 0) > ((run.times_before.get(t) or {}).get("tmax_us") or 0)]
         run.notes.append("the longest runs are counted since LinuxCNC started; %s" % (

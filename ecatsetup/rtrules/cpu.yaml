@@ -1,0 +1,212 @@
+# The processor: SMT, idle states, frequency, heat, power, SMIs.
+
+- id: smt-sibling
+  title: The real-time CPU shares its core with another (SMT, hyperthreading)
+  when: "rt_siblings and not (set(rt_siblings) <= set(isolated))"
+  evidence: "CPU {rt_cpus_text} shares a core with CPU {rt_siblings_text}, which is not isolated"
+  gain: medium
+  cause: >
+    Two hyperthreads share one core's execution units and caches: work on the
+    sibling slows the real-time thread down, by an amount that depends on that
+    work.
+  action:
+    kind: permanent
+    text: >
+      Isolate the sibling too (isolcpus with both), or switch SMT off: the
+      kernel parameter nosmt, or Hyperthreading in the BIOS.
+    kernel-param: "nosmt"
+    risk: Low.
+    cost: A restart; fewer CPUs for the GUI and the rest.
+  effect: The thread's run time and lateness no longer depend on the sibling's work.
+  check: The thread's longest run and the late maximum under load.
+  undo:
+    text: &kparam_undo >
+      Remove the parameter from GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub,
+      run update-grub and restart. If the computer does not start, press e in
+      the GRUB menu and delete it from the line that starts with linux.
+  source:
+    - text: LinuxCNC documentation, Latency tuning (disable hyperthreading)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: null
+  tests:
+    present: {rt_siblings: [1], isolated: [3]}
+    absent: {rt_siblings: []}
+
+- id: deep-idle-states
+  title: The real-time CPU may sleep in deep idle states
+  when: "deep_states and (idle_suspect or (measured and late_max_us > 10 + deepest_idle_us / 2) or not measured)"
+  evidence: "enabled on CPU {rt_cpus_text}: {deep_states_text}"
+  keys: ["idle:"]
+  gain: high
+  cause: >
+    Between two cycles the CPU sleeps; waking from a deep C-state takes as long
+    as the state's exit latency (the kernel's own figure is shown) before the
+    thread can run.
+  action:
+    kind: runtime
+    text: >
+      Switch the deep states off on the real-time CPU for this boot. To keep it
+      so, the kernel parameter intel_idle.max_cstate=1 (Intel) or
+      processor.max_cstate=1.
+    commands: ["{disable_deep_cmds}"]
+    kernel-param: "intel_idle.max_cstate=1"
+    risk: Low.
+    cost: More power and heat on that CPU (a few watts).
+  effect: The lateness no longer has a part of the size of the exit latency.
+  check: The late maximum and the 99.99 % at rest (idle states matter most when the computer is idle).
+  undo:
+    commands: ["{enable_deep_cmds}"]
+  source:
+    - text: The kernel's documentation, CPU idle time management (cpuidle sysfs, disable)
+      url: https://docs.kernel.org/admin-guide/pm/cpuidle.html
+    - text: LinuxCNC documentation, Latency tuning (CPU sleep states)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: "turner 2026-11-14 (intel_idle.max_cstate=1 processor.max_cstate=1 among six parameters); here intel_idle.max_cstate=1"
+  tests:
+    present:
+      deep_states: [{cpu: 3, state: state2, name: C6, latency_us: 170, path: /x}]
+      deepest_idle_us: 170
+      late_max_us: 120
+    absent:
+      deep_states: []
+      deepest_idle_us: 0
+      late_max_us: 120
+
+- id: governor-not-performance
+  title: The real-time CPU's frequency follows the load (governor {governor_rt})
+  when: "governor_rt is not None and governor_rt != 'performance'"
+  evidence: "scaling_governor of CPU {rt_cpus_text} is {governor_rt}"
+  keys: ["freq:"]
+  gain: medium
+  cause: >
+    A governor other than performance lets the CPU clock down when it is idle,
+    and the real-time thread then runs slower until it ramps up again.
+  action:
+    kind: runtime
+    text: >
+      Use the performance governor on every CPU, as LinuxCNC's documentation
+      advises. To keep it after a restart: linux-cpupower, tuned, or a small
+      systemd service.
+    commands: ["echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"]
+    risk: Low.
+    cost: More power and heat.
+  effect: A steady clock; a shorter, steadier run time of the thread.
+  check: The thread's longest run, the late maximum, the frequency values during the run.
+  undo:
+    commands: ["{governor_restore}"]
+  source:
+    - text: LinuxCNC documentation, CPU frequency governor
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: "turner 2026-11-14 (rt-cpu-performance.service, with turbo off)"
+  tests:
+    present: {governor_rt: powersave}
+    absent: {governor_rt: performance}
+
+- id: turbo-on
+  title: Turbo (boost) is on
+  when: "turbo and (freq_suspect or (measured and late_max_us > 30) or not measured)"
+  evidence: "turbo/boost is on"
+  keys: ["freq:"]
+  gain: low
+  cause: >
+    With turbo the clock changes with the load and temperature of all cores, so
+    the thread's run time changes with what the other CPUs do.
+  action:
+    kind: runtime
+    text: Switch turbo off for this boot (the BIOS can switch it off for good).
+    commands: ["{turbo_off_cmd}"]
+    risk: Low.
+    cost: The GUI and other programs run somewhat slower.
+  effect: A steadier run time of the thread.
+  check: The thread's longest run and the late maximum, under load.
+  undo:
+    commands: ["{turbo_on_cmd}"]
+  source:
+    - text: LinuxCNC documentation, Latency tuning (disable turbo)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: "turner 2026-11-14 (rt-cpu-performance.service: performance, no turbo)"
+  tests:
+    present: {turbo: true, measured: true, late_max_us: 50}
+    absent: {turbo: false, measured: true, late_max_us: 50}
+
+- id: thermal-throttling
+  title: The processor throttled itself because of heat during the run
+  when: "throttle_run > 0"
+  evidence: "{throttle_run} throttle event(s) on the real-time CPU during the run"
+  keys: ["throttle:"]
+  gain: high
+  cause: >
+    A processor that gets too hot lowers its clock; the thread then runs much
+    slower until it cools down.
+  action:
+    kind: advice
+    text: >
+      Improve the cooling (clean the fan and heat sink, air around the case),
+      or take the load down (turbo off).
+  source:
+    - text: "The kernel's sysfs ABI: /sys/devices/system/cpu/cpuN/thermal_throttle (Documentation/ABI/testing/sysfs-devices-system-cpu)"
+  seen-here: null
+  tests:
+    present: {throttle_run: 3}
+    absent: {throttle_run: 0}
+
+- id: on-battery
+  title: The computer runs on battery
+  when: "battery"
+  gain: medium
+  cause: On battery, laptops lower clocks and use deeper power saving.
+  action:
+    kind: advice
+    text: Connect the power supply when the machine runs, and measure again.
+  source:
+    - text: LinuxCNC documentation, Latency tuning (power-saving features)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+  seen-here: null
+  tests:
+    present: {battery: true}
+    absent: {battery: false}
+
+- id: smi-seen
+  title: System management interrupts (SMIs) came during the run
+  when: "smi_measured and smi_count > 0 and (smi_suspect or late_max_us > 30)"
+  evidence: "{smi_count} SMI(s) during the run"
+  keys: ["smi"]
+  gain: high
+  cause: >
+    An SMI stops every CPU for the BIOS's own work, invisible to Linux; nothing
+    in Linux can make it shorter. Usual causes are legacy USB emulation, power
+    management, and the BIOS watching temperatures or a TPM.
+  action:
+    kind: bios
+    text: >
+      In the BIOS, switch off legacy USB support (keyboard and mouse still work
+      in Linux), power-management features (C-states, ASPM, "ERP"), and devices
+      that are not used. Measure again after each one.
+  source:
+    - text: LinuxCNC documentation, Latency tuning (System Management Interrupt)
+      url: https://linuxcnc.org/docs/stable/html/install/latency-test.html
+    - text: The kernel's documentation, hardware latency detector (SMIs)
+      url: https://docs.kernel.org/trace/hwlat_detector.html
+  seen-here: "no SMI during runs here (2026-11-17)"
+  tests:
+    present: {smi_measured: true, smi_count: 12, smi_suspect: true, late_max_us: 80}
+    absent: {smi_measured: true, smi_count: 0, late_max_us: 80}
+
+- id: smi-not-measured
+  title: SMIs were not counted (the run was not made as root)
+  when: "measured and not smi_measured and cpu_vendor == 'intel' and spikes > 0 and late_max_us > 30"
+  evidence: "{spikes} spike(s) over the threshold; the SMI count needs root"
+  gain: medium
+  cause: >
+    An SMI shows only in its own counter (an MSR), which only root can read. A
+    spike that no other counter explains may be one.
+  action:
+    kind: measure
+    text: Measure again with sudo (--rt-root, or "as root" in the window), which also runs rtla timerlat.
+  source:
+    - text: Intel's MSR_SMI_COUNT (0x34), read through the msr module
+      url: https://docs.kernel.org/trace/hwlat_detector.html
+  seen-here: null
+  tests:
+    present: {smi_measured: false, cpu_vendor: intel, spikes: 4, late_max_us: 60}
+    absent: {smi_measured: true, cpu_vendor: intel, spikes: 4, late_max_us: 60}

@@ -1,0 +1,179 @@
+# The network card of the I/O (EtherCAT, Mesa Ethernet).
+
+- id: ethercat-nic-irq-cpu
+  title: "EtherCAT's network card interrupts are handled on CPU {item.affinity_text}, not on the real-time CPU"
+  each: irqs
+  when: "ethercat and item.io_nic and not item.on_rt and rt_isolated and (period_us is None or period_us <= 500 or (measured and late_max_us > 20))"
+  evidence: "IRQ {item.irq} ({item.name}) on CPU {item.affinity_text}; servo thread on CPU {rt_cpus_text}"
+  keys: ["irq:{item.irq}"]
+  gain: high
+  cause: >
+    With the userspace master the frame is read back in the servo thread; when
+    the card's interrupt is handled on the CPUs that run the GUI, the mouse and
+    the graphics, the frame's arrival can wait behind them, and a cycle is lost
+    now and then (working counter 0) at short periods.
+  action:
+    kind: advice
+    text: >
+      Set master irq-cpu to the servo thread's CPU in ethercat.yaml
+      (master: irq-cpu: {rt_cpus_text}; EtherCAT Setup's Master page), then
+      restart LinuxCNC.
+    risk: Low.
+    cost: None.
+  effect: No lost cycles from the frame's interrupt waiting.
+  check: The event log (working counter zero) and the late maximum, in use (attach), at the machine's period.
+  source:
+    - text: ecat's documentation, master irq-cpu
+      url: https://github.com/MetalMusings/ecat/blob/main/docs/component.md#master
+  seen-here: "here 2026-11-16: lost cycles at 250 and 200 us until irq-cpu was set"
+  tests:
+    present:
+      ethercat: true
+      period_us: 250
+      irqs: [{irq: "133", name: "enp2s0", on_rt: false, io_nic: true, affinity_text: "0-2", rate_rt: 0}]
+    absent:
+      ethercat: true
+      period_us: 250
+      irqs: [{irq: "133", name: "enp2s0", on_rt: true, io_nic: true, affinity_text: "3", rate_rt: 500}]
+
+- id: mesa-nic-coalescing
+  title: "{item.name} waits before it reports a received packet (rx-usecs {item.rx_usecs})"
+  each: nics
+  when: "mesa_eth and item.io and item.rx_usecs is not None and item.rx_usecs > 0"
+  evidence: "ethtool -c {item.name}: rx-usecs {item.rx_usecs}"
+  gain: high
+  cause: >
+    Interrupt coalescing makes the card wait up to rx-usecs microseconds before
+    it tells the CPU about a packet. hm2_eth waits for the board's answer in
+    every servo cycle, so that wait is added to the read each time.
+  action:
+    kind: runtime
+    text: >
+      Switch coalescing off for this boot. To keep it, LinuxCNC's documentation
+      puts "hardware-irq-coalesce-rx-usecs 0" in /etc/network/interfaces for the
+      card. On some Marvell cards it is harmful: measure.
+    commands: ["ethtool -C {item.name} rx-usecs 0"]
+    risk: Low; on some Marvell chips it makes things worse (measure).
+    cost: More interrupts per packet (a few thousand a second).
+  effect: The hm2 read function's run time drops by about the rx-usecs value.
+  check: The longest run of the hm2 read function and the thread.
+  undo:
+    commands: ["ethtool -C {item.name} rx-usecs {item.rx_usecs}"]
+  source:
+    - text: hm2_eth(9), "hardware-irq-coalesce-rx-usecs"
+      url: https://linuxcnc.org/docs/stable/html/man/man9/hm2_eth.9.html
+  seen-here: null
+  tests:
+    present:
+      mesa_eth: true
+      nics: [{name: eno1, io: true, rx_usecs: 3}]
+    absent:
+      mesa_eth: true
+      nics: [{name: eno1, io: true, rx_usecs: 0}]
+
+- id: io-nic-eee
+  title: "{item.name} saves power between packets (Energy Efficient Ethernet)"
+  each: nics
+  when: "item.io and item.eee_on"
+  evidence: "ethtool --show-eee {item.name}: enabled"
+  gain: medium
+  cause: >
+    With EEE the link falls into low power between packets and needs time to
+    wake for the next one, so the I/O's packets are delayed by a varying amount.
+  action:
+    kind: runtime
+    text: Switch EEE off on the card for this boot (a NetworkManager or udev setting keeps it so).
+    commands: ["ethtool --set-eee {item.name} eee off"]
+    risk: Low; the link comes up again (a short break).
+    cost: Under a watt.
+  effect: A steadier time for the I/O's packets.
+  check: The I/O function's longest run, the event log.
+  undo:
+    commands: ["ethtool --set-eee {item.name} eee on"]
+  source:
+    - text: ethtool(8), --set-eee
+      url: https://manpages.debian.org/ethtool
+  seen-here: null
+  tests:
+    present:
+      nics: [{name: eno1, io: true, eee_on: true}]
+    absent:
+      nics: [{name: eno1, io: true, eee_on: false}]
+
+- id: io-nic-carries-lan
+  title: "{item.name} carries both the I/O and the network (the default route)"
+  each: nics
+  when: "item.io and item.default_route"
+  evidence: "the default route goes through {item.name}"
+  gain: high
+  cause: >
+    Other traffic on the I/O's card (updates, browsing, broadcasts) queues in
+    front of the I/O's packets and adds interrupts at random times.
+  action:
+    kind: advice
+    text: Give the I/O a network card of its own, and the LAN another one.
+  source:
+    - text: hm2_eth(9), the dedicated ethernet interface
+      url: https://linuxcnc.org/docs/stable/html/man/man9/hm2_eth.9.html
+  seen-here: null
+  tests:
+    present:
+      nics: [{name: eno1, io: true, default_route: true}]
+    absent:
+      nics: [{name: eno1, io: true, default_route: false}]
+
+- id: io-nic-networkmanager
+  title: "NetworkManager may manage {item.name}, the I/O's card"
+  each: nics
+  when: "networkmanager and item.io and mesa_eth"
+  evidence: "NetworkManager runs; {item.name} is the I/O's card"
+  gain: low
+  cause: >
+    NetworkManager may reconfigure a card it manages (DHCP retries, link checks,
+    IPv6), which disturbs the I/O's packets.
+  action:
+    kind: runtime
+    text: Tell NetworkManager to leave the card alone for this boot (configure it statically to keep it so).
+    commands: ["nmcli device set {item.name} managed no"]
+    risk: Low; give the card its static address yourself if it loses it.
+    cost: None.
+  effect: No reconfiguration of the card while the machine runs.
+  check: The hm2 packet error pins and the read's longest run over a long run.
+  undo:
+    commands: ["nmcli device set {item.name} managed yes"]
+  source:
+    - text: nmcli(1), device set ... managed
+      url: https://manpages.debian.org/nmcli
+  seen-here: null
+  tests:
+    present:
+      networkmanager: true
+      mesa_eth: true
+      nics: [{name: eno1, io: true}]
+    absent:
+      networkmanager: false
+      mesa_eth: true
+      nics: [{name: eno1, io: true}]
+
+- id: mesa-realtek
+  title: "{item.name} uses the Realtek driver r8169 for Mesa Ethernet"
+  each: nics
+  when: "mesa_eth and item.io and item.driver == 'r8169'"
+  evidence: "driver r8169"
+  gain: medium
+  cause: >
+    Realtek cards with r8169 are often reported on the LinuxCNC forum with
+    larger and more varying read times for hm2_eth than Intel cards.
+  action:
+    kind: advice
+    text: If the read time is the problem, try an Intel network card (igb, igc, e1000e).
+  source:
+    - text: "Reports on the LinuxCNC forum (no single measurement known to us)"
+  seen-here: null
+  tests:
+    present:
+      mesa_eth: true
+      nics: [{name: enp1s0, io: true, driver: r8169}]
+    absent:
+      mesa_eth: true
+      nics: [{name: enp1s0, io: true, driver: igb}]
