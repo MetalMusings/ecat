@@ -103,8 +103,10 @@ install -d "$ROOT/usr/lib/linuxcnc/modules" "$ROOT/usr/bin" "$PY/ecatsetup" "$DO
 install -m 644 "$WORK/ecat/component/ecat.so" "$ROOT/usr/lib/linuxcnc/modules/"
 strip --strip-unneeded "$ROOT/usr/lib/linuxcnc/modules/ecat.so"
 install -m 644 "$WORK/ecat"/ecatsetup/*.py "$PY/ecatsetup/"
-install -d "$PY/ecatsetup/devices"
-install -m 644 "$WORK/ecat"/ecatsetup/devices/*.yaml "$PY/ecatsetup/devices/"
+for d in devices measured rtrules; do
+    install -d "$PY/ecatsetup/$d"
+    install -m 644 "$WORK/ecat"/ecatsetup/$d/*.yaml "$PY/ecatsetup/$d/"
+done
 cat >"$ROOT/usr/bin/ecatsetup" <<'EOF'
 #!/usr/bin/python3
 """EtherCAT Setup: see /usr/share/doc/linuxcnc-ecat/README.md."""
