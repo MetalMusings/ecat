@@ -6196,10 +6196,10 @@ class TimingPage(QWidget):
         sl.addWidget(self.summary_text)
         grow = QHBoxLayout()
         self.goto_findings = QPushButton("Go to the findings")
-        self.goto_findings.clicked.connect(lambda: self.scroller.ensureWidgetVisible(self.find_card, 0, 0))
+        self.goto_findings.clicked.connect(lambda: self.scroll_to(self.find_card))
         grow.addWidget(self.goto_findings)
         self.goto_result = QPushButton("The whole result")
-        self.goto_result.clicked.connect(lambda: self.scroller.ensureWidgetVisible(self.result_card, 0, 0))
+        self.goto_result.clicked.connect(lambda: self.scroll_to(self.result_card))
         grow.addWidget(self.goto_result)
         grow.addStretch(1)
         sl.addLayout(grow)
@@ -6372,6 +6372,12 @@ class TimingPage(QWidget):
         self.show_findings()
         self.show_summary(latest)
         self.show_changes()
+
+    def scroll_to(self, card):
+        """Scroll so that the card's top is at the top of the page (as far as
+        the page goes)."""
+        bar = self.scroller.verticalScrollBar()
+        bar.setValue(min(bar.maximum(), max(0, card.y() - 12)))
 
     def show_summary(self, latest):
         """Under Measure: the latest run's budget per thread, the comparison

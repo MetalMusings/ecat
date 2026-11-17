@@ -2026,6 +2026,16 @@ class TestTimingPage(WindowBase):
         self.assertIn("Most to gain: %s" % found[0].title, summary)
         self.assertIn("Compared with the run before", summary)
         self.assertTrue(tp.goto_findings.isVisibleTo(tp))
+        # the button takes the findings' top to the top of the page
+        w.show_tab(tp)
+        w.resize(1300, 700)
+        w.show()
+        self.addCleanup(w.hide)
+        QApplication.processEvents()
+        tp.goto_findings.click()
+        bar = tp.scroller.verticalScrollBar()
+        self.assertEqual(bar.value(), min(bar.maximum(), tp.find_card.y() - 12))
+        self.assertGreater(bar.value(), 0)
         # the way is the baseline's from now on
         self.assertFalse(tp.load.isEnabled())
         self.assertIn("late at most", tp.result.toPlainText())
