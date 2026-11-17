@@ -53,6 +53,12 @@
       puts "hardware-irq-coalesce-rx-usecs 0" in /etc/network/interfaces for the
       card. On some Marvell cards it is harmful: measure.
     commands: ["ethtool -C {item.name} rx-usecs 0"]
+    keep:
+      boot: true
+      note: >
+        The card's driver can set it back when the link goes down and up (a cable
+        pulled); LinuxCNC's documentation also shows it in /etc/network/interfaces
+        for the card.
     risk: Low; on some Marvell chips it makes things worse (measure).
     cost: More interrupts per packet (a few thousand a second).
   effect: The hm2 read function's run time drops by about the rx-usecs value.
@@ -84,6 +90,12 @@
     kind: runtime
     text: Switch EEE off on the card for this boot (a NetworkManager or udev setting keeps it so).
     commands: ["ethtool --set-eee {item.name} eee off"]
+    keep:
+      boot: true
+      note: >
+        The card's driver can set it back when the link goes down and up (a cable
+        pulled); LinuxCNC's documentation also shows it in /etc/network/interfaces
+        for the card.
     risk: Low; the link comes up again (a short break).
     cost: Under a watt.
   effect: A steadier time for the I/O's packets.
@@ -135,6 +147,11 @@
     kind: runtime
     text: Tell NetworkManager to leave the card alone for this boot (configure it statically to keep it so).
     commands: ["nmcli device set {item.name} managed no"]
+    keep:
+      file:
+        path: "/etc/NetworkManager/conf.d/90-ecatsetup-{item.name}.conf"
+        text: "[keyfile]\nunmanaged-devices=interface-name:{item.name}\n"
+        then: ["systemctl reload NetworkManager"]
     risk: Low; give the card its static address yourself if it loses it.
     cost: None.
   effect: No reconfiguration of the card while the machine runs.

@@ -6203,6 +6203,10 @@ class TimingPage(QWidget):
         self.goto_result = QPushButton("The whole result")
         self.goto_result.clicked.connect(lambda: self.scroll_to(self.result_card))
         grow.addWidget(self.goto_result)
+        self.summary_todo = QPushButton("To do yourself...")
+        self.summary_todo.setToolTip("The lasting changes, as a list to save (the same as in Findings).")
+        self.summary_todo.clicked.connect(lambda: self.show_todo())
+        grow.addWidget(self.summary_todo)
         grow.addStretch(1)
         sl.addLayout(grow)
         self.summary.hide()
@@ -6223,6 +6227,16 @@ class TimingPage(QWidget):
         self.find_card = Card("Findings", "Most to gain first. Run-time changes can be tried "
                               "here in Improve mode; kernel parameters, the BIOS and advice are "
                               "for you to do (a restart).")
+        trow = QHBoxLayout()
+        self.todo_button = QPushButton("To do yourself: the lasting changes...")
+        self.todo_button.setToolTip(
+            "A list to save: kernel parameters (one new GRUB line), sysctl, a start-up service and the BIOS, "
+            "from the changes you kept and the findings; each with how to take it back. EtherCAT Setup itself "
+            "changes nothing that lasts after a restart.")
+        self.todo_button.clicked.connect(self.show_todo)
+        trow.addWidget(self.todo_button)
+        trow.addStretch(1)
+        self.find_card.add(trow)
         self.find_box = QVBoxLayout()
         self.find_card.add(self.find_box)
         lay.addWidget(self.find_card)
@@ -6651,6 +6665,10 @@ class TimingPage(QWidget):
         self.last_result = None
         self.refresh()
 
+    def show_todo(self):
+        from . import rttodo
+        TodoDialog(self, rttodo.text(self.flow)).exec_()
+
     def write_report(self):
         from . import rtflow
         path, _ = QFileDialog.getSaveFileName(self, "Save report - %s" % TITLE,
@@ -6661,6 +6679,52 @@ class TimingPage(QWidget):
         with open(path, "w") as fh:
             fh.write(rtflow.report(self.flow))
         self.win.status("Wrote %s; look it through before sending it" % path)
+
+
+class TodoDialog(QDialog):
+    """The real-time check's lasting changes for the user to make
+    (rttodo.text): shown, copied or saved."""
+
+    def __init__(self, parent, text):
+        super().__init__(parent)
+        self.setWindowTitle("To do yourself - %s" % TITLE)
+        self.resize(900, 700)
+        lay = QVBoxLayout(self)
+        lay.addWidget(label("EtherCAT Setup changes nothing that lasts after a restart. These are the changes "
+                            "in the forms that do last, for you to make one group at a time, measuring again "
+                            "after each. Save the list or copy it.", "hint", wrap=True))
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setFont(mono())
+        self.text.setPlainText(text)
+        lay.addWidget(self.text, 1)
+        row = QHBoxLayout()
+        self.save_button = QPushButton("Save...")
+        self.save_button.setObjectName("primary")
+        self.save_button.clicked.connect(self.save)
+        row.addWidget(self.save_button)
+        copy = QPushButton("Copy")
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(self.text.toPlainText()))
+        row.addWidget(copy)
+        row.addStretch(1)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        row.addWidget(close)
+        lay.addLayout(row)
+        self.saved = None
+
+    def save(self, path=None):
+        from . import rttodo
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(self, "Save the list - %s" % TITLE,
+                                                  os.path.join(os.path.expanduser("~"), rttodo.default_name()),
+                                                  "Markdown (*.md);;Text (*.txt);;All files (*)")
+        if not path:
+            return
+        with open(path, "w") as fh:
+            fh.write(self.text.toPlainText() + "\n")
+        self.saved = path
+        self.parent().win.status("Wrote %s" % path)
 
 
 class StartPage(QWidget):

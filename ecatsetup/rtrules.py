@@ -166,6 +166,28 @@ def evaluate(node, ctx):
 _FIELD = re.compile(r"\{([A-Za-z_][A-Za-z0-9_.]*)(:[^{}]*)?\}")
 
 
+KEEP_FORMS = ("sysctl", "modprobe", "once", "file", "boot")
+
+
+def fill_keep(keep, ctx):
+    """An action's keep: (how a run-time change is made to last; the rule's
+    kernel-param is the other way) with its templates filled."""
+    if not keep:
+        return None
+    out = {}
+    for k, v in keep.items():
+        if isinstance(v, str):
+            out[k] = fill(v, ctx)
+        elif isinstance(v, list):
+            out[k] = [fill(x, ctx) for x in v]
+        elif isinstance(v, dict):
+            out[k] = {kk: (fill(vv, ctx) if isinstance(vv, str) else [fill(x, ctx) for x in vv]
+                           if isinstance(vv, list) else vv) for kk, vv in v.items()}
+        else:
+            out[k] = v
+    return out
+
+
 def fill(template, ctx):
     """A template with {name}, {item.field} and {x:.1f} filled from ctx;
     an unknown name stays as "?"."""
@@ -218,6 +240,18 @@ class Rule:
             raise RuleError("%s: rule %s: a run-time change needs undo commands" % (path, self.id))
         if a["kind"] == "permanent" and not (d.get("undo") or {}).get("text"):
             raise RuleError("%s: rule %s: a permanent change needs undo text" % (path, self.id))
+        keep = a.get("keep")
+        if keep is not None:
+            forms = [k for k in keep if k in KEEP_FORMS]
+            unknown = set(keep) - set(KEEP_FORMS) - {"note", "once-undo"}
+            if a["kind"] != "runtime" or len(forms) != 1 or unknown:
+                raise RuleError("%s: rule %s: keep is for a run-time change, with one of %s (and a note)"
+                                % (path, self.id, ", ".join(KEEP_FORMS)))
+            if "once" in keep and not keep.get("once-undo"):
+                raise RuleError("%s: rule %s: keep once needs once-undo" % (path, self.id))
+            if "file" in keep and not (isinstance(keep["file"], dict) and keep["file"].get("path")
+                                       and keep["file"].get("text")):
+                raise RuleError("%s: rule %s: keep file needs a path and a text" % (path, self.id))
 
     def __getitem__(self, k):
         return self.d.get(k)
@@ -469,6 +503,10 @@ class Finding:
         self.action = fill(a.get("text"), c)
         self.commands = [fill(x, c) for x in a.get("commands") or []]
         self.kernel_param = fill(a.get("kernel-param"), c)
+        self.keep = fill_keep(a.get("keep"), c)
+        if self.keep is None and self.kind == "runtime" and self.commands and not self.kernel_param:
+            # kept after a restart by running the same commands at each start
+            self.keep = {"boot": True}
         self.risk = fill(a.get("risk"), c)
         self.cost = fill(a.get("cost"), c)
         self.effect = fill(rule["effect"], c)

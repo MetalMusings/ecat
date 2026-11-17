@@ -187,6 +187,9 @@ def main(argv=None):
                          "one at a time (sudo), measure again, keep or undo each")
     ap.add_argument("--rt-report", metavar="FILE",
                     help="--rt-check --improve: write the check's report there at the end")
+    ap.add_argument("--rt-todo", metavar="FILE", nargs="?", const="-",
+                    help="the real-time check's lasting changes for you to make (kernel parameters, sysctl, a "
+                         "start-up service, BIOS), from what was kept and found so far; to FILE, or printed")
     ap.add_argument("--from-run", metavar="FILE", help="show a saved real-time check run")
     ap.add_argument("--response", metavar="FILE",
                     help="analyse a response recording (the Response card's samples file) again; "
@@ -245,6 +248,8 @@ def main(argv=None):
         sys.exit(capture_info(args.capture_info))
     if args.from_run:
         sys.exit(from_run(args.from_run))
+    if args.rt_todo:
+        sys.exit(rt_todo(args.rt_todo))
     if args.rt_check is not None:
         sys.exit(rt_check(args))
     if args.response:
@@ -621,6 +626,20 @@ def _rt_improve(args, flow, way, threads, load, input_fn=input):
         with open(args.rt_report, "w") as f:
             f.write(rtflow.report(flow))
         print("Report: %s" % args.rt_report)
+    print("Lasting changes for you to make: ecatsetup --rt-todo [FILE]")
+    return 0
+
+
+def rt_todo(path):
+    """The list of lasting changes (rttodo.py) from the Timing tab's state."""
+    from . import rtflow, rttodo
+    text = rttodo.text(rtflow.Flow())
+    if path == "-":
+        print(text)
+    else:
+        with open(path, "w") as f:
+            f.write(text + "\n")
+        print("Written: %s" % path)
     return 0
 
 

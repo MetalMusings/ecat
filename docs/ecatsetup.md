@@ -2004,6 +2004,23 @@ and *The whole result* lead to the rest.
 6. Back to the findings, until the check says no more changes are needed (at
    least half the period left and nothing of high gain), or nothing is left
    that it can change at run time.
+7. **To do yourself.** A kept change lasts until the next restart:
+   EtherCAT Setup changes nothing that lasts. *To do yourself: the lasting
+   changes...* (top of *Findings*) shows a list to save or copy, made from
+   the changes you kept and the findings not yet done, in the forms that
+   last, one group per edit: the kernel parameters as one new
+   `GRUB_CMDLINE_LINUX_DEFAULT` line (your present line from
+   `/etc/default/grub` with them put in; one of the same name, such as
+   `isolcpus=3`, is replaced), with the backup, `update-grub` and what to
+   do if the computer does not start; sysctl settings
+   (`/etc/sysctl.d/90-ecatsetup-rt.conf`); kernel module options
+   (`/etc/modprobe.d/ecatsetup-rt.conf`); the run-time commands that have no
+   other lasting form as a start-up service (`ecatsetup-rt.service`, the
+   whole unit file written out); commands to run once (`systemctl disable
+   irqbalance`); files (NetworkManager leaving the I/O card alone); other
+   commands; the BIOS and advice. Each group says how to take it back. A
+   finding not tried yet is marked so: try it first. Make one group at a
+   time and measure again. `ecatsetup --rt-todo [FILE]` writes the same.
 
 *History: changes made to this computer* lists every change already made
 (from the window or the command line) with its state: tried, kept or
@@ -2390,6 +2407,7 @@ ecatsetup --response ~/.local/state/ecatsetup/responses/<file>.samples [--ini <m
 ecatsetup --from-capture ecat-capture-<time>.tar.gz --diagnose
 ecatsetup --rt-check <machine>.ini [--rt-seconds 900] [--rt-load stress] [--rt-twice] [--rt-root]
 ecatsetup --rt-check <machine>.ini --improve [--rt-report report.md]
+ecatsetup --rt-todo [todo.md]
 ecatsetup --from-run ~/.local/state/ecatsetup/rt-runs/<file>.json
 ecatsetup --apply ethercat.yaml --ini <machine>.ini
 ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
@@ -2463,6 +2481,9 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   ([The computer's timing](#the-computers-timing)): two runs, then the
   run-time changes of the findings one at a time with sudo, each measured
   again and kept or undone; `--rt-report` writes the report at the end.
+  `--rt-todo [FILE]` writes the lasting changes for you to make (kernel
+  parameters, sysctl, a start-up service, the BIOS), from what was kept and
+  found so far ([The computer's timing](#the-computers-timing), step 7).
   The rules are data, in `ecatsetup/rtrules/*.yaml`;
   your own go in `~/.config/ecatsetup/rtrules/` (a rule with the same `id`
   replaces the shipped one; the format is at the top of `rtrules.py`).

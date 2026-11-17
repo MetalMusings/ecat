@@ -16,6 +16,12 @@
     kind: runtime
     text: Move it to the other CPUs (for this boot; irqaffinity= makes the kernel start interrupts there).
     commands: ["echo {nonrt_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+    keep:
+      boot: true
+      note: >
+        An interrupt's number can change when hardware or the kernel changes; the
+        kernel parameter irqaffinity={nonrt_text} is the general way to keep every
+        interrupt the kernel places off the real-time CPU.
     risk: Low. If the write is refused, the interrupt is managed by the kernel (see isolcpus managed_irq).
     cost: None.
   effect: "IRQ {item.irq} no longer counts on the real-time CPU."
@@ -46,6 +52,12 @@
     kind: runtime
     text: Move the USB controller's interrupt to the other CPUs.
     commands: ["echo {nonrt_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+    keep:
+      boot: true
+      note: >
+        An interrupt's number can change when hardware or the kernel changes; the
+        kernel parameter irqaffinity={nonrt_text} is the general way to keep every
+        interrupt the kernel places off the real-time CPU.
     risk: Low.
     cost: None.
   effect: Mouse and keyboard no longer delay the thread.
@@ -76,6 +88,12 @@
     kind: runtime
     text: Move it to the other CPUs; better still, use wired Ethernet and switch the radio off while the machine runs.
     commands: ["echo {nonrt_text} > /proc/irq/{item.irq}/smp_affinity_list"]
+    keep:
+      boot: true
+      note: >
+        An interrupt's number can change when hardware or the kernel changes; the
+        kernel parameter irqaffinity={nonrt_text} is the general way to keep every
+        interrupt the kernel places off the real-time CPU.
     risk: Low.
     cost: None.
   effect: The radio no longer delays the thread.
@@ -172,6 +190,7 @@
     kind: runtime
     text: Switch it off for this boot (options snd_hda_intel power_save=0 in /etc/modprobe.d/ keeps it so).
     commands: ["echo 0 > /sys/module/snd_hda_intel/parameters/power_save"]
+    keep: {modprobe: "options snd_hda_intel power_save=0"}
     risk: None.
     cost: Under a watt.
   effect: No power-up of the sound card during a run.
@@ -225,6 +244,7 @@
     kind: runtime
     text: Use the performance policy for this boot; pcie_aspm.policy=performance keeps it so.
     commands: ["echo performance > /sys/module/pcie_aspm/parameters/policy"]
+    kernel-param: "pcie_aspm.policy=performance"
     kernel-param: "pcie_aspm.policy=performance"
     risk: Low; the BIOS may refuse it (the write then fails).
     cost: A little more power.

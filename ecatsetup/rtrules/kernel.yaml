@@ -162,6 +162,9 @@
       (systemctl disable irqbalance), or set IRQBALANCE_BANNED_CPULIST={rt_cpus_text}
       in /etc/default/irqbalance.
     commands: ["systemctl stop irqbalance"]
+    keep:
+      once: ["systemctl disable --now irqbalance"]
+      once-undo: ["systemctl enable --now irqbalance"]
     risk: Low; interrupts stay where they are.
     cost: Nothing measurable on a LinuxCNC computer.
   effect: Interrupts stay where they are put.
@@ -242,6 +245,7 @@
     kind: runtime
     text: Gather them less often (every 10 s); to keep it, put vm.stat_interval = 10 in /etc/sysctl.d/.
     commands: ["sysctl vm.stat_interval=10"]
+    keep: {sysctl: "vm.stat_interval = 10"}
     risk: None for LinuxCNC; memory statistics are updated less often.
     cost: None.
   effect: Fewer short interruptions of the real-time CPU, about once a second.
@@ -268,6 +272,7 @@
     kind: runtime
     text: Switch it off; to keep it so, put kernel.timer_migration = 0 in /etc/sysctl.d/.
     commands: ["sysctl kernel.timer_migration=0"]
+    keep: {sysctl: "kernel.timer_migration = 0"}
     risk: None for LinuxCNC; a little more power use on an idle computer.
     cost: None.
   effect: Fewer timer softirqs on the real-time CPU.
@@ -294,6 +299,7 @@
     kind: runtime
     text: Use huge pages only where a program asks (madvise).
     commands: ["echo madvise > /sys/kernel/mm/transparent_hugepage/enabled"]
+    kernel-param: "transparent_hugepage=madvise"
     risk: None for LinuxCNC.
     cost: None.
   effect: No compaction stalls.

@@ -2127,6 +2127,26 @@ class TestTimingPage(WindowBase):
         self.assertIn("sudo sh -c 'echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo'", shown[0])
         self.assertEqual(tp.change_table.item(0, 1).text(), "tried, by hand")
 
+    def test_the_list_to_do_yourself(self):
+        w = self.window()
+        tp = self.page(w)
+        self.add_run(tp, 600, "b1.json")
+        self.add_run(tp, 610, "b2.json")
+        shown = []
+        with mock.patch.object(gui.TodoDialog, "exec_", lambda d: shown.append(d)):
+            tp.todo_button.click()
+        d = shown[0]
+        text = d.text.toPlainText()
+        self.assertIn("# Real-time settings to make yourself", text)
+        found, _ = tp.flow.findings()
+        self.assertTrue(any(f.title in text for f in found if f.kind != "measure"))
+        path = os.path.join(self.tmp.name, "todo.md")
+        with mock.patch.object(gui.QFileDialog, "getSaveFileName", return_value=(path, "")):
+            d.save_button.click()
+        with open(path) as f:
+            self.assertEqual(f.read(), text + "\n")
+        self.assertEqual(d.saved, path)
+
     def test_report(self):
         w = self.window()
         tp = self.page(w)

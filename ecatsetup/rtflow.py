@@ -88,8 +88,8 @@ def can_sudo(runner=subprocess.run):
 # the change log
 
 class Change:
-    FIELDS = ("id", "rule", "title", "item", "commands", "undo_commands", "kernel_param", "state", "tried",
-              "ended", "run_before", "run_after", "verdict", "by_hand", "error", "check")
+    FIELDS = ("id", "rule", "title", "item", "commands", "undo_commands", "kernel_param", "keep", "state",
+              "tried", "ended", "run_before", "run_after", "verdict", "by_hand", "error", "check")
 
     def __init__(self, **kw):
         for f in self.FIELDS:
@@ -149,7 +149,7 @@ class ChangeLog:
         c = Change(id="c%d-%d" % (int(time.time()), len(self.changes) + 1), rule=finding.id, title=finding.title,
                    item=item_key(finding), commands=list(finding.commands),
                    undo_commands=list(finding.undo_commands), kernel_param=finding.kernel_param,
-                   state="tried", tried=time.time(), run_before=run_before, by_hand=by_hand or None,
+                   keep=getattr(finding, "keep", None), state="tried", tried=time.time(), run_before=run_before, by_hand=by_hand or None,
                    check=finding.check)
         self.changes.append(c)
         return c

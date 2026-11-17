@@ -2887,7 +2887,9 @@ for `/proc` and `/sys` that tests point at fake trees. It runs on 2.9 and
 4. The guided page; Improve mode at run time: change log, undo commands and
    script; Save report and `--from-run`. **Built 2026-11-17** (see "Step 4:
    built").
-5. Permanent changes (GRUB, systemd), the flow across a restart.
+5. Permanent changes (GRUB, systemd), the flow across a restart. **Changed
+   2026-11-17 (the user): EtherCAT Setup makes no lasting change; it writes
+   a list for the user to follow** (see "Step 5: built" below).
 6. Training cases here and on turner; then the user's test on zx45.
 
 ### Step 1: built (2026-11-17)
@@ -3048,6 +3050,41 @@ Tried here: `--improve` with turbo off (15 s runs under stress-ng): no
 change beyond the noise (99.99 % 45 -> 46 us), undone, no_turbo back to 0;
 the log and the undo script as expected. Not tried: the window on a real
 screen (the user), beside a running LinuxCNC.
+
+### Step 5: built (2026-11-17): the list to do yourself
+
+The user chose, instead of the window editing GRUB and systemd: a list of
+the lasting changes, shown, copied or saved, which the user makes outside
+EtherCAT Setup. `ecatsetup/rttodo.py` (no Qt): `items(flow)` = the changes
+kept (from rt-changes.yaml; they last until the restart) and the findings not
+in force (those being tried are named, not listed); `text()` groups them so
+that each group is one edit:
+
+- kernel parameters: the present `GRUB_CMDLINE_LINUX_DEFAULT` read from
+  /etc/default/grub and the new line with the parameters put in
+  (`merge_params`: one of the same name replaced, e.g. `isolcpus=3` by
+  `isolcpus=managed_irq,domain,3`), the backup, update-grub, the way back and
+  what to do if the computer does not start; without that file, the
+  parameters to add to the boot loader by hand;
+- a rule's `action.keep` (new; checked when the rules load: only on a
+  run-time change, exactly one of `sysctl`, `modprobe`, `once` (with
+  `once-undo`), `file` (path, text, then), `boot`, plus a `note`): sysctl
+  lines into one file, module options into one file, `once` commands,
+  files; a run-time change whose lasting form is a kernel parameter has it
+  in `kernel-param` (`pcie_aspm.policy=performance`,
+  `transparent_hugepage=madvise`, `acpi_mask_gpe`), and one with neither is
+  `boot`: its commands as `ExecStart=/bin/sh -c ...` lines (systemd's `%`
+  escaped) of a oneshot `ecatsetup-rt.service`, the whole unit written out
+  (the test runs `systemd-analyze verify` on it);
+- other commands of permanent findings (apt install), then the BIOS and advice.
+
+The change log keeps each change's `keep` (an older entry without it: its
+commands at each start). The Timing tab's *To do yourself: the lasting
+changes...* (`TodoDialog`: Save..., Copy) and `ecatsetup --rt-todo [FILE]`.
+Tests: tests/test_rttodo.py (groups, GRUB line, the unit, every form, every
+run-time rule has a lasting form, keep validation, the log), TestTimingPage
+(the dialog and Save); mutation-checked. Not built: the flow across a
+restart (the next measurement after a restart is an ordinary one).
 
 ### The probe: `ecat_rtprobe` (2026-11-17)
 
