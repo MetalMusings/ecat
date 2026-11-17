@@ -2253,11 +2253,13 @@ Done (2026-11-17):
   tree against 2.9.4 (in a shell without the run-in-place environment) and against
   2.10, all tests passing in both. CI: job `deb29` builds against the oldest 2.9
   the package takes, 2.9.4: on Debian 13 Debian's own `linuxcnc-uspace-dev`
-  1:2.9.4-2, on Debian 12 linuxcnc.org's 1:2.9.4 (Debian 12's own is a 2.9
-  pre-release), whose archive key is the one LinuxCNC's own
-  `linuxcnc-install.sh` takes (0CE3...2927, checked by fingerprint; the trixie
-  `InRelease` verified with it here). Not yet run on GitHub (needs a
-  push); there is no container tool here to run it locally.
+  1:2.9.4-2 (with its point updates, 2.9.4-2+deb13u1 since November 2026), on
+  Debian 12 linuxcnc.org's 1:2.9.4 (Debian 12's own is a 2.9 pre-release).
+  linuxcnc.org signs bookworm with the old "EMC Archive Signing Key"
+  (EEDD...4FEF, 2008, DSA) and trixie with the "LinuxCNC Archive Signing Key"
+  (0CE3...2927, 2025); the job checks each by its full fingerprint. The first
+  run on GitHub (2026-11-17) failed on both points (one key for both, Debian's
+  version pinned exactly); fixed for ecat 0.22.
 - Tried with the package (2026-11-17): the 2.9 package built from the working
   tree installed here over 0.11 (0.11's release package kept in
   `~/ecat-0.11-backup` as the way back); from a shell without the run-in-place
