@@ -2148,7 +2148,63 @@ integer pins for LINT/ULINT and the hal-type names are in
 [component.md](component.md). Not done: 10 and 11 (need halrun against the
 bus), steps 3-6 of the order of work below.
 
-### Decision: ecat moves to 2.10 only
+### Decision (2026-11-17): one code base for 2.9 and 2.10
+
+The 2.10-only decision below was replaced on 2026-11-17, because users on
+2.9 need ecat. Decided with the user:
+
+- **One code base, `main`, built for both series.** The code stays written
+  against 2.10's HAL API. One header, `component/ecat_hal.h`, is the only
+  place with `#if HAL_API_VERSION`: on 2.9 it gives 2.10's types
+  (`hal_bool_t`, `hal_sint_t`, ...), getters, setters, `hal_pin_new_*()`,
+  `hal_param_new_*()` and `hal_extend_counter()` on 2.9's pointers, and the
+  old `rtapi_task_new()`. This is the alternative described under the old
+  decision ("the way to go if a backport to 2.9 is ever needed"). Every
+  feature is in both builds; no backporting onto `0.11.x`.
+- **Target 2.9:** Debian 13 with LinuxCNC 2.9.7 (linuxcnc.org's packages;
+  Debian's own is 2.9.4). This computer goes up to 2.9.7 for the tests; it
+  runs real work on 2.10 run-in-place with ecat only.
+- **Packages:** 2.9 as a deb (`Depends: linuxcnc-uspace (>= 1:2.9.7),
+  linuxcnc-uspace (<< 1:2.10~)`, a version marked for the series, e.g.
+  `0.22+lcnc29~debian13`); 2.10 as the run-in-place archive until 2.10 is
+  released, then as a deb as well.
+- **How long:** 2.9 is supported until some time after 2.10's release
+  (to be set then), after that bug fixes only, then not at all.
+- `0.11.x` is closed when the first 2.9 build from `main` is released.
+
+Where the two series behave differently (decided on 2.9's terms, as
+ecat 0.11 did):
+
+- Integer pins have 32 bits on 2.9. Commands are already held within the
+  PDO entry's range, so entries up to 32 bits behave the same.
+- LINT/ULINT entries and the encoder's 64-bit count are `float` pins on
+  2.9 (exact up to 2^53); `--check` refuses `hal-type: sint`/`uint` on a
+  LINT/ULINT entry for 2.9 and proposes `real`. Counters that wrap at
+  32 bits wrap as pins, as in lcec and 0.11.
+- The same `ethercat.yaml` works on both (the old type names are read
+  already).
+- EtherCAT Setup finds the series at run time (`lcnc_env`, else halcmd's
+  output): type names in `halpins`/`halcheck`/`testmode`, INI keys
+  (`HOME_SEARCH_DIST`/`HOME_LATCH_DIST` only on 2.10), component names
+  (`conv_s32_float` vs `conv_sint_real`), `KNOWN_PINS` (lube pins exist on
+  2.9, `spindle.N.orient-fault` is `s32` there), and `pindocs` (2.10's
+  texts, marked as such on 2.9 unless 2.9's are added). From lcec matters
+  most on 2.9: most lcec configurations are 2.9 ones.
+
+Tests: the C tests run twice, against a fake 2.10 HAL and against a fake
+2.9 HAL through `ecat_hal.h` (the layer is what is tested; mutation-check
+it); the Python tests with both series. At the machine: halrun on the
+plasma bus here with 2.9.7 (no motion); zx45 (2.9, Mesa, no EtherCAT) for
+the window and Apply. CI: {2.9, 2.10} x {debian12, debian13} for the
+2.10 archive, debian13 for the 2.9 deb (debian12 if linuxcnc.org has 2.9.7
+for it).
+
+Order of work: (1) `ecat_hal.h` and the 2.9 fake, C tests twice;
+(2) build against 2.9.7 here, halrun on the bus; (3) EtherCAT Setup by
+series; (4) build-deb.sh and CI for 2.9; (5) docs (README, getting-started:
+which package for which series), release; close `0.11.x`.
+
+### Old decision (2026-11-11, replaced): ecat moves to 2.10 only
 
 Decided with the user 2026-11-11:
 
@@ -2180,7 +2236,7 @@ Alternative considered: 2.10 as the main code with a header
 on 2.9's pointers (the names are free in 2.9's `hal.h`; `hal_port_t`
 clashes; params would need a `hal_malloc`ed slot). Workable, but rejected
 for the reasons above. It is the way to go if a backport to 2.9 is ever
-needed.
+needed (chosen 2026-11-17, above).
 
 What still holds for 2.9 users: `ethercat.yaml` files keep working (the
 old `hal-type` spellings are read), and the master package
