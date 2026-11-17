@@ -293,6 +293,14 @@ def hal_loads(ini):
     p = os.path.join(d, "ethercat-load.hal")
     if os.path.exists(p):
         files.append(p)
+    try:
+        entries = integrate.read_ini(ini)
+    except OSError:
+        entries = []
+
+    def ini_ref(m):
+        # [SECTION]KEY as halcmd -i substitutes it (config=[ETHERCAT]CONFIG)
+        return integrate.ini_get(entries, m.group(1), m.group(2), m.group(0))
     out = []
     for path in files:
         try:
@@ -301,7 +309,7 @@ def hal_loads(ini):
             continue
         for _, _, tok in integrate.statements(text):
             if tok[0] == "loadrt" and len(tok) > 1:
-                out.append(tok)
+                out.append([re.sub(r"\[(\w+)\](\w+)", ini_ref, t) for t in tok])
     return out, bool(files)
 
 

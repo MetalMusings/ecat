@@ -296,6 +296,22 @@ class TestEndToEnd(unittest.TestCase):
         self.assertNotIn("ethercat-nic-irq-cpu", ids)
         self.assertNotIn("irq-on-rt-cpu", ids)
 
+    def test_ini_references_in_loadrt(self):
+        """As EtherCAT Setup writes it: config=[ETHERCAT]CONFIG (and hm2_eth's
+        board_ip from the INI): halcmd -i substitutes them, so must the check."""
+        roots = fake_tree(self.root)
+        cfg = os.path.join(self.root, "cfg")
+        write(cfg, "m.ini", "[EMCMOT]\nSERVO_PERIOD = 500000\n[ETHERCAT]\nCONFIG = bus.yaml\n"
+              "[HAL]\nHALFILE = ethercat-load.hal\nHALFILE = m.hal\n")
+        write(cfg, "ethercat-load.hal", "loadrt ecat config=[ETHERCAT]CONFIG\n")
+        write(cfg, "m.hal", "loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD\n")
+        write(cfg, "bus.yaml", "master:\n  interface: enp2s0\nslaves: []\n")
+        inv = rtcheck.inventory(roots, ini=os.path.join(cfg, "m.ini"))
+        self.assertEqual(inv.data["io_nics"], ["enp2s0"])
+        loads, _ = rtcheck.hal_loads(os.path.join(cfg, "m.ini"))
+        # a reference the INI does not have stays as it is
+        self.assertIn(["loadrt", "[EMCMOT]EMCMOT", "servo_period_nsec=500000"], loads)
+
     def test_mesa_card_found_by_its_address(self):
         roots = fake_tree(self.root)
         # 10.10.10.0/24 on enp2s0 (little-endian hex, as the kernel writes it)
