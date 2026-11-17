@@ -1993,6 +1993,7 @@ class TestTimingPage(WindowBase):
         tp = self.page(w)
         tp.refresh()
         self.assertIn("Baseline", tp.step_pill.text())
+        self.assertTrue(tp.step_pill.isVisibleTo(tp))
         self.assertGreater(tp.inv_table.rowCount(), 10)
         self.assertTrue(tp.measure_button.isEnabled())
         self.assertFalse(tp.root.isEnabled())               # sudo would ask for a password
@@ -2004,13 +2005,21 @@ class TestTimingPage(WindowBase):
         self.assertIn("late at most", tp.result.toPlainText())
         titles = [v.f.title for v in tp.finding_views]
         self.assertTrue(any("Turbo" in t for t in titles))
-        # Look mode: no Try buttons; Improve (after a yes): Try on run-time changes
-        self.assertFalse(any(v.try_button.isVisibleTo(tp) for v in tp.finding_views))
+        # Look mode: Try shown on run-time changes but not pressable; Improve (after a yes): pressable
+        tries = [v.try_button for v in tp.finding_views if v.try_button.isVisibleTo(tp)]
+        self.assertTrue(tries)
+        self.assertFalse(any(b.isEnabled() for b in tries))
+        self.assertIn("Tick Improve", tries[0].toolTip())
+        # the computer is one line; the table on request
+        self.assertFalse(tp.inv_table.isVisibleTo(tp))
+        self.assertIn("Intel(R) N100", tp.inv_summary.text())
+        tp.inv_toggle.click()
+        self.assertTrue(tp.inv_table.isVisibleTo(tp))
         with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
             tp.improve.setChecked(True)
         self.assertEqual(tp.mode.text(), "Improve")
         turbo = next(v for v in tp.finding_views if "Turbo" in v.f.title)
-        self.assertTrue(turbo.try_button.isVisibleTo(tp))
+        self.assertTrue(turbo.try_button.isEnabled())
         calls = []
         with mock.patch.object(rtflow, "sudo", lambda cmd, runner=None: calls.append(cmd) or ""):
             turbo.try_button.click()

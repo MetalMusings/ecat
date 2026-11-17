@@ -1960,10 +1960,11 @@ the top (*Where you are*), and says when it is done.
 
 ![The Timing tab after two baseline runs, in Improve mode](images/gui-timing.png)
 
-1. **The computer.** Read when the tab is first shown: the kernel, isolated
-   CPUs, frequency, idle states, where every interrupt goes, the network
-   cards, the graphics, the BIOS, the INI's threads and the I/O. Hover over
-   a value to see where it was read. Choose the machine's INI file first
+1. **The computer.** Read when the tab is first shown, and summed up in one
+   line at the bottom of the page (*The computer*); *Show all* lists every
+   fact: the kernel, isolated CPUs, frequency, idle states, where every
+   interrupt goes, the network cards, the graphics, the BIOS, the INI's
+   threads and the I/O. Hover over a value to see where it was read. Choose the machine's INI file first
    (File > Machine INI file...) so that its threads and I/O are known.
 2. **Baseline: measure twice the same way.** *Way*: beside LinuxCNC while it
    runs (offered first then: run the machine as usual meanwhile; nothing that
@@ -1982,7 +1983,7 @@ the top (*Where you are*), and says when it is done.
    computers. A late cycle that came with a counter no rule knows is listed
    as such.
 4. **One change.** Tick *Improve* (it asks first) and press *Try it* on a
-   run-time change: its commands run as root with sudo and the change is
+   run-time change (in Look mode the button is there but greyed out): its commands run as root with sudo and the change is
    logged. If sudo needs a password, the window shows the commands for a
    terminal and you press *I ran it* when done. Kernel parameters, the BIOS
    and advice are for you to do (a restart).

@@ -157,8 +157,6 @@ class Shots:
                 page.measured(rtcheck.Run.load_file(src))
             page.improve.setChecked(True)
             w.show_tab(page)
-            for area in page.findChildren(gui.QScrollArea)[:1]:
-                area.verticalScrollBar().setValue(page.result_card.y() - 20)
             w.status("Measured")
             self.save(w, "gui-timing")
 

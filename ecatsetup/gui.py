@@ -5954,11 +5954,10 @@ class FindingView(QFrame):
         lay.setSpacing(4)
         head = QHBoxLayout()
         head.addWidget(label("%d. %s" % (n, f.title), "rowTitle"), 1)
-        kind = {"runtime": ("run-time change", "blue"), "permanent": ("needs a restart", "amber"),
-                "bios": ("BIOS", "grey"), "advice": ("advice", "grey"), "measure": ("measure", "blue")}
-        text, colour = kind.get(f.kind, (f.kind, "grey"))
-        head.addWidget(pill(text, colour))
-        head.addWidget(pill("gain " + f.gain, "green" if f.gain == "high" else "grey"))
+        kind = {"runtime": "run-time change", "permanent": "needs a restart", "bios": "in the BIOS",
+                "advice": "advice", "measure": "measure again"}
+        # plain text, not pills: they looked like buttons
+        head.addWidget(label("%s · gain %s" % (kind.get(f.kind, f.kind), f.gain), "hint"))
         self.try_button = QPushButton("Try it")
         self.try_button.setToolTip("Run the command(s) below as root now (sudo), and measure "
                                    "again the same way to see what it did. Undo is one press.")
@@ -6059,19 +6058,6 @@ class TimingPage(QWidget):
         self.step_card.add(srow)
         lay.addWidget(self.step_card)
 
-        # the computer
-        self.inv_card = Card("The computer", "What it is, each fact with where it was read (the "
-                             "tooltip). A fact matters only when a finding says so.")
-        self.inv_table = table(["", "Value"], stretch=1)
-        self.inv_card.add(self.inv_table)
-        irow = QHBoxLayout()
-        self.read_button = QPushButton("Read the computer")
-        self.read_button.clicked.connect(self.read_computer)
-        irow.addWidget(self.read_button)
-        irow.addStretch(1)
-        self.inv_card.add(irow)
-        lay.addWidget(self.inv_card)
-
         # measure
         self.measure_card = Card("Measure", "How late the real-time threads start, every cycle, "
                                  "and what comes with the late ones.")
@@ -6136,6 +6122,26 @@ class TimingPage(QWidget):
         crow.addStretch(1)
         self.change_card.add(crow)
         lay.addWidget(self.change_card)
+
+        # the computer: one line, the whole table on request
+        self.inv_card = Card("The computer", "What it is, each fact with where it was read (the "
+                             "tooltip). A fact matters only when a finding says so.")
+        irow = QHBoxLayout()
+        self.inv_summary = label("", wrap=True)
+        irow.addWidget(self.inv_summary, 1)
+        self.inv_toggle = QPushButton("Show all")
+        self.inv_toggle.setCheckable(True)
+        self.inv_toggle.toggled.connect(self.show_inventory)
+        irow.addWidget(self.inv_toggle)
+        self.read_button = QPushButton("Read again")
+        self.read_button.setToolTip("Read what the computer is again (after a change made elsewhere).")
+        self.read_button.clicked.connect(self.read_computer)
+        irow.addWidget(self.read_button)
+        self.inv_card.add(irow)
+        self.inv_table = table(["", "Value"], stretch=1)
+        self.inv_card.add(self.inv_table)
+        self.inv_table.hide()
+        lay.addWidget(self.inv_card)
         lay.addStretch(1)
         self.finding_views = []
         self.show_bound()
@@ -6188,7 +6194,8 @@ class TimingPage(QWidget):
         set_pill(self.mode, self.mode.text(), "amber" if self.improve.isChecked() else "grey")
 
         step, text = f.step()
-        self.step_pill.setText("Step %d of %d · %s" % (step + 1, len(rtflow.STEPS), rtflow.STEPS[step]))
+        set_pill(self.step_pill, "Step %d of %d · %s" % (step + 1, len(rtflow.STEPS), rtflow.STEPS[step]),
+                 "green" if step == 5 else "blue")
         self.step_text.setText(text)
         ch = f.log.find(f.pending) if f.pending else None
         self.keep_button.setVisible(ch is not None)
@@ -6205,6 +6212,20 @@ class TimingPage(QWidget):
             self.inv_table.setItem(r, 0, item(fact.label, tip=fact.source))
             self.inv_table.setItem(r, 1, item(fact.value, tip=fact.source))
         fit_table(self.inv_table)
+        if inv is None:
+            self.inv_summary.setText("Not read yet.")
+        else:
+            def v(key):
+                x = inv.fact(key)
+                return x.value if x else "?"
+            parts = [v("cpu_model"), "kernel %s%s" % (v("kernel"), ", PREEMPT_RT" if inv.data.get("preempt_rt")
+                                                       else ", not PREEMPT_RT"),
+                     "isolated CPU %s" % v("isolated")]
+            if inv.fact("threads"):
+                parts.append(v("threads"))
+            if inv.fact("io"):
+                parts.append("I/O " + v("io"))
+            self.inv_summary.setText(" · ".join(parts))
 
         latest = f.run(f.latest) if f.latest else None
         text = latest.text() if latest else "No run yet."
@@ -6224,8 +6245,14 @@ class TimingPage(QWidget):
         found, ctx = self.flow.findings()
         for n, fd in enumerate(found, 1):
             v = FindingView(self, fd, n)
-            v.try_button.setVisible(self.improve.isChecked() and fd.kind == "runtime" and bool(fd.commands))
-            v.try_button.setEnabled(self.flow.tryable(fd) and self.worker is None)
+            v.try_button.setVisible(fd.kind == "runtime" and bool(fd.commands))
+            v.try_button.setEnabled(self.improve.isChecked() and self.flow.tryable(fd) and self.worker is None)
+            if not self.improve.isChecked():
+                v.try_button.setToolTip("Tick Improve at the top first: then this runs the command(s) "
+                                        "below as root, and you measure again to see what it did.")
+            elif not self.flow.tryable(fd):
+                v.try_button.setToolTip("One change at a time: keep or undo the change being tried "
+                                        "first (or this one is in force already).")
             self.find_box.addWidget(v)
             self.finding_views.append(v)
         if not found:
@@ -6256,6 +6283,10 @@ class TimingPage(QWidget):
             "what is still in force, newest first (read it, then sudo sh it)." % (
                 rtflow.changes_path(), rtflow.undo_script_path()))
         self.undo_selected.setEnabled(self.worker is None and any(c.in_force for c in log.changes))
+
+    def show_inventory(self, on):
+        self.inv_table.setVisible(on)
+        self.inv_toggle.setText("Hide" if on else "Show all")
 
     # -- actions
 
