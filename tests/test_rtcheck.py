@@ -460,6 +460,19 @@ class TestCorrelation(unittest.TestCase):
         self.assertEqual(len(sp), 2)
         self.assertEqual(sp[0][1], 80000)
 
+    def test_no_rtla_beside_linuxcnc(self):
+        run = rtcheck.Run("attach", "as-used", 10, rtcheck.Inventory(), root=True)
+        run.rt_cpus = [3]
+        with mock.patch.object(rtcheck.subprocess, "Popen") as popen, \
+                mock.patch.object(rtcheck.shutil, "which", return_value="/usr/bin/rtla"):
+            self.assertIsNone(rtcheck.start_rtla(run, 10, 50))
+            self.assertFalse(popen.called)
+            self.assertIn("rtla timerlat was not run beside LinuxCNC", run.notes[-1])
+            run = rtcheck.Run("threads", "rest", 10, rtcheck.Inventory(), root=True)
+            run.rt_cpus = [3]
+            rtcheck.start_rtla(run, 10, 50)
+            self.assertTrue(popen.called)
+
     def test_rtla(self):
         d = os.path.join(os.path.dirname(__file__), "data", "rt")
         with open(os.path.join(d, "rtla-hit.txt")) as f:

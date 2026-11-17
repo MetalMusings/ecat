@@ -2444,9 +2444,11 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   real-time CPU are read every 10 ms (interrupts, softirqs, idle states,
   frequency, heat, ACPI events), and each late cycle is compared with them:
   "11 of 12 spikes came with the SMI count growing (by chance 3 %)". With
-  `--rt-root` (sudo asks once) it also counts SMIs and runs `rtla timerlat`
-  (package `rtla`), whose own analysis of the first wake-up over 50 us is
-  shown. Then the **findings**: what the rule catalogue makes of the
+  `--rt-root` (sudo asks once) it also counts SMIs and, with the threads
+  only, runs `rtla timerlat` (package `rtla`), whose own analysis of the
+  first wake-up over 50 us is shown. `rtla` is never run beside LinuxCNC:
+  switching the kernel's tracing on and off at its start and end delays the
+  real-time threads, once enough for LinuxCNC's "Unexpected realtime delay". Then the **findings**: what the rule catalogue makes of the
   inventory and the run, most to gain first, each with what was seen, why it
   matters, what to do (the commands, or the kernel parameter), its risk and
   cost, how to check it worked, how to undo it, where the knowledge comes

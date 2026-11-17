@@ -1726,8 +1726,18 @@ def stop_poller(run, p):
         run.notes.append("poller: " + e)
 
 
+RTLA_BESIDE_LINUXCNC = (
+    "rtla timerlat was not run beside LinuxCNC: its start and end switch the kernel's tracing on and "
+    "off, which delayed the real-time threads (39 and 57 us measured on an N100, and once enough for "
+    "LinuxCNC's \"Unexpected realtime delay\"); measure the threads only to have it")
+
+
 def start_rtla(run, seconds, threshold_us):
     if not run.root:
+        return None
+    if run.way == "attach":
+        # never beside a machine that runs: see RTLA_BESIDE_LINUXCNC
+        run.notes.append(RTLA_BESIDE_LINUXCNC)
         return None
     if shutil.which("rtla") is None and not os.path.exists("/usr/bin/rtla"):
         run.rtla = {"error": "not installed (sudo apt install rtla)"}

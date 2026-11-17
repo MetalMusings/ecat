@@ -3079,6 +3079,18 @@ beside `ecat.so` in the deb and the run-in-place archive, built for 2.9 and
   or one cut short: the message says how to take it out); a LinuxCNC without
   the module says that it comes with ecat 0.23 or later.
 
+**No `rtla` beside LinuxCNC.** The user's first measurement beside LinuxCNC
+(60 s, as root) ended with LinuxCNC's "Unexpected realtime delay" (uspace
+prints it once, when a thread's work ends after its next start: here more
+than ~420 us late at 500 us). With a second copy of the probe (another
+module name) watching the servo thread through a whole root measurement:
+loading and unloading `ecat_rtprobe` three times gave nothing over 14.5 us;
+`rtla timerlat`'s start gave 39 us and its end 57 us (its end came after our
+recording had stopped, so the run did not show it). rtla switches the
+kernel's tracing on and off and puts its own FIFO thread on the real-time
+CPU. So `start_rtla` does nothing in attach (a note says why); the SMI count
+stays. With the threads only it still runs.
+
 Tests: component/tests/test_rtprobe.c (layout offsets, the ring wrapping,
 names, a second load), tests/test_rtcheck.py TestProbe (the file, runs to
 cycles, lost runs, runs before the start skipped) and TestAttach with a fake

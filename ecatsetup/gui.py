@@ -6170,7 +6170,9 @@ class TimingPage(QWidget):
             self.length.addItem(text, secs)
         self.length.currentIndexChanged.connect(self.show_bound)
         form.addRow("Length", self.length)
-        self.root = QCheckBox("As root (sudo): count SMIs and run rtla timerlat")
+        self.root = QCheckBox("As root (sudo): count SMIs; with the threads only, also run rtla timerlat")
+        self.root.setToolTip("rtla is never run beside LinuxCNC: starting and stopping it can delay the "
+                             "machine's real-time threads.")
         form.addRow("", self.root)
         self.measure_card.add(form)
         self.bound = label("", "hint", wrap=True)
