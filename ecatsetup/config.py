@@ -917,9 +917,30 @@ def check(cfg, series=None):
                             "moves within its software position limits; its present value, read in "
                             "the SDO card, is a start)"
                             % (where, obj(i + a * AXIS_OFFSET, sub), "lowest" if sub == 1 else "highest"))
+    errors += check_name_lengths(cfg, series)
     from . import fromlcec
     return errors + check_joints(cfg) + check_nets(cfg) + check_params(cfg) + \
         fromlcec.check(cfg)
+
+
+def hal_name_len(series):
+    """The longest pin or parameter name HAL takes (HAL_NAME_LEN): 47
+    characters on LinuxCNC 2.9, 55 on 2.10."""
+    return 55 if series >= (2, 10) else 47
+
+
+def check_name_lengths(cfg, series):
+    """Pins and parameters whose names are too long for the series' HAL: the
+    component refuses to load ("length N too long for name")."""
+    from . import halpins
+    try:
+        names = halpins.pins(cfg)
+    except Exception:                   # a broken file: its own errors say why
+        return []
+    limit = hal_name_len(series)
+    return ["pin %s: %d characters, LinuxCNC %d.%d takes at most %d in a HAL name: give it a shorter "
+            "name" % (n, len(n), series[0], series[1], limit)
+            for n in sorted(names) if len(n) > limit]
 
 
 def check_joints(cfg):

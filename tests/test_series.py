@@ -100,6 +100,17 @@ class TestCheck(unittest.TestCase):
         cfg = generic({"bits": 16, "type": "UINT", "extend": True})
         self.assertEqual(config.check(cfg, (2, 9)), [])
 
+    def test_hal_names_are_shorter_on_2_9(self):
+        # "s." + 45 characters = 47: fits both; 48 fits only 2.10; 56 neither
+        for pin, ok29, ok210 in (("a" * 45, True, True), ("a" * 46, False, True), ("a" * 54, False, False)):
+            cfg = generic({"pin": pin})
+            for series, ok in (((2, 9), ok29), ((2, 10), ok210)):
+                errors = [e for e in config.check(cfg, series) if "characters" in e]
+                self.assertEqual(errors == [], ok, (len(pin), series, errors))
+        errors = config.check(generic({"pin": "a" * 46}), (2, 9))
+        self.assertIn("pin s.%s: 48 characters, LinuxCNC 2.9 takes at most 47 in a HAL name: give it a "
+                      "shorter name" % ("a" * 46), errors)
+
     def test_the_series_in_use_by_default(self):
         cfg = generic({"bits": 64, "type": "LINT", "hal-type": "sint"})
         with mock.patch.dict(os.environ, {"ECATSETUP_LINUXCNC_SERIES": "2.9"}):
