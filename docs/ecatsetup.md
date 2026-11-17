@@ -1982,8 +1982,13 @@ the top (*Where you are*), and says when it is done.
    where the knowledge comes from and whether we have seen it on our own
    computers. A late cycle that came with a counter no rule knows is listed
    as such.
-4. **One change.** Tick *Improve* (it asks first) and press *Try it* on a
-   run-time change (in Look mode the button is there but greyed out): its commands run as root with sudo and the change is
+4. **One change.** The page has two modes, chosen at the top: *Look*
+   measures and changes nothing; *Improve* also lets you try changes (it
+   asks first). In Improve, press *Try it* on a run-time change (in Look
+   mode the button is there but greyed out). It shows the command and asks
+   again; a run-time change never needs a restart, *Undo it* takes it back at
+   once, and a restart takes it back too. The change then stays at the top
+   of the findings as *Being tried*, with *Undo it* and *Keep it* beside it: its commands run as root with sudo and the change is
    logged. If sudo needs a password, the window shows the commands for a
    terminal and you press *I ran it* when done. Kernel parameters, the BIOS
    and advice are for you to do (a restart).

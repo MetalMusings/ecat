@@ -5942,6 +5942,11 @@ RT_LOADS = [("as-used", "As the computer is used"), ("rest", "At rest"), ("stres
 RT_LENGTHS = [(60, "1 min"), (300, "5 min"), (900, "15 min"), (3600, "1 h")]
 
 
+def rtflow_item(finding):
+    from . import rtflow
+    return rtflow.item_key(finding)
+
+
 class FindingView(QFrame):
     """One finding: what was seen, why, what to do, and in Improve mode Try."""
 
@@ -5958,9 +5963,12 @@ class FindingView(QFrame):
                 "advice": "advice", "measure": "measure again"}
         # plain text, not pills: they looked like buttons
         head.addWidget(label("%s · gain %s" % (kind.get(f.kind, f.kind), f.gain), "hint"))
+        if f.kind == "runtime" and getattr(f, "commands", None):
+            head.addWidget(label("no restart", "hint"))
         self.try_button = QPushButton("Try it")
         self.try_button.setToolTip("Run the command(s) below as root now (sudo), and measure "
-                                   "again the same way to see what it did. Undo is one press.")
+                                   "again the same way to see what it did. Undo is one press; "
+                                   "no restart is needed.")
         self.try_button.clicked.connect(lambda: page.try_finding(f))
         head.addWidget(self.try_button)
         lay.addLayout(head)
@@ -5977,9 +5985,11 @@ class FindingView(QFrame):
         cmds = list(getattr(f, "commands", []) or [])
         kp = getattr(f, "kernel_param", None)
         if cmds or kp:
-            code = QPlainTextEdit("\n".join(["# as root"] + cmds if cmds else []) +
+            code = QPlainTextEdit("\n".join(["# Try it runs, as root (no restart):"] + cmds if cmds else []) +
                                   ("\n" if cmds and kp else "") +
-                                  ("# kernel parameter%s: %s" % (" to keep it" if f.kind == "runtime" else "", kp)
+                                  (("# optional, later, to keep it for good (a kernel parameter: needs a "
+                                    "restart; not done here): %s" if f.kind == "runtime" else
+                                    "# kernel parameter (needs a restart; not done here): %s") % kp
                                    if kp else ""))
             code.setReadOnly(True)
             code.setFont(mono())
@@ -6024,18 +6034,32 @@ class TimingPage(QWidget):
         self.mode = pill("Look", "grey")
         row.addWidget(self.mode)
         row.addStretch(1)
-        self.improve = QCheckBox("Improve: let the check change this computer (sudo)")
-        self.improve.setToolTip("Look (off) reads and measures only. Improve lets you try a "
-                                "run-time change from the findings with one press; every change is "
-                                "logged with its undo command, and gone after a restart.")
+        # the mode's state; the two buttons below set it
+        self.improve = QCheckBox()
         self.improve.toggled.connect(self.improve_toggled)
-        row.addWidget(self.improve)
+        self.improve.hide()
         self.save_report = QPushButton("Save report...")
         self.save_report.setToolTip("One file with the computer, every run, the changes and what is "
                                     "left: what you saw, did and got. Only reads.")
         self.save_report.clicked.connect(self.write_report)
         row.addWidget(self.save_report)
         lay.addLayout(row)
+
+        # the two modes
+        self.mode_card = Card("Mode", None)
+        mrow0 = QHBoxLayout()
+        self.look_button = QPushButton("Look: measure only")
+        self.improve_button = QPushButton("Improve: also try changes (sudo)")
+        for b in (self.look_button, self.improve_button):
+            b.setCheckable(True)
+            mrow0.addWidget(b)
+        self.look_button.setChecked(True)
+        self.look_button.clicked.connect(lambda: self.improve.setChecked(False))
+        self.improve_button.clicked.connect(lambda: self.improve.setChecked(True))
+        self.mode_text = label("", "hint", wrap=True)
+        mrow0.addWidget(self.mode_text, 1)
+        self.mode_card.add(mrow0)
+        lay.addWidget(self.mode_card)
 
         # where the work is
         self.step_card = Card("Where you are", "The check leads; you can stop anywhere: the change "
@@ -6190,8 +6214,19 @@ class TimingPage(QWidget):
         self.measure_button.setEnabled(not running and f.inventory is not None)
         self.stop_button.setEnabled(running)
         self.read_button.setEnabled(not running)
-        self.mode.setText("Improve" if self.improve.isChecked() else "Look")
-        set_pill(self.mode, self.mode.text(), "amber" if self.improve.isChecked() else "grey")
+        on = self.improve.isChecked()
+        set_pill(self.mode, "Improve" if on else "Look", "amber" if on else "grey")
+        self.look_button.setChecked(not on)
+        self.improve_button.setChecked(on)
+        self.look_button.setObjectName("" if on else "primary")
+        self.improve_button.setObjectName("primary" if on else "")
+        restyle(self.look_button)
+        restyle(self.improve_button)
+        self.mode_text.setText(
+            "Improve: a run-time change in the findings can be tried with Try it (it asks first). "
+            "No restart is ever needed for it; Undo takes it back, and a restart does too." if on else
+            "Look reads and measures, and changes nothing. Choose Improve to try a finding's "
+            "run-time change with one press.")
 
         step, text = f.step()
         set_pill(self.step_pill, "Step %d of %d · %s" % (step + 1, len(rtflow.STEPS), rtflow.STEPS[step]),
@@ -6242,7 +6277,40 @@ class TimingPage(QWidget):
             v.setParent(None)
             v.deleteLater()
         self.finding_views = []
-        found, ctx = self.flow.findings()
+        f = self.flow
+        pending = f.log.find(f.pending) if f.pending else None
+        if pending is not None:
+            v = QFrame()
+            v.setObjectName("finding")
+            vl = QVBoxLayout(v)
+            vl.setContentsMargins(0, 6, 0, 10)
+            head = QHBoxLayout()
+            head.addWidget(label("Being tried: %s" % pending.title, "rowTitle"), 1)
+            undo = QPushButton("Undo it")
+            undo.setToolTip("\n".join(["Runs as root:"] + pending.undo_commands))
+            undo.clicked.connect(lambda: self.undo())
+            undo.setEnabled(self.worker is None)
+            head.addWidget(undo)
+            keep = QPushButton("Keep it")
+            keep.setEnabled(pending.run_after is not None and self.worker is None)
+            keep.setToolTip("Measure again first, to see what it did." if pending.run_after is None
+                            else "Keep it in force (until the next restart).")
+            keep.clicked.connect(self.keep)
+            head.addWidget(keep)
+            vl.addLayout(head)
+            what = ("Done as root: %s. Now measure again (Measure, above), the same way, to see what it "
+                    "did; then keep it or undo it." % "; ".join(pending.commands) if pending.run_after is None
+                    else "Measured after it: %s. Keep it or undo it." % pending.verdict)
+            vl.addWidget(label(what, wrap=True))
+            v.undo_button, v.keep_button = undo, keep
+            self.find_box.addWidget(v)
+            self.finding_views.append(v)
+            self.pending_view = v
+        else:
+            self.pending_view = None
+        found, ctx = f.findings()
+        if pending is not None:
+            found = [x for x in found if not (x.id == pending.rule and rtflow_item(x) == (pending.item or ""))]
         for n, fd in enumerate(found, 1):
             v = FindingView(self, fd, n)
             v.try_button.setVisible(fd.kind == "runtime" and bool(fd.commands))
@@ -6255,7 +6323,7 @@ class TimingPage(QWidget):
                                         "first (or this one is in force already).")
             self.find_box.addWidget(v)
             self.finding_views.append(v)
-        if not found:
+        if not found and pending is None:
             v = QFrame()
             QVBoxLayout(v).addWidget(label("Read the computer first." if self.flow.inventory is None
                                            else "No rule applies.", "hint"))
@@ -6357,6 +6425,12 @@ class TimingPage(QWidget):
     def try_finding(self, fd):
         from . import rtflow
         f = self.flow
+        if QMessageBox.question(
+                self, TITLE, "Try \"%s\"?\n\nThis runs as root now:\n  %s\n\nNo restart is needed. "
+                "Undo it takes it back at once (it runs: %s), and a restart takes it back too.\n\nThen "
+                "measure again the same way to see what it did." % (
+                    fd.title, "\n  ".join(fd.commands), "; ".join(fd.undo_commands))) != QMessageBox.Yes:
+            return
         try:
             ch = rtflow.try_change(f.log, fd, f.reference)
         except rtflow.SudoError as e:

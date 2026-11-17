@@ -2015,24 +2015,46 @@ class TestTimingPage(WindowBase):
         self.assertIn("Intel(R) N100", tp.inv_summary.text())
         tp.inv_toggle.click()
         self.assertTrue(tp.inv_table.isVisibleTo(tp))
+        # the mode is two buttons
         with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
-            tp.improve.setChecked(True)
+            tp.improve_button.click()
         self.assertEqual(tp.mode.text(), "Improve")
+        self.assertTrue(tp.improve_button.isChecked())
+        self.assertFalse(tp.look_button.isChecked())
+        self.assertIn("No restart", tp.mode_text.text())
         turbo = next(v for v in tp.finding_views if "Turbo" in v.f.title)
         self.assertTrue(turbo.try_button.isEnabled())
         calls = []
-        with mock.patch.object(rtflow, "sudo", lambda cmd, runner=None: calls.append(cmd) or ""):
+        asked = []
+        # it asks first, with the command and that no restart is needed; No changes nothing
+        with mock.patch.object(rtflow, "sudo", lambda cmd, runner=None: calls.append(cmd) or ""), \
+                mock.patch.object(gui.QMessageBox, "question",
+                                  side_effect=lambda *a: asked.append(a[2]) or gui.QMessageBox.No):
+            turbo.try_button.click()
+        self.assertEqual(calls, [])
+        self.assertIn("No restart is needed", asked[0])
+        self.assertIn("echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo", asked[0])
+        with mock.patch.object(rtflow, "sudo", lambda cmd, runner=None: calls.append(cmd) or ""), \
+                mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
             turbo.try_button.click()
         self.assertEqual(calls, ["echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo"])
         self.assertIn("Measure again", tp.step_pill.text())
         self.assertTrue(tp.undo_button.isVisibleTo(tp))
         self.assertFalse(tp.keep_button.isEnabled())         # not measured yet
-        self.assertFalse(any(v.try_button.isEnabled() for v in tp.finding_views))   # one at a time
+        # the change stays where the findings are, with Undo and Keep beside it
+        pv = tp.pending_view
+        self.assertIs(tp.finding_views[0], pv)
+        self.assertTrue(pv.undo_button.isEnabled())
+        self.assertFalse(pv.keep_button.isEnabled())
+        self.assertFalse(any(getattr(v, "f", None) and v.f.id == "turbo-on" for v in tp.finding_views))
+        self.assertFalse(any(v.try_button.isEnabled() for v in tp.finding_views if hasattr(v, "try_button")))
         self.assertEqual(tp.change_table.rowCount(), 1)
         self.add_run(tp, 300, "a1.json")
         self.assertIn("better", tp.result.toPlainText())
         self.assertTrue(tp.keep_button.isEnabled())
-        tp.keep_button.click()
+        self.assertTrue(tp.pending_view.keep_button.isEnabled())
+        tp.pending_view.keep_button.click()
+        self.assertIsNone(tp.pending_view)
         self.assertEqual(tp.change_table.item(0, 1).text(), "kept")
         self.assertEqual(tp.change_table.item(0, 2).text(), "better")
         # undo it later from the table
@@ -2063,7 +2085,8 @@ class TestTimingPage(WindowBase):
             box.clickedButton = lambda: ran
             return 0
         with mock.patch.object(rtflow, "sudo", needs_password), \
-                mock.patch.object(gui.QMessageBox, "exec_", exec_):
+                mock.patch.object(gui.QMessageBox, "exec_", exec_), \
+                mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
             turbo.try_button.click()
         self.assertIn("sudo sh -c 'echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo'", shown[0])
         self.assertEqual(tp.change_table.item(0, 1).text(), "tried, by hand")
