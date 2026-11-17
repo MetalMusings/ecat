@@ -22,7 +22,7 @@
 #define _LCEC_CONF_H_
 
 #include "ecrt.h"
-#include "hal.h"
+#include "ecat_hal.h"
 
 #define LCEC_MODULE_NAME "ecat"
 

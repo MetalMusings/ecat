@@ -67,12 +67,22 @@ void fake_set(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint32_t va
 void *fake_find(const char *name);
 
 /// A pin's or parameter's value, by its full name; it must exist.
-/// The storage behind a pin is a 2.10 mapped value (bool, sint, uint or
-/// real, 64 bits at most): the devices read and write it with hal_get_*()
-/// and hal_set_*() on the pin's reference, the tests through these.
-#define PIN_BIT(name) (*(volatile rtapi_bool *)fake_pin(name))
-#define PIN_S32(name) (*(volatile rtapi_sint *)fake_pin(name))
-#define PIN_U32(name) (*(volatile rtapi_uint *)fake_pin(name))
+/// The storage behind a pin is what the series' HAL keeps (2.10: a mapped
+/// value of 64 bits at most; 2.9: bool, 32-bit integers, double): the devices
+/// read and write it with hal_get_*() and hal_set_*() on the pin's
+/// reference, the tests through these.
+#if ECAT_HAL_64
+typedef rtapi_bool fake_bool_t;
+typedef rtapi_sint fake_sint_t;
+typedef rtapi_uint fake_uint_t;
+#else
+typedef bool fake_bool_t;
+typedef rtapi_s32 fake_sint_t;
+typedef rtapi_u32 fake_uint_t;
+#endif
+#define PIN_BIT(name) (*(volatile fake_bool_t *)fake_pin(name))
+#define PIN_S32(name) (*(volatile fake_sint_t *)fake_pin(name))
+#define PIN_U32(name) (*(volatile fake_uint_t *)fake_pin(name))
 #define PIN_FLOAT(name) (*(volatile rtapi_real *)fake_pin(name))
 void *fake_pin(const char *name);
 

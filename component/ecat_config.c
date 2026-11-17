@@ -437,6 +437,7 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
       else if (!strcmp(hal, "u32")) hal = "uint";
     }
     if (dt->bytes == 8 && !dt->is_float) {
+#if ECAT_HAL_64
       // LINT, ULINT: an integer pin of the same sign has all 64 bits; a real
       // pin carries them up to 2^53
       // (s32 and u32 meant 32-bit pins: not for these)
@@ -445,6 +446,13 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
         error(c, "%s: a %s entry takes hal-type %s (or real)", object, dt->name, dt->is_signed ? "sint" : "uint");
         return;
       }
+#else
+      // LinuxCNC 2.9: only a real pin (up to 2^53) carries them
+      if (hal == NULL || strcmp(hal, "real")) {
+        error(c, "%s: LinuxCNC 2.9 has no 64-bit pins: a %s entry takes hal-type real", object, dt->name);
+        return;
+      }
+#endif
     }
     if (hal != NULL && !strcmp(hal, "bool")) {
       pe->halType = HAL_BOOL;
@@ -480,6 +488,13 @@ static void pdo_entry(ctx_t *c, buf_t *b, yaml_node_t *e, int output, unsigned i
         error(c, "%s: extend is for an input entry of 8 to 32 bits with hal-type sint", object);
         return;
       }
+#if !ECAT_HAL_64
+      if (bits == 32) {
+        // the pin wraps at 32 bits as the entry does: nothing to extend
+        error(c, "%s: LinuxCNC 2.9's pins have 32 bits: extend is for an entry of 8 to 16 bits there", object);
+        return;
+      }
+#endif
       pe->extend = 1;
     }
     (*pins)++;

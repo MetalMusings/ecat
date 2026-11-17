@@ -251,9 +251,14 @@ static void test_hal_type_spellings(void) {
 }
 
 static void test_extend(void) {
-  // an input counter that keeps counting past its wrap, in 64 bits
+  // an input counter that keeps counting past its wrap, in 64 bits (2.9: 32)
+#if ECAT_HAL_64
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: sint, extend: true}")), 0);
   CHECK_EQ(ENTRY(0)->extend, 1);
+#else
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: sint, extend: true}"),
+      "LinuxCNC 2.9's pins have 32 bits: extend is for an entry of 8 to 16 bits there");
+#endif
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p, hal-type: s32, extend: true}")), 0);
   CHECK_EQ(ENTRY(0)->extend, 1);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: UDINT, pin: p, hal-type: sint}")), 0);
@@ -265,7 +270,7 @@ static void test_extend(void) {
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: DINT, pin: p, hal-type: real, extend: true}"),
       "extend is for an input entry");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: sint, extend: true}"),
-      "extend is for an input entry");
+      ECAT_HAL_64 ? "extend is for an input entry" : "a LINT entry takes hal-type real");
   CHECK_FAILS(HEAD
       "- position: 0\n"
       "  name: s\n"
@@ -284,7 +289,7 @@ static void test_raw(void) {
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 32, type: DINT, pin: p, hal-type: sint, raw: true}"),
       "raw is for an entry of up to 32 bits with hal-type uint");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: uint, raw: true}"),
-      "raw is for an entry of up to 32 bits");
+      ECAT_HAL_64 ? "raw is for an entry of up to 32 bits" : "a ULINT entry takes hal-type real");
 }
 
 static void test_hal_types(void) {
@@ -307,11 +312,18 @@ static void test_hal_types(void) {
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatIeee);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LREAL, pin: p, hal-type: float}")), 0);
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatDoubleIeee);
-  // 64-bit integers: as 64-bit integer pins, or as float (up to 2^53)
+  // 64-bit integers: as 64-bit integer pins (2.10 only), or as float (up to 2^53)
+#if ECAT_HAL_64
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: sint}")), 0);
   CHECK_EQ(ENTRY(0)->halType, HAL_SINT);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: uint}")), 0);
   CHECK_EQ(ENTRY(0)->halType, HAL_UINT);
+#else
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: sint}"),
+      "LinuxCNC 2.9 has no 64-bit pins: a LINT entry takes hal-type real");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: uint}"),
+      "LinuxCNC 2.9 has no 64-bit pins: a ULINT entry takes hal-type real");
+#endif
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: float}")), 0);
   CHECK_EQ(ENTRY(0)->subType, lcecPdoEntTypeFloatSigned);
   CHECK_EQ(load(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: float}")), 0);
@@ -321,12 +333,18 @@ static void test_hal_types(void) {
 static void test_entry_errors(void) {
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p, hal-type: s64}"), "hal-type \"s64\" is not supported");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: UINT, pin: p}"), "hal-type \"\" is not supported");
+#if ECAT_HAL_64
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: s32}"), "a LINT entry takes hal-type sint (or real)");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: u32}"), "a ULINT entry takes hal-type uint (or real)");
   // an integer pin of the other sign is no better
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: uint}"), "a LINT entry takes hal-type sint");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: sint}"), "a ULINT entry takes hal-type uint");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p}"), "a LINT entry takes hal-type sint");
+#else
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p, hal-type: s32}"), "a LINT entry takes hal-type real");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: ULINT, pin: p, hal-type: uint}"), "a ULINT entry takes hal-type real");
+  CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 64, type: LINT, pin: p}"), "a LINT entry takes hal-type real");
+#endif
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 16, type: WORD, pin: p, hal-type: u32}"), "unknown type \"WORD\"");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 0, type: UINT, pin: p, hal-type: u32}"), "bits must be 1 to 64");
   CHECK_FAILS(ONE_ENTRY("{object: '0x6000:11', bits: 65, type: UINT, pin: p, hal-type: u32}"), "bits must be 1 to 64");

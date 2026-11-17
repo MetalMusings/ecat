@@ -5,8 +5,9 @@
 #   sudo make install    install it in LinuxCNC's module directory
 #   make check           build and run the unit tests in tests/
 #
-# Needs LinuxCNC 2.10's halcompile and headers (linuxcnc-uspace-dev, or a
-# run-in-place build: ". scripts/rip-environment" first), libyaml-dev, and the
+# Needs the halcompile and headers of LinuxCNC 2.9 or 2.10 (linuxcnc-uspace-dev,
+# or a run-in-place build: ". scripts/rip-environment" first; COMP= names
+# another halcompile; ecat_hal.h is the only part that differs), libyaml-dev, and the
 # userspace master installed in USPACE_ETHERCAT: the package
 # linuxcnc-ethercat-uspace 1.1 or newer, or a master built from source.
 
@@ -70,7 +71,7 @@ ecat.so: $(objs)
 
 # Unit tests: a device's code with a fake of HAL, the master and lcec
 # (tests/fake.c), so that its read and write functions run without a bus.
-tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial tests/test_serial_bridge
+tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial tests/test_serial_bridge tests/test_hal29
 tests/test_generic: tests/test_generic.o tests/fake.o devices/lcec_generic.o
 tests/test_cia402: tests/test_cia402.o tests/fake.o tests/fake_generic.o devices/ecat_cia402.o
 tests/test_encoder: tests/test_encoder.o tests/fake.o tests/fake_generic.o devices/ecat_encoder.o
@@ -83,6 +84,7 @@ tests/test_captured: tests/test_captured.o tests/fake.o tests/fake_generic.o dev
 tests/test_serial: tests/test_serial.o tests/sim_el60xx.o tests/fake.o tests/fake_generic.o devices/ecat_serial.o devices/ecat_serial_core.o
 tests/test_serial_bridge: tests/test_serial_bridge.o tests/sim_el60xx.o tests/sim_modbus.o tests/fake.o tests/fake_generic.o devices/ecat_serial_bridge.o devices/ecat_serial_core.o
 tests/test_serial_bridge: TEST_LIBS = -lmodbus -lpthread
+tests/test_hal29: tests/test_hal29.o tests/fake.o
 tests/test_events: tests/test_events.o tests/fake.o tests/fake_generic.o ecat_events.o
 -include tests/*.d
 
@@ -98,7 +100,7 @@ tests/serial_sim_port: tests/serial_sim_port.o tests/sim_el60xx.o tests/sim_modb
 	@$(CC) -o $@ $^ -lm -lyaml -lpthread
 
 check: $(tests)
-	@for t in $(tests); do $$t || exit 1; done
+	@fail=0; for t in $(tests); do $$t || fail=1; done; exit $$fail
 
 # Makefile.modinc has an install target of its own; this one replaces it.
 install: ecat.so

@@ -81,18 +81,28 @@ static void test_read_unsigned(void) {
   CHECK_EQ((long long)PIN_U32("g.e2"), 4294967294LL);  // not sign-extended into the 64 bits
 }
 
+// More than the widest entry takes: 2^40 on 2.10, the most a 2.9 pin holds
+// there (then the 32-bit entry is only checked at the pin's own range).
+#if ECAT_HAL_64
+#define BIG_S (1LL << 40)
+#define BIG_U (1ULL << 40)
+#else
+#define BIG_S 2147483647LL
+#define BIG_U 4294967295ULL
+#endif
+
 static void test_write_is_held_within_the_entry(void) {
   const uint8_t subs[] = {1, 2, 3}, bits[] = {8, 16, 32};
   lcec_slave_t *s = generic_slave(3, subs, bits, HAL_SINT, HAL_IN);
-  PIN_S32("g.e0") = 1LL << 40;
-  PIN_S32("g.e1") = -(1LL << 40);
-  PIN_S32("g.e2") = 1LL << 40;
+  PIN_S32("g.e0") = BIG_S;
+  PIN_S32("g.e1") = -BIG_S;
+  PIN_S32("g.e2") = BIG_S;
   lcec_generic_write(s, 1000000);
   CHECK_EQ((int8_t)EC_READ_S8(pd_of(s, 0)), 127);
   CHECK_EQ(EC_READ_S16(pd_of(s, 1)), -32768);
   CHECK_EQ(EC_READ_S32(pd_of(s, 2)), 2147483647);
   PIN_S32("g.e0") = -5;
-  PIN_S32("g.e2") = -(1LL << 40);
+  PIN_S32("g.e2") = -BIG_S - 1;
   lcec_generic_write(s, 1000000);
   CHECK_EQ(EC_READ_S8(pd_of(s, 0)), -5);
   CHECK_EQ(EC_READ_S32(pd_of(s, 2)), -2147483647 - 1);
@@ -101,9 +111,9 @@ static void test_write_is_held_within_the_entry(void) {
 static void test_unsigned_write_is_held_within_the_entry(void) {
   const uint8_t subs[] = {1, 2, 3}, bits[] = {8, 16, 32};
   lcec_slave_t *s = generic_slave(3, subs, bits, HAL_UINT, HAL_IN);
-  PIN_U32("g.e0") = 1ULL << 40;
+  PIN_U32("g.e0") = BIG_U;
   PIN_U32("g.e1") = 70000;
-  PIN_U32("g.e2") = 1ULL << 40;
+  PIN_U32("g.e2") = BIG_U;
   lcec_generic_write(s, 1000000);
   CHECK_EQ(EC_READ_U8(pd_of(s, 0)), 255);
   CHECK_EQ(EC_READ_U16(pd_of(s, 1)), 65535);
@@ -118,7 +128,10 @@ static void test_raw_bit_pattern_is_cut(void) {
   lcec_slave_t *s = generic_slave(2, subs, bits, HAL_UINT, HAL_IN);
   gp[0].raw = gp[1].raw = 1;
   PIN_U32("g.e0") = 0x12345;  // bit 16 is not there
-  PIN_U32("g.e1") = 0x1FFFF0003ULL;
+  PIN_U32("g.e1") = 0xFFFF0003ULL;
+#if ECAT_HAL_64
+  PIN_U32("g.e1") = 0x1FFFF0003ULL;  // only a 64-bit pin has bit 32
+#endif
   lcec_generic_write(s, 1000000);
   CHECK_EQ(EC_READ_U16(pd_of(s, 0)), 0x2345);
   CHECK_EQ((long long)EC_READ_U32(pd_of(s, 1)), 0xFFFF0003LL);
@@ -214,7 +227,10 @@ static void test_counter_without_extend_wraps(void) {
   CHECK_EQ(PIN_S32("g.e0"), -2147483647 - 1);  // as it was: the entry's own value
 }
 
+// LINT/ULINT with integer pins: 2.10 only (2.9 has no 64-bit pins; the file
+// is refused there, test_config, and real pins are used, test_int64).
 static void test_64_bit_entries(void) {
+#if ECAT_HAL_64
   const uint8_t subs[] = {4}, bits[] = {64};
   lcec_slave_t *s = generic_slave(1, subs, bits, HAL_SINT, HAL_OUT);
   EC_WRITE_S64(pd_of(s, 0), -1234567890123456789LL);
@@ -232,6 +248,7 @@ static void test_64_bit_entries(void) {
   PIN_U32("g.e0") = 18446744073709551615ULL;
   lcec_generic_write(s, 1000000);
   CHECK(EC_READ_U64(pd_of(s, 0)) == 18446744073709551615ULL);
+#endif
 }
 
 RUN_TESTS("generic", test_read_signed, test_read_unsigned, test_raw_bit_pattern_is_cut, test_write_is_held_within_the_entry,

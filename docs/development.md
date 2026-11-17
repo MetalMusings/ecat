@@ -12,6 +12,7 @@ scripts/run-tests gui wiring               # only some modules
 python3 -m unittest discover -s tests      # Python tests, one process
 make -C component                          # ecat.so
 make -C component check                    # C unit tests
+scripts/check-component-2.9                # the same against LinuxCNC 2.9 (in a copy)
 scripts/build-deb.sh -w -o <dir>           # package from the working tree
 ```
 
@@ -2205,6 +2206,31 @@ Order of work: (1) `ecat_hal.h` and the 2.9 fake, C tests twice;
 (2) build against 2.9.7 here, halrun on the bus; (3) EtherCAT Setup by
 series; (4) build-deb.sh and CI for 2.9; (5) docs (README, getting-started:
 which package for which series), release; close `0.11.x`.
+
+Done (2026-11-17):
+
+- (1) `component/ecat_hal.h` (2.10's types, getters/setters, `hal_pin_new_*`,
+  `hal_param_new_*` with a `hal_malloc`ed slot, `hal_extend_counter` as 2.10's
+  code, `rtapi_task_new` and `hal_export_funct` with 2.9's `uses_fp`). Built
+  against 2.9's headers without a warning; the rest of the component is
+  unchanged except two rules in `ecat_config.c` (2.9: LINT/ULINT only as
+  `real`; `extend` only for 8- and 16-bit entries). `scripts/check-component-2.9`
+  builds and runs the C tests in a copy against `/usr/bin/halcompile`; the test
+  pins' storage follows the series (`tests/fake.h`), tests of 64-bit pins are
+  `#if ECAT_HAL_64` with 2.9 counterparts; `tests/test_hal29.c` tests the
+  layer against faked 2.9 functions. 12 mutations of the layer and the rules,
+  all caught.
+- (2) on 2.9.4 (installed here; 2.9.7 not yet): halrun with the 2.9 build on
+  the plasma bus (QtPlasma-ecat402-210-unused's file, 1 ms, no motion), the
+  build put in place of the package's `ecat.so` for the run and the
+  package's put back: all slaves of the file in OP, DC phased, SYNC0 shift
+  515 us, turn-around 2 cycles, the params at their defaults (pll-step 1000,
+  margins 50 us), the drives in "switch on disabled" without fault, stop
+  clean. 2.9's halrun needs a shell without the run-in-place environment
+  (`LD_LIBRARY_PATH` else gives 2.10's liblinuxcnchal: `undefined symbol:
+  hal_port_alloc`), and its `loadrt` needs the module named `ecat.so` in
+  `/usr/lib/linuxcnc/modules` (halcmd waits for a component of the module's
+  name).
 
 ### Old decision (2026-11-11, replaced): ecat moves to 2.10 only
 

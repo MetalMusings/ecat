@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 #include "ecrt.h"
-#include "hal.h"
+#include "ecat_hal.h"
 #include "lcec_conf.h"
 #include "lcec_autoshift.h"
 #include "ecat_events.h"

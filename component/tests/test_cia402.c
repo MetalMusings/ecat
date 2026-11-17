@@ -1526,6 +1526,7 @@ static void test_opmode_cmd_not_in_the_file(void) {
 }
 
 static void test_opmode_cmd_is_64_bits(void) {
+#if ECAT_HAL_64
   // 2^32 + 8 is no mode, though its low 32 bits are CSP's 8
   mm_drive(8, BIT(3));
   PIN_S32("m.opmode-cmd") = (1LL << 32) + 3;
@@ -1539,6 +1540,7 @@ static void test_opmode_cmd_is_64_bits(void) {
   PIN_BIT("m.enable") = 1;
   mm_run(1);
   CHECK_EQ(PIN_S32("m.fault-reason"), 7);
+#endif
 }
 
 static void test_mode_change_while_disabled(void) {
