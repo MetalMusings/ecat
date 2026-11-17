@@ -46,6 +46,15 @@ TASKS = [
        "keep it in the configuration.", "test", "Test"),
       ("Save, write into LinuxCNC, and set FERROR from the card's last line.", "hal",
        "HAL && LinuxCNC")]),
+    ("Checking the computer's timing",
+     "Before trusting a computer with a machine, or when cycles come late: measure how late the "
+     "real-time threads start, see what comes with the late ones, and change one thing at a time.",
+     [("Choose the machine's INI file (its threads and I/O).", "ini", "Machine INI file..."),
+      ("Read the computer and measure twice the same way: beside LinuxCNC while the machine is "
+       "used, or the threads alone with load.", "timing", "Timing"),
+      ("Read the findings; in Improve mode try one run-time change, measure again, keep or undo "
+       "it. Kernel parameters and the BIOS are for you to do.", "timing", "Timing"),
+      ("Save the report: what you saw, did and got.", "timing", "Timing")]),
     ("Troubleshooting while LinuxCNC runs",
      "Something unexpected happens and a slave may be the cause.",
      [("Watch the pins live without touching anything.", "watch", "Watch LinuxCNC"),

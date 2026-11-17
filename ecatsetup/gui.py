@@ -5935,6 +5935,480 @@ class HalPage(QWidget):
 
 # -- the window
 
+# -- the computer's timing (the real-time check)
+
+RT_WAYS = [("attach", "Beside LinuxCNC that runs"), ("threads", "The threads only (halrun, no I/O)")]
+RT_LOADS = [("as-used", "As the computer is used"), ("rest", "At rest"), ("stress", "With load (stress-ng)")]
+RT_LENGTHS = [(60, "1 min"), (300, "5 min"), (900, "15 min"), (3600, "1 h")]
+
+
+class FindingView(QFrame):
+    """One finding: what was seen, why, what to do, and in Improve mode Try."""
+
+    def __init__(self, page, f, n):
+        super().__init__()
+        self.setObjectName("finding")
+        self.f = f
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 6, 0, 10)
+        lay.setSpacing(4)
+        head = QHBoxLayout()
+        head.addWidget(label("%d. %s" % (n, f.title), "rowTitle"), 1)
+        kind = {"runtime": ("run-time change", "blue"), "permanent": ("needs a restart", "amber"),
+                "bios": ("BIOS", "grey"), "advice": ("advice", "grey"), "measure": ("measure", "blue")}
+        text, colour = kind.get(f.kind, (f.kind, "grey"))
+        head.addWidget(pill(text, colour))
+        head.addWidget(pill("gain " + f.gain, "green" if f.gain == "high" else "grey"))
+        self.try_button = QPushButton("Try it")
+        self.try_button.setToolTip("Run the command(s) below as root now (sudo), and measure "
+                                   "again the same way to see what it did. Undo is one press.")
+        self.try_button.clicked.connect(lambda: page.try_finding(f))
+        head.addWidget(self.try_button)
+        lay.addLayout(head)
+        rule = getattr(f, "rule", None)
+
+        def line(name, text):
+            if text:
+                lab = label("<b>%s</b> %s" % (name, html.escape(" ".join(str(text).split()))), wrap=True)
+                lab.setTextFormat(Qt.RichText)
+                lay.addWidget(lab)
+        line("Seen:", f.evidence)
+        line("Why:", getattr(f, "cause", None))
+        line("What to do:", getattr(f, "action", None))
+        cmds = list(getattr(f, "commands", []) or [])
+        kp = getattr(f, "kernel_param", None)
+        if cmds or kp:
+            code = QPlainTextEdit("\n".join(["# as root"] + cmds if cmds else []) +
+                                  ("\n" if cmds and kp else "") +
+                                  ("# kernel parameter%s: %s" % (" to keep it" if f.kind == "runtime" else "", kp)
+                                   if kp else ""))
+            code.setReadOnly(True)
+            code.setFont(mono())
+            code.setFixedHeight(22 * (len(cmds) + (2 if cmds else 0) + (1 if kp else 0)) + 8)
+            lay.addWidget(code)
+        line("Risk:", getattr(f, "risk", None))
+        line("Cost:", getattr(f, "cost", None))
+        line("Check:", getattr(f, "check", None))
+        undo = getattr(f, "undo", None) or "; ".join(getattr(f, "undo_commands", []) or [])
+        line("Undo:", undo)
+        if rule is not None:
+            src = "; ".join(("<a href=\"%s\">%s</a>" % (html.escape(s["url"]), html.escape(s.get("text", "")))
+                             if s.get("url") else html.escape(s.get("text", ""))) for s in f.source)
+            lab = label("<b>Source:</b> %s &nbsp; <b>Seen on our computers:</b> %s" % (
+                src, html.escape(f.seen or "no, from the documentation")), "hint", wrap=True)
+            lab.setTextFormat(Qt.RichText)
+            lab.setOpenExternalLinks(True)
+            lay.addWidget(lab)
+
+
+class TimingPage(QWidget):
+    """The real-time check: the computer, a measurement, its budget, the
+    findings and the changes, in the guided order of rtflow.Flow."""
+
+    def __init__(self, win):
+        super().__init__()
+        from . import rtflow
+        self.win = win
+        self.flow = rtflow.Flow()
+        self.worker = None
+        self.cancel = None
+        self.sudo_ok = None
+        self.last_result = None
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        content = QWidget()
+        lay = page_layout(content)
+        outer.addWidget(scroll(content))
+
+        row = QHBoxLayout()
+        row.addWidget(label("Computer timing", "bigTitle"))
+        self.mode = pill("Look", "grey")
+        row.addWidget(self.mode)
+        row.addStretch(1)
+        self.improve = QCheckBox("Improve: let the check change this computer (sudo)")
+        self.improve.setToolTip("Look (off) reads and measures only. Improve lets you try a "
+                                "run-time change from the findings with one press; every change is "
+                                "logged with its undo command, and gone after a restart.")
+        self.improve.toggled.connect(self.improve_toggled)
+        row.addWidget(self.improve)
+        self.save_report = QPushButton("Save report...")
+        self.save_report.setToolTip("One file with the computer, every run, the changes and what is "
+                                    "left: what you saw, did and got. Only reads.")
+        self.save_report.clicked.connect(self.write_report)
+        row.addWidget(self.save_report)
+        lay.addLayout(row)
+
+        # where the work is
+        self.step_card = Card("Where you are", "The check leads; you can stop anywhere: the change "
+                              "log and its undo commands stay.")
+        srow = QHBoxLayout()
+        self.step_pill = pill("", "blue")
+        srow.addWidget(self.step_pill)
+        self.step_text = label("", wrap=True)
+        srow.addWidget(self.step_text, 1)
+        self.keep_button = QPushButton("Keep the change")
+        self.keep_button.clicked.connect(self.keep)
+        srow.addWidget(self.keep_button)
+        self.undo_button = QPushButton("Undo the change")
+        self.undo_button.clicked.connect(lambda: self.undo())
+        srow.addWidget(self.undo_button)
+        self.again = QPushButton("Start again")
+        self.again.setToolTip("A new baseline (the change log stays).")
+        self.again.clicked.connect(self.start_again)
+        srow.addWidget(self.again)
+        self.step_card.add(srow)
+        lay.addWidget(self.step_card)
+
+        # the computer
+        self.inv_card = Card("The computer", "What it is, each fact with where it was read (the "
+                             "tooltip). A fact matters only when a finding says so.")
+        self.inv_table = table(["", "Value"], stretch=1)
+        self.inv_card.add(self.inv_table)
+        irow = QHBoxLayout()
+        self.read_button = QPushButton("Read the computer")
+        self.read_button.clicked.connect(self.read_computer)
+        irow.addWidget(self.read_button)
+        irow.addStretch(1)
+        self.inv_card.add(irow)
+        lay.addWidget(self.inv_card)
+
+        # measure
+        self.measure_card = Card("Measure", "How late the real-time threads start, every cycle, "
+                                 "and what comes with the late ones.")
+        form = QFormLayout()
+        self.way = QuietCombo()
+        for key, text in RT_WAYS:
+            self.way.addItem(text, key)
+        form.addRow("Way", self.way)
+        self.load = QuietCombo()
+        for key, text in RT_LOADS:
+            self.load.addItem(text, key)
+        form.addRow("Load", self.load)
+        self.length = QuietCombo()
+        for secs, text in RT_LENGTHS:
+            self.length.addItem(text, secs)
+        self.length.currentIndexChanged.connect(self.show_bound)
+        form.addRow("Length", self.length)
+        self.root = QCheckBox("As root (sudo): count SMIs and run rtla timerlat")
+        form.addRow("", self.root)
+        self.measure_card.add(form)
+        self.bound = label("", "hint", wrap=True)
+        self.measure_card.add(self.bound)
+        mrow = QHBoxLayout()
+        self.measure_button = QPushButton("Measure")
+        self.measure_button.setObjectName("primary")
+        self.measure_button.clicked.connect(self.measure)
+        mrow.addWidget(self.measure_button)
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.clicked.connect(self.stop)
+        mrow.addWidget(self.stop_button)
+        self.progress = label("", "hint", wrap=True)
+        mrow.addWidget(self.progress, 1)
+        self.measure_card.add(mrow)
+        lay.addWidget(self.measure_card)
+
+        # the result
+        self.result_card = Card("The latest run", "Its budget, the spikes and the counters that "
+                                "came with them, and the comparison with the run before.")
+        self.result = QPlainTextEdit()
+        self.result.setReadOnly(True)
+        self.result.setFont(mono())
+        self.result.setMinimumHeight(260)
+        self.result_card.add(self.result)
+        lay.addWidget(self.result_card)
+
+        # findings
+        self.find_card = Card("Findings", "Most to gain first. Run-time changes can be tried "
+                              "here in Improve mode; kernel parameters, the BIOS and advice are "
+                              "for you to do (a restart).")
+        self.find_box = QVBoxLayout()
+        self.find_card.add(self.find_box)
+        lay.addWidget(self.find_card)
+
+        # changes
+        self.change_card = Card("Changes to this computer", "")
+        self.change_table = table(["Change", "State", "Measured", "When"], stretch=0)
+        self.change_card.add(self.change_table)
+        crow = QHBoxLayout()
+        self.undo_selected = QPushButton("Undo the selected change")
+        self.undo_selected.clicked.connect(self.undo_chosen)
+        crow.addWidget(self.undo_selected)
+        crow.addStretch(1)
+        self.change_card.add(crow)
+        lay.addWidget(self.change_card)
+        lay.addStretch(1)
+        self.finding_views = []
+        self.show_bound()
+
+    # -- showing
+
+    def show_bound(self, *_):
+        from . import rtcheck
+        secs = self.length.currentData() or 60
+        self.bound.setText(
+            "A run with no spike over a limit says there are fewer than %s per hour (95 %%); "
+            "to claim fewer than one per hour, a run of %s is needed." % (
+                rtcheck.number_text(rtcheck.rate_bound(0, secs)),
+                rtcheck.duration_text(rtcheck.seconds_needed(1))))
+
+    def refresh(self):
+        from . import rtcheck, rtflow
+        f = self.flow
+        running = self.worker is not None
+        hal = rtcheck.hal_running() if not running else True
+        # beside LinuxCNC when it runs, else the threads only
+        if not running:
+            self.way.model().item(0).setEnabled(hal)
+            if not hal and self.way.currentData() == "attach":
+                self.way.setCurrentIndex(1)
+            elif hal and not f.baseline and self.way.currentData() != "attach":
+                self.way.setCurrentIndex(0)
+        lock = bool(f.baseline) and not running
+        for w in (self.way, self.load, self.length):
+            w.setEnabled(not running and not lock)
+        if lock:
+            ref = f.run(f.baseline[0])
+            self.way.setCurrentIndex(max(0, self.way.findData(ref.way)))
+            self.load.setCurrentIndex(max(0, self.load.findData(ref.load)))
+            i = min(range(len(RT_LENGTHS)), key=lambda k: abs(RT_LENGTHS[k][0] - ref.seconds))
+            self.length.setCurrentIndex(i)
+            self.measure_card.hint.setText("The same way as the baseline, so that runs can be compared "
+                                           "(Start again to choose another).")
+        if self.sudo_ok is None:
+            self.sudo_ok = rtflow.can_sudo()
+        self.root.setEnabled(bool(self.sudo_ok) and not running and not lock)
+        if not self.sudo_ok:
+            self.root.setChecked(False)
+            self.root.setToolTip("sudo would ask for a password, which the window cannot give: "
+                                 "use ecatsetup --rt-check --rt-root in a terminal")
+        self.measure_button.setEnabled(not running and f.inventory is not None)
+        self.stop_button.setEnabled(running)
+        self.read_button.setEnabled(not running)
+        self.mode.setText("Improve" if self.improve.isChecked() else "Look")
+        set_pill(self.mode, self.mode.text(), "amber" if self.improve.isChecked() else "grey")
+
+        step, text = f.step()
+        self.step_pill.setText("Step %d of %d · %s" % (step + 1, len(rtflow.STEPS), rtflow.STEPS[step]))
+        self.step_text.setText(text)
+        ch = f.log.find(f.pending) if f.pending else None
+        self.keep_button.setVisible(ch is not None)
+        self.undo_button.setVisible(ch is not None)
+        self.keep_button.setEnabled(ch is not None and ch.run_after is not None and not running)
+        self.undo_button.setEnabled(ch is not None and not running)
+        self.again.setEnabled(not running)
+
+        inv = f.inventory
+        self.inv_table.setRowCount(0)
+        for fact in (inv.facts if inv else []):
+            r = self.inv_table.rowCount()
+            self.inv_table.insertRow(r)
+            self.inv_table.setItem(r, 0, item(fact.label, tip=fact.source))
+            self.inv_table.setItem(r, 1, item(fact.value, tip=fact.source))
+        fit_table(self.inv_table)
+
+        latest = f.run(f.latest) if f.latest else None
+        text = latest.text() if latest else "No run yet."
+        if self.last_result:
+            text += "\n\n" + rtflow.comparison_text(*self.last_result)
+        self.result.setPlainText(text)
+        self.show_findings()
+        self.show_changes()
+
+    def show_findings(self):
+        for v in self.finding_views:
+            self.find_box.removeWidget(v)
+            v.hide()
+            v.setParent(None)
+            v.deleteLater()
+        self.finding_views = []
+        found, ctx = self.flow.findings()
+        for n, fd in enumerate(found, 1):
+            v = FindingView(self, fd, n)
+            v.try_button.setVisible(self.improve.isChecked() and fd.kind == "runtime" and bool(fd.commands))
+            v.try_button.setEnabled(self.flow.tryable(fd) and self.worker is None)
+            self.find_box.addWidget(v)
+            self.finding_views.append(v)
+        if not found:
+            v = QFrame()
+            QVBoxLayout(v).addWidget(label("Read the computer first." if self.flow.inventory is None
+                                           else "No rule applies.", "hint"))
+            self.find_box.addWidget(v)
+            self.finding_views.append(v)
+
+    def show_changes(self):
+        from . import rtflow
+        log = self.flow.log
+        t = self.change_table
+        t.setRowCount(0)
+        for c in log.changes:
+            r = t.rowCount()
+            t.insertRow(r)
+            tip = "\n".join(["$ " + x for x in c.commands] + ["undo: " + x for x in c.undo_commands])
+            t.setItem(r, 0, item(c.title, tip=tip))
+            t.setItem(r, 1, item(c.state + (", by hand" if c.by_hand else ""),
+                                 colour=AMBER if c.in_force else GREY))
+            t.setItem(r, 2, item(c.verdict or "-"))
+            t.setItem(r, 3, item(time.strftime("%Y-%m-%d %H:%M", time.localtime(c.tried or 0))))
+            t.item(r, 0).setData(Qt.UserRole, c.id)
+        fit_table(t, 2)
+        self.change_card.hint.setText(
+            "Each change with its undo command, in %s; the undo script %s has every undo command of "
+            "what is still in force, newest first (read it, then sudo sh it)." % (
+                rtflow.changes_path(), rtflow.undo_script_path()))
+        self.undo_selected.setEnabled(self.worker is None and any(c.in_force for c in log.changes))
+
+    # -- actions
+
+    def read_computer(self):
+        ini = self.win.session.ini_path if self.win.session.ini_path and \
+            os.path.exists(self.win.session.ini_path) else None
+        self.flow.take_inventory(ini)
+        self.win.status("Read the computer%s" % (" and %s" % os.path.basename(ini) if ini else ""))
+        self.refresh()
+
+    def improve_toggled(self, on):
+        if on and QMessageBox.question(
+                self, TITLE, "Improve mode lets you change this computer from the findings, one change "
+                "at a time, with sudo. Every change is logged with the command that takes it back, and "
+                "run-time changes are gone after a restart anyway.\n\nTurn Improve mode on?") != QMessageBox.Yes:
+            self.improve.blockSignals(True)
+            self.improve.setChecked(False)
+            self.improve.blockSignals(False)
+        self.refresh()
+
+    def threads(self):
+        f = self.flow
+        th = (f.inventory.data.get("threads") if f.inventory else None) or []
+        return th or [("servo-thread", 1000000)]
+
+    def measure(self):
+        import threading
+        from . import rtcheck
+        if self.worker is not None or self.flow.inventory is None:
+            return
+        way, load, secs = self.way.currentData(), self.load.currentData(), self.length.currentData()
+        root = self.root.isChecked() and self.root.isEnabled()
+        inv = self.flow.inventory
+        threads = self.threads()
+        self.cancel = threading.Event()
+        cancel = self.cancel
+
+        def work(progress):
+            if way == "attach":
+                return rtcheck.measure_attach(secs, load, inv, progress, root, cancel)
+            return rtcheck.measure_threads(threads, secs, load, inv, progress, root, cancel)
+        self.worker = Worker(work, self)
+        self.worker.progress.connect(self.progress.setText)
+        self.worker.done.connect(self.measured)
+        self.worker.failed.connect(self.measure_failed)
+        self.progress.setText("Starting...")
+        self.worker.start()
+        self.refresh()
+
+    def stop(self):
+        if self.cancel is not None:
+            self.cancel.set()
+            self.progress.setText("Stopping...")
+
+    def measured(self, run):
+        self.worker = None
+        self.last_result = self.flow.add_run(run)
+        self.progress.setText("Done: %s" % os.path.basename(self.flow.latest))
+        self.win.status("Measured; the run is saved in %s" % self.flow.latest)
+        self.refresh()
+
+    def measure_failed(self, text):
+        self.worker = None
+        self.progress.setText(text)
+        self.refresh()
+
+    def try_finding(self, fd):
+        from . import rtflow
+        f = self.flow
+        try:
+            ch = rtflow.try_change(f.log, fd, f.reference)
+        except rtflow.SudoError as e:
+            if not e.needs_password:
+                QMessageBox.warning(self, TITLE, "The change could not be made: %s\n\nNothing was "
+                                    "changed (what went before it was undone)." % e)
+                return
+            text = "\n".join(rtflow.shell_line(c) for c in fd.commands)
+            box = QMessageBox(self)
+            box.setWindowTitle(TITLE)
+            box.setText("sudo needs a password, which the window cannot give. Run this in a "
+                        "terminal, then press \"I ran it\":")
+            box.setDetailedText(text)
+            box.setInformativeText(text)
+            ran = box.addButton("I ran it", QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Cancel)
+            box.exec_()
+            if box.clickedButton() is not ran:
+                return
+            ch = rtflow.record_by_hand(f.log, fd, f.reference)
+        f.tried(ch)
+        self.last_result = None
+        self.win.status("Tried: %s. Measure again the same way." % ch.title)
+        self.refresh()
+
+    def keep(self):
+        self.flow.keep()
+        self.last_result = None
+        self.refresh()
+
+    def undo(self, change=None):
+        from . import rtflow
+        f = self.flow
+        pending = change is None
+        ch = f.log.find(f.pending) if pending else change
+        if ch is None:
+            return
+        try:
+            if pending:
+                f.undo()
+            else:
+                rtflow.undo_change(f.log, ch)
+        except rtflow.SudoError as e:
+            if not e.needs_password:
+                QMessageBox.warning(self, TITLE, "Undo failed: %s" % e)
+                return
+            text = "\n".join(rtflow.shell_line(c) for c in ch.undo_commands)
+            if QMessageBox.question(self, TITLE, "sudo needs a password. Run this in a terminal, then "
+                                    "press Yes:\n\n%s" % text) != QMessageBox.Yes:
+                return
+            if pending:
+                f.undo(by_hand=True)
+            else:
+                rtflow.undo_change(f.log, ch, by_hand=True)
+        self.flow.refresh_inventory()
+        self.last_result = None
+        self.refresh()
+
+    def undo_chosen(self):
+        r = self.change_table.currentRow()
+        if r < 0:
+            return
+        ch = self.flow.log.find(self.change_table.item(r, 0).data(Qt.UserRole))
+        if ch is None or not ch.in_force:
+            return
+        self.undo(None if ch.id == self.flow.pending else ch)
+
+    def start_again(self):
+        self.flow.reset()
+        self.last_result = None
+        self.refresh()
+
+    def write_report(self):
+        from . import rtflow
+        path, _ = QFileDialog.getSaveFileName(self, "Save report - %s" % TITLE,
+                                              os.path.join(os.path.expanduser("~"), rtflow.default_report_name()),
+                                              "Report (*.md);;All files (*)")
+        if not path:
+            return
+        with open(path, "w") as fh:
+            fh.write(rtflow.report(self.flow))
+        self.win.status("Wrote %s; look it through before sending it" % path)
+
+
 class StartPage(QWidget):
     """Where to begin: the tasks, each with its steps and where to do them."""
 
@@ -6041,11 +6515,13 @@ class MainWindow(QMainWindow):
         self.trouble_page = TroubleshootPage(self)
         self.test_page = TestPage(self)
         self.hal_page = HalPage(self)
+        self.timing_page = TimingPage(self)
         self.tabs.addTab(self.start_page, "Start")
         self.tabs.addTab(self.bus_page, "Bus")
         self.tabs.addTab(self.trouble_page, "Slave status")
         self.tabs.addTab(self.test_page, "Test")
         self.tabs.addTab(self.hal_page, "HAL && LinuxCNC")
+        self.tabs.addTab(self.timing_page, "Timing")
         self.tabs.currentChanged.connect(lambda _: self.show_current())
         lay.addWidget(self.tabs.strip)
         lay.addWidget(self.tabs, 1)
@@ -6063,9 +6539,9 @@ class MainWindow(QMainWindow):
     def go(self, target):
         """A start page button: a page or an action."""
         pages = {"bus": self.bus_page, "status": self.trouble_page, "test": self.test_page,
-                 "hal": self.hal_page}
+                 "hal": self.hal_page, "timing": self.timing_page}
         actions = {"scan": self.read_bus, "open": self.open_file, "update": self.update_from_bus,
-                   "esi": self.add_esi, "watch": self.start_watch}
+                   "esi": self.add_esi, "watch": self.start_watch, "ini": self.choose_ini}
         if target in pages:
             self.show_tab(pages[target])
         elif target in actions and not self.busy:
@@ -6308,6 +6784,11 @@ class MainWindow(QMainWindow):
             self.hal_page.refresh()
         elif page is self.start_page:
             self.start_page.show_state(self)
+        elif page is self.timing_page:
+            if self.timing_page.flow.inventory is None:
+                self.timing_page.read_computer()
+            else:
+                self.timing_page.refresh()
 
     def set_messages(self, groups):
         """groups: [(colour, prefix, [message])]."""
@@ -7022,6 +7503,11 @@ class MainWindow(QMainWindow):
         if self.busy or not self.ask_save():
             event.ignore()
             return
+        tp = self.timing_page
+        if tp.worker is not None:
+            # a measurement runs: stop it, so that halrun and the HAL lines it added go
+            tp.stop()
+            tp.worker.wait(30000)
         if self.test is not None:
             self.test_timer.stop()
             self.test.disable_drives()

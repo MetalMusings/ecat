@@ -182,6 +182,11 @@ def main(argv=None):
     ap.add_argument("--rt-root", action="store_true",
                     help="--rt-check: also what needs root (sudo asks): the SMI count and rtla "
                          "timerlat's wake-up latency with its analysis of the first spike")
+    ap.add_argument("--improve", action="store_true",
+                    help="--rt-check: measure twice, then offer the run-time changes of the findings "
+                         "one at a time (sudo), measure again, keep or undo each")
+    ap.add_argument("--rt-report", metavar="FILE",
+                    help="--rt-check --improve: write the check's report there at the end")
     ap.add_argument("--from-run", metavar="FILE", help="show a saved real-time check run")
     ap.add_argument("--response", metavar="FILE",
                     help="analyse a response recording (the Response card's samples file) again; "
@@ -469,14 +474,44 @@ def rt_findings(inv, run):
     return "Findings (most to gain first):\n" + rtrules.report(found, ctx)
 
 
-def rt_check(args):
-    """--rt-check: the inventory, a measurement (or two) and the budget."""
+def _rt_measure(args, way, threads, load, inv, n):
+    """One measurement for --rt-check, printed and saved."""
     from . import rtcheck
+
+    def progress(text):
+        if sys.stdout.isatty():
+            print("\r  run %d: %s   " % (n, text), end="", flush=True)
+    if way == "attach":
+        r = rtcheck.measure_attach(args.rt_seconds, load, inv, progress, args.rt_root)
+    else:
+        r = rtcheck.measure_threads(threads, args.rt_seconds, load, inv, progress, args.rt_root)
+    if sys.stdout.isatty():
+        print()
+    print(r.text())
+    return r
+
+
+def _ask(question, input_fn=input):
+    try:
+        return input_fn(question).strip().lower()
+    except EOFError:
+        return ""
+
+
+def rt_check(args, input_fn=input):
+    """--rt-check: the inventory, a measurement (or two), the budget and the
+    findings; with --improve, the guided work of rtflow on a terminal."""
+    from . import rtcheck, rtflow
     ini = args.rt_check or args.ini or os.environ.get("INI_FILE_NAME") or None
     if ini and not os.path.exists(ini):
         print("No such INI file: %s" % ini)
         return 1
-    inv = rtcheck.inventory(ini=ini)
+    flow = rtflow.Flow() if args.improve else None
+    if flow is not None:
+        flow.reset()
+        inv = flow.take_inventory(ini)
+    else:
+        inv = rtcheck.inventory(ini=ini)
     print(rtcheck.inventory_text(inv))
     print()
     way = args.rt_way
@@ -491,42 +526,101 @@ def rt_check(args):
         print("No INI file with [EMCMOT]SERVO_PERIOD: measuring a 1 ms servo thread")
         threads = [("servo-thread", 1000000)]
     load = args.rt_load or ("as-used" if way == "attach" else "rest")
-    print("Measuring %s for %s %s%s; Ctrl-C ends it early" % (
+    twice = args.rt_twice or args.improve
+    print("Measuring %s for %s%s%s; Ctrl-C ends it" % (
         "beside the running HAL" if way == "attach" else "the threads only (halrun)",
-        rtcheck.duration_text(args.rt_seconds), "twice" if args.rt_twice else "",
+        rtcheck.duration_text(args.rt_seconds), ", twice" if twice else "",
         ", with stress-ng" if load == "stress" else ""))
-    if args.rt_root and subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0 \
+    if (args.rt_root or args.improve) and subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0 \
             and subprocess.run(["sudo", "-v"]).returncode != 0:
-        print("sudo refused: measuring without root")
+        print("sudo refused: measuring without root%s" % (", and nothing can be changed" if args.improve else ""))
         args.rt_root = False
+        if args.improve:
+            return 1
     runs = []
     try:
-        for i in range(2 if args.rt_twice else 1):
-            def progress(text, i=i):
-                print("\r  run %d: %s   " % (i + 1, text), end="", flush=True)
-            if way == "attach":
-                r = rtcheck.measure_attach(args.rt_seconds, load, inv, progress, args.rt_root)
-            else:
-                r = rtcheck.measure_threads(threads, args.rt_seconds, load, inv, progress, args.rt_root)
-            print()
+        for i in range(2 if twice else 1):
+            r = _rt_measure(args, way, threads, load, inv, i + 1)
             runs.append(r)
-            print(r.text())
-            print("Saved: %s" % r.save())
+            if flow is not None:
+                flow.add_run(r)
+                print("Saved: %s" % flow.latest)
+            else:
+                print("Saved: %s" % r.save())
             print()
+        if len(runs) == 2:
+            for a, b in zip(runs[0].stats, runs[1].stats):
+                n = rtcheck.noise(a.summary(), b.summary())
+                print("%s, the two runs differ by: lateness 99.99 %% %.0f us, largest %.1f us: a "
+                      "change counts as one only when it moves more than that" % (
+                          a.thread, n["late_p9999_us"], n["late_max_us"]))
+            print()
+        if flow is None:
+            print(rt_findings(inv, runs[-1]))
+            return 0
+        return _rt_improve(args, flow, way, threads, load, input_fn)
     except rtcheck.RtError as e:
         print("\n%s" % e)
         return 1
     except KeyboardInterrupt:
-        print("\nStopped.")
+        print("\nStopped.%s" % (" Changes still in force: see %s" % rtflow.undo_script_path()
+                                 if flow is not None else ""))
         return 1
-    print(rt_findings(inv, runs[-1]))
-    print()
-    if len(runs) == 2:
-        for a, b in zip(runs[0].stats, runs[1].stats):
-            n = rtcheck.noise(a.summary(), b.summary())
-            print("%s, the two runs differ by: lateness 99.99 %% %.0f us, largest %.1f us: a change "
-                  "counts as one only when it moves more than that" % (
-                      a.thread, n["late_p9999_us"], n["late_max_us"]))
+
+
+def _rt_improve(args, flow, way, threads, load, input_fn=input):
+    """--rt-check --improve: one run-time change at a time, measured again
+    and kept or undone, until the check says it is done or the user stops."""
+    from . import rtflow, rtrules
+    while True:
+        found, ctx = flow.findings()
+        print("Findings (most to gain first):")
+        print(rtrules.report(found, ctx))
+        print()
+        step, text = flow.step()
+        print("Step %d of %d, %s: %s" % (step + 1, len(rtflow.STEPS), rtflow.STEPS[step], text))
+        tryable = [f for f in found if flow.tryable(f)]
+        if not tryable:
+            break
+        print()
+        for f in tryable:
+            print("  %d. %s" % (found.index(f) + 1, f.title))
+        a = _ask("Try which (its number), or q to stop? ", input_fn)
+        if not a.isdigit() or not 1 <= int(a) <= len(found) or found[int(a) - 1] not in tryable:
+            break
+        f = found[int(a) - 1]
+        print("Running as root:")
+        for c in f.commands:
+            print("  " + c)
+        try:
+            ch = rtflow.try_change(flow.log, f, flow.reference)
+        except rtflow.SudoError as e:
+            print("Not changed: %s" % e)
+            continue
+        flow.tried(ch)
+        print("Measuring again the same way...")
+        r = _rt_measure(args, way, threads, load, flow.inventory, len(flow.baseline) + 1)
+        result = flow.add_run(r)
+        if result:
+            print(rtflow.comparison_text(*result))
+        a = _ask("Keep it (k) or undo it (u)? [u] ", input_fn)
+        if a.startswith("k"):
+            flow.keep()
+            print("Kept. It is gone after a restart; %s" % (
+                "to keep it: kernel parameter %s" % ch.kernel_param if ch.kernel_param else
+                "the finding says how to keep it"))
+        else:
+            flow.undo()
+            print("Undone.")
+        print()
+    live = [c for c in flow.log.changes if c.in_force]
+    if live:
+        print("Still in force (run-time, gone after a restart): %s" % ", ".join(c.title for c in live))
+        print("Undo script, to read and run: %s" % rtflow.undo_script_path())
+    if args.rt_report:
+        with open(args.rt_report, "w") as f:
+            f.write(rtflow.report(flow))
+        print("Report: %s" % args.rt_report)
     return 0
 
 

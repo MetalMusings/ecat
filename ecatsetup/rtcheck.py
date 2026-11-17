@@ -38,8 +38,9 @@ SAMPLER_DEPTH = 16384
 # spike thresholds, us: counted over the run (cycle-to-cycle error, either way)
 THRESHOLDS_US = (10, 20, 50, 100, 200, 500)
 
-STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
-                         "ecatsetup", "rt-runs")
+def state_dir():
+    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                        "ecatsetup", "rt-runs")
 
 
 class RtError(Exception):
@@ -1560,10 +1561,14 @@ class Run:
 
     def save(self, path=None):
         if path is None:
-            os.makedirs(STATE_DIR, exist_ok=True)
-            path = os.path.join(STATE_DIR, "%s-%s-%s.json" % (
+            os.makedirs(state_dir(), exist_ok=True)
+            base = os.path.join(state_dir(), "%s-%s-%s" % (
                 self.host, time.strftime("%Y%m%d-%H%M%S", time.localtime(self.started or time.time())),
                 self.way))
+            path, n = base + ".json", 1
+            while os.path.exists(path):
+                n += 1
+                path = "%s-%d.json" % (base, n)
         with open(path, "w") as f:
             json.dump(self.to_json(), f)
         if self.poll_path and os.path.exists(self.poll_path):
@@ -1576,7 +1581,7 @@ class Run:
             return cls.from_json(json.load(f))
 
 
-def measure_threads(threads, seconds, load="rest", inventory=None, progress=print, root=False):
+def measure_threads(threads, seconds, load="rest", inventory=None, progress=print, root=False, cancel=None):
     """Threads only: halrun with the threads, nothing else."""
     if hal_running():
         raise RtError("HAL runs already (LinuxCNC or halrun): measure beside it (attach), or stop it")
@@ -1601,7 +1606,7 @@ def measure_threads(threads, seconds, load="rest", inventory=None, progress=prin
             time.sleep(0.2)
         else:
             raise RtError("the threads did not start: see %s" % log.name)
-        _measure(run, rec, threads, seconds, load, progress, d)
+        _measure(run, rec, threads, seconds, load, progress, d, cancel)
     finally:
         rec.stop()
         try:
@@ -1695,7 +1700,7 @@ def stop_rtla(run, p):
 RTLA_THRESHOLD_US = 50
 
 
-def _measure(run, rec, threads, seconds, load, progress, folder):
+def _measure(run, rec, threads, seconds, load, progress, folder, cancel=None):
     run.inventory = run.inventory or inventory()
     # where the threads run, now that they run
     rts = rt_threads(Roots())
@@ -1721,7 +1726,11 @@ def _measure(run, rec, threads, seconds, load, progress, folder):
         rtla = start_rtla(run, seconds, RTLA_THRESHOLD_US)
         t0 = time.monotonic()
         while time.monotonic() - t0 < seconds:
-            time.sleep(max(0.0, min(1.0, seconds - (time.monotonic() - t0))))
+            if cancel is not None and cancel.wait(max(0.0, min(1.0, seconds - (time.monotonic() - t0)))):
+                run.notes.append("stopped after %.0f s of %.0f" % (time.monotonic() - t0, seconds))
+                break
+            if cancel is None:
+                time.sleep(max(0.0, min(1.0, seconds - (time.monotonic() - t0))))
             done = time.monotonic() - t0
             s = rec.stats[-1].summary()
             progress("%3.0f %%  %s: %d cycles, late at most %.1f us" % (
@@ -1741,7 +1750,7 @@ def _measure(run, rec, threads, seconds, load, progress, folder):
                          if n > gpe0.get(g, 0) and secs > 0}
 
 
-def measure_attach(seconds, load="as-used", inventory=None, progress=print, root=False):
+def measure_attach(seconds, load="as-used", inventory=None, progress=print, root=False, cancel=None):
     """Beside a running HAL: timedelta and sampler into its threads, taken
     out again at the end."""
     if not hal_running():
@@ -1764,7 +1773,7 @@ def measure_attach(seconds, load="as-used", inventory=None, progress=print, root
         for c in attach_commands(names):
             halcmd(*c.split())
             added.append(c)
-        _measure(run, rec, threads, seconds, load, progress, folder)
+        _measure(run, rec, threads, seconds, load, progress, folder, cancel)
         grew = [t for t, d in run.times.items()
                 if (d.get("tmax_us") or 0) > ((run.times_before.get(t) or {}).get("tmax_us") or 0)]
         run.notes.append("the longest runs are counted since LinuxCNC started; %s" % (

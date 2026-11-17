@@ -327,5 +327,28 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(a)
 
 
+class TestRecordedRun(unittest.TestCase):
+    """A real run (here, 2026-11-17: threads only, 30 s under stress-ng, as root):
+    its findings come out the same from the file."""
+
+    def test_findings(self):
+        path = os.path.join(os.path.dirname(__file__), "data", "rt", "run-n100-stress-root.json")
+        run = rtcheck.Run.load_file(path)
+        self.assertTrue(run.root and run.smi_measured)
+        self.assertEqual(run.rt_cpus, [3])
+        ctx = rtrules.evidence(run.inventory, run)
+        self.assertGreater(ctx["late_max_us"], 20)
+        self.assertEqual(ctx["smi_count"], 0)
+        found = rtrules.analyse(ctx, rtrules.load(SHIPPED))
+        ids = [f.id for f in found]
+        for rule in ("governor-not-performance", "turbo-on", "i915-display-power"):
+            self.assertIn(rule, ids)
+        # EtherCAT's card on the real-time CPU is right: no rule moves it
+        self.assertNotIn("irq-on-rt-cpu", ids)
+        self.assertNotIn("isolcpus-without-managed-irq", ids)
+        un = [f for f in found if f.id == "unexplained"]
+        self.assertEqual([f.keys for f in un], [["irq:RES"]])
+
+
 if __name__ == "__main__":
     unittest.main()

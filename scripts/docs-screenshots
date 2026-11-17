@@ -7,7 +7,7 @@ program. Usage:
     scripts/docs-screenshots [--out DIR] [NAME ...]
 
 NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-test, gui-response,
-gui-status, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply);
+gui-status, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply, gui-timing);
 without names all are taken. Look at them before committing: a change in
 the window can need another state than the one shown here.
 """
@@ -22,7 +22,7 @@ from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-sync", "gui-response", "gui-status",
-         "gui-settings", "gui-settings-picker", "gui-hal", "gui-hal-apply"]
+         "gui-settings", "gui-settings-picker", "gui-hal", "gui-hal-apply", "gui-timing"]
 
 # English system messages (strerror) and no display: set before anything loads
 if os.environ.get("LC_ALL") != "C":
@@ -134,7 +134,33 @@ class Shots:
             self.response(w)
         if self.want("gui-settings") or self.want("gui-settings-picker"):
             self.settings(w)
+        if self.want("gui-timing"):
+            self.timing(w)
         self.close(w)
+
+    def timing(self, w):
+        """The Timing page after a baseline of two runs: the recorded run of
+        tests/data/rt (this N100, 30 s under stress-ng, as root), twice, in
+        Improve mode. No halrun, no sudo, nothing changed."""
+        from ecatsetup import rtcheck, rtflow
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"XDG_STATE_HOME": tmp}), \
+                mock.patch.object(rtflow, "can_sudo", return_value=True), \
+                mock.patch.object(rtcheck, "hal_running", return_value=False), \
+                mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+            src = os.path.join(ROOT, "tests", "data", "rt", "run-n100-stress-root.json")
+            page = w.timing_page
+            page.flow = rtflow.Flow()
+            run = rtcheck.Run.load_file(src)
+            page.flow.inventory = run.inventory
+            for _ in range(2):
+                page.measured(rtcheck.Run.load_file(src))
+            page.improve.setChecked(True)
+            w.show_tab(page)
+            for area in page.findChildren(gui.QScrollArea)[:1]:
+                area.verticalScrollBar().setValue(page.result_card.y() - 20)
+            w.status("Measured")
+            self.save(w, "gui-timing")
 
     def sync(self, w):
         """The Synchronisation card as it looks while a test runs: made from pins a

@@ -2877,7 +2877,8 @@ for `/proc` and `/sys` that tests point at fake trees. It runs on 2.9 and
 3. The rule catalogue with its tests, general cases included. **Built
    2026-11-17**.
 4. The guided page; Improve mode at run time: change log, undo commands and
-   script; Save report and `--from-run`.
+   script; Save report and `--from-run`. **Built 2026-11-17** (see "Step 4:
+   built").
 5. Permanent changes (GRUB, systemd), the flow across a restart.
 6. Training cases here and on turner; then the user's test on zx45.
 
@@ -3002,6 +3003,43 @@ Packaging: build-deb.sh now installs `ecatsetup/rtrules/*.yaml`, and
 `ecatsetup/measured/*.yaml`, which it had missed since 0.20 (the window's
 measured SYNC0 results were empty in the deb; the rip archive copies the whole
 folder and had them).
+
+### Step 4: built (2026-11-17)
+
+`ecatsetup/rtflow.py` (no Qt): `Flow` (the steps, which runs are the baseline
+and the reference, the change being tried; kept in
+~/.local/state/ecatsetup/rt-flow.json so that it survives the window),
+`ChangeLog` (rt-changes.yaml, readable without the tool) with
+`try_change` / `undo_change` / `record_by_hand`, `write_undo_script`
+(rt-undo.sh, newest first), `compare_runs` against the noise of the two
+baseline runs, and `report()`. Commands run as `sudo -n sh -c`; when sudo
+needs a password the window shows `sudo sh -c '...'` lines for a terminal and
+the user says when they ran them (the window never asks for a password). A
+command that fails undoes the ones before it; nothing is logged then.
+Only run-time changes are made; kernel parameters wait for step 5.
+
+The window's *Timing* tab (`gui.TimingPage`, `FindingView`) and a start page
+task; the measurement runs in the page's own worker, so the rest of the
+window stays usable, and *Stop* (or closing the window) ends it cleanly
+(`cancel` in `rtcheck._measure`). `ecatsetup --rt-check --improve
+[--rt-report FILE]` does the same on a terminal. Runs are saved under
+unique names (two in one second overwrote each other before).
+
+"Done" is advice, not a stop: with half the period left and nothing of high
+gain, the check says no more changes are needed, and still offers the rest.
+
+Tests: tests/test_rtflow.py (the steps through baseline, a change kept and
+one undone, the noise deciding, the log, the undo script's order, a failing
+command, a password), tests/test_gui.py TestTimingPage (the page offscreen:
+steps, Look/Improve, Try, Keep, Undo from the table, the password dialog, the
+report), tests/test_rtrules.py TestRecordedRun on a real run of this computer
+(tests/data/rt/run-n100-stress-root.json). Screenshot docs/images/gui-timing.png
+(scripts/docs-screenshots gui-timing, from that run).
+
+Tried here: `--improve` with turbo off (15 s runs under stress-ng): no
+change beyond the noise (99.99 % 45 -> 46 us), undone, no_turbo back to 0;
+the log and the undo script as expected. Not tried: the window on a real
+screen (the user), beside a running LinuxCNC.
 
 ### Open
 

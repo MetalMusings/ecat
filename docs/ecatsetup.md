@@ -19,7 +19,7 @@ what scripts use.
 
 Contents:
 
-- [The window](#the-window): a tour of the five tabs;
+- [The window](#the-window): a tour of the tabs;
 - [Bringing up a new slave](#bringing-up-a-new-slave): where a proposal
   comes from, ESI files, how-tos for [a spindle
   encoder](#a-spindle-encoder-el5101), [a Modbus VFD on a serial
@@ -29,6 +29,8 @@ Contents:
   the steps to answer them;
 - [Test mode](#test-mode): I/O, SDOs, moving a drive, homing;
 - [Writing the configuration into LinuxCNC](#writing-the-configuration-into-linuxcnc);
+- [The computer's timing](#the-computers-timing): how late the real-time
+  threads start, why, and changing one thing at a time;
 - [Event log and report](#event-log-and-report): what to send when asking
   for help, and [a capture of the bus](#a-capture-of-the-bus) for a device
   the developer does not have;
@@ -73,7 +75,8 @@ or `theme: dark`) for the next start. Light is the default, and the
 screenshots in this document show it.
 
 Five tabs, in the order you normally use them: **Start**, **Bus**,
-**Slave status**, **Test**, **HAL & LinuxCNC**.
+**Slave status**, **Test**, **HAL & LinuxCNC**; and a sixth, **Timing**,
+for the computer itself ([The computer's timing](#the-computers-timing)).
 
 ### Start
 
@@ -1947,6 +1950,66 @@ both joints 10 mm as measured, the encoder and its index by hand, the
 cable pulled (the drives shut down in a millisecond, all in OP 11 s after
 the cable was back), the software E-stop, and a clean stop.
 
+## The computer's timing
+
+The *Timing* tab checks whether the computer keeps time well enough for the
+machine, for any LinuxCNC computer (EtherCAT, Mesa Ethernet, a parallel
+port): how late the real-time threads start, what comes with the late
+cycles, and what to change. It leads you through the work in steps, shown at
+the top (*Where you are*), and says when it is done.
+
+![The Timing tab after two baseline runs, in Improve mode](images/gui-timing.png)
+
+1. **The computer.** Read when the tab is first shown: the kernel, isolated
+   CPUs, frequency, idle states, where every interrupt goes, the network
+   cards, the graphics, the BIOS, the INI's threads and the I/O. Hover over
+   a value to see where it was read. Choose the machine's INI file first
+   (File > Machine INI file...) so that its threads and I/O are known.
+2. **Baseline: measure twice the same way.** *Way*: beside LinuxCNC while it
+   runs (offered first then: run the machine as usual meanwhile; nothing that
+   talks to your I/O card is loaded), or the INI's threads alone in halrun.
+   *Load*: as the computer is used, at rest, or with `stress-ng`. *Length*:
+   the line under it says what a run of that length can show ("no spike in
+   15 min means fewer than 12 per hour"). *As root* counts SMIs and runs
+   `rtla timerlat` (only when sudo needs no password; otherwise use the
+   command line). The two runs show how much the numbers move by chance: a
+   later change counts as better or worse only by more than that. From then
+   on the way, load and length stay the baseline's (*Start again* to change
+   them).
+3. **Findings**, most to gain first, each with what was seen, why it
+   matters, what to do, the risk and cost, how to check it, how to undo it,
+   where the knowledge comes from and whether we have seen it on our own
+   computers. A late cycle that came with a counter no rule knows is listed
+   as such.
+4. **One change.** Tick *Improve* (it asks first) and press *Try it* on a
+   run-time change: its commands run as root with sudo and the change is
+   logged. If sudo needs a password, the window shows the commands for a
+   terminal and you press *I ran it* when done. Kernel parameters, the BIOS
+   and advice are for you to do (a restart).
+5. **Measure again**, the same way. *The latest run* says better, worse or
+   no change against the run before, with the noise taken into account.
+   Then *Keep the change* or *Undo the change*.
+6. Back to the findings, until the check says no more changes are needed (at
+   least half the period left and nothing of high gain), or nothing is left
+   that it can change at run time.
+
+*Changes to this computer* lists every change with its state; *Undo the
+selected change* takes one back. Everything is in
+`~/.local/state/ecatsetup/rt-changes.yaml`, and `rt-undo.sh` beside it has
+the undo commands of what is still in force, newest first, to read and run
+(`sudo sh ~/.local/state/ecatsetup/rt-undo.sh`). Run-time changes are gone
+after a restart anyway. *Save report...* writes one file with the computer,
+every run, the changes and their measurements, the findings and what was
+done in order: what to send when asking for help with timing.
+
+The same from a terminal: `ecatsetup --rt-check <machine>.ini --improve`
+measures twice, then offers the run-time changes one at a time, measures
+again and asks whether to keep each ([Command line](#command-line)).
+
+Tried 2026-11-17 on this N100 (threads only at 1 ms under `stress-ng`):
+turbo off by `--improve`, measured again (no change beyond the noise),
+undone; the window offscreen against the recorded runs.
+
 ## Event log and report
 
 When something unexpected happens in LinuxCNC, the cause has often passed
@@ -2312,6 +2375,7 @@ ecatsetup --capture --esi <ESI folder>
 ecatsetup --response ~/.local/state/ecatsetup/responses/<file>.samples [--ini <machine>.ini]
 ecatsetup --from-capture ecat-capture-<time>.tar.gz --diagnose
 ecatsetup --rt-check <machine>.ini [--rt-seconds 900] [--rt-load stress] [--rt-twice] [--rt-root]
+ecatsetup --rt-check <machine>.ini --improve [--rt-report report.md]
 ecatsetup --from-run ~/.local/state/ecatsetup/rt-runs/<file>.json
 ecatsetup --apply ethercat.yaml --ini <machine>.ini
 ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
@@ -2380,7 +2444,11 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   is saved in `~/.local/state/ecatsetup/rt-runs/`; `--from-run` shows one
   again. A running HAL that has `sampler` or `timedelta` loaded already
   cannot be measured beside (HAL loads a component once): measure the
-  threads only then. The rules are data, in `ecatsetup/rtrules/*.yaml`;
+  threads only then. `--improve` goes on as the *Timing* tab does
+  ([The computer's timing](#the-computers-timing)): two runs, then the
+  run-time changes of the findings one at a time with sudo, each measured
+  again and kept or undone; `--rt-report` writes the report at the end.
+  The rules are data, in `ecatsetup/rtrules/*.yaml`;
   your own go in `~/.config/ecatsetup/rtrules/` (a rule with the same `id`
   replaces the shipped one; the format is at the top of `rtrules.py`).
 - Other options: `--mode` chooses the mode proposed for CiA 402 drives,

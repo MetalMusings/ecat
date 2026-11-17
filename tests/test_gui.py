@@ -304,8 +304,8 @@ class TestWindow(WindowBase):
         from ecatsetup import tasks
         w = self.window()
         pages = {"bus": w.bus_page, "status": w.trouble_page, "test": w.test_page,
-                 "hal": w.hal_page}
-        known = set(pages) | {"scan", "open", "update", "esi", "watch"}
+                 "hal": w.hal_page, "timing": w.timing_page}
+        known = set(pages) | {"scan", "open", "update", "esi", "watch", "ini"}
         self.assertEqual({t for _, _, steps in tasks.TASKS for _, t, _ in steps} - known, set())
         self.assertEqual(len(w.start_page.buttons), sum(len(x[2]) for x in tasks.TASKS))
         self.assertIs(w.tabs.currentWidget(), w.bus_page)       # a configuration is open
@@ -1949,3 +1949,124 @@ class TestProcessDataColumns(WindowBase):
             page.pd.setColumnHidden(page.SPLIT, True)
         page.pd.cellWidget(row, page.HALTYPE).setCurrentText(page.BIT_FIELD)
         self.assertFalse(page.pd.isColumnHidden(page.SPLIT))
+
+
+@unittest.skipIf(gui is None, "PyQt5 is not installed")
+class TestTimingPage(WindowBase):
+    """The real-time check's page: the steps, the findings, Try / Keep / Undo,
+    against a fake tree, saved runs and a fake sudo (no halrun, no root)."""
+
+    def setUp(self):
+        super().setUp()         # the fake bus
+        sys.path.insert(0, os.path.dirname(__file__))
+        from test_rtcheck import fake_tree
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        p = mock.patch.dict(os.environ, {"XDG_STATE_HOME": os.path.join(self.tmp.name, "state")})
+        p.start()
+        self.addCleanup(p.stop)
+        self.roots = fake_tree(os.path.join(self.tmp.name, "tree"))
+        for target, value in (("ecatsetup.rtflow.can_sudo", False), ("ecatsetup.rtcheck.hal_running", False)):
+            m = mock.patch(target, return_value=value)
+            m.start()
+            self.addCleanup(m.stop)
+
+    def page(self, w):
+        from ecatsetup import rtflow
+        tp = w.timing_page
+        tp.flow = rtflow.Flow()
+        tp.flow.take_inventory(roots=self.roots)
+        w.tabs.setCurrentWidget(tp)
+        return tp
+
+    def add_run(self, tp, late_us, name):
+        from ecatsetup import rtcheck
+        from test_rtrules import good_run
+        r = good_run(tp.flow.inventory, late_us=late_us)
+        path = os.path.join(self.tmp.name, name)
+        r.save(path)
+        tp.measured(rtcheck.Run.load_file(path))
+
+    def test_steps_findings_and_a_change(self):
+        from ecatsetup import rtflow
+        w = self.window()
+        tp = self.page(w)
+        tp.refresh()
+        self.assertIn("Baseline", tp.step_pill.text())
+        self.assertGreater(tp.inv_table.rowCount(), 10)
+        self.assertTrue(tp.measure_button.isEnabled())
+        self.assertFalse(tp.root.isEnabled())               # sudo would ask for a password
+        self.add_run(tp, 600, "b1.json")
+        self.add_run(tp, 610, "b2.json")
+        self.assertIn("Findings", tp.step_pill.text())
+        # the way is the baseline's from now on
+        self.assertFalse(tp.load.isEnabled())
+        self.assertIn("late at most", tp.result.toPlainText())
+        titles = [v.f.title for v in tp.finding_views]
+        self.assertTrue(any("Turbo" in t for t in titles))
+        # Look mode: no Try buttons; Improve (after a yes): Try on run-time changes
+        self.assertFalse(any(v.try_button.isVisibleTo(tp) for v in tp.finding_views))
+        with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+            tp.improve.setChecked(True)
+        self.assertEqual(tp.mode.text(), "Improve")
+        turbo = next(v for v in tp.finding_views if "Turbo" in v.f.title)
+        self.assertTrue(turbo.try_button.isVisibleTo(tp))
+        calls = []
+        with mock.patch.object(rtflow, "sudo", lambda cmd, runner=None: calls.append(cmd) or ""):
+            turbo.try_button.click()
+        self.assertEqual(calls, ["echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo"])
+        self.assertIn("Measure again", tp.step_pill.text())
+        self.assertTrue(tp.undo_button.isVisibleTo(tp))
+        self.assertFalse(tp.keep_button.isEnabled())         # not measured yet
+        self.assertFalse(any(v.try_button.isEnabled() for v in tp.finding_views))   # one at a time
+        self.assertEqual(tp.change_table.rowCount(), 1)
+        self.add_run(tp, 300, "a1.json")
+        self.assertIn("better", tp.result.toPlainText())
+        self.assertTrue(tp.keep_button.isEnabled())
+        tp.keep_button.click()
+        self.assertEqual(tp.change_table.item(0, 1).text(), "kept")
+        self.assertEqual(tp.change_table.item(0, 2).text(), "better")
+        # undo it later from the table
+        tp.change_table.selectRow(0)
+        with mock.patch.object(rtflow, "sudo", lambda cmd, runner=None: calls.append(cmd) or ""):
+            tp.undo_selected.click()
+        self.assertEqual(calls[-1], "echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo")
+        self.assertEqual(tp.change_table.item(0, 1).text(), "undone")
+
+    def test_password_asks_for_a_terminal(self):
+        from ecatsetup import rtflow
+        w = self.window()
+        tp = self.page(w)
+        self.add_run(tp, 600, "b1.json")
+        self.add_run(tp, 610, "b2.json")
+        with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+            tp.improve.setChecked(True)
+        turbo = next(v for v in tp.finding_views if "Turbo" in v.f.title)
+
+        def needs_password(cmd, runner=None):
+            raise rtflow.SudoError("sudo needs a password here", needs_password=True)
+        shown = []
+
+        def exec_(box):
+            # the user ran the commands in a terminal and presses "I ran it"
+            shown.append(box.informativeText())
+            ran = next(b for b in box.buttons() if b.text() == "I ran it")
+            box.clickedButton = lambda: ran
+            return 0
+        with mock.patch.object(rtflow, "sudo", needs_password), \
+                mock.patch.object(gui.QMessageBox, "exec_", exec_):
+            turbo.try_button.click()
+        self.assertIn("sudo sh -c 'echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo'", shown[0])
+        self.assertEqual(tp.change_table.item(0, 1).text(), "tried, by hand")
+
+    def test_report(self):
+        w = self.window()
+        tp = self.page(w)
+        self.add_run(tp, 600, "b1.json")
+        path = os.path.join(self.tmp.name, "r.md")
+        with mock.patch.object(gui.QFileDialog, "getSaveFileName", return_value=(path, "")):
+            tp.save_report.click()
+        with open(path) as f:
+            text = f.read()
+        self.assertIn("# Real-time check report", text)
+        self.assertIn(".json (baseline, reference)", text)
