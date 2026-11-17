@@ -14,8 +14,8 @@
 # Otherwise the committed state of this repository is built, from a fresh
 # clone, so uncommitted changes are not packaged. The package is built for the Debian
 # release and LinuxCNC that this machine has: for LinuxCNC 2.10 (a run-in-place
-# build's environment read, or its package) or 2.9 (linuxcnc-uspace-dev 2.9.x
-# from linuxcnc.org, in a shell without a run-in-place environment). A 2.9
+# build's environment read, or its package) or 2.9 (linuxcnc-uspace-dev 2.9.x,
+# in a shell without a run-in-place environment). A 2.9
 # package's version has "+lcnc2.9" before the Debian release.
 #
 # Build dependencies: build-essential git dpkg-dev libyaml-dev libmodbus-dev (C tests)
@@ -31,8 +31,9 @@ BASE_VERSION=0.21
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
 MASTER_MIN=1.5
-# The oldest 2.9 a 2.9 package asks for (the user's decision, 2026-11-17).
-LINUXCNC29_MIN=2.9.7
+# The oldest 2.9 a 2.9 package asks for (the user's decision, 2026-11-17:
+# Debian 13's own package; the HAL API is the same in the whole series).
+LINUXCNC29_MIN=2.9.4
 OUTDIR=$PWD
 WORKTREE=
 

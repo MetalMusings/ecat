@@ -16,8 +16,9 @@
 # needs only halcompile, the headers and the HAL library. The build is cached.
 #
 # The job deb29 builds the same code for LinuxCNC 2.9 (component/ecat_hal.h)
-# against linuxcnc-uspace-dev LINUXCNC29 from linuxcnc.org's archive (the
-# oldest 2.9 the package asks for), signed with the key its own
+# against linuxcnc-uspace-dev 2.9.4, the oldest 2.9 the package asks for:
+# Debian 13's own, and on Debian 12 linuxcnc.org's (Debian 12's own is a 2.9
+# pre-release), whose archive is signed with the key LinuxCNC's own
 # linuxcnc-install.sh takes (LINUXCNC_KEY). Its packages have "+lcnc2.9" in
 # their version; there is no run-in-place archive for 2.9.
 
@@ -38,7 +39,6 @@ permissions:
 env:
   MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.5' }}
   LINUXCNC_COMMIT: b0e7b191b92066c771f2063714dc00736899ec95  # 2.10.0~pre2-436, 2026-11-12
-  LINUXCNC29: 1:2.9.7
   LINUXCNC_KEY: 0CE3E44425B11F871BBCC6F5E43B5A8E78CC2927  # LinuxCNC Archive Signing Key (2025)
 
 jobs:
@@ -126,8 +126,12 @@ jobs:
         include:
           - debian: bookworm
             id: debian12
+            linuxcnc: 1:2.9.4      # linuxcnc.org's
+            linuxcnc_org: true
           - debian: trixie
             id: debian13
+            linuxcnc: 1:2.9.4-2    # Debian's own
+            linuxcnc_org: false
     container: debian:${{ matrix.debian }}
     steps:
       - name: Build tools
@@ -137,7 +141,8 @@ jobs:
             build-essential git dpkg-dev libyaml-dev libmodbus-dev python3 python3-yaml \
             ca-certificates curl gnupg
 
-      - name: LinuxCNC ${{ env.LINUXCNC29 }} from linuxcnc.org
+      - name: linuxcnc.org's archive
+        if: matrix.linuxcnc_org
         run: |
           export GNUPGHOME=$(mktemp -d)
           curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$LINUXCNC_KEY" | gpg --batch --import
@@ -147,8 +152,11 @@ jobs:
           echo "deb [arch=amd64 signed-by=/usr/share/keyrings/linuxcnc.gpg] https://www.linuxcnc.org/ ${{ matrix.debian }} base 2.9-uspace" \
             > /etc/apt/sources.list.d/linuxcnc.list
           apt-get update
+
+      - name: LinuxCNC ${{ matrix.linuxcnc }}
+        run: |
           apt-get install -y --no-install-recommends \
-            linuxcnc-uspace-dev="$LINUXCNC29" linuxcnc-uspace="$LINUXCNC29"
+            linuxcnc-uspace-dev="${{ matrix.linuxcnc }}" linuxcnc-uspace="${{ matrix.linuxcnc }}"
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
@@ -192,4 +200,4 @@ jobs:
           gh release create "${{ github.ref_name }}" out/*.deb out/*.tar.gz \
             --repo "${{ github.repository }}" --prerelease \
             --title "ecat ${{ github.ref_name }}" \
-            --notes "ecat for LinuxCNC 2.10 and 2.9. **Run-in-place LinuxCNC** (there are no 2.10 packages yet): unpack ecat-rip-*-debian12 or -debian13.tar.gz and run ./install. It installs ecat.so for LinuxCNC ${{ env.LINUXCNC_COMMIT }} (2.10.0~pre2-436) and EtherCAT Setup, and refuses another LinuxCNC (see docs/development.md for building ecat for it). **With a LinuxCNC 2.10 package:** the linuxcnc-ecat .deb without +lcnc2.9. **LinuxCNC 2.9 (2.9.7 or newer, the packages from linuxcnc.org):** the linuxcnc-ecat .deb with +lcnc2.9 in its name, for Debian 12 or 13. All need linuxcnc-ethercat-uspace 1.5 or newer from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases); built against ${{ env.MASTER_RELEASE }}. The window, ecatsetup --gui, needs python3-pyqt5. To try ecat without disturbing your setup: [getting started](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/getting-started.md). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."
+            --notes "ecat for LinuxCNC 2.10 and 2.9. **Run-in-place LinuxCNC** (there are no 2.10 packages yet): unpack ecat-rip-*-debian12 or -debian13.tar.gz and run ./install. It installs ecat.so for LinuxCNC ${{ env.LINUXCNC_COMMIT }} (2.10.0~pre2-436) and EtherCAT Setup, and refuses another LinuxCNC (see docs/development.md for building ecat for it). **With a LinuxCNC 2.10 package:** the linuxcnc-ecat .deb without +lcnc2.9. **LinuxCNC 2.9 (2.9.4 or newer, Debian's or linuxcnc.org's packages):** the linuxcnc-ecat .deb with +lcnc2.9 in its name, for Debian 12 or 13. All need linuxcnc-ethercat-uspace 1.5 or newer from [MetalMusings/ethercat](https://github.com/MetalMusings/ethercat/releases); built against ${{ env.MASTER_RELEASE }}. The window, ecatsetup --gui, needs python3-pyqt5. To try ecat without disturbing your setup: [getting started](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/getting-started.md). See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)."

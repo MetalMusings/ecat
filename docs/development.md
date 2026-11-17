@@ -2166,12 +2166,15 @@ The 2.10-only decision below was replaced on 2026-11-17, because users on
   old `rtapi_task_new()`. This is the alternative described under the old
   decision ("the way to go if a backport to 2.9 is ever needed"). Every
   feature is in both builds; no backporting onto `0.11.x`.
-- **Target 2.9:** Debian 13 with LinuxCNC 2.9.7 (linuxcnc.org's packages;
-  Debian's own is 2.9.4). This computer goes up to 2.9.7 for the tests; it
-  runs real work on 2.10 run-in-place with ecat only.
-- **Packages:** 2.9 as a deb (`Depends: linuxcnc-uspace (>= 1:2.9.7),
+- **Target 2.9:** LinuxCNC 2.9.4 or newer on Debian 13 (Debian's own
+  package is 2.9.4; linuxcnc.org has 2.9.5 to 2.9.10) and Debian 12
+  (linuxcnc.org's packages). First said 2.9.7; 2.9.4 chosen the same day, as
+  the HAL API is the same in the whole series and 2.9.4 was the one tried.
+  This computer stays on 2.9.4 (no upgrade, the user's choice); it runs real
+  work on 2.10 run-in-place with ecat only.
+- **Packages:** 2.9 as a deb (`Depends: linuxcnc-uspace (>= 1:2.9.4),
   linuxcnc-uspace (<< 1:2.10~)`, a version marked for the series, e.g.
-  `0.22+lcnc29~debian13`); 2.10 as the run-in-place archive until 2.10 is
+  `0.22+git...+lcnc2.9~debian13`); 2.10 as the run-in-place archive until 2.10 is
   released, then as a deb as well.
 - **How long:** 2.9 is supported until some time after 2.10's release
   (to be set then), after that bug fixes only, then not at all.
@@ -2199,15 +2202,14 @@ ecat 0.11 did):
 Tests: the C tests run twice, against a fake 2.10 HAL and against a fake
 2.9 HAL through `ecat_hal.h` (the layer is what is tested; mutation-check
 it); the Python tests with both series. At the machine: halrun on the
-plasma bus here with 2.9.7 (no motion), and on turner's bus (2.9.7 from
-linuxcnc.org's packages beside its 2.10 run-in-place, which must keep
-working: turner's own Turner configuration runs on that). The window and
-Apply on copies of configurations, on either. CI: {2.9, 2.10} x {debian12, debian13} for the
-2.10 archive, debian13 for the 2.9 deb (debian12 if linuxcnc.org has 2.9.7
-for it).
+plasma bus here with 2.9.4 (no motion), and on turner's bus (2.9.4 from
+Debian beside its 2.10 run-in-place, which must keep working: turner's own
+Turner configuration runs on that). The window and Apply on copies of
+configurations, on either. CI: the 2.10 package and archive and the 2.9
+package, each for Debian 12 and 13.
 
 Order of work: (1) `ecat_hal.h` and the 2.9 fake, C tests twice;
-(2) build against 2.9.7 here, halrun on the bus; (3) EtherCAT Setup by
+(2) build against 2.9 here, halrun on the bus; (3) EtherCAT Setup by
 series; (4) build-deb.sh and CI for 2.9; (5) docs (README, getting-started:
 which package for which series), release; close `0.11.x`.
 
@@ -2224,7 +2226,7 @@ Done (2026-11-17):
   `#if ECAT_HAL_64` with 2.9 counterparts; `tests/test_hal29.c` tests the
   layer against faked 2.9 functions. 12 mutations of the layer and the rules,
   all caught.
-- (2) on 2.9.4 (installed here; 2.9.7 not yet): halrun with the 2.9 build on
+- (2) on 2.9.4 (installed here): halrun with the 2.9 build on
   the plasma bus (QtPlasma-ecat402-210-unused's file, 1 ms, no motion), the
   build put in place of the package's `ecat.so` for the run and the
   package's put back: all slaves of the file in OP, DC phased, SYNC0 shift
@@ -2246,13 +2248,15 @@ Done (2026-11-17):
   `tests/test_series.py`, 10 mutations caught.
 - (4) `scripts/build-deb.sh` finds the series (a run-in-place tree's `VERSION`, else
   `linuxcnc-uspace-dev`'s version): a 2.9 package has `+lcnc2.9` before the Debian
-  release in its version and `Depends: linuxcnc-uspace (>= 1:2.9.7),
+  release in its version and `Depends: linuxcnc-uspace (>= 1:2.9.4),
   linuxcnc-uspace (<< 1:2.10~)` (`LINUXCNC29_MIN`); built here from the working
   tree against 2.9.4 (in a shell without the run-in-place environment) and against
-  2.10, all tests passing in both. CI: job `deb29` (Debian 12 and 13) installs
-  `linuxcnc-uspace-dev` 1:2.9.7 from linuxcnc.org's archive, whose key is the one
-  LinuxCNC's own `linuxcnc-install.sh` takes (0CE3...2927, checked by fingerprint;
-  the trixie `InRelease` verified with it here). Not yet run on GitHub (needs a
+  2.10, all tests passing in both. CI: job `deb29` builds against the oldest 2.9
+  the package takes, 2.9.4: on Debian 13 Debian's own `linuxcnc-uspace-dev`
+  1:2.9.4-2, on Debian 12 linuxcnc.org's 1:2.9.4 (Debian 12's own is a 2.9
+  pre-release), whose archive key is the one LinuxCNC's own
+  `linuxcnc-install.sh` takes (0CE3...2927, checked by fingerprint; the trixie
+  `InRelease` verified with it here). Not yet run on GitHub (needs a
   push); there is no container tool here to run it locally.
 
 ### Old decision (2026-11-11, replaced): ecat moves to 2.10 only
