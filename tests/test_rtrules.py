@@ -100,6 +100,19 @@ class TestCatalogue(Base, unittest.TestCase):
                 absent = rtrules.analyse(self.ctx(r["tests"]["absent"]), {r.id: r})
                 self.assertEqual([f.id for f in absent if f.id == r.id], [], "absent")
 
+    def test_an_ipi_is_explained_and_not_moved(self):
+        """RES, CAL, TLB, IWI are signals between CPUs: no "move that interrupt"."""
+        item = {"key": "irq:RES", "label": "RES: Rescheduling interrupts", "with": 19, "of": 23,
+                "expected": 0.4, "lift": 2.0}
+        found = rtrules.analyse(self.ctx({"measured": True, "suspects": ["irq:RES"], "suspect_items": [item]}),
+                                self.rules)
+        ids = [f.id for f in found]
+        self.assertIn("ipi-with-spikes", ids)
+        self.assertNotIn("unexplained", ids)
+        f = found[ids.index("ipi-with-spikes")]
+        self.assertIn("not a device's interrupt that can be moved", " ".join(f.cause.split()))
+        self.assertIn("19 of 23 spikes", f.evidence)
+
     def test_threads_without_stress_are_measured_again_under_load(self):
         r = {"measure-under-load": self.rules["measure-under-load"]}
         for load, way, want in (("as-used", "threads", True), ("rest", "threads", True),
@@ -125,6 +138,8 @@ class TestCatalogue(Base, unittest.TestCase):
         # the item lists from a tree that has items in each
         items = {k: v for k, v in self.base.items() if isinstance(v, list) and v and isinstance(v[0], dict)}
         items.setdefault("funcs", self.base["funcs"])
+        items.setdefault("suspect_items", [{"key": "irq:RES", "label": "RES", "with": 3, "of": 4, "expected": 0.1,
+                                            "lift": 7.5}])
         for r in self.rules.values():
             tree = ast.parse(str(r["when"]), mode="eval")
             for node in ast.walk(tree):
@@ -231,7 +246,7 @@ class TestAnalysis(Base, unittest.TestCase):
 
     def test_unexplained_suspects(self):
         c = copy.deepcopy(self.base)
-        sus = [{"key": "irq:RES", "label": "RES: Rescheduling interrupts", "with": 15, "of": 23,
+        sus = [{"key": "irq:MCP", "label": "MCP: Machine check polls", "with": 15, "of": 23,
                 "expected": 0.2, "lift": 3.3},
                {"key": "idle:3:C6", "label": "CPU 3 enters idle state C6", "with": 9, "of": 10,
                 "expected": 0.1, "lift": 9}]
@@ -243,7 +258,7 @@ class TestAnalysis(Base, unittest.TestCase):
         ids = [f.id for f in found]
         self.assertIn("deep-idle-states", ids)          # explains idle:3:C6 (its key "idle:")
         un = [f for f in found if f.id == "unexplained"]
-        self.assertEqual([f.keys for f in un], [["irq:RES"]])
+        self.assertEqual([f.keys for f in un], [["irq:MCP"]])
         self.assertIn("15 of 23", un[0].text())
         # runtime and permanent changes first, advice last
         self.assertLess(ids.index("deep-idle-states"), ids.index("unexplained"))
@@ -369,8 +384,10 @@ class TestRecordedRun(unittest.TestCase):
         # EtherCAT's card on the real-time CPU is right: no rule moves it
         self.assertNotIn("irq-on-rt-cpu", ids)
         self.assertNotIn("isolcpus-without-managed-irq", ids)
-        un = [f for f in found if f.id == "unexplained"]
-        self.assertEqual([f.keys for f in un], [["irq:RES"]])
+        # RES came with the spikes: a signal between CPUs, explained as such (it was
+        # "no rule knows it" with the advice to move it, which cannot be done)
+        self.assertIn("ipi-with-spikes", ids)
+        self.assertEqual([f for f in found if f.id == "unexplained"], [])
 
 
 if __name__ == "__main__":

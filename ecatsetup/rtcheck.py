@@ -211,6 +211,18 @@ def rt_threads(roots):
     return out
 
 
+def hal_threads(rts):
+    """The HAL threads among rt_threads(): uspace names them rtapi_app:T#<n>.
+    rtapi_app has other real-time threads too (the EtherCAT master's
+    irq_work and EtherCAT-OP, an I/O driver's): their CPU is not the real-time
+    threads' CPU. Without such names (an older LinuxCNC), every one but the
+    master's known threads."""
+    hal = [t for t in rts if re.search(r"T#\d+$", t[1])]
+    if hal:
+        return hal
+    return [t for t in rts if not re.match(r"(EtherCAT|ec_|irq_work)", t[1])]
+
+
 class Fact:
     def __init__(self, key, label, value, source):
         self.key, self.label, self.value, self.source = key, label, value, source
@@ -650,9 +662,13 @@ def inventory(roots=None, ini=None):
                 "ethercat.yaml master.interface, hm2_eth board_ip against /proc/net/route", data=nics_io)
     rts = rt_threads(r)
     if rts:
+        hal = hal_threads(rts)
+        others = [t for t in rts if t not in hal]
         inv.add("rt_cpu", "Real-time threads run on",
-                ", ".join("%s on CPU %d (prio %d)" % (n, c, p) for _, n, c, p in rts),
-                "/proc/<rtapi_app>/task/*/stat", data=sorted({c for _, _, c, _ in rts}))
+                ", ".join("%s on CPU %d (prio %d)" % (n, c, p) for _, n, c, p in hal) +
+                ("; other real-time threads of rtapi_app: " + ", ".join(
+                    "%s on CPU %d (prio %d)" % (n, c, p) for _, n, c, p in others) if others else ""),
+                "/proc/<rtapi_app>/task/*/stat", data=sorted({c for _, _, c, _ in hal}))
     else:
         inv.add("rt_cpu", "Real-time threads run on", "LinuxCNC is not running",
                 "/proc/*/comm", data=[])
@@ -1782,7 +1798,7 @@ RTLA_THRESHOLD_US = 50
 def _measure(run, rec, threads, seconds, load, progress, folder, cancel=None):
     run.inventory = run.inventory or inventory()
     # where the threads run, now that they run
-    rts = rt_threads(Roots())
+    rts = hal_threads(rt_threads(Roots()))
     run.rt_cpus = sorted({c for _, _, c, _ in rts}) or run.inventory.data.get("isolated") or \
         (run.inventory.data.get("cpus") or [0])[-1:]
     run.times_before = read_times()

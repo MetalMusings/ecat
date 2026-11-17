@@ -313,3 +313,37 @@
   tests:
     present: {thp: always, late_max_us: 40}
     absent: {thp: madvise, late_max_us: 40}
+
+- id: ipi-with-spikes
+  title: "Late cycles came with {item.label}: another CPU interrupts the real-time CPU"
+  each: suspect_items
+  when: "re(item.key, '^irq:(RES|CAL|TLB|IWI)$')"
+  keys: ["{item.key}"]
+  evidence: "{item.with} of {item.of} spikes came with it"
+  gain: medium
+  cause: >
+    This is not a device's interrupt that can be moved: it is a signal from
+    another CPU (an IPI). RES asks the real-time CPU to run a task that was
+    woken for it, so something besides LinuxCNC's threads runs there (a task
+    allowed on every CPU, a per-CPU kernel thread). CAL asks it to run a
+    function for another CPU (reading its frequency or a model-specific
+    register from outside, as monitoring tools do, or kernel work that needs
+    every CPU). TLB tells it that memory of a process running on it was
+    unmapped: rtapi_app's other threads (or anything sharing its memory)
+    freeing or mapping memory. IWI is deferred kernel work (logging, tracing).
+  action:
+    kind: advice
+    text: >
+      Find what else runs on the real-time CPU (ps -eLo pid,tid,psr,rtprio,comm
+      | awk '$3 == {rt_cpus_text}') and keep it off: isolcpus with nohz_full and
+      rcu_nocbs for that CPU, no program started with an affinity that includes
+      it. Stop monitoring tools that read every CPU's frequency or registers
+      while measuring. For TLB, the memory changes are in rtapi_app's process:
+      tell the developers which component, with the report.
+  source:
+    - text: The kernel's documentation, Reducing OS jitter due to per-cpu kthreads
+      url: https://docs.kernel.org/admin-guide/kernel-per-CPU-kthreads.html
+  seen-here: "here 2026-11-17: RES came with 19 of 23 spikes under stress-ng (threads only); its cause not found"
+  tests:
+    present: {measured: true, suspects: ["irq:RES"], suspect_items: [{key: "irq:RES", label: "RES: Rescheduling interrupts", with: 19, of: 23, expected: 0.4, lift: 2.0}]}
+    absent: {measured: true, suspects: ["irq:125"], suspect_items: [{key: "irq:125", label: "IRQ 125", with: 19, of: 23, expected: 0.4, lift: 2.0}]}

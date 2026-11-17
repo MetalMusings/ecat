@@ -195,7 +195,8 @@ class TestInventory(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_facts(self):
-        inv = rtcheck.inventory(fake_tree(self.root))
+        self.roots = fake_tree(self.root)
+        inv = rtcheck.inventory(self.roots)
         d = inv.data
         self.assertTrue(d["preempt_rt"])
         self.assertEqual(d["isolated"], [3])
@@ -232,6 +233,15 @@ class TestInventory(unittest.TestCase):
         self.assertFalse(d["battery"])
         self.assertEqual(d["rt_cpu"], [3])
         self.assertIn("rtapi_app:T#0 on CPU 3", inv.fact("rt_cpu").value)
+        # the EtherCAT master's own real-time thread on another CPU (as on the
+        # plasma cutter without irq-cpu): not a real-time threads' CPU
+        rest = " ".join(["0"] * 35)
+        write(self.roots.proc, "200/task/202/stat", "202 (irq_work) S %s 2 98 1 0 0\n" % rest)
+        inv = rtcheck.inventory(self.roots)
+        self.assertEqual(inv.data["rt_cpu"], [3])
+        self.assertIn("other real-time threads of rtapi_app: irq_work on CPU 2", inv.fact("rt_cpu").value)
+        self.assertEqual(rtcheck.hal_threads([(1, "irq_work", 2, 98), (2, "rtapi_app", 3, 98)]),
+                         [(2, "rtapi_app", 3, 98)])
         # every fact says where it was read
         self.assertTrue(all(f.source for f in inv.facts))
         text = rtcheck.inventory_text(inv)
