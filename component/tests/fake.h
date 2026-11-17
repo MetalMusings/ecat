@@ -63,6 +63,14 @@ void fake_bus(lcec_slave_t *slave, int ok);
 uint32_t fake_get(lcec_slave_t *slave, uint16_t index, uint8_t subindex);
 void fake_set(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint32_t value);
 
+/// SDOs (lcec_write_sdo/lcec_read_sdo, cleared by fake_slave()): what the
+/// drive holds; a download of index fake_sdo_refuse fails, one of
+/// fake_sdo_forget succeeds without being kept; fake_sdo_writes counts them.
+void fake_sdo_set(uint16_t index, uint8_t subindex, uint32_t value);
+int fake_sdo_get(uint16_t index, uint8_t subindex, uint32_t *value);
+extern int fake_sdo_writes;
+extern uint16_t fake_sdo_refuse, fake_sdo_forget;
+
 /// A pin or parameter by its full name; NULL if there is none.
 void *fake_find(const char *name);
 

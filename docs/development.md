@@ -2471,6 +2471,44 @@ and devices that should work but do not need a device on a bus to develop
 and try against. There are four ways to get one, in this order: the first
 that suffices is used.
 
+### A simulated StepperOnline A6 (2026-11-17)
+
+The EaserCAT 3000 test card can act as an A6 servo drive: its identity,
+sync managers, PDOs and CiA 402 dictionary come from the A6's ESI file
+(V0.04), with the drive model of the feedforward tests behind them. As the
+A6: DC only (SAFEOP without SYNC0 refused with AL 0x0027), no SDO
+information, CSP only, fault Er74.0 (0x603F 0x6320) when SYNC0 is not a
+multiple of 250 us. Not the A6's own parameters (C01.13 and the rest) yet.
+How it is made and flashed: the work copy's README, "The A6 personality"
+(~/src/easercat-3000-eoe, Firmware tag a6-sim-1).
+
+What it found, on its first run:
+
+- EtherCAT Setup proposed no cia402 profile: the A6's ESI has the profile
+  number as `Profile/ChannelInfo/ProfileNo` (esi.py read only
+  `Profile/ProfileNo`; ETG.2000 allows both), and without SDO information
+  the slave's dictionary is empty, so 0x1000 was not read. Now 0x1000 is
+  read from every CoE slave, and the ESI's dictionary decides what else is
+  read (0x6502, 0x1C32/0x1C33, 0x607F) when the slave lists none.
+- The cia402 profile enabled the drive in no mode: the default PDOs
+  0x1701/0x1B01 have neither 0x6060 nor 0x6061, the profile wrote the mode
+  only into the process data and checked 0x6061 only when mapped, and the
+  drive came up with 0x6060 = 0. Now the mode is written by SDO at load and
+  read back when 0x6060 is not mapped, and the master writes it again at
+  each configuration (docs/component.md, cia402). The A6's ESI asks for the
+  same with an InitCmd (0x6060 = 8 at PS), which ecat does not read.
+- The ESI file's dictionary has other entries for 0x1702 and 0x1B04 than
+  its PDO definitions of the same index (0x60B8 twice in 0x1702, no 0x60F4 in
+  0x1B04). What a real A6 answers is not known; a master that compares the
+  slave's mapping with its own would try to write those fixed PDOs.
+
+Results (halrun, 1 ms): OP with DC, turn-around 2, no warnings in the event
+log; following error +-3040 counts on a 10000-count 2 Hz sine without
+feedforward, 184 with velocity feedforward through 0x1600 with 0x60B1 (the
+mapping an A6 owner needs: no fixed A6 PDO has 0x60B1); free run refused
+with 0x0027 "Freerun not supported" in the event log; at 1.1 ms Er74.0, the
+drive cannot be enabled.
+
 ### Waiting for equipment (list, 2026-11-16)
 
 Built and tested as far as possible here, but the last try needs a device or

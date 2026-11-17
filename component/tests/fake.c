@@ -33,6 +33,18 @@ static named_t names[MAX_PINS];
 static int n_names;
 
 int fake_generic_reads, fake_generic_writes;
+
+// SDOs: what the drive holds, which index refuses a download, which one
+// takes it without keeping it
+#define MAX_SDOS 32
+static struct {
+  uint16_t index;
+  uint8_t subindex;
+  uint32_t value;
+} sdos[MAX_SDOS];
+static int n_sdos;
+int fake_sdo_writes;
+uint16_t fake_sdo_refuse, fake_sdo_forget;
 char fake_msgs[8192];
 int fake_failures;
 
@@ -96,6 +108,9 @@ lcec_slave_t *fake_slave(const char *name, const fake_entry_t *entries, const lc
 
   n_names = 0;
   fake_generic_reads = fake_generic_writes = 0;
+  n_sdos = 0;
+  fake_sdo_writes = 0;
+  fake_sdo_refuse = fake_sdo_forget = 0;
   fake_msgs[0] = 0;
   fake_bus(s, 1);
   return s;
@@ -210,6 +225,58 @@ int lcec_pdo_init(lcec_slave_t *slave, uint16_t idx, uint16_t sidx, unsigned int
   *os = p->os;
   if (bp != NULL) *bp = p->bp;
   return 0;
+}
+
+static int sdo_at(uint16_t index, uint8_t subindex) {
+  int i;
+  for (i = 0; i < n_sdos; i++)
+    if (sdos[i].index == index && sdos[i].subindex == subindex) return i;
+  return -1;
+}
+
+void fake_sdo_set(uint16_t index, uint8_t subindex, uint32_t value) {
+  int i = sdo_at(index, subindex);
+  if (i < 0) {
+    if (n_sdos == MAX_SDOS) abort();
+    i = n_sdos++;
+    sdos[i].index = index, sdos[i].subindex = subindex;
+  }
+  sdos[i].value = value;
+}
+
+int fake_sdo_get(uint16_t index, uint8_t subindex, uint32_t *value) {
+  int i = sdo_at(index, subindex);
+  if (i < 0) return -1;
+  *value = sdos[i].value;
+  return 0;
+}
+
+int lcec_write_sdo(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint8_t *value, size_t size) {
+  uint32_t v = 0;
+  size_t k;
+  (void)slave;
+  fake_sdo_writes++;
+  if (index == fake_sdo_refuse) return -1;
+  for (k = 0; k < size && k < 4; k++) v |= (uint32_t)value[k] << (8 * k);
+  if (index != fake_sdo_forget) fake_sdo_set(index, subindex, v);
+  return 0;
+}
+
+int lcec_write_sdo8(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint8_t value) {
+  return lcec_write_sdo(slave, index, subindex, &value, 1);
+}
+
+int lcec_read_sdo(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint8_t *target, size_t size) {
+  uint32_t v;
+  size_t k;
+  (void)slave;
+  if (fake_sdo_get(index, subindex, &v) != 0) return -1;
+  for (k = 0; k < size && k < 4; k++) target[k] = (uint8_t)(v >> (8 * k));
+  return 0;
+}
+
+int lcec_read_sdo8(lcec_slave_t *slave, uint16_t index, uint8_t subindex, uint8_t *result) {
+  return lcec_read_sdo(slave, index, subindex, result, 1);
 }
 
 int lcec_pin_newf_list(void *base, const lcec_pindesc_t *list, ...) {

@@ -82,7 +82,11 @@ def _device(path, vendor_id, dev):
     d = EsiDevice(path, vendor_id, number(t.get("ProductCode")),
                   number(t.get("RevisionNo") or "0"), (t.text or "").strip(),
                   _text(dev, "Name"))
+    # ETG.2000: the profile number directly under Profile, or per channel
+    # (Profile/ChannelInfo/ProfileNo, as StepperOnline's A6 has it)
     prof = dev.find("Profile/ProfileNo")
+    if prof is None:
+        prof = dev.find("Profile/ChannelInfo/ProfileNo")
     if prof is not None and prof.text:
         d.profile = number(prof.text)
     for tag, direction in (("RxPdo", "rx"), ("TxPdo", "tx")):

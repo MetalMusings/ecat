@@ -53,18 +53,24 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
     sii = sii_mod.parse(tool.sii(pos))
     coe = coe_mod.Dictionary(tool.sdos_settled(pos, progress=progress)) if sii.has_coe \
         else coe_mod.Dictionary()
-    device_type = tool.upload(pos, 0x1000, 0, "uint32") if coe else None
-    modes = None
-    if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in coe.objects:
-        modes = tool.upload(pos, 0x6502, 0, "uint32")
     dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
+    # what the slave has: its own dictionary, or, when it gives none (no SDO
+    # information, such as StepperOnline's A6), the ESI file's
+    known = coe
+    if sii.has_coe and not coe.objects and dev:
+        known = esi.dictionary(dev)
+    # 0x1000 is mandatory for every CoE slave
+    device_type = tool.upload(pos, 0x1000, 0, "uint32") if sii.has_coe else None
+    modes = None
+    if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in known.objects:
+        modes = tool.upload(pos, 0x6502, 0, "uint32")
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
-    p.dc_info.sync = dcinfo.read_sync(pos, coe)
+    p.dc_info.sync = dcinfo.read_sync(pos, known)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
         for n in range(getattr(p, "axes", 1)):
             index = 0x607F + n * 0x800
-            if index in coe.objects:
+            if index in known.objects:
                 v = tool.upload(pos, index, 0, "uint32")
                 if v:
                     p.max_velocity[n] = int(v)
