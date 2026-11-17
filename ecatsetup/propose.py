@@ -270,6 +270,8 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     info: tool.slave_info(); sii: sii.Sii; coe: coe.Dictionary (may be empty);
     device_type: CoE 0x1000; drive_modes: CoE 0x6502; esi_dev: esi.EsiDevice.
     """
+    from . import lcnc_env
+    wide = lcnc_env.wide_pins()  # 64-bit integer pins (LinuxCNC 2.10)
     p = Proposal(info["position"], sii.vendor_id, sii.product_code, sii.revision,
                  sii.serial, sii.name or sii.order)
 
@@ -422,18 +424,22 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
                 base = kebab(e.name.split("__")[-1]) or "0x%04x-%02x" % (e.index, e.subindex)
                 e.pin = "%s.%s" % (kebab(pd.name), base) if counts[e.name] > 1 else base
                 e.hal_type = "bool" if e.bitlen == 1 else HAL_TYPES.get(e.data_type, "uint")
+                if e.data_type in ("LINT", "ULINT") and not wide:
+                    e.hal_type = "real"  # LinuxCNC 2.9 has no 64-bit pins: exact up to 2^53
                 if e.hal_type == "uint" and e.bitlen == 32 and WRAPPING.search(e.name):
                     # an encoder counter or latch counts down past 0;
                     # LinuxCNC's encoder and joint pins take it signed
                     e.hal_type = "sint"
                 if (pd.direction == "tx" and e.hal_type in ("sint", "uint")
-                        and ((e.bitlen == 32 and WRAPPING.search(e.name))
+                        and ((e.bitlen == 32 and WRAPPING.search(e.name) and wide)
                              or (e.bitlen == 16 and re.search(r"counter", e.name, re.I)))):
                     # the entry wraps; the pin counts on in 64 bits (a counter or a latched
-                    # position that goes past 0 is negative, as the encoder's own pins)
+                    # position that goes past 0 is negative, as the encoder's own pins).
+                    # LinuxCNC 2.9's pins have 32 bits: a 16-bit counter is taken on to
+                    # 32 bits there, a 32-bit one wraps as the pin does.
                     e.hal_type, e.extend = "sint", True
-                    p.notes.append("%s: a %d-bit counter, extended to 64 bits (extend)"
-                                   % (e.pin, e.bitlen))
+                    p.notes.append("%s: a %d-bit counter, extended to %d bits (extend)"
+                                   % (e.pin, e.bitlen, 64 if wide else 32))
                 elif p.profile == 5001 and analog_value(e, pd.direction):
                     rng = analog_range(p.name) or analog_range(getattr(esi_dev, "name", ""))
                     if rng:

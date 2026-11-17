@@ -89,6 +89,10 @@ scripts/build-deb.sh -w -o <dir>           # package from the working tree
   installed one (`ecatsetup/lcnc_env.py`): it reads that tree's
   `scripts/rip-environment` for `halrun`, `halcmd` and `tclsh` and takes the
   HAL library (`hallib`) from it. The window shows which one in its status bar.
+  `lcnc_env.series()` is that LinuxCNC's series ((2, 9) or (2, 10); the tree's
+  `VERSION`, else `linuxcnc_var LINUXCNCVERSION`; unknown is (2, 10));
+  `$ECATSETUP_LINUXCNC_SERIES` overrides it, and every test module sets it to
+  2.10 unless a test says otherwise (`tests/test_series.py`).
 - `scripts/build-deb.sh` runs both test suites and builds the package for
   Debian 12 and 13 (`.github/workflows/deb.yml` does so for releases).
 
@@ -2231,6 +2235,15 @@ Done (2026-11-17):
   hal_port_alloc`), and its `loadrt` needs the module named `ecat.so` in
   `/usr/lib/linuxcnc/modules` (halcmd waits for a component of the module's
   name).
+- (3) EtherCAT Setup by series (`lcnc_env.series()`/`wide_pins()`): `config.check`
+  has the component's two 2.9 rules with the same words; `propose` gives
+  LINT/ULINT a `real` pin and `extend` only to 16-bit counters on 2.9;
+  `testmode.parse_pins` reads 2.9's halcmd types (bit, s32, u32, float) as
+  2.10's and a hex value as decimal, so the rest keeps 2.10's names. Nothing
+  else was 2.10-only: HAL lines written by Apply and the tests (`limit3`,
+  `mux2`, `not`, `sampler`, `timedelta`, `net a <=> b`) are 2.9's as well, and
+  the pin help (`pindocs`) links to linuxcnc.org's current documentation.
+  `tests/test_series.py`, 10 mutations caught.
 
 ### Old decision (2026-11-11, replaced): ecat moves to 2.10 only
 

@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# the tests are written for 2.10 unless they say otherwise (lcnc_env.series)
+os.environ.setdefault("ECATSETUP_LINUXCNC_SERIES", "2.10")
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 if "ECATSETUP_TEST_STATE" not in os.environ:

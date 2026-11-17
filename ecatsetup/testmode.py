@@ -251,13 +251,27 @@ def halcmd(*args, check=True):
     return proc.stdout
 
 
+# LinuxCNC 2.9's halcmd names the types bit, s32, u32, float (2.10: bool,
+# sint, uint, real) and prints a u32 in hex
+HALCMD_TYPES = {"bit": "bool", "s32": "sint", "u32": "uint", "float": "real",
+                "s64": "sint", "u64": "uint"}
+
+
 def parse_pins(text):
-    """name -> Pin, from "halcmd -s show pin"."""
+    """name -> Pin, from "halcmd -s show pin" (or param). The types are
+    given with 2.10's names and integers in decimal, whichever LinuxCNC
+    printed them."""
     pins = {}
     for line in text.splitlines():
         f = line.split()
         if len(f) >= 5:
-            pins[f[4]] = Pin(f[4], f[1], f[2], f[3])
+            type_, value = HALCMD_TYPES.get(f[1], f[1]), f[3]
+            if type_ in ("sint", "uint") and value[:2].lower() == "0x":
+                try:
+                    value = str(int(value, 16))
+                except ValueError:
+                    pass
+            pins[f[4]] = Pin(f[4], type_, f[2], value)
     return pins
 
 

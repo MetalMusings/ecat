@@ -6,7 +6,11 @@ A run-in-place LinuxCNC needs its scripts/rip-environment read before its
 programs run (halrun, halcmd, tclsh's HAL library path). The window and the
 command line do that here, for the programs they start, so that the user
 need not read it in the shell first. The installer (scripts/install-rip)
-writes `linuxcnc:` into the settings."""
+writes `linuxcnc:` into the settings.
+
+The series (2.9 or 2.10) decides what the component can do: 2.9's integer
+pins have 32 bits (no LINT/ULINT integer pins, `extend` only for 8- and
+16-bit entries) and halcmd prints its types as bit/s32/u32/float."""
 
 import os
 import subprocess
@@ -14,6 +18,7 @@ import subprocess
 from . import settings
 
 _cache = {}
+_versions = {}
 
 
 def _is_tree(p):
@@ -67,4 +72,51 @@ def hallib():
 
 def describe():
     root = tree()
-    return "run-in-place LinuxCNC in %s" % root if root else "installed LinuxCNC"
+    v = version()
+    name = "LinuxCNC %s" % v if v else "LinuxCNC"
+    return "run-in-place %s in %s" % (name, root) if root else "installed %s" % name
+
+
+def version():
+    """LinuxCNC's version ("2.9.4", "2.10.0~pre2"), or None when it cannot be
+    found: the run-in-place tree's VERSION file, else linuxcnc_var of the
+    installed LinuxCNC."""
+    root = tree()
+    if root not in _versions:
+        v = None
+        if root:
+            try:
+                with open(os.path.join(root, "VERSION")) as f:
+                    v = f.read().strip() or None
+            except OSError:
+                pass
+        else:
+            try:
+                v = subprocess.run(["linuxcnc_var", "LINUXCNCVERSION"], capture_output=True,
+                                   timeout=10).stdout.decode(errors="replace").strip() or None
+            except (OSError, subprocess.SubprocessError):
+                pass
+        _versions[root] = v
+    return _versions[root]
+
+
+def parse_series(text):
+    """"2.9.4" -> (2, 9); None when text is not a version."""
+    import re
+    m = re.match(r"\s*(\d+)\.(\d+)", text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def series():
+    """(major, minor) of the LinuxCNC in use: (2, 9), (2, 10), ... When it
+    cannot be found, (2, 10), the series ecat is written for.
+    $ECATSETUP_LINUXCNC_SERIES ("2.9") overrides (tests, a check for the
+    other series)."""
+    return (parse_series(os.environ.get("ECATSETUP_LINUXCNC_SERIES"))
+            or parse_series(version()) or (2, 10))
+
+
+def wide_pins(s=None):
+    """True when HAL's integer pins have 64 bits (2.10 and later); s: a
+    series, else the one in use."""
+    return (s or series()) >= (2, 10)

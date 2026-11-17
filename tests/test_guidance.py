@@ -2,6 +2,9 @@ import os
 import tempfile
 import unittest
 
+# the tests are written for 2.10 unless they say otherwise (lcnc_env.series)
+os.environ.setdefault("ECATSETUP_LINUXCNC_SERIES", "2.10")
+
 from ecatsetup import coe, esi, guidance, quirks
 from ecatsetup.session import Session
 

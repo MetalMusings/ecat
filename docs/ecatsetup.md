@@ -1361,7 +1361,13 @@ needs to know the tree: `linuxcnc: /home/you/src/linuxcnc-2.10` in
 writes it), or `ECATSETUP_LINUXCNC=<tree>` in the environment, or just start it
 from a shell that has read the tree's `scripts/rip-environment`. EtherCAT Setup
 then reads that file itself for the programs it starts, so you need not. The
-status bar of the window says which LinuxCNC it uses.
+status bar of the window says which LinuxCNC it uses, with its version.
+
+The version matters: LinuxCNC 2.9's integer pins have 32 bits, 2.10's 64. On
+2.9 EtherCAT Setup proposes a `LINT`/`ULINT` entry as a `real` pin and
+`extend` only for 16-bit counters (a 32-bit counter wraps as the pin does),
+and the check refuses what the 2.9 component cannot do. The same
+`ethercat.yaml` otherwise works on both.
 
 ## Starting the master
 

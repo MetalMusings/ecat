@@ -517,8 +517,14 @@ def axis_of(cfg, prefix):
     return None, None
 
 
-def check(cfg):
-    """Errors in a configuration, as readable strings; empty if it is fine."""
+def check(cfg, series=None):
+    """Errors in a configuration, as readable strings; empty if it is fine.
+    series: the LinuxCNC series it is checked for, (2, 9) or (2, 10); the one
+    in use when None (lcnc_env.series)."""
+    from . import lcnc_env
+    series = series or lcnc_env.series()
+    wide = lcnc_env.wide_pins(series)
+    series_text = "%d.%d" % series
     errors = []
     err = errors.append
     if not isinstance(cfg, dict):
@@ -777,6 +783,9 @@ def check(cfg):
                         own = [e["pin"]]
                         if e.get("hal-type") not in HAL_TYPES:
                             err("%s: %s has unknown hal-type %r" % (where, e["object"], e.get("hal-type")))
+                        elif e.get("type") in HAL_64 and not wide and e.get("hal-type") != "real":
+                            err("%s: %s: LinuxCNC %s has no 64-bit pins: a %s entry takes hal-type real"
+                                % (where, e["object"], series_text, e["type"]))
                         elif e.get("type") in HAL_64 and e.get("hal-type") not in ("real", HAL_64[e["type"]]):
                             err("%s: %s: a %s entry takes hal-type %s (or real)"
                                 % (where, e["object"], e["type"], HAL_64[e["type"]]))
@@ -798,6 +807,9 @@ def check(cfg):
                                                   or not isinstance(bits, int) or not 8 <= bits <= 32):
                             err("%s: %s: extend is for an input entry of 8 to 32 bits with "
                                 "hal-type sint" % (where, e["object"]))
+                        elif e.get("extend") and not wide and bits == 32:
+                            err("%s: %s: LinuxCNC %s's pins have 32 bits: extend is for an entry of "
+                                "8 to 16 bits there" % (where, e["object"], series_text))
                     if "invert" in e:
                         inv = e["invert"]
                         if "pin" in e:

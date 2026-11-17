@@ -8,6 +8,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# the tests are written for 2.10 unless they say otherwise (lcnc_env.series)
+os.environ.setdefault("ECATSETUP_LINUXCNC_SERIES", "2.10")
 
 from ecatsetup import lcnc_env, settings  # noqa: E402
 
@@ -36,13 +38,15 @@ class TestLcncEnv(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         lcnc_env._cache.clear()
+        lcnc_env._versions.clear()
+        self.addCleanup(lcnc_env._versions.clear)
 
     def test_none_without_a_tree(self):
         self.assertIsNone(lcnc_env.tree())
         self.assertIsNone(lcnc_env.env())
         self.assertEqual(lcnc_env.program("halrun"), "halrun")
         self.assertEqual(lcnc_env.hallib(), "/usr/share/linuxcnc/hallib")
-        self.assertEqual(lcnc_env.describe(), "installed LinuxCNC")
+        self.assertTrue(lcnc_env.describe().startswith("installed LinuxCNC"))  # and its version
 
     def test_the_tree_from_the_settings(self):
         settings.save({"linuxcnc": self.root})
