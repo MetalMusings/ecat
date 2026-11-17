@@ -6112,7 +6112,7 @@ class TimingPage(QWidget):
         lay.addWidget(self.find_card)
 
         # changes
-        self.change_card = Card("Changes to this computer", "")
+        self.change_card = Card("History: changes made to this computer", "")
         self.change_table = table(["Change", "State", "Measured", "When"], stretch=0)
         self.change_card.add(self.change_table)
         crow = QHBoxLayout()
@@ -6279,9 +6279,10 @@ class TimingPage(QWidget):
             t.item(r, 0).setData(Qt.UserRole, c.id)
         fit_table(t, 2)
         self.change_card.hint.setText(
-            "Each change with its undo command, in %s; the undo script %s has every undo command of "
-            "what is still in force, newest first (read it, then sudo sh it)." % (
-                rtflow.changes_path(), rtflow.undo_script_path()))
+            "What was already done, here or with ecatsetup --rt-check --improve; changes to try are "
+            "the findings above. \"undone\" means taken back. Each change with its undo command is in "
+            "%s; the undo script %s has every undo command of what is still in force, newest first "
+            "(read it, then sudo sh it)." % (rtflow.changes_path(), rtflow.undo_script_path()))
         self.undo_selected.setEnabled(self.worker is None and any(c.in_force for c in log.changes))
 
     def show_inventory(self, on):

@@ -1994,7 +1994,9 @@ the top (*Where you are*), and says when it is done.
    least half the period left and nothing of high gain), or nothing is left
    that it can change at run time.
 
-*Changes to this computer* lists every change with its state; *Undo the
+*History: changes made to this computer* lists every change already made
+(from the window or the command line) with its state: tried, kept or
+undone (taken back); the changes still to try are the findings; *Undo the
 selected change* takes one back. Everything is in
 `~/.local/state/ecatsetup/rt-changes.yaml`, and `rt-undo.sh` beside it has
 the undo commands of what is still in force, newest first, to read and run
