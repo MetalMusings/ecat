@@ -18,8 +18,12 @@
 # The job deb29 builds the same code for LinuxCNC 2.9 (component/ecat_hal.h)
 # against linuxcnc-uspace-dev 2.9.4, the oldest 2.9 the package asks for:
 # Debian 13's own, and on Debian 12 linuxcnc.org's (Debian 12's own is a 2.9
-# pre-release), whose archive is signed with the key LinuxCNC's own
-# linuxcnc-install.sh takes (LINUXCNC_KEY). Its packages have "+lcnc2.9" in
+# pre-release). linuxcnc.org signs its bookworm archive with the old "EMC
+# Archive Signing Key" (3CB9FD148F374FEF, 2008) and trixie with the "LinuxCNC
+# Archive Signing Key" (2025); each is checked by its full fingerprint
+# (matrix.key). Debian's own 2.9.4 gets point updates (2.9.4-2+deb13u1), so
+# that job takes Debian's candidate and checks that it is a 2.9.4. Its
+# packages have "+lcnc2.9" in
 # their version; there is no run-in-place archive for 2.9.
 
 name: Package
@@ -39,7 +43,6 @@ permissions:
 env:
   MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.5' }}
   LINUXCNC_COMMIT: b0e7b191b92066c771f2063714dc00736899ec95  # 2.10.0~pre2-436, 2026-11-12
-  LINUXCNC_KEY: 0CE3E44425B11F871BBCC6F5E43B5A8E78CC2927  # LinuxCNC Archive Signing Key (2025)
 
 jobs:
   deb:
@@ -87,7 +90,7 @@ jobs:
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
-          url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
+          url=$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
             | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p')
           test -n "$url" || { echo "no ${{ matrix.id }} package in $MASTER_RELEASE"; exit 1; }
           curl -fsSL -o /tmp/master.deb "$url"
@@ -128,9 +131,10 @@ jobs:
             id: debian12
             linuxcnc: 1:2.9.4      # linuxcnc.org's
             linuxcnc_org: true
+            key: EEDD0D29F81DCAA0D258661F3CB9FD148F374FEF  # EMC Archive Signing Key (2008)
           - debian: trixie
             id: debian13
-            linuxcnc: 1:2.9.4-2    # Debian's own
+            linuxcnc: 1:2.9.4-2    # Debian's own: point updates (+deb13uN) taken
             linuxcnc_org: false
     container: debian:${{ matrix.debian }}
     steps:
@@ -145,22 +149,32 @@ jobs:
         if: matrix.linuxcnc_org
         run: |
           export GNUPGHOME=$(mktemp -d)
-          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$LINUXCNC_KEY" | gpg --batch --import
-          gpg --batch --with-colons --fingerprint | grep -q "^fpr:::::::::$LINUXCNC_KEY:" \
-            || { echo "the LinuxCNC archive key is not $LINUXCNC_KEY"; exit 1; }
-          gpg --batch --export "$LINUXCNC_KEY" > /usr/share/keyrings/linuxcnc.gpg
+          key=${{ matrix.key }}
+          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$key" | gpg --batch --import
+          gpg --batch --with-colons --fingerprint | grep -q "^fpr:::::::::$key:" \
+            || { echo "the LinuxCNC archive key is not $key"; exit 1; }
+          gpg --batch --export "$key" > /usr/share/keyrings/linuxcnc.gpg
           echo "deb [arch=amd64 signed-by=/usr/share/keyrings/linuxcnc.gpg] https://www.linuxcnc.org/ ${{ matrix.debian }} base 2.9-uspace" \
             > /etc/apt/sources.list.d/linuxcnc.list
           apt-get update
 
       - name: LinuxCNC ${{ matrix.linuxcnc }}
         run: |
-          apt-get install -y --no-install-recommends \
-            linuxcnc-uspace-dev="${{ matrix.linuxcnc }}" linuxcnc-uspace="${{ matrix.linuxcnc }}"
+          want="${{ matrix.linuxcnc }}"
+          if ${{ matrix.linuxcnc_org }}; then
+            apt-get install -y --no-install-recommends linuxcnc-uspace-dev="$want" linuxcnc-uspace="$want"
+          else
+            apt-get install -y --no-install-recommends linuxcnc-uspace-dev linuxcnc-uspace
+          fi
+          got=$(dpkg-query -W -f '${Version}' linuxcnc-uspace-dev)
+          case "$got" in
+            "$want"|"$want"+*) echo "linuxcnc-uspace-dev $got" ;;
+            *) echo "linuxcnc-uspace-dev is $got, not $want"; exit 1 ;;
+          esac
 
       - name: linuxcnc-ethercat-uspace from ${{ env.MASTER_RELEASE }}
         run: |
-          url=$(curl -fsSL "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
+          url=$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/repos/MetalMusings/ethercat/releases/tags/$MASTER_RELEASE" \
             | sed -n 's/.*"browser_download_url": *"\([^"]*${{ matrix.id }}_amd64\.deb\)".*/\1/p')
           test -n "$url" || { echo "no ${{ matrix.id }} package in $MASTER_RELEASE"; exit 1; }
           curl -fsSL -o /tmp/master.deb "$url"
