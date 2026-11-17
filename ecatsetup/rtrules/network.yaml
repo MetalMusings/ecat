@@ -130,6 +130,30 @@
       mesa_eth: true
       nics: [{name: eno1, io: true, rx_usecs: 0}]
 
+- id: ethtool-missing
+  title: "The I/O's network card settings could not be read (ethtool is not installed)"
+  when: "io_nics and not ethtool"
+  evidence: "ethtool not found; I/O card {io_nics_text}"
+  gain: low
+  cause: >
+    The check reads a card's interrupt coalescing and Energy Efficient Ethernet
+    with ethtool. Without it, the rules for them cannot say anything, either
+    way: a quiet list does not mean the card is set right.
+  action:
+    kind: advice
+    text: Install ethtool (sudo apt install ethtool) and measure again.
+    risk: None.
+    cost: None.
+  effect: The coalescing and EEE rules can look at the card.
+  check: The Network cards line shows rx-usecs and EEE.
+  source:
+    - text: ethtool(8)
+      url: https://manpages.debian.org/ethtool
+  seen-here: "turner had no ethtool until 2026-11-14"
+  tests:
+    present: {io_nics: [enp3s0], ethtool: false}
+    absent: {io_nics: [enp3s0], ethtool: true}
+
 - id: io-nic-eee
   title: "{item.name} saves power between packets (Energy Efficient Ethernet)"
   each: nics

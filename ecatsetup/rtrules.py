@@ -317,7 +317,7 @@ def evidence(inv, run=None):
         "aspm_policy": (inv.fact("aspm_policy").value if inv.fact("aspm_policy") else None),
         "sysctl": d.get("sysctl") or {}, "snd_power_save": d.get("snd_power_save"),
         "nvme": d.get("nvme"), "default_route": d.get("default_route"),
-        "io": io, "io_nics": io_nics, "mesa_eth": mesa,
+        "io": io, "io_nics": io_nics, "mesa_eth": mesa, "ethtool": d.get("ethtool", True), "io_nics_text": ", ".join(io_nics),
         "ethercat": any("EtherCAT" in x for x in io), "parport": any("parport" in x for x in io),
         "pstate": inv.fact("pstate").value if inv.fact("pstate") else None,
         "last_cpu": cpus[-1] if cpus else 0,

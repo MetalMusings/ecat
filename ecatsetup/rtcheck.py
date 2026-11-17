@@ -84,6 +84,12 @@ class Roots:
         path = os.path.join(base, *parts)
         return os.path.basename(os.path.realpath(path)) if os.path.lexists(path) else None
 
+    def has(self, prog):
+        """Whether a program is installed (in sbin too)."""
+        if self._run is not None:
+            return self._run([prog, "--version"]) is not None
+        return bool(shutil.which(prog) or shutil.which(prog, path="/usr/sbin:/sbin"))
+
     def run(self, argv):
         """A program's output, or None when it is missing or fails."""
         if self._run is not None:
@@ -573,8 +579,12 @@ def inventory(roots=None, ini=None):
         if any(n["aspm"].values()):
             bits.append("ASPM " + ",".join(k[:-5] for k, v in n["aspm"].items() if v))
         return " ".join(bits)
+    ethtool = r.has("ethtool")
     inv.add("nics", "Network cards", "; ".join(nic_text(n) for n in nics) or "none",
             "/sys/class/net, ethtool -c / --show-eee", data=nics)
+    inv.add("ethtool", "ethtool", "installed" if ethtool else
+            "not installed: the cards' coalescing and EEE are not known (sudo apt install ethtool)",
+            "PATH, /usr/sbin", data=ethtool)
     inv.add("aspm_policy", "PCIe ASPM policy",
             (re.search(r"\[(\w+)\]", r.s("module", "pcie_aspm", "parameters", "policy") or "") or
              [None, "not known"])[1], "/sys/module/pcie_aspm/parameters/policy")

@@ -144,6 +144,8 @@ def fake_tree(root, isolated="3", smt=False, vm=False):
 
 
 def fake_run(argv):
+    if argv == ["ethtool", "--version"]:
+        return "ethtool version 6.14.2\n"
     if argv[:2] == ["ethtool", "-c"]:
         return "Coalesce parameters for %s:\nrx-usecs:\t3\nrx-frames:\tn/a\n" % argv[2]
     if argv[:2] == ["ethtool", "--show-eee"]:

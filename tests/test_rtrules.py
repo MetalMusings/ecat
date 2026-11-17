@@ -403,6 +403,27 @@ class TestEndToEnd(unittest.TestCase):
         self.assertNotIn("mesa-nic-irq-cpu", ids)
         self.assertNotIn("irq-on-rt-cpu", ids)
 
+    def test_ethtool_missing(self):
+        """Without ethtool the coalescing and EEE rules are quiet for want of
+        data, and the list must say so (zx45's question)."""
+        roots = fake_tree(self.root)
+        write(roots.proc, "net/route", "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+              "enp2s0\t000A0A0A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n")
+        cfg = os.path.join(self.root, "cfg")
+        write(cfg, "m.ini", "[EMCMOT]\nSERVO_PERIOD = 1000000\n[HAL]\nHALFILE = m.hal\n")
+        write(cfg, "m.hal", 'loadrt hostmot2\nloadrt hm2_eth board_ip="10.10.10.10"\n')
+        ini = os.path.join(cfg, "m.ini")
+        ids = [f.id for f in rtrules.analyse(rtrules.evidence(rtcheck.inventory(roots, ini=ini), None), self.rules)]
+        self.assertNotIn("ethtool-missing", ids)
+        self.assertIn("mesa-nic-coalescing", ids)
+        roots._run = lambda argv: None                 # no ethtool
+        inv = rtcheck.inventory(roots, ini=ini)
+        self.assertIn("sudo apt install ethtool", inv.fact("ethtool").value)
+        found = {f.id: f for f in rtrules.analyse(rtrules.evidence(inv, None), self.rules)}
+        self.assertIn("ethtool-missing", found)
+        self.assertIn("enp2s0", found["ethtool-missing"].evidence)
+        self.assertNotIn("mesa-nic-coalescing", found)
+
     def test_run_from_json(self):
         """A saved run gives the same findings (a user's file becomes a test)."""
         roots = fake_tree(self.root)

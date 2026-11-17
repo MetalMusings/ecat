@@ -164,7 +164,7 @@ Version: $VERSION
 Architecture: $ARCH
 Maintainer: $MAINTAINER
 Depends: $SHLIBS, $MASTER_PKG (>= $MASTER_MIN), python3, python3-yaml
-Recommends: python3-pyqt5, stress-ng
+Recommends: python3-pyqt5, stress-ng, ethtool
 Section: misc
 Priority: optional
 Homepage: https://github.com/MetalMusings/ecat

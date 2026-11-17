@@ -3145,6 +3145,11 @@ through the Timing tab alone. "Works well". Shortcomings found, each fixed:
   out). Not tried on a Mesa card. `irq-on-rt-cpu` and
   `isolcpus-without-managed-irq` now leave every I/O card's interrupt alone,
   not EtherCAT's only.
+- The user asked about rx-usecs (zx45: 0, EEE enabled). `mesa-nic-coalescing`
+  and `io-nic-eee` read the card with ethtool; without ethtool both were quiet
+  and nothing said why. Now the inventory has an ethtool line, rule
+  `ethtool-missing` (advice) names the I/O card, and the package recommends
+  ethtool.
 
 ### The probe: `ecat_rtprobe` (2026-11-17)
 
