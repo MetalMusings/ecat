@@ -44,14 +44,16 @@ objs := lcec_main.o lcec_ethercat.o lcec_pins.o lcec_malloc.o lcec_lookup.o \
 	lcec_modparam.o lcec_devicelist.o lcec_autoshift.o ecat_config.o ecat_startcheck.o ecat_events.o devices/lcec_generic.o devices/ecat_cia402.o devices/ecat_encoder.o \
 	devices/ecat_serial.o devices/ecat_serial_core.o devices/ecat_serial_bridge.o
 
+probe_objs := ecat_rtprobe.o ecat_rtprobe_core.o
+
 .PHONY: all install clean check
-all: ecat.so
+all: ecat.so ecat_rtprobe.so
 
 %.o: %.c
 	@echo Compiling $<
 	@$(CC) -o $@ $(CFLAGS_ECAT) -c $<
 
--include $(objs:.o=.d)
+-include $(objs:.o=.d) $(probe_objs:.o=.d)
 
 # Not linked to liblinuxcnchal: like LinuxCNC's own modules, ecat.so takes HAL
 # and RTAPI from hal_lib.so and rtapi_app, which are loaded when rtapi_app
@@ -69,9 +71,20 @@ ecat.so: $(objs)
 	@chmod -x $@
 	@rm -f $@.tmp $@.sym $@.ver
 
+# ecat_rtprobe.so: the time of every thread run, for EtherCAT Setup's
+# real-time check (ecat_rtprobe_core.h). No master, no libyaml.
+ecat_rtprobe.so: $(probe_objs)
+	@echo Linking $@
+	@ld -d -r -o $@.tmp $(probe_objs)
+	@objcopy -j .rtapi_export -O binary $@.tmp $@.sym
+	@(echo '{ global : '; tr -s '\0' < $@.sym | xargs -r0 printf '%s;\n' | grep .; echo 'local : * ; };') > $@.ver
+	@$(CC) -shared -Bsymbolic -Wl,--version-script,$@.ver -o $@ $(probe_objs) -lrt
+	@chmod -x $@
+	@rm -f $@.tmp $@.sym $@.ver
+
 # Unit tests: a device's code with a fake of HAL, the master and lcec
 # (tests/fake.c), so that its read and write functions run without a bus.
-tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial tests/test_serial_bridge tests/test_hal29
+tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial tests/test_serial_bridge tests/test_hal29 tests/test_rtprobe
 tests/test_generic: tests/test_generic.o tests/fake.o devices/lcec_generic.o
 tests/test_cia402: tests/test_cia402.o tests/fake.o tests/fake_generic.o devices/ecat_cia402.o
 tests/test_encoder: tests/test_encoder.o tests/fake.o tests/fake_generic.o devices/ecat_encoder.o
@@ -85,6 +98,7 @@ tests/test_serial: tests/test_serial.o tests/sim_el60xx.o tests/fake.o tests/fak
 tests/test_serial_bridge: tests/test_serial_bridge.o tests/sim_el60xx.o tests/sim_modbus.o tests/fake.o tests/fake_generic.o devices/ecat_serial_bridge.o devices/ecat_serial_core.o
 tests/test_serial_bridge: TEST_LIBS = -lmodbus -lpthread
 tests/test_hal29: tests/test_hal29.o tests/fake.o
+tests/test_rtprobe: tests/test_rtprobe.o tests/fake.o ecat_rtprobe_core.o
 tests/test_events: tests/test_events.o tests/fake.o tests/fake_generic.o ecat_events.o
 -include tests/*.d
 
@@ -103,9 +117,9 @@ check: $(tests)
 	@fail=0; for t in $(tests); do $$t || fail=1; done; exit $$fail
 
 # Makefile.modinc has an install target of its own; this one replaces it.
-install: ecat.so
+install: ecat.so ecat_rtprobe.so
 	install -d $(DESTDIR)$(RTLIBDIR)
-	install -m 644 ecat.so $(DESTDIR)$(RTLIBDIR)/
+	install -m 644 ecat.so ecat_rtprobe.so $(DESTDIR)$(RTLIBDIR)/
 
 clean:
-	rm -f ecat.so *.o *.d devices/*.o devices/*.d tests/*.o tests/*.d $(tests) tests/serial_sim_port *.tmp *.sym *.ver
+	rm -f ecat.so ecat_rtprobe.so *.o *.d devices/*.o devices/*.d tests/*.o tests/*.d $(tests) tests/serial_sim_port *.tmp *.sym *.ver

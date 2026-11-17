@@ -2431,9 +2431,10 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   ASPM, graphics driver, BIOS, virtual machine or not, the INI's threads and
   I/O, the CPU LinuxCNC's threads run on), each fact with where it was
   read. Then it measures how evenly the real-time threads start, every
-  cycle: with LinuxCNC running, beside it (`timedelta` and `sampler` put
-  first into its threads and taken out again at the end; nothing that talks
-  to your I/O card); otherwise in `halrun` with the INI's threads alone
+  cycle: with LinuxCNC running, beside it (a function of ecat's own small
+  HAL module `ecat_rtprobe` put first into each thread and taken out again at
+  the end; it only notes the time of each run, talks to nothing, and works
+  beside a configuration's own `sampler` or `timedelta`); otherwise in `halrun` with the INI's threads alone
   (`--rt-way threads|attach|inventory` chooses). It prints how late the
   threads started (the largest, and what 99.99 % of the cycles stay within),
   the cycles over 20, 50 and 100 us with what the length of the run can say
@@ -2456,9 +2457,7 @@ ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
   meanwhile; `--rt-twice` measures twice and says how much the numbers
   move by chance, so that a later change is judged against that. Every run
   is saved in `~/.local/state/ecatsetup/rt-runs/`; `--from-run` shows one
-  again. A running HAL that has `sampler` or `timedelta` loaded already
-  cannot be measured beside (HAL loads a component once): measure the
-  threads only then. `--improve` goes on as the *Timing* tab does
+  again. `--improve` goes on as the *Timing* tab does
   ([The computer's timing](#the-computers-timing)): two runs, then the
   run-time changes of the findings one at a time with sudo, each measured
   again and kept or undone; `--rt-report` writes the report at the end.

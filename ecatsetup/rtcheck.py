@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import threading
 import time
@@ -33,7 +34,8 @@ from . import lcnc_env
 
 # names of what the check adds to a HAL; the prefix tells them from the user's
 PREFIX = "ecatsetup-rt"
-SAMPLER_DEPTH = 16384
+PROBE = "ecat_rtprobe"                  # the HAL module (component/ecat_rtprobe.c)
+PROBE_FILE = "/dev/shm/ecat-rtprobe"
 
 # spike thresholds, us: counted over the run (cycle-to-cycle error, either way)
 THRESHOLDS_US = (10, 20, 50, 100, 200, 500)
@@ -740,8 +742,10 @@ class CycleStats:
         self.events_dropped = 0
         self.anchor = None      # (monotonic ns of the first sample, uncertainty ns)
 
-    def add(self, delta):
-        """One cycle: delta = ns since the previous run (0 = first, skipped)."""
+    def add(self, delta, at=None):
+        """One cycle: delta = ns since the previous run (0 = first, skipped);
+        at: its time (ns since the first cycle) when known, else the sum of
+        the deltas."""
         if delta <= 0:
             return
         e = delta - self.period
@@ -765,7 +769,9 @@ class CycleStats:
             self.worst.sort(key=lambda x: -x[0])
             del self.worst[self.WORST:]
         # time and lateness
-        if idx == 0:
+        if at is not None:
+            self.t = at
+        elif idx == 0:
             self.t = 0
         elif self.t is not None:
             self.t += delta
@@ -1085,35 +1091,38 @@ def read_times(run=None):
     return thread_times(th or "", vals)
 
 
-def td_name(thread):
-    return "%s-td-%s" % (PREFIX, thread)
+def probe_name(thread):
+    return "%s-%s" % (PREFIX, thread)
+
+
+def probe_file():
+    return os.environ.get("ECAT_RTPROBE_FILE") or PROBE_FILE
 
 
 def attach_commands(threads):
-    """halcmd lines adding a timedelta first in each thread and a sampler
-    channel per thread recording it; sampler channel i = threads[i]. The
-    channels start disabled: Recorder enables them once halsampler reads,
-    and the moment it does so is the time of each channel's first sample."""
-    names = [td_name(t) for t in threads]
-    cmds = ["loadrt timedelta names=%s" % ",".join(names),
-            "loadrt sampler depth=%s cfg=%s" % (",".join([str(SAMPLER_DEPTH)] * len(threads)),
-                                                ",".join(["s"] * len(threads)))]
-    cmds += ["setp sampler.%d.enable 0" % i for i in range(len(threads))]
-    for i, (t, n) in enumerate(zip(threads, names)):
-        cmds += ["addf %s %s 1" % (n, t),
-                 "addf sampler.%d %s" % (i, t),
-                 "net %s-%d %s.out sampler.%d.pin.0" % (PREFIX, i, n, i)]
-    return cmds
+    """halcmd lines putting an ecat_rtprobe function first in each thread:
+    each run's time goes into probe_file() (ProbeReader). Nothing else in
+    HAL is used, so a configuration's own sampler or timedelta is no
+    obstacle."""
+    names = [probe_name(t) for t in threads]
+    load = "loadrt %s names=%s" % (PROBE, ",".join(names))
+    if os.environ.get("ECAT_RTPROBE_FILE"):
+        load += " file=%s" % probe_file()
+    return [load] + ["addf %s %s 1" % (n, t) for t, n in zip(threads, names)]
+
+
+def probe_error(text):
+    """What to say when loading ecat_rtprobe failed."""
+    if re.search(r"not found|No such file|cannot open shared object|dlopen", text):
+        return ("%s is not installed for this LinuxCNC (it comes with ecat 0.23 or later, beside "
+                "ecat.so): %s" % (PROBE, text))
+    return "%s did not load: %s" % (PROBE, text)
 
 
 def detach_commands(threads):
     """The reverse of attach_commands: functions out of the threads first
     (2.10 refuses to unload a component whose function is in a thread)."""
-    cmds = []
-    for i, t in enumerate(threads):
-        cmds += ["delf sampler.%d %s" % (i, t), "delf %s %s" % (td_name(t), t),
-                 "delsig %s-%d" % (PREFIX, i)]
-    return cmds + ["unloadrt sampler", "unloadrt timedelta"]
+    return ["delf %s %s" % (probe_name(t), t) for t in threads] + ["unloadrt %s" % PROBE]
 
 
 def threads_hal(threads):
@@ -1364,80 +1373,127 @@ def gpe_counts(roots=None):
 # --------------------------------------------------------------------------
 # a measurement
 
+class ProbeReader:
+    """ecat_rtprobe's file (component/ecat_rtprobe_core.h has the layout):
+    the run times of each thread, read as they come."""
+
+    HEAD = struct.Struct("<8sIIIIq")
+    INST = 128
+
+    def __init__(self, path):
+        import mmap
+        with open(path, "rb") as f:
+            self.map = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        magic, version, n, slots, size, self.created = self.HEAD.unpack_from(self.map, 0)
+        if magic != b"ECATRTP\0" or version != 1 or size != self.INST or slots & (slots - 1):
+            self.map.close()
+            raise RtError("%s is not an ecat_rtprobe file of version 1" % path)
+        self.n, self.slots = n, slots
+        self.names = [self.map[64 + i * self.INST:64 + i * self.INST + 64].split(b"\0")[0].decode()
+                      for i in range(n)]
+        self.rings = 64 + n * self.INST
+
+    def count(self, i):
+        return struct.unpack_from("<Q", self.map, 64 + i * self.INST + 72)[0]
+
+    def period(self, i):
+        return struct.unpack_from("<q", self.map, 64 + i * self.INST + 64)[0]
+
+    def times(self, i, start, end):
+        """The times of runs start .. end-1 (all still in the ring)."""
+        out = []
+        base = self.rings + i * self.slots * 8
+        k = start
+        while k < end:
+            slot = k & (self.slots - 1)
+            m = min(end - k, self.slots - slot)
+            out += struct.unpack_from("<%dq" % m, self.map, base + slot * 8)
+            k += m
+        return out
+
+    def close(self):
+        self.map.close()
+
+
 class Recorder:
-    """halsampler per thread, its output read as it comes into CycleStats."""
+    """Reads ecat_rtprobe's file every READ_EVERY s into CycleStats, one per
+    thread: the time between runs and each run's own time (the anchor is
+    exact: the probe's clock is the poller's, CLOCK_MONOTONIC)."""
+
+    READ_EVERY = 0.05
 
     def __init__(self, threads):
-        self.threads = threads                  # [(name, period)], channel = index
+        self.threads = threads                  # [(name, period)]
         self.stats = [CycleStats(n, p) for n, p in threads]
-        self.procs = []
-        self.readers = []
         self.errors = []
+        self.reader = None
+        self.thread = None
+        self.stopping = threading.Event()
 
     def start(self):
-        hs = os.environ.get("ECAT_HALSAMPLER") or lcnc_env.program("halsampler")
-        for i, st in enumerate(self.stats):
-            p = subprocess.Popen([hs, "-c", str(i)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, env=lcnc_env.env())
-            self.procs.append(p)
-            t = threading.Thread(target=self._read, args=(p, st), daemon=True)
-            t.start()
-            self.readers.append(t)
-        time.sleep(0.2)          # halsampler attached before the first sample
-        # one halcmd that stays, so that a setp takes microseconds, not the
-        # milliseconds of starting halcmd: the time of each channel's first
-        # sample is known to within that and one period
-        hc = subprocess.Popen([_halcmd(), "-kf"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True, bufsize=1, env=lcnc_env.env())
         try:
-            hc.stdin.write("getp sampler.0.enable\n")
-            hc.stdin.flush()
-            hc.stdout.readline()
-            for i, st in enumerate(self.stats):
-                st.started = time.time()
-                a = time.monotonic_ns()
-                hc.stdin.write("setp sampler.%d.enable 1\ngetp sampler.%d.enable\n" % (i, i))
-                hc.stdin.flush()
-                hc.stdout.readline()
-                b = time.monotonic_ns()
-                # the first sample comes at the thread's first run after the setp
-                lo, hi = a, b + st.period
-                st.anchor = ((lo + hi) // 2, (hi - lo) // 2)
-        finally:
-            hc.stdin.close()
-            hc.stdout.close()
-            hc.wait(10)
+            self.reader = ProbeReader(probe_file())
+        except (OSError, ValueError) as e:
+            raise RtError("cannot read the probe's file %s: %s" % (probe_file(), e))
+        index = {n: i for i, n in enumerate(self.reader.names)}
+        self.index = [index.get(probe_name(n)) for n, _ in self.threads]
+        for st, i in zip(self.stats, self.index):
+            if i is None:
+                self.errors.append("%s: the probe has no function for this thread" % st.thread)
+        # runs before now are not part of the measurement
+        self.next = [self.reader.count(i) if i is not None else 0 for i in self.index]
+        self.last = [None] * len(self.stats)
+        for st in self.stats:
+            st.started = time.time()
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.thread.start()
 
-    @staticmethod
-    def _read(p, st):
-        buf = []
-        for line in p.stdout:
-            buf.append(line)
-            if len(buf) >= 256:
-                st.feed("".join(buf))
-                buf = []
-        if buf:
-            st.feed("".join(buf))
+    def _loop(self):
+        while not self.stopping.wait(self.READ_EVERY):
+            self.read()
+        self.read()
+
+    def read(self):
+        r = self.reader
+        for k, (st, i) in enumerate(zip(self.stats, self.index)):
+            if i is None:
+                continue
+            end = r.count(i)
+            start = self.next[k]
+            if end - start > r.slots - 64:
+                # the ring went round before it was read: the runs between are gone
+                st.lost()
+                self.last[k] = None
+                start = end - (r.slots - 64)
+            if end <= start:
+                continue
+            times = r.times(i, start, end)
+            # the count may have moved on while the slots were read: a slot
+            # written again since then is not taken
+            if r.count(i) - start > r.slots:
+                st.lost()
+                self.last[k] = None
+                self.next[k] = r.count(i)
+                continue
+            self.next[k] = end
+            prev = self.last[k]
+            for t in times:
+                if prev is not None:
+                    if st.anchor is None:
+                        st.anchor = (t, 0)
+                    # the time is the probe's own, also after runs were lost
+                    st.add(t - prev, at=t - st.anchor[0])
+                prev = t
+            self.last[k] = prev
 
     def stop(self):
-        for p in self.procs:
-            if p.poll() is None:
-                p.terminate()
-        for p in self.procs:
-            try:
-                p.wait(5)
-            except subprocess.TimeoutExpired:
-                p.kill()
-        for t in self.readers:
-            t.join(5)
-        for p, st in zip(self.procs, self.stats):
-            err = p.stderr.read().strip() if p.stderr else ""
-            if err and not st.n:
-                self.errors.append("%s: halsampler: %s" % (st.thread, err))
-            for f in (p.stdout, p.stderr):
-                if f:
-                    f.close()
-        self.procs = []
+        if self.thread is not None:
+            self.stopping.set()
+            self.thread.join(5)
+            self.thread = None
+        if self.reader is not None:
+            self.reader.close()
+            self.reader = None
         for st in self.stats:
             st.ended = time.time()
 
@@ -1599,6 +1655,11 @@ def measure_threads(threads, seconds, load="rest", inventory=None, progress=prin
         end = time.monotonic() + 20
         while time.monotonic() < end:
             if proc.poll() is not None:
+                log.flush()
+                with open(log.name) as f:
+                    text = f.read()
+                if PROBE in text:
+                    raise RtError(probe_error(text.strip().splitlines()[-1] if text.strip() else ""))
                 raise RtError("halrun stopped: see %s" % log.name)
             th = parse_threads(halcmd("show", "thread", check=False) or "")
             if all(any(f.startswith(PREFIX) for f in th.get(n, {}).get("funcs", [])) for n, _ in threads):
@@ -1751,15 +1812,14 @@ def _measure(run, rec, threads, seconds, load, progress, folder, cancel=None):
 
 
 def measure_attach(seconds, load="as-used", inventory=None, progress=print, root=False, cancel=None):
-    """Beside a running HAL: timedelta and sampler into its threads, taken
-    out again at the end."""
+    """Beside a running HAL: an ecat_rtprobe function first in each of its
+    threads, taken out again at the end."""
     if not hal_running():
         raise RtError("no HAL runs: start LinuxCNC first, or measure the threads only")
-    loaded = comps()
-    for c in ("sampler", "timedelta"):
-        if c in loaded:
-            raise RtError("the running HAL has %s loaded already: the check needs its own "
-                          "(HAL loads a component once). Measure the threads only instead." % c)
+    if PROBE in comps():
+        raise RtError("%s is loaded already: another check is measuring, or one was cut short. "
+                      "Wait for it, or take it out: halcmd delf %s-<thread> <thread> for each "
+                      "thread, then halcmd unloadrt %s" % (PROBE, PREFIX, PROBE))
     th = parse_threads(halcmd("show", "thread"))
     threads = sorted(((n, d["period"]) for n, d in th.items()), key=lambda x: x[1])
     if not threads:
@@ -1771,7 +1831,10 @@ def measure_attach(seconds, load="as-used", inventory=None, progress=print, root
     folder = __import__("tempfile").mkdtemp(prefix="ecatsetup-rt-")
     try:
         for c in attach_commands(names):
-            halcmd(*c.split())
+            try:
+                halcmd(*c.split())
+            except RtError as e:
+                raise RtError(probe_error(str(e)) if c.startswith("loadrt") else str(e))
             added.append(c)
         _measure(run, rec, threads, seconds, load, progress, folder, cancel)
         grew = [t for t, d in run.times.items()

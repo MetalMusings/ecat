@@ -8,8 +8,10 @@ import io
 import json
 import os
 import stat
+import struct
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -496,19 +498,115 @@ class TestPoller(unittest.TestCase):
         self.assertNotIn("irq:126", data.changes)
 
 
+class FakeProbe:
+    """ProbeReader's interface over lists: runs are added with run()."""
+    slots = 64 + 32
+
+    def __init__(self):
+        self.names = ["ecatsetup-rt-servo-thread"]
+        self.ring = [0] * self.slots
+        self.n = 0
+
+    def run(self, t):
+        self.ring[self.n % self.slots] = t
+        self.n += 1
+
+    def count(self, i):
+        return self.n
+
+    def times(self, i, start, end):
+        return [self.ring[k % self.slots] for k in range(start, end)]
+
+    def close(self):
+        pass
+
+
+class TestProbe(unittest.TestCase):
+    def test_the_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "probe")
+            write_probe(path, [("ecatsetup-rt-base-thread", 25000, [1, 2]),
+                               ("ecatsetup-rt-servo-thread", 1000000, list(range(70000)))])
+            r = rtcheck.ProbeReader(path)
+            self.assertEqual(r.names, ["ecatsetup-rt-base-thread", "ecatsetup-rt-servo-thread"])
+            self.assertEqual((r.count(0), r.count(1), r.period(1), r.slots), (2, 70000, 1000000, 65536))
+            self.assertEqual(r.times(0, 0, 2), [1, 2])
+            # across the end of the ring
+            self.assertEqual(r.times(1, 65530, 65540), list(range(65530, 65540)))
+            r.close()
+            with open(path, "r+b") as f:
+                f.write(b"NOTAPROB")
+            with self.assertRaises(rtcheck.RtError):
+                rtcheck.ProbeReader(path)
+
+    def recorder(self, probe):
+        rec = rtcheck.Recorder([("servo-thread", 1000000)])
+        rec.reader, rec.index, rec.next, rec.last = probe, [0], [probe.n], [None]
+        return rec
+
+    def test_the_runs_become_cycles(self):
+        p = FakeProbe()
+        for k in range(5):
+            p.run(10 ** 9 + k * 1000000)          # before the start: not counted
+        rec = self.recorder(p)
+        st = rec.stats[0]
+        for k in range(5, 15):
+            p.run(10 ** 9 + k * 1000000 + (40000 if k == 9 else 0))
+        rec.read()
+        # 10 runs read: 9 cycles; the anchor is the second run's time
+        self.assertEqual(st.n, 9)
+        self.assertEqual(st.anchor, (10 ** 9 + 6 * 1000000, 0))
+        self.assertEqual((st.max, st.min), (40000, -40000))
+        self.assertEqual(st.events[0][0], 3 * 1000000 + 40000)     # the late run's time since the anchor
+        self.assertEqual(st.late_max, 40000)
+
+    def test_start_skips_what_came_before(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, {"ECAT_RTPROBE_FILE": os.path.join(d, "probe")}):
+            write_probe(os.path.join(d, "probe"), [("ecatsetup-rt-servo-thread", 1000000,
+                                                    [k * 1000000 for k in range(500)])])
+            rec = rtcheck.Recorder([("servo-thread", 1000000), ("base-thread", 25000)])
+            rec.start()
+            rec.stop()
+            self.assertEqual([st.n for st in rec.stats], [0, 0])
+            self.assertEqual(rec.errors, ["base-thread: the probe has no function for this thread"])
+
+    def test_runs_lost_when_read_too_late(self):
+        p = FakeProbe()
+        rec = self.recorder(p)
+        st = rec.stats[0]
+        for k in range(10):
+            p.run(k * 1000000)
+        rec.read()
+        for k in range(10, 10 + p.slots + 5):        # the ring went round before it was read
+            p.run(k * 1000000)
+        rec.read()
+        self.assertEqual(st.overruns, 1)
+        # no cycle of the gap counts; the time line goes on from the probe's own times
+        self.assertEqual((st.max, st.min), (0, 0))
+        self.assertEqual(st.t, (10 + p.slots + 4) * 1000000 - 1000000)
+
+
 class TestHal(unittest.TestCase):
     def test_threads_hal(self):
-        text = rtcheck.threads_hal([("base-thread", 25000), ("servo-thread", 1000000)])
+        with mock.patch.dict(os.environ):
+            os.environ.pop("ECAT_RTPROBE_FILE", None)
+            text = rtcheck.threads_hal([("base-thread", 25000), ("servo-thread", 1000000)])
         lines = text.splitlines()
         self.assertEqual(lines[0], "loadrt threads name1=base-thread period1=25000 "
                                    "name2=servo-thread period2=1000000")
-        self.assertIn("loadrt timedelta names=ecatsetup-rt-td-base-thread,ecatsetup-rt-td-servo-thread",
-                      lines)
-        self.assertIn("loadrt sampler depth=16384,16384 cfg=s,s", lines)
-        # the timedelta first in its thread, the sampler channel by index
-        self.assertIn("addf ecatsetup-rt-td-servo-thread servo-thread 1", lines)
-        self.assertIn("net ecatsetup-rt-1 ecatsetup-rt-td-servo-thread.out sampler.1.pin.0", lines)
+        # one probe function per thread, first in it; nothing of sampler or timedelta
+        self.assertIn("loadrt ecat_rtprobe names=ecatsetup-rt-base-thread,ecatsetup-rt-servo-thread", lines)
+        self.assertIn("addf ecatsetup-rt-servo-thread servo-thread 1", lines)
+        self.assertIn("addf ecatsetup-rt-base-thread base-thread 1", lines)
+        self.assertFalse([l for l in lines if "sampler" in l or "timedelta" in l])
         self.assertEqual(lines[-1], "start")
+        with mock.patch.dict(os.environ, {"ECAT_RTPROBE_FILE": "/x/p"}):
+            self.assertIn("file=/x/p", rtcheck.attach_commands(["t"])[0])
+
+    def test_probe_error(self):
+        self.assertIn("not installed", rtcheck.probe_error("dlopen: ecat_rtprobe.so: cannot open shared object"))
+        self.assertIn("did not load", rtcheck.probe_error("rtapi_app_main: -22"))
 
     def test_detach_reverses_attach(self):
         a = rtcheck.attach_commands(["servo-thread"])
@@ -585,21 +683,77 @@ elif args and args[0] == "loadrt":
     if args[1] in st["comps"]:
         print("already loaded", file=sys.stderr)
         sys.exit(1)
+    if args[1] == "ecat_rtprobe" and st.get("no_probe"):
+        print("dlopen: ecat_rtprobe.so: cannot open shared object file", file=sys.stderr)
+        sys.exit(1)
     st["comps"].append(args[1])
+    if args[1] == "ecat_rtprobe":
+        kw = dict(a.split("=", 1) for a in args[2:])
+        import subprocess
+        subprocess.Popen([sys.executable, os.environ["FAKE_PROBE_WRITER"], kw["file"], kw["names"]],
+                         start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        for _ in range(100):
+            if os.path.exists(kw["file"]):
+                break
+            import time
+            time.sleep(0.02)
 elif args and args[0] == "unloadrt":
     st["comps"].remove(args[1])
+    if args[1] == "ecat_rtprobe" and os.path.exists(os.environ["ECAT_RTPROBE_FILE"]):
+        os.remove(os.environ["ECAT_RTPROBE_FILE"])
 json.dump(st, open(state, "w"))
 """
 
-FAKE_HALSAMPLER = """\
-#!/usr/bin/python3
-import sys, time
-ch = sys.argv[sys.argv.index("-c") + 1]
-period = 25000 if ch == "0" else 1000000
-for i in range(2000):
-    print(period + (60000 if (ch == "1" and i == 7) else 0))
-sys.stdout.flush()
-time.sleep(60)
+def write_probe(path, insts):
+    """An ecat_rtprobe file (component/ecat_rtprobe_core.h; its C test checks
+    the same offsets): insts = [(name, period, [times])]."""
+    slots = 65536
+    data = bytearray(64 + 128 * len(insts) + 8 * slots * len(insts))
+    struct.pack_into("<8sIIIIq", data, 0, b"ECATRTP\0", 1, len(insts), slots, 128, 5)
+    for i, (name, period, times) in enumerate(insts):
+        o = 64 + 128 * i
+        data[o:o + len(name)] = name.encode()
+        struct.pack_into("<qQ", data, o + 64, period, len(times))
+        base = 64 + 128 * len(insts) + i * slots * 8
+        for k, t in enumerate(times):
+            struct.pack_into("<q", data, base + (k % slots) * 8, t)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+# What ecat_rtprobe does in a running HAL, for the fake halcmd: the file is
+# made at loadrt and written as time goes on (base 25 us, servo 1 ms, every
+# 20th servo run 60 us late), until unloadrt removes it.
+FAKE_PROBE_WRITER = """\
+import mmap, os, struct, sys, time
+path, names = sys.argv[1], sys.argv[2].split(",")
+periods = [25000 if "base" in n else 1000000 for n in names]
+slots = 65536
+size = 64 + 128 * len(names) + 8 * slots * len(names)
+with open(path + ".tmp", "wb") as f:
+    f.truncate(size)
+os.rename(path + ".tmp", path)
+f = open(path, "r+b")
+m = mmap.mmap(f.fileno(), size)
+struct.pack_into("<8sIIIIq", m, 0, b"ECATRTP\\0", 1, len(names), slots, 128, 5)
+for i, n in enumerate(names):
+    m[64 + 128 * i:64 + 128 * i + len(n)] = n.encode()
+    struct.pack_into("<q", m, 64 + 128 * i + 64, periods[i])
+t0 = time.monotonic_ns()
+counts = [0] * len(names)
+end = time.monotonic() + 30
+while os.path.exists(path) and time.monotonic() < end:
+    now = time.monotonic_ns() - t0
+    for i, p in enumerate(periods):
+        base = 64 + 128 * len(names) + i * slots * 8
+        while counts[i] * p <= now:
+            k = counts[i]
+            t = t0 + k * p + (60000 if p == 1000000 and k % 20 == 7 else 0)
+            struct.pack_into("<q", m, base + (k % slots) * 8, t)
+            counts[i] += 1
+        struct.pack_into("<Q", m, 64 + 128 * i + 72, counts[i])
+    time.sleep(0.005)
 """
 
 # the poller: a file of its format, written at once; then it waits to be stopped
@@ -627,13 +781,15 @@ class TestAttach(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         d = self.tmp.name
         self.state = os.path.join(d, "hal.json")
-        for name, text in (("halcmd", FAKE_HALCMD), ("halsampler", FAKE_HALSAMPLER), ("rtpoll", FAKE_RTPOLL)):
+        for name, text in (("halcmd", FAKE_HALCMD), ("probe_writer.py", FAKE_PROBE_WRITER),
+                           ("rtpoll", FAKE_RTPOLL)):
             p = os.path.join(d, name)
             with open(p, "w") as f:
                 f.write(text)
             os.chmod(p, os.stat(p).st_mode | stat.S_IEXEC)
         self.env = mock.patch.dict(os.environ, {
-            "ECAT_HALCMD": os.path.join(d, "halcmd"), "ECAT_HALSAMPLER": os.path.join(d, "halsampler"),
+            "ECAT_HALCMD": os.path.join(d, "halcmd"), "FAKE_PROBE_WRITER": os.path.join(d, "probe_writer.py"),
+            "ECAT_RTPROBE_FILE": os.path.join(d, "probe"),
             "FAKE_RT_STATE": self.state, "ECAT_RTPOLL": os.path.join(d, "rtpoll"),
             "FAKE_RTPOLL_DATA": os.path.join(d, "poll.txt")})
         with open(os.path.join(d, "poll.txt"), "w") as f:
@@ -660,22 +816,27 @@ class TestAttach(unittest.TestCase):
         base, servo = run.stats
         self.assertEqual((base.thread, base.period), ("base-thread", 25000))
         self.assertEqual((servo.thread, servo.period), ("servo-thread", 1000000))
-        self.assertEqual(servo.n, 2000)
+        # about 0.5 s of runs, read as they came (the ones before the start are not counted)
+        self.assertGreater(servo.n, 200)
+        self.assertLess(servo.n, 3000)
+        self.assertGreater(base.n, 40 * servo.n - 2000)
         self.assertEqual(servo.max, 60000)
-        self.assertEqual(servo.over[50], 1)
+        self.assertEqual(servo.min, -60000)
+        self.assertGreaterEqual(servo.over[50], 2)          # each late run, and the short one after it
+        self.assertGreater(servo.late_max, 59000)
         cmds = self.cmds()
-        self.assertIn("addf ecatsetup-rt-td-servo-thread servo-thread 1", cmds)
-        # the channels start disabled and are enabled once halsampler reads (the time anchor)
-        self.assertLess(cmds.index("setp sampler.1.enable 0"), cmds.index("addf sampler.1 servo-thread"))
-        self.assertLess(cmds.index("addf sampler.1 servo-thread"), cmds.index("setp sampler.1.enable 1"))
-        self.assertIsNotNone(servo.anchor)
-        self.assertLess(servo.anchor[1], 1e9)
+        self.assertIn("addf ecatsetup-rt-servo-thread servo-thread 1", cmds)
+        self.assertIn("addf ecatsetup-rt-base-thread base-thread 1", cmds)
+        # the anchor is the probe's own time of the first cycle: exact, on the poller's clock
+        self.assertEqual(servo.anchor[1], 0)
+        self.assertLess(abs(servo.anchor[0] - time.monotonic_ns()), 10e9)
+        self.assertTrue(all(e[0] is not None for e in servo.events))
         # the poller's file was read
         self.assertEqual(run.poll["counters"]["irq:LOC"]["total"], 12)
-        self.assertIn("addf sampler.0 base-thread", cmds)
         # everything the check added is gone again
-        self.assertIn("delf ecatsetup-rt-td-servo-thread servo-thread", cmds)
-        self.assertEqual(cmds[-2:], ["unloadrt sampler", "unloadrt timedelta"])
+        self.assertIn("delf ecatsetup-rt-servo-thread servo-thread", cmds)
+        self.assertEqual(cmds[-1], "unloadrt ecat_rtprobe")
+        self.assertFalse(os.path.exists(os.environ["ECAT_RTPROBE_FILE"]))
         with open(self.state) as f:
             self.assertEqual(json.load(f)["comps"], ["halcmd123", "motmod", "stepgen"])
         self.assertTrue(any("since LinuxCNC started" in n for n in run.notes))
@@ -689,14 +850,34 @@ class TestAttach(unittest.TestCase):
         from ecatsetup import __main__ as cli
         with redirect_stdout(out):
             self.assertEqual(cli.from_run(path), 0)
-        self.assertIn("servo-thread (1 ms): 2000 cycles", out.getvalue())
+        self.assertIn("servo-thread (1 ms): %d cycles" % servo.n, out.getvalue())
 
-    def test_refuses_when_sampler_is_loaded(self):
-        self.hal(["halcmd123", "motmod", "sampler"])
+    def test_beside_a_sampler_of_its_own(self):
+        # the configuration's own sampler and timedelta are no obstacle any more
+        self.hal(["halcmd123", "motmod", "sampler", "timedelta"])
+        run = rtcheck.measure_attach(0.3, inventory=rtcheck.Inventory(), progress=lambda t: None)
+        self.assertGreater(run.stats[1].n, 100)
+        with open(self.state) as f:
+            self.assertEqual(json.load(f)["comps"], ["halcmd123", "motmod", "sampler", "timedelta"])
+
+    def test_refuses_when_the_probe_is_loaded(self):
+        self.hal(["halcmd123", "motmod", "ecat_rtprobe"])
         with self.assertRaises(rtcheck.RtError) as e:
             rtcheck.measure_attach(0.5, inventory=rtcheck.Inventory(), progress=lambda t: None)
-        self.assertIn("sampler loaded already", str(e.exception))
+        self.assertIn("ecat_rtprobe is loaded already", str(e.exception))
         self.assertFalse(any(c.startswith(("loadrt", "addf")) for c in self.cmds()))
+
+    def test_probe_not_installed(self):
+        self.hal(["halcmd123", "motmod"])
+        with open(self.state) as f:
+            st = json.load(f)
+        st["no_probe"] = True
+        with open(self.state, "w") as f:
+            json.dump(st, f)
+        with self.assertRaises(rtcheck.RtError) as e:
+            rtcheck.measure_attach(0.5, inventory=rtcheck.Inventory(), progress=lambda t: None)
+        self.assertIn("not installed", str(e.exception))
+        self.assertFalse(any(c.startswith("addf") for c in self.cmds()))
 
     def test_no_hal(self):
         self.hal(["halcmd123"])

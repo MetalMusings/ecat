@@ -100,8 +100,9 @@ make -s -C "$WORK/ecat/component" USPACE_ETHERCAT=$MASTER \
 
 step "Package tree"
 install -d "$ROOT/usr/lib/linuxcnc/modules" "$ROOT/usr/bin" "$PY/ecatsetup" "$DOC" "$ROOT/DEBIAN"
-install -m 644 "$WORK/ecat/component/ecat.so" "$ROOT/usr/lib/linuxcnc/modules/"
-strip --strip-unneeded "$ROOT/usr/lib/linuxcnc/modules/ecat.so"
+install -m 644 "$WORK/ecat/component/ecat.so" "$WORK/ecat/component/ecat_rtprobe.so" \
+    "$ROOT/usr/lib/linuxcnc/modules/"
+strip --strip-unneeded "$ROOT/usr/lib/linuxcnc/modules/ecat.so" "$ROOT/usr/lib/linuxcnc/modules/ecat_rtprobe.so"
 install -m 644 "$WORK/ecat"/ecatsetup/*.py "$PY/ecatsetup/"
 for d in devices measured rtrules; do
     install -d "$PY/ecatsetup/$d"

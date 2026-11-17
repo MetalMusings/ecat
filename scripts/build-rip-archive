@@ -41,7 +41,7 @@ fi
 
 echo "=== Building ecat.so (libyaml linked in)"
 make -C "$WORK/src/component" YAML_STATIC=1 >/dev/null
-cp "$WORK/src/component/ecat.so" "$WORK/$NAME/"
+cp "$WORK/src/component/ecat.so" "$WORK/src/component/ecat_rtprobe.so" "$WORK/$NAME/"
 
 echo "=== The LinuxCNC headers ecat.so was built against"
 # the .d files list every header a source file includes

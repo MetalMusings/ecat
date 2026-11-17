@@ -114,6 +114,12 @@ note() { echo "$1" >>"$STATE/manifest"; }
 install -m 644 "$HERE/ecat.so" "$RIP/rtlib/ecat.so"
 note "$RIP/rtlib/ecat.so"
 echo "installed $RIP/rtlib/ecat.so"
+# the real-time check's probe (EtherCAT Setup's Timing tab); older archives had none
+if [ -f "$HERE/ecat_rtprobe.so" ]; then
+    install -m 644 "$HERE/ecat_rtprobe.so" "$RIP/rtlib/ecat_rtprobe.so"
+    note "$RIP/rtlib/ecat_rtprobe.so"
+    echo "installed $RIP/rtlib/ecat_rtprobe.so"
+fi
 
 LIB=$PREFIX/lib/ecat-rip
 rm -rf "$LIB"

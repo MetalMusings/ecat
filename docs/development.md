@@ -2675,7 +2675,7 @@ interrupts on CPUs 0-2 while the servo thread ran on the isolated CPU 3
 
 | Layer | Measure | Sources that can be shown with data |
 |---|---|---|
-| The thread wakes late | wake-up latency per cycle (`timedelta`), `rtla timerlat` | interrupts on the real-time CPU (`/proc/interrupts`, per-CPU column), softirqs (`/proc/softirqs`), SMIs (MSR 0x34, root), ACPI GPEs (`/sys/firmware/acpi/interrupts/gpe*`), C-state exits (cpuidle `usage` per state and its stated `latency`), frequency changes (`scaling_cur_freq`), thermal throttling (`thermal_throttle/*_count`) |
+| The thread wakes late | wake-up latency per cycle (`ecat_rtprobe`; first `timedelta`), `rtla timerlat` | interrupts on the real-time CPU (`/proc/interrupts`, per-CPU column), softirqs (`/proc/softirqs`), SMIs (MSR 0x34, root), ACPI GPEs (`/sys/firmware/acpi/interrupts/gpe*`), C-state exits (cpuidle `usage` per state and its stated `latency`), frequency changes (`scaling_cur_freq`), thermal throttling (`thermal_throttle/*_count`) |
 | The thread runs long | HAL function `time` / `tmax` | which function (ecat, motion, hm2, plasmac, ...) |
 | The I/O | EtherCAT: `send-offset` spread, working counter 0 (event log); Mesa Ethernet: the hm2 read's time, its packet errors; parallel port: the base thread's latency | the card's IRQ placement, interrupt coalescing (`ethtool -c`), Energy Efficient Ethernet (`ethtool --show-eee`), PCIe ASPM (`lspci -vv` LnkCtl) |
 | DC and PLL (EtherCAT) | `pll-err`, SYNC0 shift, turn-around | the Synchronisation card's rows (built) |
@@ -2712,9 +2712,9 @@ done ("60 % margin at 1 ms: no more changes needed").
     `timedelta` in each; no I/O loaded. Safe anywhere, but not the real load.
   - *With the bus*: ecat in the test's HAL (as the I/O test), for EtherCAT.
   - *Alongside a running LinuxCNC* (attach, as `dc-jitter-measure --attach`):
-    the user runs the machine as usual; the check adds a sampler and
-    `timedelta` to its HAL (`loadrt`/`addf` into the running threads, removed
-    at the end), reads the HAL functions' times (`hm2_7i76e.0.read.tmax`,
+    the user runs the machine as usual; the check adds `ecat_rtprobe` to its
+    HAL (`loadrt`/`addf` into the running threads, removed at the end; first
+    a sampler and `timedelta`, see "The probe" below), reads the HAL functions' times (`hm2_7i76e.0.read.tmax`,
     `ecat.read-all.tmax`, ...) and the I/O driver's error counters. It loads
     nothing that talks to the user's hardware, so it works for any I/O card.
     This is the realistic one, and the one for zx45.
@@ -2873,7 +2873,7 @@ prints the same), `--rt-check --improve` (asks before every change),
 `--from-run FILE`. Modules without Qt (session pattern): `rtcheck.py`
 (inventory, measurement, analysis), `rtrules.py` (the catalogue), with roots
 for `/proc` and `/sys` that tests point at fake trees. It runs on 2.9 and
-2.10 (halrun, `timedelta`, `sampler` are in both).
+2.10 (halrun is in both; `ecat_rtprobe` is built for both).
 
 ### Order of work
 
@@ -3049,13 +3049,51 @@ change beyond the noise (99.99 % 45 -> 46 us), undone, no_turbo back to 0;
 the log and the undo script as expected. Not tried: the window on a real
 screen (the user), beside a running LinuxCNC.
 
+### The probe: `ecat_rtprobe` (2026-11-17)
+
+Beside the user's LinuxCNC the check failed at once: the plasma cutter's
+QtPlasma.hal loads `sampler` for its own use, and HAL loads a component once
+(`sampler` and halcompile's `timedelta` have no second instance). A
+configuration with a sampler is common (debugging), so steps 1-2's
+timedelta + sampler + halsampler is replaced, in both ways, by a small HAL
+module of our own, `component/ecat_rtprobe.c` (`ecat_rtprobe.so`, shipped
+beside `ecat.so` in the deb and the run-in-place archive, built for 2.9 and
+2.10 through `ecat_hal.h`):
+
+- `loadrt ecat_rtprobe names=ecatsetup-rt-<thread>,...` exports one
+  function per name, no pins; `addf <name> <thread> 1` puts it first. Each
+  run writes `rtapi_get_time()` into a ring in `/dev/shm/ecat-rtprobe`
+  (`ecat_rtprobe_core.h` has the layout: header, 128-byte instances with
+  name, period and count, 65536 slots per thread; the slot first, then the
+  count with release order). No system call or lock in the function. The
+  file is made at load (a new inode, so a reader of an old one keeps its
+  mapping) and removed at unload.
+- `rtcheck.ProbeReader` maps it read-only; `Recorder` reads every 50 ms
+  (the ring holds 1.6 s of a 25 us thread, 65 s of 1 ms), skips the runs
+  before the measurement starts, counts as lost what the ring overwrote,
+  and gives `CycleStats` the delta and the run's own time: the anchor is
+  exact (it was +- 20 us + one period from enabling the sampler) and the
+  time line goes on after lost runs (it ended there before). No halsampler
+  and no `halcmd -kf` any more.
+- Attach refuses only when `ecat_rtprobe` is loaded already (a check running,
+  or one cut short: the message says how to take it out); a LinuxCNC without
+  the module says that it comes with ecat 0.23 or later.
+
+Tests: component/tests/test_rtprobe.c (layout offsets, the ring wrapping,
+names, a second load), tests/test_rtcheck.py TestProbe (the file, runs to
+cycles, lost runs, runs before the start skipped) and TestAttach with a fake
+halcmd whose `loadrt` starts a writer of the same file (beside a sampler of
+the configuration's own; the module missing); mutation-checked. Tried here
+beside the user's running LinuxCNC 2.10 (QtPlasma, 500 us, its own sampler
+loaded): 10 s, 20027 cycles, late at most 13.5 us, everything taken out again
+(no module, no file, the servo thread's functions as before).
+
 ### Open
 
 - MSR access needs root and the `msr` module (loaded by the check when
   missing); AMD has no SMI counter.
-- Whether a cycle's time stamp from `halsampler` can be tied to the
-  poller's monotonic clock closely enough (else a small comp of our own that
-  writes `rtapi_get_time()` with each sample).
+- (Answered 2026-11-17 by `ecat_rtprobe`: each run's own `rtapi_get_time()`,
+  on the poller's clock.)
 - What `hm2_eth` exposes in 2.9 vs 2.10 for the read's time and packet errors.
 - (Answered 2026-11-17: `addf`, `delf` and `unloadrt` work in running
   threads on 2.9 and 2.10; delf first.)
