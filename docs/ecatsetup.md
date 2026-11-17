@@ -1956,7 +1956,13 @@ The *Timing* tab checks whether the computer keeps time well enough for the
 machine, for any LinuxCNC computer (EtherCAT, Mesa Ethernet, a parallel
 port): how late the real-time threads start, what comes with the late
 cycles, and what to change. It leads you through the work in steps, shown at
-the top (*Where you are*), and says when it is done.
+the top (*Where you are*: every step in order, the ones done ticked, the
+present one marked; the check moves on by itself, the steps are not buttons),
+and says when it is done. When a run is done, a few lines under *Measure* sum
+it up: per thread how much of the period is left and how late it started,
+better or worse than the run before, and how many findings there are, which
+can be tried at once and which has the most to gain; *Go to the findings*
+and *The whole result* lead to the rest.
 
 ![The Timing tab after two baseline runs, in Improve mode](images/gui-timing.png)
 

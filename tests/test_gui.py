@@ -286,12 +286,20 @@ class TestTheme(WindowBase):
             self.assertEqual(self.app.palette().color(gui.QPalette.Window).name(),
                              gui.THEMES["dark"]["bg"])
             self.assertEqual(gui.settings.load()["theme"], "dark")
+            # check boxes are drawn so that they show on the dark cards
+            self.assertIsInstance(self.app.style(), gui.IndicatorStyle)
+            box = gui.QCheckBox("x")
+            box.resize(60, 24)
+            img = box.grab().toImage()
+            colours = {img.pixelColor(x, y).name() for x in range(16) for y in range(img.height())}
+            self.assertTrue(any(gui.QColor(c).lightness() > 100 for c in colours), colours)
             w2 = self.window()
             self.assertEqual(w2.theme, "dark")
             self.assertTrue(w2.a_theme["dark"].isChecked())
             w2.a_theme["light"].trigger()
             self.assertEqual(gui.RED.name(), gui.THEMES["light"]["red"])
             self.assertEqual(gui.settings.load()["theme"], "light")
+            self.assertNotIsInstance(self.app.style(), gui.IndicatorStyle)
 
     def test_every_token_in_both(self):
         self.assertEqual(set(gui.THEMES["light"]), set(gui.THEMES["dark"]))
@@ -1994,12 +2002,30 @@ class TestTimingPage(WindowBase):
         tp.refresh()
         self.assertIn("Baseline", tp.step_pill.text())
         self.assertTrue(tp.step_pill.isVisibleTo(tp))
+        # every step shows, the ones done ticked, only the present one a pill
+        self.assertEqual([lab.text() for lab in tp.step_labels],
+                         ["\u2713 Inventory", "Step 2 of 6 \u00b7 Baseline", "3 Findings", "4 One change",
+                          "5 Measure again", "6 Done"])
+        self.assertEqual([lab.property("pill") for lab in tp.step_labels],
+                         [None, "blue", None, None, None, None])
+        self.assertFalse(tp.summary.isVisibleTo(tp))           # no run yet
         self.assertGreater(tp.inv_table.rowCount(), 10)
         self.assertTrue(tp.measure_button.isEnabled())
         self.assertFalse(tp.root.isEnabled())               # sudo would ask for a password
         self.add_run(tp, 600, "b1.json")
         self.add_run(tp, 610, "b2.json")
         self.assertIn("Findings", tp.step_pill.text())
+        self.assertIs(tp.step_pill, tp.step_labels[2])
+        self.assertEqual(tp.step_labels[1].text(), "\u2713 Baseline")
+        # under Measure: the run in short, and the findings counted with the first named
+        self.assertTrue(tp.summary.isVisibleTo(tp))
+        found, _ = tp.flow.findings()
+        summary = tp.summary_text.text()
+        self.assertIn("servo-thread", summary)
+        self.assertIn("<b>%d findings</b>" % len(found), summary)
+        self.assertIn("Most to gain: %s" % found[0].title, summary)
+        self.assertIn("Compared with the run before", summary)
+        self.assertTrue(tp.goto_findings.isVisibleTo(tp))
         # the way is the baseline's from now on
         self.assertFalse(tp.load.isEnabled())
         self.assertIn("late at most", tp.result.toPlainText())

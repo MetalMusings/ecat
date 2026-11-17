@@ -25,8 +25,9 @@ import re
 import sys
 import time
 
-from PyQt5.QtCore import QLocale, QSize, QThread, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QFont, QFontDatabase, QKeySequence, QPainter, QPalette, QPen
+from PyQt5.QtCore import QLocale, QPointF, QSize, QThread, QTimer, Qt, pyqtSignal
+from PyQt5.QtGui import (QBrush, QColor, QFont, QFontDatabase, QKeySequence, QPainter, QPalette, QPen,
+                         QPolygonF)
 from PyQt5.QtWidgets import (
     QAbstractItemView, QAction, QActionGroup, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox,
@@ -34,7 +35,7 @@ from PyQt5.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea,
-    QSizePolicy, QSpinBox, QStackedWidget, QStyledItemDelegate, QTabBar, QTableWidget,
+    QProxyStyle, QSizePolicy, QSpinBox, QStackedWidget, QStyle, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
 from . import (config, dcinfo, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
@@ -98,6 +99,7 @@ QFrame#nav QTabBar::tab {{ background: {surface}; padding: 10px 16px; border: no
               border-bottom: 2px solid transparent; color: {text2}; }}
 QFrame#nav QTabBar::tab:selected {{ border-bottom: 2px solid {accent}; color: {text1}; }}
 QFrame#card {{ background: {surface}; border: 1px solid {border}; border-radius: 10px; }}
+QFrame#summaryBox {{ background: {greycard}; border: 1px solid {border}; border-radius: 8px; }}
 QFrame#card[tone="red"] {{ border: 1px solid {redborder}; background: {redcard}; }}
 QFrame#card[tone="amber"] {{ border: 1px solid {amberborder}; background: {ambercard}; }}
 QFrame#card[tone="grey"] {{ background: {greycard}; }}
@@ -189,8 +191,10 @@ def apply_theme(theme):
     if _default_style is None:
         _default_style = (app.style().objectName(), QPalette(app.palette()))
     want = _default_style[0] if theme == "light" else "fusion"
-    if app.style().objectName().lower() != want.lower():
-        app.setStyle(QStyleFactory.create(want) or app.style())
+    proxied = isinstance(app.style(), IndicatorStyle)
+    if app.style().objectName().lower() != want.lower() or proxied != (theme == "dark"):
+        base = QStyleFactory.create(want) or QStyleFactory.create(app.style().objectName())
+        app.setStyle(IndicatorStyle(base) if theme == "dark" else base)
     if theme == "light":
         app.setPalette(_default_style[1])     # as the window was before any mode
         return
@@ -212,6 +216,60 @@ def apply_theme(theme):
     for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
         pal.setColor(QPalette.Disabled, role, QColor(c["disabled"]))
     app.setPalette(pal)
+
+
+class IndicatorStyle(QProxyStyle):
+    """Fusion with check boxes and radio buttons that show on a dark
+    surface: Fusion fills them with the base colour (near black) and draws
+    their edge darker than the window, so on the dark cards they were black
+    on dark grey. Light mode keeps the platform's own."""
+
+    def __init__(self, base):
+        super().__init__(base)
+        self.setObjectName(base.objectName())
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element not in (QStyle.PE_IndicatorCheckBox, QStyle.PE_IndicatorRadioButton,
+                           QStyle.PE_IndicatorItemViewItemCheck):
+            return super().drawPrimitive(element, option, painter, widget)
+        c = THEMES["dark"]
+        on = bool(option.state & QStyle.State_On)
+        partly = bool(option.state & QStyle.State_NoChange)
+        enabled = bool(option.state & QStyle.State_Enabled)
+        r = option.rect.adjusted(1, 1, -1, -1)
+        side = min(r.width(), r.height())
+        r.setSize(QSize(side, side))
+        r.moveCenter(option.rect.center())
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        edge = QColor(c["text3"] if enabled else c["boxborder"])
+        fill = QColor(c["accent"] if (on or partly) and enabled else
+                      c["accentdis"] if (on or partly) else c["hover"])
+        if on or partly:
+            edge = fill
+        elif option.state & QStyle.State_MouseOver and enabled:
+            edge = QColor(c["text2"])
+        painter.setPen(QPen(edge, 1.5))
+        painter.setBrush(fill)
+        if element == QStyle.PE_IndicatorRadioButton:
+            painter.drawEllipse(r)
+            if on:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor("#ffffff"))
+                d = side * 0.36
+                painter.drawEllipse(r.center(), d / 2 + 0.5, d / 2 + 0.5)
+        else:
+            painter.drawRoundedRect(r, 3, 3)
+            painter.setPen(QPen(QColor("#ffffff"), max(1.6, side / 8.0), Qt.SolidLine, Qt.RoundCap,
+                                Qt.RoundJoin))
+            x, y, w = r.x(), r.y(), float(side)
+            if partly:
+                painter.drawLine(QPointF(x + w * 0.25, y + w * 0.5), QPointF(x + w * 0.75, y + w * 0.5))
+            elif on:
+                painter.drawPolyline(QPolygonF([QPointF(x + w * 0.24, y + w * 0.52),
+                                                QPointF(x + w * 0.43, y + w * 0.70),
+                                                QPointF(x + w * 0.77, y + w * 0.31)]))
+        painter.restore()
 
 
 _MONO = []
@@ -6027,7 +6085,8 @@ class TimingPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         content = QWidget()
         lay = page_layout(content)
-        outer.addWidget(scroll(content))
+        self.scroller = scroll(content)
+        outer.addWidget(self.scroller)
 
         row = QHBoxLayout()
         row.addWidget(label("Computer timing", "bigTitle"))
@@ -6062,11 +6121,23 @@ class TimingPage(QWidget):
         lay.addWidget(self.mode_card)
 
         # where the work is
-        self.step_card = Card("Where you are", "The check leads; you can stop anywhere: the change "
-                              "log and its undo commands stay.")
+        self.step_card = Card("Where you are", "The check leads and moves on by itself as you work; "
+                              "you can stop anywhere: the change log and its undo commands stay.")
+        # every step in order, the present one marked; they only show, they are not buttons
+        from . import rtflow
+        strip = QHBoxLayout()
+        strip.setSpacing(6)
+        self.step_labels = []
+        for n, name in enumerate(rtflow.STEPS):
+            if n:
+                strip.addWidget(label("\u203a", "hint"))
+            lab = label("%d %s" % (n + 1, name), "hint")
+            self.step_labels.append(lab)
+            strip.addWidget(lab)
+        strip.addStretch(1)
+        self.step_card.add(strip)
+        self.step_pill = self.step_labels[0]
         srow = QHBoxLayout()
-        self.step_pill = pill("", "blue")
-        srow.addWidget(self.step_pill)
         self.step_text = label("", wrap=True)
         srow.addWidget(self.step_text, 1)
         self.keep_button = QPushButton("Keep the change")
@@ -6115,6 +6186,25 @@ class TimingPage(QWidget):
         self.progress = label("", "hint", wrap=True)
         mrow.addWidget(self.progress, 1)
         self.measure_card.add(mrow)
+        # the latest run in a few lines, and where its findings are
+        self.summary = QFrame()
+        self.summary.setObjectName("summaryBox")
+        sl = QVBoxLayout(self.summary)
+        sl.setContentsMargins(10, 8, 10, 8)
+        self.summary_text = label("", wrap=True)
+        self.summary_text.setTextFormat(Qt.RichText)
+        sl.addWidget(self.summary_text)
+        grow = QHBoxLayout()
+        self.goto_findings = QPushButton("Go to the findings")
+        self.goto_findings.clicked.connect(lambda: self.scroller.ensureWidgetVisible(self.find_card, 0, 0))
+        grow.addWidget(self.goto_findings)
+        self.goto_result = QPushButton("The whole result")
+        self.goto_result.clicked.connect(lambda: self.scroller.ensureWidgetVisible(self.result_card, 0, 0))
+        grow.addWidget(self.goto_result)
+        grow.addStretch(1)
+        sl.addLayout(grow)
+        self.summary.hide()
+        self.measure_card.add(self.summary)
         lay.addWidget(self.measure_card)
 
         # the result
@@ -6229,8 +6319,20 @@ class TimingPage(QWidget):
             "run-time change with one press.")
 
         step, text = f.step()
-        set_pill(self.step_pill, "Step %d of %d · %s" % (step + 1, len(rtflow.STEPS), rtflow.STEPS[step]),
-                 "green" if step == 5 else "blue")
+        for n, lab in enumerate(self.step_labels):
+            name = rtflow.STEPS[n]
+            if n == step:
+                lab.setObjectName("")
+                set_pill(lab, "Step %d of %d · %s" % (n + 1, len(rtflow.STEPS), name),
+                         "green" if step == 5 else "blue")
+            else:
+                lab.setText("\u2713 %s" % name if n < step else "%d %s" % (n + 1, name))
+                lab.setProperty("pill", None)
+                lab.setObjectName("hint")
+                restyle(lab)
+            lab.setToolTip("Where the check is now." if n == step else "Done." if n < step
+                           else "Comes later; the check moves on by itself.")
+        self.step_pill = self.step_labels[step]
         self.step_text.setText(text)
         ch = f.log.find(f.pending) if f.pending else None
         self.keep_button.setVisible(ch is not None)
@@ -6268,7 +6370,45 @@ class TimingPage(QWidget):
             text += "\n\n" + rtflow.comparison_text(*self.last_result)
         self.result.setPlainText(text)
         self.show_findings()
+        self.show_summary(latest)
         self.show_changes()
+
+    def show_summary(self, latest):
+        """Under Measure: the latest run's budget per thread, the comparison
+        with the run before, and how many findings there are, with the most
+        to gain named."""
+        from html import escape
+        from .rtcheck import period_text
+        if latest is None:
+            self.summary.hide()
+            return
+        lines = []
+        for b in latest.budgets():
+            colour = RED if b.share_left < 0.2 else AMBER if b.share_left < 0.5 else GREEN
+            lines.append("<b>%s</b>: <span style='color:%s'>%s</span>, %.0f us of %s left (%.0f %%); "
+                         "started at most %.1f us late" % (
+                             escape(b.thread), colour.name(), escape(b.verdict()), b.left_us,
+                             escape(period_text(b.period)), 100 * b.share_left, b.late_us))
+        if not lines:
+            lines.append("No cycles were recorded.")
+        if self.last_result:
+            lines.append("Compared with the run before: <b>%s</b>" % escape(self.last_result[1]))
+        found, _ = self.flow.findings()
+        if found:
+            now = [x for x in found if x.kind == "runtime" and x.commands]
+            later = len(found) - len(now)
+            parts = []
+            if now:
+                parts.append("%d can be tried now, no restart" % len(now))
+            if later:
+                parts.append("%d need a restart, the BIOS or are advice" % later)
+            lines.append("<b>%d finding%s</b> (%s). Most to gain: %s." % (
+                len(found), "" if len(found) == 1 else "s", "; ".join(parts), escape(found[0].title)))
+        else:
+            lines.append("No finding: no rule applies to this run.")
+        self.summary_text.setText("<br>".join(lines))
+        self.goto_findings.setVisible(bool(found))
+        self.summary.show()
 
     def show_findings(self):
         for v in self.finding_views:
