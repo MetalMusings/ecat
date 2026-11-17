@@ -44,7 +44,9 @@ and has no Debian packages, so most people run it run-in-place (built from
 source, see [Developing ecat](docs/development.md#linuxcnc-210)): ecat then
 comes as an archive with an installer, tested against one LinuxCNC commit
 (named in the release notes). On 2.9 the integer pins have 32 bits instead of
-64 ([the component](docs/component.md)); otherwise ecat does the same on both.
+64 ([the component](docs/component.md)) and HAL names take 47 characters instead of
+55 (`ecatsetup --check` names a pin that is too long); otherwise ecat does the
+same on both.
 
 1. the userspace EtherCAT master, `linuxcnc-ethercat-uspace`, from the
    `uspace-v*` releases of

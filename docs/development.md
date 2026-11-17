@@ -2189,8 +2189,14 @@ ecat 0.11 did):
   2.9 (exact up to 2^53); `--check` refuses `hal-type: sint`/`uint` on a
   LINT/ULINT entry for 2.9 and proposes `real`. Counters that wrap at
   32 bits wrap as pins, as in lcec and 0.11.
+- HAL names (pins and parameters, `<slave>.<pin>`) take at most 47
+  characters on 2.9 and 55 on 2.10 (`HAL_NAME_LEN`); the component refuses
+  to load a longer one ("length 48 too long for name"). `--check` names
+  each such pin for the series (`config.check_name_lengths`; found in
+  LinuxCNC 2.9 with 0.22 on the plasma cutter's EaserCAT 7000, whose
+  `in-unit1.low-pass-filter-threshold-voltage` makes 48).
 - The same `ethercat.yaml` works on both (the old type names are read
-  already).
+  already), names of at most 47 characters given.
 - EtherCAT Setup finds the series at run time (`lcnc_env`, else halcmd's
   output): type names in `halpins`/`halcheck`/`testmode`, INI keys
   (`HOME_SEARCH_DIST`/`HOME_LATCH_DIST` only on 2.10), component names
