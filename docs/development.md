@@ -2504,3 +2504,192 @@ Rules for a session:
 2. When a user needs it: the live image, the help script, the jump
    server; tried first on turner or a borrowed computer as if it were a
    stranger's.
+
+## Real-time check: where jitter comes from (design, 2026-11-17)
+
+Agreed with the user (2026-11-17), not built. A page in the window and a
+command line that measure a LinuxCNC computer's timing, say where a delay
+comes from, and suggest and try changes, one at a time, with the evidence
+beside each.
+
+### Why
+
+The usual LinuxCNC advice is a list (isolcpus, no hyperthreading, C-states,
+BIOS settings) and one number from `latency-test` held against a rule of
+thumb. Two weaknesses, both seen on our own computers:
+
+- **Cause and effect are not tied together.** On turner, steps 1-3 of the
+  real-time tuning (2026-11-14) added six kernel parameters at once
+  (`isolcpus=managed_irq,domain,1 nohz_full=1 rcu_nocbs=1
+  intel_idle.max_cstate=1 processor.max_cstate=1 pcie_aspm=off`): the servo
+  latency under load went from -28.6/+26.8 us to -14.4/+17.6 us, idle from
+  -5.4/+7.5 to -3.8/+4.3 us (`~/rt-tune` on turner). Which of the six did
+  it is not known.
+- **The wrong measure.** What matters is not a latency on its own but
+  whether it fits the period: the frame must be on the wire before SYNC0
+  with a margin, and the answer back within two cycles. 67 us at most is
+  nothing at 1 ms and most of the room at 125 us ("The servo period").
+
+And both real findings came from measuring, not from a guide: turner's
+~300 us spikes were ACPI GPEs and i915 display power states
+(`acpi_mask_gpe=0x6F i915.enable_dc=0`), and the lost cycles here were the
+network card's interrupts on CPUs 0-2 while the servo thread ran on the
+isolated CPU 3 (`master: irq-cpu`).
+
+### What is measured: the period's budget, in layers
+
+| Layer | Measure | Sources that can be shown with data |
+|---|---|---|
+| The thread wakes late | wake-up latency per cycle (`timedelta`), `rtla timerlat` | interrupts on the real-time CPU (`/proc/interrupts`, per-CPU column), softirqs (`/proc/softirqs`), SMIs (MSR 0x34, root), ACPI GPEs (`/sys/firmware/acpi/interrupts/gpe*`), C-state exits (cpuidle `usage` per state and its stated `latency`), frequency changes (`scaling_cur_freq`), thermal throttling (`thermal_throttle/*_count`) |
+| The thread runs long | HAL function `time` / `tmax` | which function (ecat, motion, hm2, plasmac, ...) |
+| The network | EtherCAT: `send-offset` spread, working counter 0 (event log); Mesa Ethernet: the hm2 read's time, `packet-error*` | the card's IRQ placement, interrupt coalescing (`ethtool -c`), Energy Efficient Ethernet (`ethtool --show-eee`), PCIe ASPM (`lspci -vv` LnkCtl) |
+| DC and PLL (EtherCAT) | `pll-err`, SYNC0 shift, turn-around | the Synchronisation card's rows (built) |
+| The drive (EtherCAT) | status cycles, AL codes | measured SYNC0 results (built) |
+
+The result is a budget: wake-up latency + thread time + time on the wire +
+margins against the period, "X us left; Y of it goes to Z". That answers
+first whether there is a problem at this period at all.
+
+### Two modes
+
+- **Look** needs no sudo and changes nothing: inventory, measurement,
+  correlation, budget. What needs root (the SMI counter, `rtla`) is shown as
+  "not measured without sudo", never left out silently.
+- **Improve** runs with sudo after the user says yes (the same way as the
+  master start, `masterstart.py`: `sudo -n` from the window, a terminal
+  prompt on the command line). Every change is clear and can be taken back
+  by hand (below).
+
+### Inventory (seconds, no load)
+
+Facts, each with where it was read: kernel and `/proc/cmdline`, PREEMPT_RT,
+CPU model, cores and SMT, isolated CPUs (`/sys/devices/system/cpu/isolated`,
+`nohz_full`, `rcu_nocbs`), the governor and turbo, cpuidle states with their
+stated exit latencies and which are disabled, IRQ affinity of the network
+card and of everything else that lands on the real-time CPU, EEE, coalescing,
+ASPM, the BIOS version (`/sys/class/dmi/id`), the INI's thread periods, the
+CPU the servo thread runs on. A fact gets a verdict only after a measurement
+shows that it matters; before that it is a row, not a warning. Known
+relations may be named as candidates (a C-state whose stated exit latency is
+as long as the spikes seen), not as causes.
+
+### Measurement
+
+- `halrun` with the INI's threads at their periods (servo, and base when
+  there is one), `timedelta` in each for the wake-up latency, the cycle
+  samples kept with `sampler`/`halsampler` (as the Response card does), the
+  functions' `tmax`. Three runs to choose from: at rest, under `stress-ng`,
+  and "use the computer as usual" (the GUI and the mouse gave our lost
+  cycles; needs the user there).
+- With the bus or the board: EtherCAT through ecat in the test's HAL (as
+  the I/O test), the event log for lost cycles; Mesa Ethernet with `hm2_eth`
+  loaded and nothing connected (the board talks, nothing moves; asked first,
+  as a bus test is). Without them: threads only.
+- Beside it a poller on a non-real-time CPU reads the counters of the table
+  above every 10 ms with a monotonic time stamp. As root also `rtla timerlat`
+  on the real-time CPU with its automatic analysis above a threshold (IRQ,
+  softirq, blocking thread, with a stack); its report is kept with the run.
+- **Correlation per spike:** every cycle over a threshold gets what changed
+  in its time window ("11 of 12 spikes over 40 us came with an SMI count
+  increase", "an `enp2s0` interrupt on CPU 3 in 9 of 9"). A correlation is a
+  reason to suspect; an A/B measurement is the proof (below).
+
+### Numbers that are honest
+
+- **The baseline is measured twice.** The difference between the two is the
+  noise; a change counts as better only by more than that.
+- **Counts over thresholds per hour and high percentiles** (99.99 %) beside
+  the maximum, which on its own is one of the noisiest numbers there is.
+- **"No spike" with a bound:** none in 15 minutes means fewer than about 12
+  per hour (95 %, Poisson). Our lost cycles came once per 100 s to 10
+  minutes, so a 30 s run says nothing; the page says how long a run is
+  needed for the claim the user wants.
+- Every run keeps the inventory it ran under, so two runs can be compared
+  and the difference in conditions shown.
+
+### Trying a change, and taking it back
+
+The pattern of the Response card (Try it / Keep / Undo, the comparison
+first):
+
+1. **At run time first, no restart:** governor and turbo, IRQ affinity,
+   single cpuidle states (`stateN/disable`, which can stand in for
+   `max_cstate` while measuring), EEE off, coalescing. A/B against the
+   baseline.
+2. **Then permanent, only what showed an effect:** kernel parameters in
+   `/etc/default/grub` + `update-grub` (needs a restart and the user's
+   yes; the run after the restart is compared with the one before), a
+   systemd unit for run-time settings (as turner's
+   `rt-cpu-performance.service`).
+
+Every change is an entry in `~/.local/state/ecatsetup/rt-changes.yaml`:
+what, the value before and after, run-time or permanent, the exact command
+that undoes it (shown and copyable), and the runs before and after that are
+the reason it was kept. A file that is changed gets a copy
+(`<file>.before-ecatsetup-<date>`) and its lines are marked
+`# ecatsetup: added ...` / `# ecatsetup: ` (as `integrate.py` does), so they
+are seen without the tool. Taking back is by hand (the user's choice); the
+page also writes an undo script with every command in reverse order, to be
+read and run by the user. Nothing is changed in the BIOS: an SMI or firmware
+cause is shown with its evidence and the advice is a BIOS setting or another
+computer.
+
+### Results kept
+
+Per computer (CPU, board and BIOS version, network card and driver, kernel):
+the inventory, the runs, what was tried and what it gave, in
+`~/.local/state/ecatsetup/rt-runs/`, and a short report to share (as Save
+report). Like `measured/sync0.yaml`: over time results from many computers
+are evidence for what helps on which hardware, instead of forum lore. How
+results are gathered from users is the same open question as device data
+(memory `todo-device-data-upkeep`).
+
+### The three computers
+
+- **turner** (i3-7100, I210/igb, EtherCAT): steps 1-3 done again one at a
+  time, **leave-one-out** from the working set (start from the system that
+  works, take one parameter away per run): two baselines plus six runs of
+  ~20 minutes (5 at rest, 15 under load) with a restart between, 2.5-3 hours,
+  each restart on the user's word. The two `max_cstate` parameters are first
+  tried at run time through cpuidle `disable`. The first real result of the
+  tool and its test.
+- **This computer** (N100, igc, EtherCAT): the network layer, the IRQ
+  placement found by hand on 2026-11-16 as the check that the tool finds a
+  known cause.
+- **zx45** (i3-6100 the user thinks, Mesa Ethernet, LinuxCNC 2.9 installed
+  the user thinks, RT settings to be read at start; not in production, the
+  user's to restart): no EtherCAT. The measuring part must run without the
+  ecat component and on 2.9 (halrun, `timedelta`, `sampler` are in both;
+  to be checked: ecatsetup's Python starting without a 2.10 tree). The
+  network layer is `hm2_eth`'s. ecat may be installed there if it helps
+  (the user, 2026-11-17).
+
+### Window and command line
+
+A start page task "Check the computer's timing" and a page with: inventory,
+Measure (run choice, length with its bound), the budget, the spikes and what
+came with them, Try / Keep / Undo rows in Improve mode, the change log with
+undo commands. Command line: `ecatsetup --rt-check` (Look, prints the same),
+`--rt-check --improve` (asks before every change). Module `rtcheck.py`
+without Qt (session pattern), the poller and the inventory reading roots
+that tests can point at fake `/proc` and `/sys` trees (as `gui.irq_row`).
+
+### Order of work
+
+1. Inventory and Look-mode measurement (threads only), the budget, the
+   statistics; tests on fake trees; tried here and on turner.
+2. The poller and per-spike correlation; `rtla` and the SMI counter as root.
+3. Improve mode at run time: change log, undo commands and script.
+4. Permanent changes (grub, systemd) and the before/after-restart pairing;
+   turner leave-one-out.
+5. Mesa Ethernet and 2.9: zx45.
+6. With the bus: ecat's layers joined to the Synchronisation card.
+
+### Open
+
+- `rtla` package and version on Debian 12/13; MSR access (`msr` module).
+- Whether a cycle's time stamp from `halsampler` can be tied to the poller's
+  monotonic clock closely enough (else a small comp of our own that writes
+  `rtapi_get_time()` with each sample).
+- What `hm2_eth` exposes in 2.9 vs 2.10 for the read's time and packet
+  errors.
