@@ -1966,12 +1966,33 @@ and *The whole result* lead to the rest.
 
 ![The Timing tab after two baseline runs, in Improve mode](images/gui-timing.png)
 
+**What it needs.** A PREEMPT_RT kernel and LinuxCNC (2.9 or 2.10); ecat's
+EtherCAT component is not needed. The package recommends two programs that
+apt installs with it; when one is missing the check says so:
+
+- `stress-ng` for *Load: With load* (`sudo apt install stress-ng`);
+- `ethtool` to read the network cards' interrupt coalescing (`rx-usecs`) and
+  Energy Efficient Ethernet (`sudo apt install ethtool`).
+
+Optional: `rtla` (package `rtla`) for *As root*, and sudo without a password
+for *Try it* (otherwise the window shows the commands for a terminal).
+
+**Choose the machine's INI file**, even when LinuxCNC is not running (File >
+Machine INI file..., or `--ini`). The check learns the threads, the servo
+period, the I/O (Mesa Ethernet, EtherCAT, a parallel port) and the I/O's
+network card from it and its HAL files. Without it the rules about that card
+(its interrupt, coalescing, EEE, the LAN on the same card) cannot look at it,
+and a quiet list then says nothing about the card. The card is found from
+ethercat.yaml's `master: interface`, or for `hm2_eth` from the card whose
+address range holds `board_ip`: the computer's line *The I/O's network card*
+shows which.
+
 1. **The computer.** Read when the tab is first shown, and summed up in one
    line at the bottom of the page (*The computer*); *Show all* lists every
    fact: the kernel, isolated CPUs, frequency, idle states, where every
    interrupt goes, the network cards, the graphics, the BIOS, the INI's
-   threads and the I/O. Hover over a value to see where it was read. Choose the machine's INI file first
-   (File > Machine INI file...) so that its threads and I/O are known.
+   threads and the I/O. Hover over a value to see where it was read. *Read
+   again* after a change made elsewhere.
 2. **Baseline: measure twice the same way.** *Way*: beside LinuxCNC while it
    runs (offered first then: run the machine as usual meanwhile; nothing that
    talks to your I/O card is loaded), or the INI's threads alone in halrun.
@@ -1989,7 +2010,8 @@ and *The whole result* lead to the rest.
    matters, what to do, the risk and cost, how to check it, how to undo it,
    where the knowledge comes from and whether we have seen it on our own
    computers. A late cycle that came with a counter no rule knows is listed
-   as such.
+   as such. What the rules look at is listed below ([What the check looks
+   at](#what-the-check-looks-at)).
 4. **One change.** The page has two modes, chosen at the top: *Look*
    measures and changes nothing; *Improve* also lets you try changes (it
    asks first). In Improve, press *Try it* on a run-time change (in Look
@@ -2035,13 +2057,31 @@ after a restart anyway. *Save report...* writes one file with the computer,
 every run, the changes and their measurements, the findings and what was
 done in order: what to send when asking for help with timing.
 
+### What the check looks at
+
+Each finding comes from a rule in a catalogue shipped with the package
+(`ecatsetup/rtrules/*.yaml`, one file per area; a rule with the same `id`
+in `~/.config/ecatsetup/rtrules/` replaces the shipped one). A rule speaks only
+on its evidence: what the computer is, or what came with the late cycles.
+
+| Area | What it looks at |
+|---|---|
+| Kernel | PREEMPT_RT, a virtual machine; isolated CPUs (`isolcpus`): none, one isolated but used by no real-time thread and not sharing its core (`isolcpus=1,2,3` with the threads on 3 and 1 its sibling: `isolcpus=1,3` frees CPU 2 for the rest), the `managed_irq` flag; `irqaffinity`, irqbalance; `nohz_full`, `rcu_nocbs`; memory statistics, timer migration, transparent huge pages; signals between CPUs (RES, CAL, TLB, IWI) that came with late cycles |
+| Processor | hyperthread sibling not isolated, deep idle states, frequency governor, turbo, heat throttling, battery, SMIs (as root) |
+| Devices | interrupts on the real-time CPU (USB, wireless, any other), ACPI GPE storms, Intel graphics power states, sound card and NVMe power saving, PCIe ASPM |
+| Network | the I/O card's interrupt on the real-time CPU (EtherCAT: `master: irq-cpu`; Mesa: moved at run time), coalescing (`rx-usecs`) on a Mesa card, EEE on the I/O card, the I/O card also carrying the LAN, NetworkManager on the Mesa card, Realtek r8169 with Mesa, ethtool missing |
+| LinuxCNC | too little of the period left, a HAL function taking much of it, a tight base thread, measured without load |
+
 The same from a terminal: `ecatsetup --rt-check <machine>.ini --improve`
 measures twice, then offers the run-time changes one at a time, measures
 again and asks whether to keep each ([Command line](#command-line)).
 
-Tried 2026-11-17 on this N100 (threads only at 1 ms under `stress-ng`):
-turbo off by `--improve`, measured again (no change beyond the noise),
-undone; the window offscreen against the recorded runs.
+Tried 2026-11-17: on our N100 (threads only at 1 ms under `stress-ng`:
+turbo off by `--improve`, measured again, no change beyond the noise,
+undone); on turner, one kernel parameter at a time taken away and found
+again; and by a user alone on a Mesa Ethernet computer with LinuxCNC 2.9.4,
+from the window only. That test gave the stress-ng and ethtool messages and
+the rules for unused isolated CPUs and the Mesa card's interrupt.
 
 ## Event log and report
 
