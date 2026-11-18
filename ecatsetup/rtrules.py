@@ -31,6 +31,7 @@ here; a name that is not there is None, and a comparison with None is false.
 """
 
 import ast
+import copy
 import glob
 import operator
 import os
@@ -260,6 +261,30 @@ class Rule:
         return "Rule(%s)" % self.id
 
 
+_parsed = {}     # path -> ((mtime_ns, size), data): the files are parsed again only when changed
+
+
+def _read(path):
+    """A rule file's entries, parsed once while the file stays the same (the
+    Timing tab analyses at every refresh; parsing every file each time cost
+    more than a second)."""
+    try:
+        st = os.stat(path)
+        stamp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        stamp = None
+    hit = _parsed.get(path)
+    if stamp is not None and hit and hit[0] == stamp:
+        return copy.deepcopy(hit[1])     # a caller may change its rules
+    with open(path) as f:
+        try:
+            data = yaml.safe_load(f) or []
+        except yaml.YAMLError as e:
+            raise RuleError("%s: %s" % (path, e))
+    _parsed[path] = (stamp, copy.deepcopy(data))
+    return data
+
+
 def load(dirs=None):
     """The rules, by id; a user's file replaces a shipped rule of the same id."""
     if dirs is None:
@@ -268,12 +293,7 @@ def load(dirs=None):
     rules = {}
     for d in dirs:
         for path in sorted(glob.glob(os.path.join(d, "*.yaml"))):
-            with open(path) as f:
-                try:
-                    data = yaml.safe_load(f) or []
-                except yaml.YAMLError as e:
-                    raise RuleError("%s: %s" % (path, e))
-            for x in data:
+            for x in _read(path):
                 r = Rule(x, path)
                 rules[r.id] = r
     return rules

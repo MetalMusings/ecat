@@ -9,6 +9,8 @@ Each module runs as `python3 -m unittest tests.<module>` with the window
 offscreen. Every test module keeps its temporary files in a folder of its
 own process, so modules do not share state. The output of a module is
 shown only when it fails; the end lists every module with its time.
+The slowest module (SPLIT) runs as several processes, each with a share
+of its tests, so that it does not set the whole run's time.
 Exit status 1 when a module fails.
 """
 import argparse
@@ -21,6 +23,8 @@ from concurrent.futures import ThreadPoolExecutor
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # the slowest first, so that they do not start last
 FIRST = ["test_gui", "test_integrate", "test_drivetest", "test_capture", "test_prototype"]
+# modules run in parts: module -> number of processes
+SPLIT = {"test_gui": 4}
 
 
 def modules(names):
@@ -35,12 +39,45 @@ def modules(names):
     return sorted(found, key=lambda m: (FIRST.index(m) if m in FIRST else len(FIRST), m))
 
 
-def run(module):
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PYTHONDONTWRITEBYTECODE="1")
+ENV = dict(os.environ, QT_QPA_PLATFORM="offscreen", PYTHONDONTWRITEBYTECODE="1")
+
+
+def test_ids(module):
+    """The test ids of a module, listed in a process of its own (test modules
+    set up their environment when imported)."""
+    code = ("import sys, unittest\n"
+            "def walk(s):\n"
+            "    for t in s:\n"
+            "        yield from walk(t) if isinstance(t, unittest.TestSuite) else [t]\n"
+            "for t in walk(unittest.defaultTestLoader.loadTestsFromName(sys.argv[1])):\n"
+            "    print(t.id())\n")
+    r = subprocess.run([sys.executable, "-c", code, "tests." + module], cwd=ROOT, env=ENV,
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    return r.stdout.split() if r.returncode == 0 else []
+
+
+def jobs(names):
+    """(label, unittest arguments) per process: a module, or a share of one."""
+    out = []
+    for m in modules(names):
+        ids = test_ids(m) if m in SPLIT else []
+        parts = min(SPLIT.get(m, 1), len(ids))
+        if parts > 1:
+            # a test class's tests stay together where they can (setUpClass)
+            for i in range(parts):
+                out.append(("%s[%d/%d]" % (m, i + 1, parts), ids[i * len(ids) // parts:
+                                                                 (i + 1) * len(ids) // parts]))
+        else:
+            out.append((m, ["tests." + m]))
+    return out
+
+
+def run(job):
+    label, args = job
     t0 = time.time()
-    r = subprocess.run([sys.executable, "-m", "unittest", "tests." + module], cwd=ROOT, env=env,
+    r = subprocess.run([sys.executable, "-m", "unittest"] + args, cwd=ROOT, env=ENV,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    return module, r.returncode, time.time() - t0, r.stdout
+    return label, r.returncode, time.time() - t0, r.stdout
 
 
 def main():
@@ -51,7 +88,7 @@ def main():
     t0 = time.time()
     results = []
     with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as pool:
-        for module, code, secs, out in pool.map(run, modules(a.module)):
+        for module, code, secs, out in pool.map(run, jobs(a.module)):
             results.append((module, code, secs, out))
             if code != 0:
                 print("=" * 70)
@@ -61,7 +98,7 @@ def main():
     for module, code, secs, out in sorted(results, key=lambda r: -r[2]):
         n = next((int(line.split()[1]) for line in out.splitlines() if line.startswith("Ran ")), 0)
         tests += n
-        print("%-22s %5.1f s  %4d tests  %s" % (module, secs, n, "ok" if code == 0 else "FAILED"))
+        print("%-24s %5.1f s  %4d tests  %s" % (module, secs, n, "ok" if code == 0 else "FAILED"))
     failed = [m for m, c, _, _ in results if c != 0]
     print("%d tests in %d modules, %.1f s%s" % (tests, len(results), time.time() - t0,
                                                   ", FAILED: " + ", ".join(failed) if failed else ", all ok"))
