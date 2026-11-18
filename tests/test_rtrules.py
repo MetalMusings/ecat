@@ -215,6 +215,20 @@ class TestLoading(unittest.TestCase):
                 r = rtrules.load()
             self.assertEqual(r["r1"]["when"], "battery")
 
+    def test_a_changed_file_is_read_again(self):
+        """Files are parsed once while unchanged; a change (or a caller that
+        changes its rules) is never hidden by that."""
+        with tempfile.TemporaryDirectory() as a:
+            self.write(a, "x.yaml", id="r1", when="vm")
+            r = rtrules.load([a])
+            self.assertEqual(r["r1"]["when"], "vm")
+            for _ in range(2):      # the first load's result and a cached one
+                r["r1"].d["when"] = "changed by a caller"
+                r = rtrules.load([a])
+                self.assertEqual(r["r1"]["when"], "vm")
+            self.write(a, "x.yaml", id="r1", when="battery")
+            self.assertEqual(rtrules.load([a])["r1"]["when"], "battery")
+
     def test_bad_rules_are_refused(self):
         with tempfile.TemporaryDirectory() as a:
             self.write(a, "x.yaml", id="r1", when="vm", kind="runtime", cmds=", commands: [x]")

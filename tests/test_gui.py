@@ -226,6 +226,7 @@ class TestSession(BusTest):
 
 
 try:
+    from PyQt5.QtCore import QEvent
     from PyQt5.QtWidgets import QApplication
     from ecatsetup import gui
 except ImportError:  # pragma: no cover
@@ -247,8 +248,18 @@ class WindowBase(BusTest):
         w = gui.MainWindow(s)
         w.check()
         w.refresh()
-        self.addCleanup(lambda: (s.__setattr__("saved", s.cfg), w.close()))
+        self.addCleanup(self.dispose, s, w)
         return w
+
+    @staticmethod
+    def dispose(s, w):
+        """Close the window and delete it now: windows left alive make every
+        later style change (setStyle restyles each widget) slow, 350 s in
+        test_dark_and_back after the other tests' 70 windows."""
+        s.saved = s.cfg
+        w.close()
+        w.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     @staticmethod
     def hal(w):
