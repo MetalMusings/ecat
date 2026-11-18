@@ -2156,20 +2156,35 @@ ecatsetup --report [FILE] --ini <machine>.ini
 writes one Markdown file (`ethercat-report-<date>-<time>.md`) with:
 
 - versions: the packages (`linuxcnc-ecat`, `linuxcnc-ethercat-uspace`,
-  LinuxCNC), the kernel (and whether it is PREEMPT_RT), the system;
+  LinuxCNC), the kernel (and whether it is PREEMPT_RT), the system, and
+  where EtherCAT Setup runs from (a run-in-place archive's version from its
+  `BUILD-INFO`, a checkout's `git describe`);
 - `ethercat.yaml` (from `[ETHERCAT]CONFIG`, or `--check FILE`), its check,
-  and the network card's driver and whether it can do `xdp-native`;
+  the network card's driver, whether it can do `xdp-native`, and the
+  transport the file asks for;
 - the INI lines that matter: `SERVO_PERIOD`, `[ETHERCAT]`, `[HAL]` files,
   `[KINS]`, `[TRAJ]` units and velocity, each joint's limits, following
   error, scale and homing;
 - `ethercat-load.hal` and `ethercat.hal`;
+- the EtherCAT masters on the computer: the IgH kernel master (its device
+  `/dev/EtherCAT0`, `ec_*` modules, `ethercat.service` enabled/active, with
+  a warning when it is loaded: it must not share the card with the
+  userspace master), free userspace masters with their command lines, and
+  whether LinuxCNC and `rtapi_app` run; and the running master's own
+  status (`ethercat-uspace master`: link, frames, lost frames);
+- the computer as the [real-time check](#the-computers-timing) reads it (kernel command
+  line, CPUs and isolation, governor, network cards with driver, EEE and
+  coalescing, the I/O card, the threads' CPUs), each line with its source;
 - a diagnosis of every slave, if a master can be reached (LinuxCNC with
   `ecat` running, or `sudo ethercat-uspace start`): states, error
   counters, the slaves' messages, CiA 402 state;
 - both event logs.
 
-It only reads, and sends nothing anywhere. It holds file paths and the
-machine's configuration: look it through before posting it.
+It only reads, and sends nothing anywhere. Disk UUIDs on the kernel
+command line (`root=`, `resume=`, ...) are left out, MAC addresses are
+replaced by the card's name, and the home folder is written `~`. It still
+holds file paths and the machine's configuration: look it through before
+posting it.
 
 ### A capture of the bus
 

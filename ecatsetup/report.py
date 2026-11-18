@@ -2,7 +2,15 @@
 post), with what is needed to understand an EtherCAT problem in
 LinuxCNC: versions, the configuration, the relevant INI lines and HAL
 file, a diagnosis of the bus if a master can be reached, and the flight
-recorder's events of this run and the one before.
+recorder's events of this run and the one before. Also what decides
+whether frames get through: other EtherCAT masters on the computer (the
+IgH kernel master beside the userspace one shares the card), the
+transport and the master's frame counters, and the computer as the
+real-time check reads it.
+
+Personal details the problem does not need are left out: disk UUIDs on
+the kernel command line, MAC addresses (a card is named by its interface
+name instead) and the home folder's name (written ~).
 
 It reads only. Nothing is sent anywhere; the user decides where the file
 goes.
@@ -10,10 +18,11 @@ goes.
 
 import os
 import platform
+import re
 import subprocess
 import time
 
-from . import config, diagnose, events, integrate, netif, quirks, tool
+from . import config, diagnose, events, integrate, masterstart, netif, quirks, tool
 
 PACKAGES = ["linuxcnc-ecat", "linuxcnc-ethercat-uspace", "linuxcnc-uspace", "linuxcnc"]
 INI_KEYS = {
@@ -35,6 +44,133 @@ def _run(*cmd):
         return ""
 
 
+# kernel parameters naming a disk, a partition or an encrypted volume
+PRIVATE_PARAM = re.compile(r"\b(root|resume|cryptdevice|cryptroot|rd\.luks\.uuid|rd\.luks\.name|"
+                           r"rd\.lvm\.lv|rd\.md\.uuid|boot|systemd\.gpt_auto)=\S+")
+MAC = re.compile(r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b", re.I)
+SYS_NET = "/sys/class/net"
+KERNEL_MASTER_DEVICE = masterstart.KERNEL_MASTER_DEVICE
+FREE_MASTER_PROCESSES = {"ec_master", "ethercat-uspace"}
+
+
+def mac_names(sys_net=SYS_NET):
+    """MAC address (lower case) -> interface name."""
+    out = {}
+    for name in sorted(os.listdir(sys_net)) if os.path.isdir(sys_net) else []:
+        try:
+            with open(os.path.join(sys_net, name, "address")) as f:
+                out.setdefault(f.read().strip().lower(), name)
+        except OSError:
+            continue
+    return out
+
+
+def redact(text, sys_net=SYS_NET, home=None):
+    """The text without disk UUIDs on a kernel command line, with each MAC
+    address replaced by its interface's name (or "(MAC)") and the home
+    folder written as ~ (it holds the user's name)."""
+    text = PRIVATE_PARAM.sub(lambda m: m.group(1) + "=(left out)", text)
+    home = home or os.path.expanduser("~")
+    if home and home != "/":
+        text = re.sub(re.escape(home.rstrip("/")) + r"(?=/|\b)", "~", text)
+    names = mac_names(sys_net)
+    return MAC.sub(lambda m: "(MAC of %s)" % names[m.group(0).lower()]
+                   if m.group(0).lower() in names else "(MAC)", text)
+
+
+def ecat_build(here=None):
+    """Where ecatsetup runs from and which build it is: a run-in-place archive
+    says so in BUILD-INFO beside the package, a checkout by git, a package
+    by dpkg (in versions)."""
+    pkg = here or os.path.dirname(os.path.abspath(__file__))
+    top = os.path.dirname(pkg)
+    try:
+        with open(os.path.join(top, "BUILD-INFO")) as f:
+            first = f.readline().strip()
+        if first:
+            return "%s (run-in-place archive: %s)" % (pkg, first)
+    except OSError:
+        pass
+    if os.path.exists(os.path.join(top, ".git")):
+        rev = _run("git", "-C", top, "describe", "--tags", "--always", "--dirty")
+        if rev:
+            return "%s (checkout %s)" % (pkg, rev)
+    return pkg
+
+
+def _processes(proc="/proc"):
+    """(pid, comm, command line) of every process."""
+    out = []
+    try:
+        pids = sorted((p for p in os.listdir(proc) if p.isdigit()), key=int)
+    except OSError:
+        return out
+    for pid in pids:
+        try:
+            with open(os.path.join(proc, pid, "comm")) as f:
+                comm = f.read().strip()
+            with open(os.path.join(proc, pid, "cmdline"), "rb") as f:
+                cmd = f.read().replace(b"\0", b" ").decode(errors="replace").strip()
+        except OSError:
+            continue
+        out.append((pid, comm, cmd))
+    return out
+
+
+def masters(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None):
+    """Lines on the EtherCAT masters of this computer: the IgH kernel master
+    (device, modules, ethercat.service), free userspace masters, LinuxCNC.
+    The kernel master and the userspace one must not share a network card."""
+    run = run or _run
+    out = []
+    mods = []
+    try:
+        with open(os.path.join(proc, "modules")) as f:
+            mods = sorted(x.split()[0] for x in f if x.startswith("ec_"))
+    except OSError:
+        pass
+    dev = os.path.exists(kernel_device)
+    enabled = run("systemctl", "is-enabled", "ethercat.service")
+    active = run("systemctl", "is-active", "ethercat.service")
+    out.append("IgH kernel master: %s; modules %s; ethercat.service %s" % (
+        "loaded (%s)" % kernel_device if dev else "not loaded",
+        ", ".join(mods) if mods else "none",
+        "%s, %s" % (enabled, active) if enabled else "not installed"))
+    procs = _processes(proc)
+    free = [(p, c) for p, comm, c in procs if comm in FREE_MASTER_PROCESSES]
+    for pid, cmd in free:
+        out.append("Free userspace master: pid %s: %s" % (pid, cmd))
+    if not free:
+        out.append("Free userspace master: none running")
+    rt = [p for p, comm, _ in procs if comm == "rtapi_app"]
+    lcnc = sorted({comm for _, comm, _ in procs if comm in masterstart.LINUXCNC_PROCESSES})
+    out.append("LinuxCNC: %s; rtapi_app (HAL, with ecat's master when loaded): %s" % (
+        "running (%s)" % ", ".join(lcnc) if lcnc else "not running",
+        "running" if rt else "not running"))
+    if dev or mods or active == "active":
+        out.append("WARNING: the IgH kernel master is loaded. It must not use the network card "
+                   "of the userspace master: `sudo systemctl stop ethercat` (and `sudo systemctl "
+                   "disable ethercat` so that it does not come back at the next start).")
+    elif enabled == "enabled":
+        out.append("Note: ethercat.service is enabled: the kernel master starts at the next boot.")
+    return out
+
+
+def master_status():
+    """The running master's own status (`ethercat-uspace master`): link,
+    frames sent and received, lost frames. None when no master answers."""
+    try:
+        return tool.run("master").strip()
+    except (tool.ToolError, OSError):
+        return None
+
+
+def computer(ini_path=None):
+    """The computer as the real-time check reads it, as text lines."""
+    from . import rtcheck
+    return rtcheck.inventory_text(rtcheck.inventory(ini=ini_path)).splitlines()
+
+
 def versions():
     out = []
     for pkg in PACKAGES:
@@ -50,7 +186,7 @@ def versions():
         out.append("system %s" % name)
     except OSError:
         pass
-    out.append("ecatsetup %s" % os.path.dirname(os.path.abspath(__file__)))
+    out.append("ecatsetup %s" % ecat_build())
     return out
 
 
@@ -89,8 +225,10 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
     out = ["# EtherCAT report, %s" % time.strftime("%Y-%m-%d %H:%M:%S"),
            "",
            "Written by EtherCAT Setup (ecatsetup --report). It holds the configuration, "
-           "the INI lines about EtherCAT and the joints, a diagnosis of the bus and the "
-           "ecat component's event log. Look it through before posting it."]
+           "the INI lines about EtherCAT and the joints, the EtherCAT masters on this "
+           "computer, the computer as the real-time check reads it, a diagnosis of the bus "
+           "and the ecat component's event log. Disk UUIDs, MAC addresses and the home "
+           "folder's name are left out. Look it through before posting it."]
 
     _section(out, "Versions")
     out += ["- " + v for v in versions()]
@@ -110,10 +248,12 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
             out.append("")
             out.append("Check: " + ("no errors" if not errs else "%d error(s)" % len(errs)))
             out += ["- " + x for x in errs]
-            iface = (cfg.get("master") or {}).get("interface")
+            master = cfg.get("master") or {}
+            iface = master.get("interface")
             if iface:
-                out.append("Interface %s: driver %s, xdp-native %s" % (
-                    iface, netif.driver(iface) or "?", "yes" if netif.xdp_native(iface) else "no"))
+                out.append("Interface %s: driver %s, xdp-native %s; transport %s" % (
+                    iface, netif.driver(iface) or "?", "yes" if netif.xdp_native(iface) else "no",
+                    master.get("transport") or "raw (the default)"))
         except Exception as x:     # a report must not stop at a bad file
             out.append("(cannot read it as a configuration: %s)" % x)
     quirks.load()
@@ -134,6 +274,27 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
             if os.path.exists(path):
                 _section(out, name)
                 _file(out, path)
+
+    _section(out, "EtherCAT masters")
+    out += ["- " + x for x in masters()]
+    if bus:
+        status = master_status()
+        if status:
+            out.append("")
+            out.append("The running master (`ethercat-uspace master`):")
+            out.append("```")
+            out.append(status)
+            out.append("```")
+
+    _section(out, "Computer")
+    out.append("As the real-time check (Timing tab) reads it; the source of each line in [].")
+    try:
+        lines = computer(ini_path)
+        out.append("```")
+        out += lines
+        out.append("```")
+    except Exception as x:     # a report must not stop at an odd computer
+        out.append("(cannot read it: %s)" % x)
 
     _section(out, "Bus")
     if bus:
@@ -160,7 +321,7 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
             out.append("```")
         except events.EventsError as e:
             out.append("(%s)" % e)
-    return "\n".join(out) + "\n"
+    return redact("\n".join(out) + "\n")
 
 
 def default_name():

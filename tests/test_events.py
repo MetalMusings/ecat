@@ -226,18 +226,26 @@ class TestReport(unittest.TestCase):
             ini = os.path.join(d, "machine.ini")
             with open(ini, "w") as f:
                 f.write(INI.replace("[HAL]", "[ETHERCAT]\nCONFIG = ethercat.yaml\n\n[HAL]"))
-            config.write(cfg(), os.path.join(d, "ethercat.yaml"))
+            c = cfg()
+            c.setdefault("master", {})["interface"] = "lo"
+            config.write(c, os.path.join(d, "ethercat.yaml"))
             write_log(os.path.join(d, "ev"), [(0, events.START, -1, 3, 0),
                                               (1, events.DRIVE_FAULT, 0, 0x7500, 0x218)])
 
             def no_master():
                 raise tool.ToolError("no master")
+            computer = ["Kernel command line   BOOT_IMAGE=/boot/vmlinuz root=UUID=85eb-24a ro "
+                        "isolcpus=3   [/proc/cmdline]"]
             with mock.patch.object(events, "PATH", os.path.join(d, "ev")), \
-                    mock.patch.object(tool, "slave_positions", no_master):
+                    mock.patch.object(tool, "slave_positions", no_master), \
+                    mock.patch.object(report, "master_status", lambda: None), \
+                    mock.patch.object(report, "masters", lambda: ["IgH kernel master: not loaded"]), \
+                    mock.patch.object(report, "computer", lambda ini: computer):
                 text = report.build(None, ini)
         # the configuration found from the INI file, checked
         self.assertIn("## Configuration %s" % os.path.join(d, "ethercat.yaml"), text)
         self.assertIn("Check: no errors", text)
+        self.assertRegex(text, r"(?m)^Interface lo: driver .*; transport raw$")
         self.assertIn("[EMCMOT]SERVO_PERIOD = 1000000", text)
         self.assertIn("[JOINT_0]SCALE = 100", text)
         self.assertNotIn("TWOPASS", text)
@@ -245,6 +253,103 @@ class TestReport(unittest.TestCase):
         # the event log, with the slaves' names
         self.assertIn("slave 0 (x): drive fault 0x7500", text)
         self.assertIn("## Event log, the run before", text)
+        # the masters and the computer, without the disk's UUID
+        self.assertIn("## EtherCAT masters\n\n- IgH kernel master: not loaded", text)
+        self.assertIn("## Computer", text)
+        self.assertIn("root=(left out) ro isolcpus=3", text)
+        self.assertNotIn("85eb", text)
+
+    def test_redact(self):
+        from ecatsetup import report
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "enp2s0"))
+            with open(os.path.join(d, "enp2s0", "address"), "w") as f:
+                f.write("c4:62:37:06:66:54\n")
+            text = report.redact("Main: C4:62:37:06:66:54 (attached)\nother 00:11:22:33:44:55\n"
+                                 "resume=UUID=ab-cd quiet cryptdevice=/dev/sda2:root\n"
+                                 "[EMCMOT] of /home/kim/linuxcnc/x.ini; /home/kimberly/y; /home/kim",
+                                 sys_net=d, home="/home/kim")
+        self.assertEqual(text, "Main: (MAC of enp2s0) (attached)\nother (MAC)\n"
+                               "resume=(left out) quiet cryptdevice=(left out)\n"
+                               "[EMCMOT] of ~/linuxcnc/x.ini; /home/kimberly/y; ~")
+
+    def fake_proc(self, d, modules="", procs=()):
+        with open(os.path.join(d, "modules"), "w") as f:
+            f.write(modules)
+        for pid, comm, cmd in procs:
+            os.makedirs(os.path.join(d, pid))
+            with open(os.path.join(d, pid, "comm"), "w") as f:
+                f.write(comm + "\n")
+            with open(os.path.join(d, pid, "cmdline"), "wb") as f:
+                f.write(cmd.replace(" ", "\0").encode() + b"\0")
+
+    def test_masters_kernel_beside_userspace(self):
+        from ecatsetup import report
+        answers = {"is-enabled": "enabled", "is-active": "active"}
+        with tempfile.TemporaryDirectory() as d:
+            self.fake_proc(d, "ec_generic 16384 0 - Live 0x0\nec_master 352256 1 ec_generic, Live 0x0\n"
+                              "igc 200000 0 - Live 0x0\n",
+                           [("12", "ec_master", "/opt/x/ec_master -i enp1s0 -t raw"),
+                            ("40", "rtapi_app", "rtapi_app start"),
+                            ("41", "milltask", "milltask -ini x.ini")])
+            lines = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
+                                   run=lambda *a: answers[a[1]])
+        self.assertEqual(lines[0], "IgH kernel master: not loaded; modules ec_generic, ec_master; "
+                                   "ethercat.service enabled, active")
+        self.assertEqual(lines[1], "Free userspace master: pid 12: /opt/x/ec_master -i enp1s0 -t raw")
+        self.assertEqual(lines[2], "LinuxCNC: running (milltask); rtapi_app (HAL, with ecat's master "
+                                   "when loaded): running")
+        self.assertTrue(lines[3].startswith("WARNING: the IgH kernel master is loaded"))
+
+    def test_masters_userspace_only(self):
+        from ecatsetup import report
+        with tempfile.TemporaryDirectory() as d:
+            self.fake_proc(d, "igc 200000 0 - Live 0x0\n")
+            lines = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
+                                   run=lambda *a: "")
+            with open(os.path.join(d, "EtherCAT0"), "w"):
+                pass
+            loaded = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
+                                    run=lambda *a: "")
+        self.assertEqual(lines, ["IgH kernel master: not loaded; modules none; "
+                                 "ethercat.service not installed",
+                                 "Free userspace master: none running",
+                                 "LinuxCNC: not running; rtapi_app (HAL, with ecat's master when "
+                                 "loaded): not running"])
+        self.assertTrue(loaded[0].startswith("IgH kernel master: loaded ("))
+        self.assertTrue(loaded[-1].startswith("WARNING"))
+
+    def test_masters_modules_without_service(self):
+        # modules loaded by hand or by an old setup, no ethercat.service
+        from ecatsetup import report
+        with tempfile.TemporaryDirectory() as d:
+            self.fake_proc(d, "ec_r8169 90000 0 - Live 0x0\nec_master 352256 1 ec_r8169, Live 0x0\n")
+            lines = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
+                                   run=lambda *a: "")
+        self.assertIn("modules ec_master, ec_r8169; ethercat.service not installed", lines[0])
+        self.assertTrue(lines[-1].startswith("WARNING: the IgH kernel master is loaded"))
+
+    def test_masters_enabled_service_only(self):
+        from ecatsetup import report
+        answers = {"is-enabled": "enabled", "is-active": "inactive"}
+        with tempfile.TemporaryDirectory() as d:
+            self.fake_proc(d)
+            lines = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
+                                   run=lambda *a: answers[a[1]])
+        self.assertIn("ethercat.service enabled, inactive", lines[0])
+        self.assertEqual(lines[-1], "Note: ethercat.service is enabled: the kernel master starts "
+                                    "at the next boot.")
+
+    def test_build_info(self):
+        from ecatsetup import report
+        with tempfile.TemporaryDirectory() as d:
+            pkg = os.path.join(d, "ecatsetup")
+            os.makedirs(pkg)
+            self.assertEqual(report.ecat_build(pkg), pkg)
+            with open(os.path.join(d, "BUILD-INFO"), "w") as f:
+                f.write("ecat 0.23 (ecat-v0.23, 2587fcf)\nlinuxcnc v2.10\n")
+            self.assertEqual(report.ecat_build(pkg),
+                             pkg + " (run-in-place archive: ecat 0.23 (ecat-v0.23, 2587fcf))")
 
 
 try:
