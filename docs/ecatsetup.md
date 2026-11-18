@@ -2145,6 +2145,47 @@ To see it:
 - in a terminal: `scripts/ecat-events-follow`, events and the master's
   messages as they come.
 
+### What the event log means
+
+When the log shows a known problem, the *Event log* card starts with a box
+*What this means*: what the events mean in plain words and the problem's
+usual causes, each judged against this computer:
+
+| Mark | |
+|---|---|
+| likely | This computer has it (the IgH kernel master loaded, EEE on the EtherCAT card). What to do is under it. |
+| possible | A known risk is there (a Realtek card), not proof. |
+| not checked | Nothing here tells; under it, how to find out (the Timing tab, *Examine all*). |
+| ruled out | Checked, and it is not that. |
+
+The likely causes come first. The judgement uses the event log of the run
+shown, the EtherCAT masters on the computer, the computer as the
+[real-time check](#the-computers-timing) reads it, the network card of
+`master.interface` and, after *Examine all*, the slaves' port error
+counters. It changes nothing. The same text is at the top of the
+[report](#the-report) and after `ecatsetup --events`.
+
+The first problem it knows (2026-11-18), from a user whose drives would not
+stay enabled after moving from the IgH kernel master to the userspace one:
+
+**Frames were lost or came back too late**: working counter zero while
+running (not while the slaves come up), or the master's *skipped*,
+*unmatched* or *timed-out* datagrams. In such a cycle no process data is
+exchanged and ecat shuts every drive down (`fault-reason` 2): a drive
+reaches "Operation enabled" and falls back at once. Late frames are mostly
+timing or a second user of the card, seldom the cable. The causes looked
+at: the IgH kernel master loaded (or enabled for the next boot), the servo
+thread late (ecat's *servo thread late* events, a turn-around of 3 cycles),
+no PREEMPT_RT kernel, no isolated CPU, EEE on the card, the card also
+carrying the LAN, the card's interrupt not on the real-time CPU (while
+LinuxCNC runs), a Realtek card (`r8169`), and a cable or a slave's power
+(link down, slaves offline, port error counters).
+
+The problems are data, `ecatsetup/explain/*.yaml` (the format is at the top
+of `ecatsetup/explain.py`), with the real-time check's safe expressions.
+A file of your own in `~/.config/ecatsetup/explain/` replaces a shipped
+problem of the same `id`. Each problem and each cause carries its own tests.
+
 ### The report
 
 *Save report...* on the *Troubleshoot* page, or
@@ -2155,6 +2196,8 @@ ecatsetup --report [FILE] --ini <machine>.ini
 
 writes one Markdown file (`ethercat-report-<date>-<time>.md`) with:
 
+- first, when this run's event log shows a known problem, [what it
+  means](#what-the-event-log-means) and its causes judged on this computer;
 - versions: the packages (`linuxcnc-ecat`, `linuxcnc-ethercat-uspace`,
   LinuxCNC), the kernel (and whether it is PREEMPT_RT), the system, and
   where EtherCAT Setup runs from (a run-in-place archive's version from its

@@ -23,7 +23,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
         __import__("tempfile").tempdir = __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 
-from ecatsetup import events  # noqa: E402
+from ecatsetup import events, rtcheck  # noqa: E402
 
 N = 8
 
@@ -234,14 +234,33 @@ class TestReport(unittest.TestCase):
 
             def no_master():
                 raise tool.ToolError("no master")
-            computer = ["Kernel command line   BOOT_IMAGE=/boot/vmlinuz root=UUID=85eb-24a ro "
-                        "isolcpus=3   [/proc/cmdline]"]
+            computer = rtcheck.Inventory()
+            computer.add("cmdline", "Kernel command line", "BOOT_IMAGE=/boot/vmlinuz root=UUID=85eb-24a ro "
+                         "isolcpus=3", "/proc/cmdline")
+            facts = {"device": False, "modules": ["ec_master"], "enabled": "enabled", "active": "active",
+                     "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True}
             with mock.patch.object(events, "PATH", os.path.join(d, "ev")), \
                     mock.patch.object(tool, "slave_positions", no_master), \
                     mock.patch.object(report, "master_status", lambda: None), \
-                    mock.patch.object(report, "masters", lambda: ["IgH kernel master: not loaded"]), \
+                    mock.patch.object(report, "master_facts", lambda: facts), \
                     mock.patch.object(report, "computer", lambda ini: computer):
                 text = report.build(None, ini)
+            # a run with frames lost: the report starts with what it means
+            write_log(os.path.join(d, "ev"), [(0, events.START, -1, 3, 0), (1, events.LINK, -1, 1, 0),
+                                              (2, events.MASTER_AL, -1, 8, 2), (3, events.WC, -1, 2, 1),
+                                              (4, events.WC, -1, 0, 2)])
+            with mock.patch.object(events, "PATH", os.path.join(d, "ev")), \
+                    mock.patch.object(tool, "slave_positions", no_master), \
+                    mock.patch.object(report, "master_status", lambda: None), \
+                    mock.patch.object(report, "master_facts", lambda: facts), \
+                    mock.patch.object(report, "computer", lambda ini: computer):
+                lost = report.build(None, ini)
+        self.assertNotIn("## What the event log means", text)
+        self.assertLess(lost.index("## Versions"), lost.index("## What the event log means"))
+        self.assertLess(lost.index("## What the event log means"), lost.index("## Configuration"))
+        self.assertIn("Frames were lost or came back too late\n  Seen: working counter zero 1 times", lost)
+        self.assertIn("[x]  The IgH kernel master is loaded beside the userspace master: modules ec_master; "
+                      "ethercat.service is active", lost)
         # the configuration found from the INI file, checked
         self.assertIn("## Configuration %s" % os.path.join(d, "ethercat.yaml"), text)
         self.assertIn("Check: no errors", text)
@@ -254,9 +273,9 @@ class TestReport(unittest.TestCase):
         self.assertIn("slave 0 (x): drive fault 0x7500", text)
         self.assertIn("## Event log, the run before", text)
         # the masters and the computer, without the disk's UUID
-        self.assertIn("## EtherCAT masters\n\n- IgH kernel master: not loaded", text)
+        self.assertIn("## EtherCAT masters\n\n- IgH kernel master: not loaded; modules ec_master", text)
         self.assertIn("## Computer", text)
-        self.assertIn("root=(left out) ro isolcpus=3", text)
+        self.assertIn("root=(left out) ro isolcpus=3   [/proc/cmdline]", text)
         self.assertNotIn("85eb", text)
 
     def test_redact(self):

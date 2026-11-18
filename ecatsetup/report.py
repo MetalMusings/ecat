@@ -117,41 +117,48 @@ def _processes(proc="/proc"):
     return out
 
 
-def masters(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None):
-    """Lines on the EtherCAT masters of this computer: the IgH kernel master
-    (device, modules, ethercat.service), free userspace masters, LinuxCNC.
-    The kernel master and the userspace one must not share a network card."""
+def master_facts(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None):
+    """The EtherCAT masters of this computer as data: the IgH kernel master
+    (device, ec_* modules, ethercat.service), free userspace masters,
+    LinuxCNC and rtapi_app. `kernel_master` is True when the kernel master
+    is loaded: it must not share a network card with the userspace master."""
     run = run or _run
-    out = []
     mods = []
     try:
         with open(os.path.join(proc, "modules")) as f:
             mods = sorted(x.split()[0] for x in f if x.startswith("ec_"))
     except OSError:
         pass
-    dev = os.path.exists(kernel_device)
-    enabled = run("systemctl", "is-enabled", "ethercat.service")
-    active = run("systemctl", "is-active", "ethercat.service")
-    out.append("IgH kernel master: %s; modules %s; ethercat.service %s" % (
-        "loaded (%s)" % kernel_device if dev else "not loaded",
-        ", ".join(mods) if mods else "none",
-        "%s, %s" % (enabled, active) if enabled else "not installed"))
     procs = _processes(proc)
-    free = [(p, c) for p, comm, c in procs if comm in FREE_MASTER_PROCESSES]
-    for pid, cmd in free:
+    f = {"device": os.path.exists(kernel_device), "modules": mods,
+         "enabled": run("systemctl", "is-enabled", "ethercat.service"),
+         "active": run("systemctl", "is-active", "ethercat.service"),
+         "free": [(p, c) for p, comm, c in procs if comm in FREE_MASTER_PROCESSES],
+         "rtapi": any(comm == "rtapi_app" for _, comm, _ in procs),
+         "linuxcnc": sorted({comm for _, comm, _ in procs if comm in masterstart.LINUXCNC_PROCESSES})}
+    f["kernel_master"] = bool(f["device"] or mods or f["active"] == "active")
+    return f
+
+
+def masters(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None, facts=None):
+    """Lines on the EtherCAT masters of this computer (master_facts)."""
+    f = facts or master_facts(proc, kernel_device, run)
+    out = ["IgH kernel master: %s; modules %s; ethercat.service %s" % (
+        "loaded (%s)" % kernel_device if f["device"] else "not loaded",
+        ", ".join(f["modules"]) if f["modules"] else "none",
+        "%s, %s" % (f["enabled"], f["active"]) if f["enabled"] else "not installed")]
+    for pid, cmd in f["free"]:
         out.append("Free userspace master: pid %s: %s" % (pid, cmd))
-    if not free:
+    if not f["free"]:
         out.append("Free userspace master: none running")
-    rt = [p for p, comm, _ in procs if comm == "rtapi_app"]
-    lcnc = sorted({comm for _, comm, _ in procs if comm in masterstart.LINUXCNC_PROCESSES})
     out.append("LinuxCNC: %s; rtapi_app (HAL, with ecat's master when loaded): %s" % (
-        "running (%s)" % ", ".join(lcnc) if lcnc else "not running",
-        "running" if rt else "not running"))
-    if dev or mods or active == "active":
+        "running (%s)" % ", ".join(f["linuxcnc"]) if f["linuxcnc"] else "not running",
+        "running" if f["rtapi"] else "not running"))
+    if f["kernel_master"]:
         out.append("WARNING: the IgH kernel master is loaded. It must not use the network card "
                    "of the userspace master: `sudo systemctl stop ethercat` (and `sudo systemctl "
                    "disable ethercat` so that it does not come back at the next start).")
-    elif enabled == "enabled":
+    elif f["enabled"] == "enabled":
         out.append("Note: ethercat.service is enabled: the kernel master starts at the next boot.")
     return out
 
@@ -166,9 +173,9 @@ def master_status():
 
 
 def computer(ini_path=None):
-    """The computer as the real-time check reads it, as text lines."""
+    """The computer as the real-time check reads it (rtcheck.Inventory)."""
     from . import rtcheck
-    return rtcheck.inventory_text(rtcheck.inventory(ini=ini_path)).splitlines()
+    return rtcheck.inventory(ini=ini_path)
 
 
 def versions():
@@ -232,6 +239,7 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
 
     _section(out, "Versions")
     out += ["- " + v for v in versions()]
+    explain_at = len(out)       # what the event log means goes here, at the end
 
     cfg = None
     if cfg_path is None and ini_path:
@@ -275,8 +283,9 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
                 _section(out, name)
                 _file(out, path)
 
+    facts = master_facts()
     _section(out, "EtherCAT masters")
-    out += ["- " + x for x in masters()]
+    out += ["- " + x for x in masters(facts=facts)]
     if bus:
         status = master_status()
         if status:
@@ -288,10 +297,12 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
 
     _section(out, "Computer")
     out.append("As the real-time check (Timing tab) reads it; the source of each line in [].")
+    inv = None
     try:
-        lines = computer(ini_path)
+        from . import rtcheck
+        inv = computer(ini_path)
         out.append("```")
-        out += lines
+        out += rtcheck.inventory_text(inv).splitlines()
         out.append("```")
     except Exception as x:     # a report must not stop at an odd computer
         out.append("(cannot read it: %s)" % x)
@@ -311,16 +322,37 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
         out.append("(not diagnosed)")
 
     names = events.names_of(cfg)
+    this_run = None
     for title, path in (("Event log, this run (or the last)", events.PATH),
                         ("Event log, the run before", events.PATH + ".prev")):
         _section(out, title)
         try:
             log = events.read(path)
+            this_run = this_run or (log if path == events.PATH else None)
             out.append("```")
             events.report(log, names, out=out.append)
             out.append("```")
         except events.EventsError as e:
             out.append("(%s)" % e)
+
+    # first in the report: what this run's event log means on this computer
+    if this_run is not None:
+        try:
+            from . import explain
+            found = explain.findings(explain.context(
+                this_run, names, masters=facts, inv=inv,
+                interface=((cfg or {}).get("master") or {}).get("interface")))
+        except Exception as x:     # a report must not stop at a bad symptom file
+            found, x_text = [], str(x)
+        else:
+            x_text = None
+        if found or x_text:
+            part = []
+            _section(part, "What the event log means")
+            part.append("From this run's event log, judged against this computer.")
+            part.append("")
+            part += explain.text_lines(found) if found else ["(cannot judge it: %s)" % x_text]
+            out[explain_at:explain_at] = part
     return redact("\n".join(out) + "\n")
 
 

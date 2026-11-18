@@ -1452,6 +1452,39 @@ class TestWindow(WindowBase):
         self.assertIn("grew on port 0", page.cable_verdict.text())
         self.assertIn("no diagnosis history", page.history_none.text())
 
+    def test_what_the_event_log_means(self):
+        """Frames lost while running: the event log card says what it means and
+        judges the causes on this computer (a kernel master loaded here), with a
+        button to the Timing tab; a clean log shows nothing."""
+        from ecatsetup import events, report, rtcheck
+        sys.path.insert(0, os.path.dirname(__file__))
+        from test_events import write_log
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "ev")
+        start = [(0, events.START, -1, 3, 0), (1, events.LINK, -1, 1, 0), (2, events.MASTER_AL, -1, 8, 2),
+                 (3, events.WC, -1, 2, 1)]
+        write_log(path, start)
+        facts = {"device": False, "modules": ["ec_master"], "enabled": "enabled", "active": "active",
+                 "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True}
+        with mock.patch.object(events, "PATH", path), \
+                mock.patch.object(report, "master_facts", lambda: facts), \
+                mock.patch.object(rtcheck, "inventory", lambda roots=None, ini=None: rtcheck.Inventory()):
+            w = self.window()
+            page = w.trouble_page
+            page.show_events()
+            self.assertTrue(page.meaning.isHidden())
+            write_log(path, start + [(4, events.WC, -1, 0, 2), (5, events.DRIVE_BLOCK, 0, 2, 0)])
+            page.show_events()
+            self.assertFalse(page.meaning.isHidden())
+            text = page.meaning_text.text()
+            self.assertIn("Frames were lost or came back too late", text)
+            self.assertIn("working counter zero 1 times while running", text)
+            self.assertIn("The IgH kernel master is loaded beside the userspace master", text)
+            self.assertLess(text.index("IgH kernel master is loaded"), text.index("servo thread runs late"))
+            self.assertFalse(page.meaning_timing.isHidden())
+            page.meaning_timing.click()
+            self.assertIs(w.tabs.currentWidget(), w.timing_page)
+
     def test_test_page_without_a_test(self):
         w = self.window()
         w.select_slave(0)
