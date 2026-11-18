@@ -1,0 +1,185 @@
+# Symptoms of the bus seen in the event log: what they mean and their usual
+# causes, judged against this computer (ecatsetup/explain.py has the format).
+# Each symptom and each cause carries tests: contexts where it must hold
+# (present, or the state the cause must get) and where it must not.
+
+- id: frames-lost
+  title: Frames were lost or came back too late
+  when: "log and (wc_zero > 0 or lost > 0)"
+  evidence: >
+    working counter zero {wc_zero} times while running; the master: {skipped} skipped,
+    {unmatched} unmatched, {timed_out} timed-out datagrams; drives shut down for
+    invalid process data: {drives_shut}
+  meaning: >
+    In those cycles the frame with the process data did not come back before the
+    next one was sent, so no data was exchanged with the slaves. ecat then shuts
+    every drive down (fault-reason 2) and keeps it off until enable drops: that is
+    why a drive reaches "Operation enabled" and falls back at once. Skipped and
+    unmatched datagrams mean a frame came back late, not that it was broken: this
+    is mostly timing, or a second user of the network card, and seldom the cable.
+  causes:
+    - id: kernel-master
+      title: The IgH kernel master is loaded beside the userspace master
+      likely: "kernel_master"
+      ruled-out: "kernel_master == False"
+      evidence: "{kernel_master_text}"
+      check: >
+        Save report (section EtherCAT masters), or: lsmod | grep ec_ ; systemctl
+        status ethercat
+      fix: >
+        Two masters on one card take each other's frames. Stop it and keep it from
+        starting: sudo systemctl stop ethercat; sudo systemctl disable ethercat. If
+        ec_* modules stay loaded, restart the computer.
+      tests:
+        likely: {kernel_master: true, kernel_master_text: "modules ec_master, ec_r8169"}
+        ruled-out: {kernel_master: false}
+        not checked: {}
+
+    - id: kernel-master-at-boot
+      title: The IgH kernel master starts at the next boot
+      possible: "kernel_master == False and kernel_service_enabled"
+      ruled-out: "masters_read and not kernel_service_enabled"
+      evidence: "ethercat.service is enabled"
+      check: "systemctl is-enabled ethercat"
+      fix: >
+        Not loaded now, but after the next start it takes the card again: sudo
+        systemctl disable ethercat.
+      tests:
+        possible: {kernel_master: false, kernel_service_enabled: true, masters_read: true}
+        ruled-out: {kernel_master: false, kernel_service_enabled: false, masters_read: true}
+        not checked: {masters_read: false}
+
+    - id: late-thread
+      title: The servo thread runs late
+      likely: "late > 0 or turnaround_3 > 0"
+      evidence: >
+        ecat recorded {late} late servo cycles and {turnaround_3} times a turn-around
+        of 3 cycles
+      check: >
+        The Timing tab: Measure (with load) shows how late the servo thread runs on
+        this computer, and what delays it.
+      fix: >
+        The Timing tab's findings say what to change. A frame sent late comes back
+        after the next cycle has started: skipped and unmatched datagrams.
+      look: timing
+      tests:
+        likely: {late: 3, turnaround_3: 0}
+        not checked: {late: 0, turnaround_3: 0}
+
+    - id: not-preempt-rt
+      title: The kernel is not a PREEMPT_RT kernel
+      likely: "computer_read and rt == False"
+      ruled-out: "computer_read and rt"
+      evidence: "kernel without PREEMPT_RT"
+      check: "uname -v shows PREEMPT_RT on a real-time kernel"
+      fix: >
+        Install and start a PREEMPT_RT kernel (Debian: linux-image-rt-amd64); the
+        Timing tab explains.
+      look: timing
+      tests:
+        likely: {computer_read: true, rt: false}
+        ruled-out: {computer_read: true, rt: true}
+        not checked: {computer_read: false}
+
+    - id: no-isolated-cpu
+      title: No CPU is kept free for the real-time threads
+      possible: "computer_read and rt and not rt_isolated"
+      ruled-out: "computer_read and rt_isolated"
+      evidence: "no isolated CPU (isolcpus) for the servo thread"
+      check: "The Timing tab"
+      fix: >
+        Other programs then share the servo thread's CPU. The Timing tab shows how
+        late the thread runs and whether isolcpus helps on this computer.
+      look: timing
+      tests:
+        possible: {computer_read: true, rt: true, rt_isolated: false}
+        ruled-out: {computer_read: true, rt: true, rt_isolated: true}
+        not checked: {computer_read: false}
+
+    - id: nic-eee
+      title: Energy Efficient Ethernet is on on the EtherCAT card
+      likely: "nic and nic.eee_on"
+      ruled-out: "nic and ethtool and not nic.eee_on"
+      evidence: "EEE is on on {nic_name}"
+      check: "sudo ethtool --show-eee <card>"
+      fix: >
+        The card sleeps between frames and wakes late. Switch it off: sudo ethtool
+        --set-eee {nic_name} eee off (until the next start; the Timing tab's list
+        "To do yourself" makes it last).
+      tests:
+        likely: {nic: {name: enp1s0, eee_on: true}, nic_name: enp1s0, ethtool: true}
+        ruled-out: {nic: {name: enp1s0, eee_on: false}, nic_name: enp1s0, ethtool: true}
+        not checked: {nic: null}
+
+    - id: nic-carries-lan
+      title: The EtherCAT card also carries the LAN
+      likely: "nic and nic.default_route"
+      ruled-out: "nic and not nic.default_route"
+      evidence: "{nic_name} is the computer's default route"
+      check: "ip route: the card named after 'default via'"
+      fix: >
+        EtherCAT needs a network card of its own: other traffic and the network
+        manager's work on the card delay the frames. Put the LAN on another card.
+      tests:
+        likely: {nic: {name: eno1, default_route: true}, nic_name: eno1}
+        ruled-out: {nic: {name: eno1, default_route: false}, nic_name: eno1}
+        not checked: {nic: null}
+
+    - id: nic-irq-cpu
+      title: The EtherCAT card's interrupt is not on the real-time CPU
+      possible: "nic and hal_running and nic_irq_on_rt == False"
+      ruled-out: "nic and hal_running and nic_irq_on_rt"
+      evidence: "{nic_name}'s interrupt is not on CPU {rt_cpus_text}"
+      check: "While LinuxCNC runs: /proc/interrupts, the card's line, and the Timing tab"
+      fix: >
+        The received frame then waits for another CPU. Set master: irq-cpu to
+        {rt_cpus_text} in ethercat.yaml (the Master page); the Timing tab has the rule.
+      look: timing
+      tests:
+        possible: {nic: {name: enp2s0}, nic_name: enp2s0, hal_running: true, nic_irq_on_rt: false,
+                   rt_cpus_text: "3"}
+        ruled-out: {nic: {name: enp2s0}, hal_running: true, nic_irq_on_rt: true}
+        not checked: {nic: {name: enp2s0}, hal_running: false, nic_irq_on_rt: false}
+
+    - id: nic-realtek
+      title: The EtherCAT card is a Realtek card (r8169)
+      possible: "nic and nic.driver == 'r8169'"
+      ruled-out: "nic and nic.driver and nic.driver != 'r8169'"
+      evidence: >
+        {nic_name} uses r8169: often reported on the LinuxCNC forum for late frames;
+        it can do only the raw transport
+      check: "ethtool -i <card> names the driver"
+      fix: >
+        When the causes above are ruled out: a card with an Intel chip (igb, igc,
+        e1000e) and the transport xdp-native.
+      tests:
+        possible: {nic: {name: enp1s0, driver: r8169}, nic_name: enp1s0}
+        ruled-out: {nic: {name: enp1s0, driver: igc}, nic_name: enp1s0}
+        not checked: {nic: null}
+
+    - id: cable
+      title: A cable, a connector or a slave's power
+      likely: "port_errors or link_down > 0 or offline > 0"
+      ruled-out: "ports_read and not port_errors and link_down == 0 and offline == 0"
+      evidence: "{cable_text}"
+      check: >
+        Troubleshoot: Examine all reads every slave's port error counters (rx and
+        lost-link errors point at the cable between two slaves).
+      fix: >
+        Look at the cable and connectors at the port with the errors, and the power
+        of the slave after it.
+      look: examine
+      tests:
+        likely: {port_errors: [{slave: 2, port: 1, counts: {rx: 4}}], link_down: 0, offline: 0}
+        ruled-out: {ports_read: true, port_errors: [], link_down: 0, offline: 0}
+        not checked: {ports_read: false, port_errors: [], link_down: 0, offline: 0}
+
+  tests:
+    present:
+      log: true
+      wc_zero: 5
+      lost: 0
+    absent:
+      log: true
+      wc_zero: 0
+      lost: 0

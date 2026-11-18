@@ -730,12 +730,27 @@ def show_events(args):
         print(e)
         return 1
     names = {}
+    cfg = None
     if log.config and os.path.exists(log.config):
         try:
-            names = events.names_of(config.load(log.config))
+            cfg = config.load(log.config)
+            names = events.names_of(cfg)
         except (OSError, yaml.YAMLError):
             pass
     events.report(log, names)
+    # what it means on this computer (explain.py)
+    from . import explain, report, rtcheck
+    try:
+        found = explain.findings(explain.context(
+            log, names, masters=report.master_facts(), inv=rtcheck.inventory(ini=args.ini),
+            interface=((cfg or {}).get("master") or {}).get("interface")))
+    except Exception as e:      # a bad symptom file must not hide the log
+        print("\n(cannot say what the log means: %s)" % e)
+        return 0
+    if found:
+        print("\nWhat this means, judged against this computer:\n")
+        for line in explain.text_lines(found):
+            print(line)
     return 0
 
 

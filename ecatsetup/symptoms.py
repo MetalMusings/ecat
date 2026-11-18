@@ -13,6 +13,13 @@ SYMPTOMS = [
      "process data was not valid.",
      "The slave's fault-reason pin and drive fault events (Event log); Watch LinuxCNC shows the "
      "CiA 402 state and status word live; its error code (0x603F) is in the diagnosis."),
+    ("A drive reaches \"Operation enabled\" and falls back at once; the event log has working "
+     "counter zero, or the master's skipped, unmatched or timed-out datagrams",
+     "Frames come back too late: a second master on the network card (the IgH kernel master "
+     "left loaded), the servo thread running late, or the card (EEE, shared with the LAN, a "
+     "Realtek card); seldom the cable. ecat shuts every drive down in such a cycle.",
+     "Event log: the box \"What this means\" above the events judges each cause on this "
+     "computer; the Timing tab measures the servo thread."),
     ("Slaves drop out for a moment (working counter incomplete)",
      "A cable or connector, or a slave losing power; the master does not see the frames come "
      "back.",

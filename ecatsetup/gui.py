@@ -38,7 +38,8 @@ from PyQt5.QtWidgets import (
     QProxyStyle, QSizePolicy, QSpinBox, QStackedWidget, QStyle, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, dcinfo, diagnose, drivetest, esi, events, fromlcec, guidance, halcheck, halpins, homing,
+from . import (config, dcinfo, diagnose, drivetest, esi, events, explain, fromlcec, guidance, halcheck, halpins,
+               homing,
                integrate, lcnc_env, masterstart, measured,
                netif, pindocs, propose, quirks, response, settings, symptoms, tasks, testmode, tool, tuning,
                update, wiring)
@@ -2779,6 +2780,30 @@ class TroubleshootPage(QWidget):
         refresh.clicked.connect(self.show_events)
         er.addWidget(refresh)
         self.events.lay.addLayout(er)
+        # what the log means on this computer (explain.py), when a symptom shows
+        self.meaning = QFrame()
+        self.meaning.setObjectName("meaning")
+        ml = QVBoxLayout(self.meaning)
+        ml.setContentsMargins(0, 0, 0, 8)
+        ml.addWidget(label("WHAT THIS MEANS", "cardTitle"))
+        self.meaning_text = label("", wrap=True)
+        self.meaning_text.setTextFormat(Qt.RichText)
+        self.meaning_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        ml.addWidget(self.meaning_text)
+        mr = QHBoxLayout()
+        self.meaning_timing = QPushButton("Timing tab")
+        self.meaning_timing.setToolTip("Measure how late the servo thread runs on this computer.")
+        self.meaning_timing.clicked.connect(lambda: win.go("timing"))
+        mr.addWidget(self.meaning_timing)
+        self.meaning_examine = QPushButton("Examine all")
+        self.meaning_examine.setToolTip("Read every slave's port error counters (cable, connectors).")
+        self.meaning_examine.clicked.connect(lambda: win.examine(None))
+        mr.addWidget(self.meaning_examine)
+        mr.addStretch(1)
+        ml.addLayout(mr)
+        self.meaning.hide()
+        self.meaning_key = None
+        self.events.add(self.meaning)
         self.events_info = self.events.add(label("", "hint", wrap=True))
         self.events_table = table(["Time", "", "Event"], 2)
         self.events.add(self.events_table)
@@ -2817,6 +2842,7 @@ class TroubleshootPage(QWidget):
         shown = log.events
         said = events.folded(log.texts or [])
         pos = self.win.current if isinstance(self.win.current, int) else None
+        self.show_meaning(log, names, path)
         if self.events_slave.isChecked() and pos is not None:
             shown = [e for e in shown if e.slave in (-1, pos)]
             said = [(x, n) for x, n in said if x.slave in (None, pos)]
@@ -2842,6 +2868,38 @@ class TroubleshootPage(QWidget):
             t.setItem(r, 2, item(msg, colour=colours[sev] if kind == "event" else colours[sev] or GREY,
                                  font=mono() if kind == "text" else None))
         fit_table(t, minimum=1)
+
+    def show_meaning(self, log, names, path):
+        """What the log means on this computer: judged again when the log or the
+        examined slaves change, or after 30 s (the masters, the computer)."""
+        win = self.win
+        key = (path, log.start, log.total, log.texts_total, id(win.reports), len(win.reports),
+               win.session.ini_path, int(time.time() // 30))
+        if key == self.meaning_key:
+            return
+        self.meaning_key = key
+        from . import report as report_mod, rtcheck
+        ini = win.session.ini_path if win.session.ini_path and os.path.exists(win.session.ini_path) else None
+        try:
+            ctx = explain.context(log, names, masters=report_mod.master_facts(),
+                                  inv=rtcheck.inventory(ini=ini),
+                                  interface=((win.session.cfg or {}).get("master") or {}).get("interface"),
+                                  reports=list(win.reports.values()))
+            found = explain.findings(ctx)
+        except Exception as x:      # a bad symptom file must not break the page
+            self.meaning_text.setText("The explanation could not be made: %s" % x)
+            self.meaning.show()
+            return
+        self.meaning.setVisible(bool(found))
+        if not found:
+            return
+        self.meaning_text.setText(explain.html(found, {
+            "likely": RED.name(), "possible": AMBER.name(), "ruled out": GREEN.name(),
+            "not checked": GREY.name()}))
+        looks = {c["look"] for f in found for c in f.causes if c["state"] != "ruled out"}
+        self.meaning_timing.setVisible("timing" in looks)
+        self.meaning_examine.setVisible("examine" in looks)
+        self.meaning_examine.setEnabled(not win.busy)
 
     def fill_slaves(self):
         win = self.win
