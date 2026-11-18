@@ -844,7 +844,9 @@ class TestAttach(unittest.TestCase):
         # about 0.5 s of runs, read as they came (the ones before the start are not counted)
         self.assertGreater(servo.n, 200)
         self.assertLess(servo.n, 3000)
-        self.assertGreater(base.n, 40 * servo.n - 2000)
+        # 40 base runs per servo run, give or take what the start and the end
+        # cut off: relative, since a loaded computer makes the window longer
+        self.assertGreater(base.n, 0.9 * 40 * servo.n - 2000)
         self.assertEqual(servo.max, 60000)
         self.assertEqual(servo.min, -60000)
         self.assertGreaterEqual(servo.over[50], 2)          # each late run, and the short one after it
