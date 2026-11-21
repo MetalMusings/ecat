@@ -960,6 +960,8 @@ static void ecat_config_dc(lcec_master_t *master) {
       continue;
     }
     slave->dc_conf->sync0Cycle *= master->app_time_period;
+    slave->dc_conf->sync1Cycle = ecat_sync1_cycle(slave->dc_conf->sync1Cycle, slave->dc_conf->sync0Cycle,
+                                                  slave->dc_conf->sync1Shift);
     ecrt_slave_config_dc(slave->config, slave->dc_conf->assignActivate, slave->dc_conf->sync0Cycle, slave->dc_conf->sync0Shift,
         slave->dc_conf->sync1Cycle, slave->dc_conf->sync1Shift);
     rtapi_print_msg(RTAPI_MSG_DBG,

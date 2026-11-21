@@ -55,6 +55,9 @@ class EsiDcMode:
     assign_activate: int
     sync0_factor: int
     shift0: int
+    sync1_ns: int = 0       # CycleTimeSync1: a fixed SYNC1 cycle in ns (0: by sync1_factor)
+    sync1_factor: int = 0   # CycleTimeSync1@Factor: >0 times the SYNC0 cycle, <0 times the bus cycle
+    shift1: int = 0         # ShiftTimeSync1: SYNC1 after SYNC0, ns
 
 
 @dataclass
@@ -116,11 +119,15 @@ def _device(path, vendor_id, dev):
             d.pdos.append(pdo)
     for m in dev.findall("Dc/OpMode"):
         c0 = m.find("CycleTimeSync0")
+        c1 = m.find("CycleTimeSync1")
         d.dc_modes.append(EsiDcMode(
             _text(m, "Name"), _text(m, "Desc"),
             number(_text(m, "AssignActivate") or "0"),
             number(c0.get("Factor")) if c0 is not None and c0.get("Factor") else 1,
-            number(_text(m, "ShiftTimeSync0") or "0")))
+            number(_text(m, "ShiftTimeSync0") or "0"),
+            number(_text(m, "CycleTimeSync1") or "0"),
+            number(c1.get("Factor")) if c1 is not None and c1.get("Factor") else 0,
+            number(_text(m, "ShiftTimeSync1") or "0")))
     for a in dev.findall("Info/VendorSpecific/TwinCAT/AlternativeSmMapping"):
         sms = {}
         for sm in a.findall("Sm"):
@@ -210,7 +217,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 
 
 def cache_path():

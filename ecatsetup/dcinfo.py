@@ -45,6 +45,9 @@ class Mode:
     sync0_factor: int
     shift: int
     source: str          # "ESI" or "SII"
+    sync1_cycles: int = 0   # SYNC1 every n SYNC0 cycles (0: no SYNC1 cycle given)
+    sync1_shift: int = 0    # SYNC1 after SYNC0, ns
+    sync1_ns: int = 0       # a fixed SYNC1 cycle in ns the file gives instead (needs the period)
 
     @property
     def dc(self):
@@ -180,16 +183,31 @@ def _modes_text(modes):
     return "; ".join(m.label() for m in modes)
 
 
+def sync1_cycles(factor, sync0_factor):
+    """SYNC1's cycle in SYNC0 cycles from an ESI CycleTimeSync1@Factor (ETG.2000 table 51):
+    positive, times the SYNC0 cycle; negative, times the bus cycle (the servo period), which
+    is |factor| / sync0_factor SYNC0 cycles. 0 when none is given or it is not a whole number."""
+    if factor > 0:
+        return factor
+    if factor < 0 and sync0_factor and sync0_factor > 0 and -factor % sync0_factor == 0:
+        return -factor // sync0_factor
+    return 0
+
+
 def build(info, sii=None, esi_dev=None, esi_exact=False, sync=()):
     """A DcInfo from what was read: info from tool.slave_info(), sii an
     sii.Sii, esi_dev an esi.EsiDevice (or None)."""
     d = DcInfo(clock=info.get("dc_clock") if info.get("dc_clock") is not None else
                ("64" if info.get("dc") else None))
     if sii is not None:
-        d.sii_modes = [Mode(m.name, "", m.assign_activate, m.sync0_cycle_factor, m.shift_time0, "SII")
+        # the SII's Sync1 cycle factor: taken when positive (times the SYNC0 cycle)
+        d.sii_modes = [Mode(m.name, "", m.assign_activate, m.sync0_cycle_factor, m.shift_time0, "SII",
+                            max(getattr(m, "sync1_cycle_factor", 0), 0), getattr(m, "shift_time1", 0))
                        for m in sii.dc_modes]
     if esi_dev is not None:
-        d.esi_modes = [Mode(m.name, m.desc, m.assign_activate, m.sync0_factor, m.shift0, "ESI")
+        d.esi_modes = [Mode(m.name, m.desc, m.assign_activate, m.sync0_factor, m.shift0, "ESI",
+                            sync1_cycles(getattr(m, "sync1_factor", 0), m.sync0_factor),
+                            getattr(m, "shift1", 0), getattr(m, "sync1_ns", 0))
                        for m in esi_dev.dc_modes]
         d.esi_exact = bool(esi_exact)
         d.esi_file = os.path.basename(esi_dev.path or "")

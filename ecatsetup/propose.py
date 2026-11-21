@@ -105,6 +105,8 @@ class Proposal:
     pdo_set_pdos: dict = field(default_factory=dict)   # name -> sorted [(sm, pdo index)]
     dc_assign: int = None
     dc_sync0_factor: int = None
+    dc_sync1_cycles: int = 0     # SYNC1 every n SYNC0 cycles (0: none)
+    dc_sync1_shift: int = 0
     dc_shift: int = None
     dc_source: str = ""
     dc_info: object = None      # dcinfo.DcInfo: what the slave can do with DC
@@ -609,6 +611,11 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     if modes and modes[0].dc and d.can_sync is not False:
         m = modes[0]
         p.dc_assign, p.dc_sync0_factor, p.dc_shift = m.assign, m.sync0_factor, m.shift
+        if m.assign & 0x0400:      # SYNC1 is on (ESI files give a factor for every mode)
+            p.dc_sync1_cycles, p.dc_sync1_shift = m.sync1_cycles, m.sync1_shift
+        if m.assign & 0x0400 and not m.sync1_cycles:
+            p.notes.append("the DC mode \"%s\" uses SYNC1 but gives no SYNC1 cycle%s: set sync1-cycles"
+                           % (m.name, " (only a fixed %d ns)" % m.sync1_ns if m.sync1_ns else ""))
         p.dc_source = "%s mode \"%s\"" % (m.source, m.name)
     elif modes and modes[0].dc:
         p.notes.append("the slave lists DC modes, but its EtherCAT chip has no DC clock; DC "

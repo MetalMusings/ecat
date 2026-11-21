@@ -64,6 +64,8 @@ class DcMode:
     cycle_time0: int
     shift_time0: int
     sync0_cycle_factor: int
+    shift_time1: int = 0
+    sync1_cycle_factor: int = 0
 
 
 @dataclass
@@ -160,8 +162,8 @@ def parse(data):
                 sii.pdos.append(pdo)
         elif ctype == CAT_DC:
             for i in range(len(body) // 24):
-                (cycle0, shift0, _shift1, _s1f, assign, s0f, name_idx,
+                (cycle0, shift0, shift1, s1f, assign, s0f, name_idx,
                  _desc) = struct.unpack_from("<IIIhHhBB", body, i * 24)
                 sii.dc_modes.append(DcMode(_string(strings, name_idx), assign,
-                                           cycle0, shift0, s0f))
+                                           cycle0, shift0, s0f, shift1, s1f))
     return sii

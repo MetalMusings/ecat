@@ -1343,6 +1343,29 @@ class SlaveView(QWidget):
         self.sync0_shift.valueChanged.connect(self.general_edited)
         sync.addWidget(self.sync0_shift)
         op.add(sync)
+        # SYNC1, for DC modes that use it (AssignActivate bit 0x0400)
+        sync1 = QHBoxLayout()
+        self.sync1_label = label("SYNC1:")
+        sync1.addWidget(self.sync1_label)
+        self.sync1_cycles = QSpinBox()
+        self.sync1_cycles.setRange(0, 65535)
+        self.sync1_cycles.setPrefix("every ")
+        self.sync1_cycles.setSuffix(" SYNC0")
+        self.sync1_cycles.setToolTip("SYNC1 every n SYNC0 cycles (0: none); from the DC mode in the ESI file")
+        self.sync1_cycles.valueChanged.connect(self.general_edited)
+        sync1.addWidget(self.sync1_cycles)
+        self.sync1_shift = QSpinBox()
+        self.sync1_shift.setRange(-10000000, 10000000)
+        self.sync1_shift.setPrefix("shift ")
+        self.sync1_shift.setSuffix(" ns")
+        self.sync1_shift.setToolTip("SYNC1 after SYNC0, in ns (less than the SYNC0 cycle)")
+        self.sync1_shift.valueChanged.connect(self.general_edited)
+        sync1.addWidget(self.sync1_shift)
+        sync1.addStretch(1)
+        self.sync1_row = QWidget()
+        self.sync1_row.setLayout(sync1)
+        sync1.setContentsMargins(0, 0, 0, 0)
+        op.add(self.sync1_row)
         self.dc_hint = op.add(label("", "hint", wrap=True))
         self.dc_cycle = op.add(label("", "hint", wrap=True))
         self.dc_warn = op.add(label("", wrap=True))
@@ -1934,6 +1957,8 @@ class SlaveView(QWidget):
         self.assign.setText(str(dc.get("assign-activate", "")))
         self.sync0_cycles.setValue(int(dc.get("sync0-cycles") or 1))
         self.sync0_shift.setValue(int(dc.get("sync0-shift-ns") or 0))
+        self.sync1_cycles.setValue(int(dc.get("sync1-cycles") or 0))
+        self.sync1_shift.setValue(int(dc.get("sync1-shift-ns") or 0))
         self.enable_dc_fields()
         self.dc_hint.setText("Distributed clocks, as the slave describes them: " +
                              "; ".join(d.lines()) if d else
@@ -1944,8 +1969,11 @@ class SlaveView(QWidget):
         choice = self.dc_mode.currentData()
         on = self.dc_mode.isEnabled()
         self.assign.setEnabled(on and choice == DC_OWN)
-        for w in (self.sync0_cycles, self.sync0_shift):
+        for w in (self.sync0_cycles, self.sync0_shift, self.sync1_cycles, self.sync1_shift):
             w.setEnabled(on and choice != DC_FREE)
+        # the SYNC1 fields where SYNC1 is on (AssignActivate 0x0400) or the file has a cycle
+        assign = dcinfo.parse_assign(self.assign.text()) or 0
+        self.sync1_row.setVisible(choice != DC_FREE and bool(assign & 0x0400 or self.sync1_cycles.value()))
 
     def dc_cycle_text(self, s):
         """The SYNC0 cycle this slave gets (the servo period times its factor), and what was
@@ -1983,6 +2011,9 @@ class SlaveView(QWidget):
             self.assign.setText("0x%04X" % m.assign)
             self.loading = True
             self.sync0_cycles.setValue(max(int(m.sync0_factor or 1), 1))
+            on = bool(m.assign & 0x0400)      # SYNC1 is on: the mode's cycle, else none
+            self.sync1_cycles.setValue(int(m.sync1_cycles or 0) if on else 0)
+            self.sync1_shift.setValue(int(m.sync1_shift or 0) if on else 0)
             self.loading = False
         elif m == DC_OWN and not self.assign.text().strip():
             self.assign.setFocus()
@@ -2508,6 +2539,12 @@ class SlaveView(QWidget):
             dc["assign-activate"] = self.assign.text().strip()
             dc["sync0-cycles"] = self.sync0_cycles.value()
             dc["sync0-shift-ns"] = self.sync0_shift.value()
+            if self.sync1_cycles.value() and (dcinfo.parse_assign(dc["assign-activate"]) or 0) & 0x0400:
+                dc["sync1-cycles"] = self.sync1_cycles.value()
+                dc["sync1-shift-ns"] = self.sync1_shift.value()
+            else:
+                dc.pop("sync1-cycles", None)
+                dc.pop("sync1-shift-ns", None)
         else:
             s.pop("dc", None)
         self.enable_dc_fields()

@@ -3538,3 +3538,34 @@ device needs them.
   release notes.
 - The test file `~/src/easercat-3000-eoe/test-scripts/a6/a6.yaml` (outside the
   repository) needs the setting 0x6060:00 = 8 for slave 4.
+
+## Unused parts of the ESI file (2026-11-21, the user's order: SYNC1, state timeouts, Slots/Modules, mailbox timeouts)
+
+Survey of `~/esi` (4731 device descriptions) against what `esi.py` reads: SYNC1 in
+~6300 DC modes, `Info/StateMachine/Timeout` in ~1220 devices, `Slots`/`Modules` in
+~1212, `Mailbox/Timeout` in ~4750; also not used, later or never: `Backup`/`Setting`
+flags and `Unit` of the dictionary, `DiagMessages`, `Electrical/EBusCurrent`,
+oversampling (`OSFac`), FoE, SoE, SM sizes and FMMUs (the master takes the SII's).
+
+### SYNC1 (built 2026-11-21)
+
+- ETG.2000 table 51: `CycleTimeSync1` > 0 is a fixed cycle in ns; 0 means its
+  `Factor`: positive, times the SYNC0 cycle; negative, times the bus cycle. The
+  register the master writes (ESC 0x09A4, "CycleTime1") is CycleTimeSync1 -
+  CycleTimeSync0 + ShiftTimeSync1; IgH writes the value it is given as it is.
+- The file: `dc.sync1-cycles` (SYNC1 every n SYNC0 cycles) and
+  `dc.sync1-shift-ns`. `ecat_config.c` puts n in the DC record; `lcec_main.c`
+  makes the register value once the SYNC0 cycle is known
+  (`ecat_sync1_cycle(n, sync0, shift)` = (n - 1) x SYNC0 + shift).
+- `esi.EsiDcMode` has `sync1_ns`, `sync1_factor`, `shift1` (cache version 6);
+  the SII's Sync1 cycle factor and shift are read too (taken when positive);
+  `dcinfo.Mode.sync1_cycles/sync1_shift` (`dcinfo.sync1_cycles` turns a negative
+  factor into SYNC0 cycles when it divides). Beckhoff's files give a SYNC1 factor
+  (1) on every mode, also those without SYNC1 (the EL5101's 0x0320): the proposal
+  and the window write SYNC1 only where AssignActivate has 0x0400.
+- `config.dc_warnings`: a slave with 0x0400 and no `sync1-cycles`; `config.check`:
+  whole numbers, shift needs cycles. Window: a SYNC1 row under Sync, shown for a
+  mode with SYNC1 or a file that has a cycle.
+- Correction: turner's EL5101 refusing a typed 0x0700 (AL 0x0030) is not this:
+  its ESI file has no SYNC1 mode at all. 1454 modes in Beckhoff's files have
+  0x0700/0x0730. Not tried on a slave that uses SYNC1 (we have none).

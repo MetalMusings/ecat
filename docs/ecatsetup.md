@@ -146,7 +146,9 @@ Choosing a slave shows:
   predefined assignment the file uses; choosing another proposes the slave
   again with it, after asking), `configure-pdos`, the Sync
   choice (free run, one of the slave's DC modes, or DC mode with user settings; see
-  [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift; under
+  [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift (and,
+  for a mode that uses SYNC1, a row with SYNC1 every n SYNC0 cycles and its
+  shift, filled from the mode); under
   it what the slave says about DC (chip, SII, ESI, CoE), a line with the SYNC0
   cycle it gets (the servo period times the cycle factor) and, when there are
   any, what was *measured on the bus* on this kind of device at servo periods that

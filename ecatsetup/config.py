@@ -183,6 +183,9 @@ def slave_from_proposal(p, name=None):
     if p.dc_assign is not None:
         s["dc"] = {"assign-activate": "0x%04X" % p.dc_assign,
                    "sync0-cycles": p.dc_sync0_factor, "sync0-shift-ns": p.dc_shift}
+        if getattr(p, "dc_sync1_cycles", 0):
+            s["dc"]["sync1-cycles"] = p.dc_sync1_cycles
+            s["dc"]["sync1-shift-ns"] = p.dc_sync1_shift
     s["settings"] = [{"object": obj(i, sub), "type": t, "value": p.pp_limits[(i, sub)]}
                      for i, sub, t in PP_LIMITS if (i, sub) in p.pp_limits]
     # what the device needs written at start (ESI InitCmds, the drive's mode)
@@ -260,7 +263,19 @@ def _assign_value(v):
 
 
 def dc_warnings(cfg):
-    """Texts about the master's DC settings that work but are not advised."""
+    """Texts about DC settings that work but are not advised."""
+    out = []
+    for s in (cfg or {}).get("slaves") or []:
+        dc = s.get("dc") if isinstance(s, dict) else None
+        if isinstance(dc, dict) and _assign_value(dc.get("assign-activate")) & 0x0400 and not dc.get("sync1-cycles"):
+            out.append("slave %s (%s): assign-activate %s turns SYNC1 on, but no sync1-cycles is given: SYNC1 "
+                       "then has no cycle of its own and the slave may refuse SAFEOP (AL 0x0030); give sync1-cycles "
+                       "(SYNC1 every n SYNC0 cycles, from the DC mode in the ESI file)"
+                       % (s.get("position"), s.get("name"), dc.get("assign-activate")))
+    return out + _master_dc_warnings(cfg)
+
+
+def _master_dc_warnings(cfg):
     mdc = ((cfg or {}).get("master") or {}).get("dc")
     if not isinstance(mdc, dict) or mdc.get("servo-thread-follows-ref-clock") is True:
         return []
@@ -914,6 +929,14 @@ def check(cfg, series=None):
                     int(str(aa), 16)
                 except ValueError:
                     err("%s: dc assign-activate %r is not a hex number, such as 0x0300" % (where, aa))
+            for key, low in (("sync1-cycles", 0), ("sync1-shift-ns", None)):
+                v = dc.get(key)
+                if v is None:
+                    continue
+                if isinstance(v, bool) or not isinstance(v, int) or (low is not None and v < low):
+                    err("%s: dc %s must be a whole number%s" % (where, key, " of 0 or more" if low == 0 else ""))
+            if dc.get("sync1-shift-ns") is not None and not dc.get("sync1-cycles"):
+                err("%s: dc sync1-shift-ns needs sync1-cycles (SYNC1 every n SYNC0 cycles)" % where)
         for e in eoe_errors(s.get("eoe")):
             err("%s: %s" % (where, e))
         set_objects = set()

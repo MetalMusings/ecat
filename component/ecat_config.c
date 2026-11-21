@@ -1135,6 +1135,18 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     dcc->assignActivate = get_int(c, dc, "assign-activate", 0);
     dcc->sync0Cycle = get_int(c, dc, "sync0-cycles", 1);  // servo periods, see ecat_config.h
     dcc->sync0Shift = get_int(c, dc, "sync0-shift-ns", 0);
+    // SYNC1 every n SYNC0 cycles, shifted from SYNC0; the register value (CycleTime1,
+    // ETG.2000) is made in lcec_main.c once the SYNC0 cycle is known (ecat_sync1_cycle)
+    {
+      long long n = get_int(c, dc, "sync1-cycles", 0);
+      if (n < 0 || n > 0xFFFF) {
+        error(c, "dc sync1-cycles must be 0 to 65535 (SYNC1 every n SYNC0 cycles)");
+        n = 0;
+      }
+      dcc->sync1Cycle = (uint32_t)n;
+      dcc->sync1Shift = (int32_t)get_int(c, dc, "sync1-shift-ns", 0);
+      if (dcc->sync1Shift != 0 && n == 0) error(c, "dc sync1-shift-ns needs sync1-cycles");
+    }
   }
   eoe(c, b, get(c, s, "eoe"));
   process_data(c, b, get(c, s, "process-data"), (LCEC_CONF_SLAVE_T *)(b->data + off), off);
@@ -1233,6 +1245,13 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     }
   }
   c->where[0] = 0;
+}
+
+uint32_t ecat_sync1_cycle(uint32_t n, uint32_t sync0_ns, int32_t shift_ns) {
+  // ETG.2000 (OpMode:CycleTimeSync1): the register is CycleTimeSync1 - CycleTimeSync0
+  // + ShiftTimeSync1; SYNC1 every n SYNC0 cycles: (n - 1) * SYNC0 + shift. 0: no SYNC1 cycle
+  if (n == 0) return 0;
+  return (uint32_t)((int64_t)(n - 1) * sync0_ns + shift_ns);
 }
 
 char *ecat_config_load(const char *path, size_t *length) {

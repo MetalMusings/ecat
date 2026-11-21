@@ -473,7 +473,11 @@ static void test_dc(void) {
                 "- position: 1\n"
                 "  name: e\n"
                 "  profile: generic\n"
-                "  dc: {assign-activate: '0x300', sync0-cycles: 2}\n"),
+                "  dc: {assign-activate: '0x300', sync0-cycles: 2}\n"
+                "- position: 2\n"
+                "  name: f\n"
+                "  profile: generic\n"
+                "  dc: {assign-activate: '0x700', sync1-cycles: 4, sync1-shift-ns: 10000}\n"),
       0);
   CHECK_EQ(MASTER->refClockSyncCycles, -1);
   CHECK_EQ(MASTER->syncToRefClock, 1);
@@ -482,6 +486,13 @@ static void test_dc(void) {
   CHECK_EQ(DC(0)->sync0Cycle, 1);  // servo periods
   CHECK_EQ(DC(0)->sync0Shift, -5000);
   CHECK_EQ(DC(1)->sync0Cycle, 2);
+  CHECK_EQ(DC(1)->sync1Cycle, 0);       // no SYNC1
+  CHECK_EQ(DC(2)->sync1Cycle, 4);       // SYNC0 cycles, until the SYNC0 cycle is known
+  CHECK_EQ(DC(2)->sync1Shift, 10000);
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
+              "dc: {assign-activate: '0x700', sync1-cycles: -1}}\n", "dc sync1-cycles must be 0 to 65535");
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
+              "dc: {assign-activate: '0x700', sync1-shift-ns: 5}}\n", "dc sync1-shift-ns needs sync1-cycles");
   // without dc: none
   CHECK_EQ(load(io), 0);
   CHECK_EQ(count(lcecConfTypeDcConf), 0);
@@ -688,6 +699,14 @@ static void test_cia402_pp(void) {
 // the mode: set every cycle (0x6060 mapped), once as a setting, or at least seen (0x6061)
 #define NOMODE_OUT P("0x6040:00", 16, "UINT") P("0x607A:00", 32, "DINT")
 #define NOMODE_IN P("0x6041:00", 16, "UINT") P("0x6064:00", 32, "DINT")
+
+static void test_sync1(void) {
+  // the register value (ETG.2000 CycleTime1): (n - 1) * SYNC0 + shift
+  CHECK_EQ(ecat_sync1_cycle(0, 1000000, 0), 0);
+  CHECK_EQ(ecat_sync1_cycle(1, 1000000, 250000), 250000);
+  CHECK_EQ(ecat_sync1_cycle(2, 1000000, 0), 1000000);
+  CHECK_EQ(ecat_sync1_cycle(4, 500000, 10000), 1510000);
+}
 
 static void test_cia402_mode_setting(void) {
   CHECK_FAILS(CIA402("csp", NOMODE_OUT, NOMODE_IN), "the drive's mode is neither set nor seen");
@@ -1032,5 +1051,5 @@ static void test_unused(void) {
 
 RUN_TESTS("config", test_cia402_feedforward, test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
-    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
+    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_sync1, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders, test_serial, test_serial_errors, test_unused, test_master_cpus)

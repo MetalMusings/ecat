@@ -282,6 +282,47 @@ except ImportError:  # pragma: no cover
 
 
 @unittest.skipIf(gui is None, "PyQt5 is not installed")
+class TestSync1(unittest.TestCase):
+    """SYNC1 (ETG.2000 OpMode:CycleTimeSync1/ShiftTimeSync1), for AssignActivate 0x0400."""
+
+    def test_factor_to_sync0_cycles(self):
+        self.assertEqual(dcinfo.sync1_cycles(2, 1), 2)       # 2 x the SYNC0 cycle
+        self.assertEqual(dcinfo.sync1_cycles(-4, 2), 2)      # 4 bus cycles = 2 SYNC0 cycles of 2
+        self.assertEqual(dcinfo.sync1_cycles(-3, 2), 0)      # not a whole number of SYNC0 cycles
+        self.assertEqual(dcinfo.sync1_cycles(0, 1), 0)
+
+    def test_from_the_esi(self):
+        dev = esi.EsiDevice("x.xml", 2, 1, 1, "T", "T")
+        dev.dc_modes = [esi.EsiDcMode("DC", "with SYNC1", 0x0700, 1, 0, 0, 2, 10000),
+                        esi.EsiDcMode("DC0", "SYNC0 only", 0x0300, 1, 0, 0, 1, 0)]
+        modes = dcinfo.build({"dc": True}, None, dev, True).esi_modes
+        self.assertEqual((modes[0].sync1_cycles, modes[0].sync1_shift), (2, 10000))
+
+    def test_proposal_writes_sync1_only_where_it_is_on(self):
+        from ecatsetup import coe, config, propose
+        for assign, want in ((0x0700, {"sync1-cycles": 2, "sync1-shift-ns": 10000}), (0x0300, {})):
+            dev = esi.EsiDevice("x.xml", 2, 1, 1, "T", "T")
+            dev.dc_modes = [esi.EsiDcMode("DC", "", assign, 1, 0, 0, 2, 10000)]
+            s = sii_mod.Sii(vendor_id=2, product_code=1, revision=1, serial=0, mailbox_protocols=0)
+            p = propose.propose({"position": 0, "dc": True, "dc_clock": "64"}, s, coe.Dictionary(),
+                                esi_dev=dev, esi_exact=True)
+            dc = config.slave_from_proposal(p)["dc"]
+            self.assertEqual({k: v for k, v in dc.items() if k.startswith("sync1")}, want)
+
+    def test_check_and_warning(self):
+        from ecatsetup import config
+        cfg = {"ecat": 1, "master": {}, "slaves": [dict(slave("0x0700"), position=0)]}
+        self.assertTrue(any("turns SYNC1 on, but no sync1-cycles" in w for w in config.dc_warnings(cfg)))
+        cfg["slaves"][0]["dc"]["sync1-cycles"] = 2
+        self.assertEqual(config.dc_warnings(cfg), [])
+        for bad in (-1, "2", True):
+            cfg["slaves"][0]["dc"]["sync1-cycles"] = bad
+            self.assertTrue(any("sync1-cycles must be a whole number" in e for e in config.check(cfg)), bad)
+        cfg["slaves"][0]["dc"]["sync1-cycles"] = 0
+        cfg["slaves"][0]["dc"]["sync1-shift-ns"] = 500
+        self.assertTrue(any("sync1-shift-ns needs sync1-cycles" in e for e in config.check(cfg)))
+
+
 class TestSyncRow(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -306,6 +347,21 @@ class TestSyncRow(unittest.TestCase):
     def choose(self, page, index):
         page.dc_mode.setCurrentIndex(index)
         page.dc_mode_chosen()
+
+    def test_sync1_fields(self):
+        # as Beckhoff's files: a SYNC1 factor (1) also on the modes that do not use SYNC1
+        d = el5101(esi_modes=[M("DC", "DC-Synchron", 0x320, 1, 0, "ESI", 1, 0), M("DCIN", "", 0x320, 1, 0, "ESI", 1, 0),
+                              M("DC1", "with SYNC1", 0x0700, 1, 0, "ESI", 2, 10000)])
+        w, page, ses = self.window(d)
+        self.choose(page, 1)                                  # 0x0320: no SYNC1
+        self.assertTrue(page.sync1_row.isHidden())
+        self.assertEqual(page.sync1_cycles.value(), 0)
+        self.assertNotIn("sync1-cycles", ses.slave(2)["dc"])
+        self.choose(page, 3)                                  # 0x0700
+        self.assertFalse(page.sync1_row.isHidden())
+        self.assertEqual((ses.slave(2)["dc"]["sync1-cycles"], ses.slave(2)["dc"]["sync1-shift-ns"]), (2, 10000))
+        self.choose(page, 1)                                  # back: the SYNC1 keys go
+        self.assertNotIn("sync1-cycles", ses.slave(2)["dc"])
 
     def test_the_slaves_modes_and_user_settings(self):
         w, page, ses = self.window(el5101())

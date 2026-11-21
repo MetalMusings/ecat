@@ -23,10 +23,16 @@
 #define _ECAT_CONFIG_H_
 
 #include <stddef.h>
+#include <stdint.h>
 
 /// @brief Read a configuration file.
 /// @return A malloc'd buffer of LCEC_CONF_* records ending with
 /// lcecConfTypeNone, or NULL after printing an error. Free it with free().
 char *ecat_config_load(const char *path, size_t *length);
+
+/// @brief A slave's SYNC1 register value (ESC 0x09A4, ETG.2000's CycleTime1) for
+/// SYNC1 every n SYNC0 cycles of sync0_ns, shift_ns after SYNC0; 0 for n = 0.
+/// The configuration's sync1Cycle is n until the SYNC0 cycle is known.
+uint32_t ecat_sync1_cycle(uint32_t n, uint32_t sync0_ns, int32_t shift_ns);
 
 #endif
