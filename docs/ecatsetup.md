@@ -234,19 +234,27 @@ Choosing a slave shows:
   its entries. A PDO that the ESI file marks fixed cannot be edited: the
   window says so and what to do (*Propose again* chooses ready PDOs that
   have the objects, or builds a mapping in the open PDO);
-- **Settings**: SDOs written at every start, in PREOP. A new proposal
-  already has what the device needs written at start: the settings its
-  ESI file writes then (its InitCmds, such as Beckhoff's channel
-  settings; not the ones the configuring tool fills in itself, such as
-  the cycle time, and not those written with complete access, which a
-  note names), and for a drive whose `0x6060` is not in the process data,
-  its mode (`0x6060:00`, which follows the mode chosen above); also the
-  state change timeouts its ESI file gives that are longer than the
-  master's (`state-timeouts-ms`), and how long its SDO answers may take
-  (`sdo-timeout-ms`). For a file
-  made earlier, *Add what the device needs* adds them (shown when some
-  are missing; *Update from bus* names them too, and adds nothing on its
-  own). *Add setting...*
+- **Written at start by the device's description (InitCmds)**: what the
+  device's ESI file writes at every start (its InitCmds, such as
+  Beckhoff's channel settings or StepperOnline's mode), a modular
+  device's configured module list (`0xF030`) and a drive's mode where
+  `0x6060` is not in the process data. These are written before your
+  settings. A row's value can be *the mode* (it follows the mode chosen
+  above) or *the cycle time* (the servo period, which ecat fills in at
+  start where the vendor's tool would); *complete access* writes a whole
+  object at once. Untick *Use* to leave a row out: it stays in the file,
+  turned off, so that *Update from bus* does not bring it back. Not taken
+  from the ESI file: objects the vendor's tool fills in itself (other than
+  the cycle time), its own functions (such as diagnosis messages), and
+  state changes ecat does not write at (only IP and PS); a note names
+  what is skipped. A new proposal has these rows already, and also the
+  state change timeouts the ESI file gives that are longer than the
+  master's (`state-timeouts-ms`) and how long its SDO answers may take
+  (`sdo-timeout-ms`). For a file made earlier, *Add what the device
+  needs* (in Settings) adds them (shown when some are missing; *Update
+  from bus* names them too, and adds nothing on its own);
+- **Settings**: your own SDOs, written at every start, in PREOP, after the
+  rows above. *Add setting...*
   opens the slave's object dictionary: filter by object or name, objects
   writable in PREOP only (untick to see all), manufacturer objects
   (0x2000-0x5FFF) in bold, with type, size, access and, from the ESI file,

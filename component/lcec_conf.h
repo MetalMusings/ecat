@@ -32,6 +32,7 @@
 #define LCEC_CONF_STR_MAXLEN 48
 
 #define LCEC_CONF_SDO_COMPLETE_SUBIDX -1
+#define LCEC_CONF_SDO_COMPLETE_FROM1 -2   ///< complete access from subindex 1 (an ESI InitCmd's)
 #define LCEC_CONF_GENERIC_MAX_SUBPINS 32
 #define LCEC_CONF_GENERIC_MAX_BITLEN  255
 
@@ -53,7 +54,8 @@ typedef enum {
   lcecConfTypeComplexEntry,
   lcecConfTypeModParam,
   lcecConfTypeEoe,
-  lcecConfTypeStateTimeouts
+  lcecConfTypeStateTimeouts,
+  lcecConfTypeSdoCycleTime
 } LCEC_CONF_TYPE_T;
 
 typedef enum {
@@ -143,6 +145,14 @@ typedef struct {
   uint32_t back_to_safeop;  ///< OP -> SAFEOP
   uint32_t sdo_response;    ///< the slave's SDO answers (sdo-timeout-ms), 0: the master's 1000 ms
 } LCEC_CONF_STATE_TIMEOUTS_T;
+
+/// An SDO the master writes with the servo period in ns (UDINT), such as 0x1C32:02
+/// (an ESI InitCmd TwinCAT fills with the cycle time; init-cmds from: cycle-time).
+typedef struct {
+  LCEC_CONF_TYPE_T confType;
+  uint16_t index;
+  uint8_t subindex;
+} LCEC_CONF_SDO_CYCLE_T;
 
 typedef struct {
   LCEC_CONF_TYPE_T confType;

@@ -3638,3 +3638,35 @@ oversampling (`OSFac`), FoE, SoE, SM sizes and FMMUs (the master takes the SII's
   is longer than 1000 ms; Update and *Add what the device needs* recommend it.
 - EtherCAT Setup's own SDO reads through the `ethercat-uspace` tool still use the
   master's 1000 ms (the tool has no timeout option).
+
+### ESI InitCmds kept apart: init-cmds (built 2026-11-21, the user's decisions)
+
+Replaces "InitCmds as settings" above (never released). The user: InitCmds are the
+vendor's, settings the user's; a block of its own with a Use box per row (`disabled:
+true`, kept so that Update does not bring it back); templates: the cycle time now,
+the rest when a device needs it; SO: refused until a device needs it.
+
+- The file: `init-cmds: [{at: IP|PS, object, value+type | data | from: profile |
+  from: cycle-time, complete, disabled}]`, written before `settings`.
+- `ecat_config.c` `init_cmds()` (and `sdo_bytes`, shared with `settings()`):
+  SDO records before the settings'; `complete` as `LCEC_CONF_SDO_COMPLETE_SUBIDX`
+  (from 0) or `LCEC_CONF_SDO_COMPLETE_FROM1` (from 1; `lcec_main.c` calls
+  `ecrt_slave_config_complete_sdo_from`, master fork a71407f0, else an error is
+  logged); `from: profile` gives the mode's number and counts as the mode being
+  set; `from: cycle-time` is a `lcecConfTypeSdoCycleTime` record, written by
+  `lcec_main.c` with the servo period where DC is configured (the period is known
+  there), so after the settings in the master's list; other transitions refused.
+- Master fork a71407f0: complete access from subindex 1 (the request's subindex
+  goes into the CoE header; the master wrote every complete access from 0, which
+  would have put an InitCmd's first byte into subindex 0); the simulator keeps a
+  complete download at its first subindex (tests/test_sim_complete_sdo.c). The
+  same commit adds `ecrt_slave_config_sdo_timeout` to master/uspace/libethercat.map,
+  which 1d5a16fa had left out (it could not have been linked against).
+- `initcmds.from_esi` gives rows (pdoreq/initcmds.yaml: `templates` 0x1C32:02 and
+  0x1C33:02 = cycle-time; 0x6060 of cia402 = from: profile; skipped as before);
+  `Proposal.init_cmds` (and the modules' InitCmds, 0xF030 at IP); `config.mode_setting`
+  reads settings and init-cmds; `config.init_cmd_errors`; `Session.missing_init_cmds`
+  / `add_device_needs`. Window: the card "Written at start by the device's description
+  (InitCmds)" with Use boxes.
+- Tests: C `test_init_cmds`; Python `tests/test_initcmds.py`, test_slots, the window's
+  card; mutation-checked.

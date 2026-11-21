@@ -122,8 +122,10 @@ class TestProposal(unittest.TestCase):
         p = proposal(device(FOUR), [0x10, 0x20])
         self.assertEqual([c.index for c in p.pdos], [0x1A00, 0x1601])
         s = config.slave_from_proposal(p)
-        objs = [st["object"] for st in s["settings"]]
-        self.assertEqual(objs, ["0x8000:01", "0xF030:00", "0xF030:01", "0xF030:02", "0xF030:00"])
+        rows = [(r["at"], r["object"]) for r in s["init-cmds"]]
+        self.assertEqual(rows, [("PS", "0x8000:01"), ("IP", "0xF030:00"), ("IP", "0xF030:01"),
+                                ("IP", "0xF030:02"), ("IP", "0xF030:00")])
+        self.assertEqual(s["settings"], [])
         self.assertEqual(config.check(config.from_proposals([p])), [])
         self.assertTrue(any("slot 1 (IO slot): module 0x00000020 DO4" in n for n in p.notes))
 

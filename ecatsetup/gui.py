@@ -43,7 +43,7 @@ from . import (config, dcinfo, diagnose, drivetest, esi, events, explain, fromlc
                integrate, lcnc_env, masterstart, measured,
                netif, pindocs, propose, quirks, response, settings, symptoms, tasks, testmode, tool, tuning,
                update, wiring)
-from .session import Session, servo_period
+from .session import Session, servo_period, _row_text as session_row_text
 
 TITLE = "EtherCAT Setup"
 RED, AMBER, GREEN, GREY = QColor("#b42318"), QColor("#9a5b00"), QColor("#1a7f37"), QColor("#6b7280")
@@ -1533,7 +1533,7 @@ class SlaveView(QWidget):
         self.init_button = QPushButton("Add what the device needs")
         self.init_button.setToolTip("Add the settings the device's ESI file writes at start (its InitCmds) "
                                     "and, for a drive whose 0x6060 is not in the process data, its mode")
-        self.init_button.clicked.connect(self.add_init_settings)
+        self.init_button.clicked.connect(self.add_device_needs)
         buttons.addWidget(self.init_button)
         self.ferror_button = QPushButton("Suggest following-error window")
         self.ferror_button.setToolTip(
@@ -1551,6 +1551,18 @@ class SlaveView(QWidget):
         buttons.addStretch(1)
         st.add(buttons)
         lay.addWidget(st)
+
+        # what the device's ESI file writes at start (init-cmds), apart from the user's settings
+        ic = Card("Written at start by the device's description (InitCmds)",
+                  "From the device's ESI file, written before the settings above whenever the master "
+                  "configures the slave. Untick a row to leave it out (it stays in the file, so that "
+                  "Update does not bring it back). The mode follows the drive's mode; the cycle time is "
+                  "the servo period.")
+        self.ic = table(["Use", "At", "Object", "Value", "From"], 3)
+        self.ic.itemChanged.connect(self.init_cmd_toggled)
+        ic.add(self.ic)
+        self.ic_card = ic
+        lay.addWidget(ic)
 
         self.notes = Card("Notes from the proposal")
         self.notes_text = self.notes.add(label(wrap=True))
@@ -2442,8 +2454,8 @@ class SlaveView(QWidget):
         s = self.win.session.slave(self.position)
         return s["process-data"][direction][pi]["entries"][ei]
 
-    def add_init_settings(self):
-        added = self.win.session.add_init_settings(self.position)
+    def add_device_needs(self):
+        added = self.win.session.add_device_needs(self.position)
         s = self.win.session.slave(self.position)
         if s is None or not added:
             return
@@ -2451,14 +2463,51 @@ class SlaveView(QWidget):
         self.win.changed()
         self.win.status("Added %s" % ", ".join(st["object"] for st in added))
 
+    def show_init_cmds(self, s):
+        rows = [r for r in s.get("init-cmds") or [] if isinstance(r, dict)]
+        self.ic_card.setVisible(bool(rows))
+        self.ic.blockSignals(True)
+        self.ic.setRowCount(0)
+        for r in rows:
+            n = self.ic.rowCount()
+            self.ic.insertRow(n)
+            use = QTableWidgetItem("")
+            use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+            use.setCheckState(Qt.Unchecked if r.get("disabled") else Qt.Checked)
+            self.ic.setItem(n, 0, use)
+            f = r.get("from")
+            value = {"profile": "the mode (%s)" % ((s.get("cia402") or {}).get("mode") or "").upper(),
+                     "cycle-time": "the servo period, ns"}.get(f) or str(r.get("value", r.get("data", "")))
+            if r.get("complete"):
+                value += " (complete access)"
+            for col, text in ((1, r.get("at", "")), (2, r.get("object", "")), (3, value),
+                              (4, {"profile": "the profile", "cycle-time": "the cycle time"}.get(f, "the ESI file"))):
+                self.ic.setItem(n, col, item(text, font=mono() if col == 2 else None,
+                                             tip=r.get("name") if col == 2 else None))
+        fit_table(self.ic)
+        self.ic.blockSignals(False)
+
+    def init_cmd_toggled(self, it):
+        s = self.win.session.slave(self.position)
+        if s is None or it.column() != 0:
+            return
+        rows = [r for r in s.get("init-cmds") or [] if isinstance(r, dict)]
+        if it.row() >= len(rows):
+            return
+        if it.checkState() == Qt.Checked:
+            rows[it.row()].pop("disabled", None)
+        else:
+            rows[it.row()]["disabled"] = True
+        self.win.changed()
+
     def show_settings(self, s):
-        missing = self.win.session.missing_init_settings(self.position) + [
-            {"object": "SDO answer timeout" if k == "sdo" else "state timeout " + k, "value": "%d ms" % v}
+        self.show_init_cmds(s)
+        missing = [session_row_text(r) for r in self.win.session.missing_init_cmds(self.position)] + [
+            "%s %d ms" % ("SDO answer timeout" if k == "sdo" else "state timeout " + k, v)
             for k, v in sorted(self.win.session.missing_state_timeouts(self.position).items())]
         self.init_button.setVisible(bool(missing))
-        self.init_button.setToolTip("Adds %s (from the device's ESI file, or the drive's mode)"
-                                    % ", ".join("%s = %s" % (st["object"], st.get("value", st.get("data")))
-                                                for st in missing) if missing else "")
+        self.init_button.setToolTip("Adds what the device's ESI file writes at start (init-cmds) and its "
+                                    "timeouts: %s" % ", ".join(missing) if missing else "")
         self.loading = True
         self.st.setRowCount(0)
         for st in s.get("settings") or []:

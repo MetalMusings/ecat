@@ -126,8 +126,8 @@ class Proposal:
     status: list = field(default_factory=list)    # pdoreq.Status lines under the PDOs
     state_timeouts: dict = field(default_factory=dict)  # the ESI's state timeouts longer than the master's
     sdo_timeout: int = None   # the ESI's SDO response timeout, where longer than the master's
-    init_settings: list = field(default_factory=list)  # settings from the ESI's InitCmds, and the
-    #                                                    cia402 mode where 0x6060 is not mapped
+    init_cmds: list = field(default_factory=list)  # init-cmds: the ESI's InitCmds (and its modules'),
+    #                                                0xF030, the cia402 mode where 0x6060 is not mapped
     notes: list = field(default_factory=list)
 
 
@@ -603,26 +603,30 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         dictionary = coe if coe is not None and coe.entries else esi_mod.dictionary(esi_dev)
         cmds = dataclasses.replace(esi_dev, init_cmds=list(esi_dev.init_cmds) + module_cmds)
         found = initcmds.from_esi(cmds, dictionary, "cia402" if p.profile == 402 else None)
-        p.init_settings += found.settings
+        p.init_cmds += found.cmds
         p.notes += found.notes
-        if found.settings:
-            p.notes.append("settings %s from the ESI file's InitCmds" % ", ".join(st["object"] for st in found.settings))
+        if found.cmds:
+            p.notes.append("init-cmds %s from the ESI file's InitCmds" % ", ".join(r["object"] for r in found.cmds))
     if layout is not None:
-        p.init_settings += layout.settings
+        # the configured module list, written at the transition the ESI file names (IP)
+        p.init_cmds += [dict(st, at="IP") for st in layout.settings]
     if p.profile == 402:
         mapped = {e.index for pd in pdos for e in pd.entries}
         supported = drive_modes if drive_modes is not None else getattr(esi_dev, "drive_modes", None)
         one_mode = supported is not None and bin(supported & 0x3FF).count("1") == 1
         for a in range(p.axes):
             index = 0x6060 + a * AXIS_OFFSET
+            obj_text = "0x%04X:00" % index
             if index in mapped or one_mode or extra_modes:
+                # the mode is set every cycle (or there is nothing to set): no row for it
+                p.init_cmds = [r for r in p.init_cmds if r["object"] != obj_text]
                 continue
-            p.init_settings.append({"object": "0x%04X:00" % index, "name": "Modes of operation",
-                                    "type": "SINT", "value": CIA402_MODE_NUMBERS[mode]})
-            p.notes.append("0x%04X is not in the process data: the mode is the setting 0x%04X:00 = %d (%s), "
-                           "written in PREOP at every start" % (index, index, CIA402_MODE_NUMBERS[mode], mode.upper()))
+            if not any(r["object"] == obj_text for r in p.init_cmds):
+                p.init_cmds.append({"at": "PS", "object": obj_text, "from": "profile"})
+            p.notes.append("0x%04X is not in the process data: the mode (%d, %s) is written at every start "
+                           "(init-cmds, from: profile)" % (index, CIA402_MODE_NUMBERS[mode], mode.upper()))
         from . import config
-        mine = {"cia402": {"mode": mode, "axes": [None] * p.axes}, "settings": p.init_settings}
+        mine = {"cia402": {"mode": mode, "axes": [None] * p.axes}, "init-cmds": p.init_cmds}
         p.status = pdoreq.cia402_status(mode, extra_modes, p.axes,
                                         {(e.index, e.subindex) for pd in pdos for e in pd.entries},
                                         mode_settings=pdoreq.mode_settings(mine))

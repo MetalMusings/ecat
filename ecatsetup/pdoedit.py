@@ -226,10 +226,9 @@ def add_missing(slave, esi_dev, dictionary, adds):
         for index, d in adds:
             if d != "setting" or mode not in config.MODE_NUMBERS:
                 continue
-            st = {"object": config.obj(index, 0), "name": "Modes of operation", "type": "SINT",
-                  "value": config.MODE_NUMBERS[mode]}
-            slave.setdefault("settings", []).append(st)
-            added.append(st)
+            row = {"at": "PS", "object": config.obj(index, 0), "from": "profile"}
+            slave.setdefault("init-cmds", []).append(row)
+            added.append(row)
         adds = [(i, d) for i, d in adds if d != "setting"]
         if not adds:
             return added, failed

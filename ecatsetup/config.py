@@ -108,7 +108,8 @@ MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
 
 
 def mode_setting(slave, axis=0):
-    """The value of a drive's setting 0x6060:00 (for an axis), or None."""
+    """The mode a drive is put in at start (0x6060:00 for an axis): a setting's value, else
+    an init-cmds row's (from: profile is cia402.mode's number); None without either."""
     want = (0x6060 + axis * AXIS_OFFSET, 0)
     for st in slave.get("settings") or []:
         try:
@@ -116,7 +117,69 @@ def mode_setting(slave, axis=0):
                 return int(st["value"])
         except (ValueError, TypeError):
             pass
+    for r in slave.get("init-cmds") or []:
+        try:
+            if not isinstance(r, dict) or r.get("disabled") or parse_obj(r.get("object")) != want:
+                continue
+        except ValueError:
+            continue
+        if r.get("from") == "profile":
+            return MODE_NUMBERS.get((slave.get("cia402") or {}).get("mode"))
+        if "value" in r:
+            try:
+                return int(r["value"])
+            except (ValueError, TypeError):
+                return None
     return None
+
+
+INIT_AT = ("IP", "PS", "IP,PS")
+INIT_FROM = ("profile", "cycle-time")
+
+
+def init_cmd_errors(slave):
+    """What is wrong with a slave's init-cmds (as ecat_config.c checks them)."""
+    rows = slave.get("init-cmds")
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        return ["init-cmds must be a list"]
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            out.append("init-cmds: each row is a mapping (at, object, ...)")
+            continue
+        o = r.get("object")
+        try:
+            index, sub = parse_obj(o)
+        except ValueError:
+            out.append("init-cmds: %r is not an object such as 0x8000:01" % (o,))
+            continue
+        if r.get("disabled") is True:
+            continue
+        if r.get("at") not in INIT_AT:
+            out.append("init-cmds %s: at %s is not supported yet (ecat writes them in PREOP, before SAFEOP: "
+                       "IP and PS)" % (o, r.get("at") or "(missing)"))
+        f = r.get("from")
+        if f is not None:
+            if f not in INIT_FROM:
+                out.append("init-cmds %s: from must be profile or cycle-time" % o)
+            elif f == "profile" and not (slave.get("profile") == "cia402" and sub == 0
+                                         and (index - 0x6060) % AXIS_OFFSET == 0 and 0x6060 <= index < 0x8000):
+                out.append("init-cmds %s: from: profile is only for a cia402 drive's 0x6060:00" % o)
+        elif "value" in r:
+            if r.get("type") not in DATA_TYPES:
+                out.append("init-cmds %s: unknown type %r" % (o, r.get("type")))
+        elif "data" in r:
+            try:
+                bytes.fromhex(str(r["data"]))
+            except ValueError:
+                out.append("init-cmds %s: data %r is not hex bytes" % (o, r["data"]))
+        else:
+            out.append("init-cmds %s: give value and type, data, or from" % o)
+        if r.get("complete") and sub > 1:
+            out.append("init-cmds %s: complete access starts at subindex 0 or 1" % o)
+    return out
 
 
 def sync_mode_setting(slave):
@@ -208,11 +271,9 @@ def slave_from_proposal(p, name=None):
     if getattr(p, "sdo_timeout", None):
         s["sdo-timeout-ms"] = p.sdo_timeout
     # what the device needs written at start (ESI InitCmds, the drive's mode)
-    before = {parse_obj(x["object"]) for x in s["settings"]}
-    for st in getattr(p, "init_settings", None) or []:
-        # an object written twice in a row stays (0xF030:00: count 0, the list, the count)
-        if parse_obj(st["object"]) not in before:
-            s["settings"].append(dict(st))
+    # what the device's description writes at start (its InitCmds, 0xF030, the drive's mode)
+    if getattr(p, "init_cmds", None):
+        s["init-cmds"] = [dict(r) for r in p.init_cmds]
     # a quirk file's settings for this device (one saved from an earlier slave)
     have = {parse_obj(st["object"]) for st in s["settings"]}
     for st in quirks.settings((p.vendor_id, p.product_code)):
@@ -959,6 +1020,8 @@ def check(cfg, series=None):
             if dc.get("sync1-shift-ns") is not None and not dc.get("sync1-cycles"):
                 err("%s: dc sync1-shift-ns needs sync1-cycles (SYNC1 every n SYNC0 cycles)" % where)
         for e in eoe_errors(s.get("eoe")):
+            err("%s: %s" % (where, e))
+        for e in init_cmd_errors(s):
             err("%s: %s" % (where, e))
         v = s.get("sdo-timeout-ms")
         if v is not None and (isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 600000):

@@ -992,6 +992,15 @@ static void ecat_config_dc(lcec_master_t *master) {
     master->global_shift_time = master->app_time_period / 2;
   }
   for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+    int k;
+    // init-cmds from: cycle-time (0x1C32:02 and the like): the servo period, now known
+    for (k = 0; k < slave->n_cycle_sdos; k++) {
+      uint8_t ns[4];
+      EC_WRITE_U32(ns, master->app_time_period);
+      if (ecrt_slave_config_sdo(slave->config, slave->cycle_sdos[k]->index, slave->cycle_sdos[k]->subindex, ns, 4) != 0)
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "slave %s.%s: failed to configure sdo %04x:%02x (cycle time)\n",
+            master->name, slave->name, slave->cycle_sdos[k]->index, slave->cycle_sdos[k]->subindex);
+    }
     if (slave->dc_conf == NULL) {
       continue;
     }
@@ -1147,7 +1156,16 @@ int rtapi_app_main(void) {
       if (slave->sdo_config != NULL) {
         for (sdo_config = slave->sdo_config; sdo_config->index != 0xffff;
              sdo_config = (lcec_slave_sdoconf_t *)&sdo_config->data[sdo_config->length]) {
-          if (sdo_config->subindex == LCEC_CONF_SDO_COMPLETE_SUBIDX) {
+          if (sdo_config->subindex == LCEC_CONF_SDO_COMPLETE_FROM1) {
+#ifdef EC_HAVE_COMPLETE_SDO_FROM
+            if (ecrt_slave_config_complete_sdo_from(slave->config, sdo_config->index, 1, &sdo_config->data[0],
+                                                   sdo_config->length) != 0)
+#endif
+            {
+              rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failed to configure slave %s.%s sdo %04x:01 (complete access; "
+                  "needs a master with ecrt_slave_config_complete_sdo_from)\n", master->name, slave->name, sdo_config->index);
+            }
+          } else if (sdo_config->subindex == LCEC_CONF_SDO_COMPLETE_SUBIDX) {
             if (ecrt_slave_config_complete_sdo(slave->config, sdo_config->index, &sdo_config->data[0], sdo_config->length) != 0) {
               rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "failed to configure slave %s.%s sdo %04x (complete)\n", master->name,
                   slave->name, sdo_config->index);
@@ -1627,6 +1645,15 @@ int lcec_parse_config(void) {
 
         // add to slave
         slave->dc_conf = dc;
+        break;
+
+      case lcecConfTypeSdoCycleTime:
+        if (slave == NULL || slave->n_cycle_sdos == 4) {
+          rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "init-cmds from: cycle-time: no slave, or more than 4\n");
+          goto fail2;
+        }
+        slave->cycle_sdos[slave->n_cycle_sdos++] = (LCEC_CONF_SDO_CYCLE_T *)conf;
+        conf += sizeof(LCEC_CONF_SDO_CYCLE_T);
         break;
 
       case lcecConfTypeStateTimeouts:

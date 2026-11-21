@@ -1,10 +1,12 @@
-"""An ESI file's InitCmds as settings (docs/development.md "ESI InitCmds").
+"""An ESI file's InitCmds as a slave's init-cmds (docs/development.md "ESI InitCmds").
 
-An InitCmd is an SDO write the vendor's file asks the configuring tool to do at a
-state change, such as StepperOnline's 0x6060 = 8 at PREOP->SAFEOP. TwinCAT does
-them; ecat does not read ESI files at run time, so EtherCAT Setup puts the ones
-that are fixed settings into the slave's `settings` (written in PREOP whenever the
-master configures the slave). The rules are data: pdoreq/initcmds.yaml.
+An InitCmd is an SDO write the vendor's file asks the configuring tool to do at a state
+change, such as StepperOnline's 0x6060 = 8 at PREOP->SAFEOP. ecat does not read ESI files
+at run time, so EtherCAT Setup copies them into the slave's `init-cmds`, which the
+component writes before the user's `settings`, in PREOP whenever the master configures
+the slave. They stay apart from the settings: the vendor's, with their transition, complete
+access, and templates the component fills in (the cycle time); a row can be turned off
+(`disabled: true`). The rules are data: pdoreq/initcmds.yaml.
 """
 
 from dataclasses import dataclass, field
@@ -20,10 +22,9 @@ _SIZE = {"BOOL": 1, "SINT": 1, "USINT": 1, "INT": 2, "UINT": 2, "DINT": 4, "UDIN
 
 @dataclass
 class Found:
-    settings: list = field(default_factory=list)   # setting dicts for the file
+    cmds: list = field(default_factory=list)       # init-cmds rows for the file
     notes: list = field(default_factory=list)      # what the user should know
     skipped: list = field(default_factory=list)    # (object text, why)
-    owned: list = field(default_factory=list)      # (index, subindex, value) a profile decides
 
 
 def _rules():
@@ -34,62 +35,73 @@ def _obj(index, sub):
     return "0x%04X:%02X" % (index, sub)
 
 
-def setting(index, sub, data, dictionary=None):
-    """The setting an InitCmd's data gives: a typed value where the type is known
-    (the dictionary, else the data's length), else the raw bytes."""
+def value_of(index, sub, data, dictionary=None):
+    """The value part of a row from an InitCmd's data: a typed value where the type is
+    known (the dictionary, else the data's length) and its size fits, else the raw bytes."""
     raw = bytes.fromhex((data or "").replace(" ", ""))
     entry = dictionary.entries.get((index, sub)) if dictionary is not None else None
     ctype = guidance.config_type(entry) or _BY_LENGTH.get(len(raw))
-    st = {"object": _obj(index, sub)}
+    out = {}
     if entry is not None and dictionary.name(index, sub):
-        st["name"] = dictionary.name(index, sub)
+        out["name"] = dictionary.name(index, sub)
     if ctype in ("REAL", "LREAL") or ctype is None or _SIZE.get(ctype) != len(raw):
         # as the file has it, byte by byte: also where the dictionary's type has another size
-        st["data"] = raw.hex(" ")
-        return st
-    st["type"] = ctype
-    st["value"] = int.from_bytes(raw, "little", signed=ctype in _SIGNED)
-    return st
+        out["data"] = raw.hex(" ")
+        return out
+    out["type"] = ctype
+    out["value"] = int.from_bytes(raw, "little", signed=ctype in _SIGNED)
+    return out
 
 
 def from_esi(esi_dev, dictionary=None, profile=None):
-    """The InitCmds of a device description, sorted into settings, notes and what is
-    skipped. `profile` ("cia402", ...): objects it owns are returned in `owned`."""
+    """The InitCmds of a device description (and its modules', moved to their slots), as
+    init-cmds rows, notes and what is skipped. `profile` ("cia402", ...): an object it owns
+    becomes a row with `from: profile`."""
     out = Found()
     if esi_dev is None:
         return out
     rules = _rules()
     owned = set(rules.get("profile-owned", {}).get(profile) or [])
+    templates = {pdoreq_obj(k): v for k, v in (rules.get("templates") or {}).items()}
     seen = set()
     for cmd in esi_dev.init_cmds:
         transitions, index, sub, data = cmd[:4]
-        complete = len(cmd) > 4 and cmd[4]
-        when = {t.strip().upper() for t in (transitions or "").split(",") if t.strip()}
+        complete = len(cmd) > 4 and bool(cmd[4])
+        when = [t.strip().upper() for t in (transitions or "").split(",") if t.strip()]
         text = _obj(index, sub)
-        if complete:
-            out.skipped.append((text, "written with complete access (the whole object at once), which "
-                                      "ecat's settings do not do yet"))
-            if any(lo <= index <= hi for lo, hi in rules["take"]):
-                out.notes.append("%s: the ESI file writes the whole object at start (complete access); "
-                                 "ecat cannot yet: set its subindexes as settings if the device needs it" % text)
+        on_time = [t for t in when if t in rules["transitions"]["on-time"]]
+        if not on_time:
+            out.skipped.append((text, "at %s, a state change ecat does not write at yet" % ",".join(when)))
             continue
-        if not when & set(rules["transitions"]["on-time"] + rules["transitions"]["early"]):
-            out.skipped.append((text, "at %s, a state change ecat does not configure at" % ",".join(sorted(when))))
+        row = {"at": ",".join(on_time), "object": text}
+        if (index, sub) in templates:
+            row["from"] = templates[(index, sub)]
+        elif index in owned:
+            row["from"] = "profile"
+        else:
+            why = next((r["why"] for r in rules["skip"] if r["from"] <= index <= r["to"]), None)
+            if why is not None or not any(lo <= index <= hi for lo, hi in rules["take"]):
+                out.skipped.append((text, why or "outside the objects taken"))
+                continue
+            if complete:
+                if sub > 1:
+                    out.skipped.append((text, "complete access from subindex %d" % sub))
+                    continue
+                row["complete"] = True
+                row["data"] = bytes.fromhex((data or "").replace(" ", "")).hex(" ")
+            else:
+                row.update(value_of(index, sub, data, dictionary))
+        if (row["object"], row.get("complete", False)) in seen:
             continue
-        why = next((r["why"] for r in rules["skip"] if r["from"] <= index <= r["to"]), None)
-        if why is not None or not any(lo <= index <= hi for lo, hi in rules["take"]):
-            out.skipped.append((text, why or "outside the objects taken as settings"))
-            continue
-        if (index, sub) in seen:
-            continue
-        seen.add((index, sub))
-        st = setting(index, sub, data, dictionary)
-        if index in owned:
-            raw = bytes.fromhex((data or "").replace(" ", ""))
-            out.owned.append((index, sub, st.get("value", int.from_bytes(raw, "little", signed=True))))
-            continue
-        out.settings.append(st)
-        if not when & set(rules["transitions"]["on-time"]):
-            out.notes.append("%s: the ESI file writes it at %s; ecat writes settings in PREOP, before "
-                             "that" % (text, ",".join(sorted(when))))
+        seen.add((row["object"], row.get("complete", False)))
+        out.cmds.append(row)
+    if any("complete" in r for r in out.cmds):
+        out.notes.append("complete-access InitCmds need a master with ecrt_slave_config_complete_sdo_from "
+                         "(the master fork after 1.5) where they start at subindex 1")
     return out
+
+
+def pdoreq_obj(text):
+    """(index, subindex) of "0x1C32:02"."""
+    index, sub = str(text).split(":")
+    return int(index, 16), int(sub, 16)

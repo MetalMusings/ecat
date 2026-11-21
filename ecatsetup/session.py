@@ -259,27 +259,25 @@ class Session:
                 notes.append("slave %s (%s): recommended timeouts, from its ESI file: %s; add "
                              "them with \"Add what the device needs\" on its page"
                              % (s["position"], s.get("name"), ", ".join("%s %d ms" % kv for kv in sorted(timeouts.items()))))
-            missing = self.missing_init_settings(s.get("position"))
+            missing = self.missing_init_cmds(s.get("position"))
             if missing:
-                notes.append("slave %s (%s): recommended settings, from its ESI file or for its mode: %s; add "
-                             "them with \"Add what the device needs\" on its page"
-                             % (s["position"], s.get("name"), ", ".join(
-                                 "%s = %s" % (st["object"], st.get("value", st.get("data"))) for st in missing)))
+                notes.append("slave %s (%s): its ESI file writes at start what the file does not have yet: %s; "
+                             "add them with \"Add what the device needs\" on its page"
+                             % (s["position"], s.get("name"), ", ".join(_row_text(r) for r in missing)))
         return notes + netif.fill_master(self.cfg, self.bus_interface)
 
-    def missing_init_settings(self, position):
-        """The settings the proposal of the slave read from the bus would write at start
-        (its ESI file's InitCmds; a drive's mode where 0x6060 is not in the file's process
-        data) that its entry lacks. Empty without the bus."""
+    def missing_init_cmds(self, position):
+        """The init-cmds rows the proposal of the slave read from the bus has (its ESI file's
+        InitCmds, 0xF030; a drive's mode where 0x6060 is not in the file's process data and
+        no setting gives it) that the slave's entry lacks (a row turned off counts as there).
+        Empty without the bus."""
         s, b = self.slave(position), self.bus.get(position)
         if s is None or b is None or not same_kind(s, b.info):
             return []
-        have = set()
-        for st in s.get("settings") or []:
-            try:
-                have.add(config.parse_obj(st.get("object")))
-            except ValueError:
-                pass
+
+        def key(r):
+            return (str(r.get("object")).upper(), bool(r.get("complete")), r.get("at"))
+        have = {key(r) for r in s.get("init-cmds") or [] if isinstance(r, dict)}
         mapped = set()
         for d in (s.get("process-data") or {}).values():
             for pdo in d or []:
@@ -289,16 +287,16 @@ class Session:
                     except ValueError:
                         pass
         out = []
-        for st in getattr(b.proposal, "init_settings", None) or []:
-            o = config.parse_obj(st["object"])
-            if o in have:
+        for r in getattr(b.proposal, "init_cmds", None) or []:
+            if key(r) in have:
                 continue
-            if s.get("profile") == "cia402" and (o[0] & 0x7FF) == 0x0060 and 0x6060 <= o[0] < 0x8000:
+            o = config.parse_obj(r["object"])
+            if r.get("from") == "profile":
                 c = s.get("cia402") or {}
-                if o in mapped or c.get("modes") or c.get("mode") not in config.MODE_NUMBERS:
-                    continue        # the mode is set every cycle, or there is nothing to set
-                st = dict(st, value=config.MODE_NUMBERS[c["mode"]])
-            out.append(dict(st))
+                if (s.get("profile") != "cia402" or o in mapped or c.get("modes")
+                        or config.mode_setting(s, (o[0] - 0x6060) // config.AXIS_OFFSET) is not None):
+                    continue        # the mode is set every cycle, or already at start
+            out.append(dict(r))
         return out
 
     def missing_state_timeouts(self, position):
@@ -314,14 +312,14 @@ class Session:
             out["sdo"] = b.proposal.sdo_timeout       # sdo-timeout-ms
         return out
 
-    def add_init_settings(self, position):
-        """Add what missing_init_settings and missing_state_timeouts name; returns the
-        settings added (and the timeouts, as {"object": "state-timeouts-ms.<key>", "value": ms})."""
+    def add_device_needs(self, position):
+        """Add what missing_init_cmds and missing_state_timeouts name; returns the rows
+        added (and the timeouts, as {"object": "state-timeouts-ms.<key>", "value": ms})."""
         s = self.slave(position)
-        added = self.missing_init_settings(position)
+        added = self.missing_init_cmds(position)
         timeouts = self.missing_state_timeouts(position)
         if s is not None and added:
-            s.setdefault("settings", []).extend(added)
+            s.setdefault("init-cmds", []).extend(dict(r) for r in added)
         if s is not None and "sdo" in timeouts:
             s["sdo-timeout-ms"] = timeouts.pop("sdo")
             added.append({"object": "sdo-timeout-ms", "value": s["sdo-timeout-ms"]})
@@ -553,6 +551,13 @@ class Session:
     def object_name(self, position, index, subindex):
         b = self.bus.get(position)
         return b.coe.name(index, subindex) if b and b.coe else ""
+
+
+def _row_text(r):
+    """"0x8000:06 = 1", "0x1C32:02 = the cycle time", "0x6060:00 = the mode" of an init-cmds row."""
+    what = {"profile": "the mode", "cycle-time": "the cycle time"}.get(r.get("from"))
+    return "%s = %s%s" % (r.get("object"), what or r.get("value", r.get("data")),
+                          " (complete access)" if r.get("complete") else "")
 
 
 def _take_pdos(old, new):

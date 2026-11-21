@@ -627,12 +627,59 @@ static void process_data(ctx_t *c, buf_t *b, yaml_node_t *pd, LCEC_CONF_SLAVE_T 
 
 // ---- settings ----
 
+/// The bytes of a setting or InitCmd: value with type, or data (hex bytes). 0 after an error.
+static size_t sdo_bytes(ctx_t *c, yaml_node_t *st, const char *what, const char *object, uint8_t *data,
+                        size_t cap) {
+  const char *hex = get_str(c, st, "data");
+  size_t len = 0;
+  if (get(c, st, "value") != NULL) {
+    const dtype_t *dt = find_dtype(get_str(c, st, "type"));
+    if (dt == NULL) {
+      error(c, "%s %s: unknown type", what, object);
+      return 0;
+    }
+    len = dt->bytes;
+    if (dt->is_float) {
+      double v = get_float(c, st, "value", 0);
+      if (len == 4) {
+        float f = v;
+        memcpy(data, &f, 4);  // little endian on the machines LinuxCNC runs on
+      } else {
+        memcpy(data, &v, 8);
+      }
+    } else {
+      unsigned long long v = (unsigned long long)get_int(c, st, "value", 0);
+      size_t n;
+      for (n = 0; n < len; n++) data[n] = (v >> (8 * n)) & 0xff;
+    }
+  } else if (hex != NULL) {
+    const char *p = hex;
+    unsigned int byte;
+    int used;
+    while (*p) {
+      if (*p == ' ') {
+        p++;
+        continue;
+      }
+      if (len >= cap || sscanf(p, "%2x%n", &byte, &used) != 1 || used != 2) {
+        error(c, "%s %s: data \"%s\" is not hex bytes", what, object, hex);
+        return 0;
+      }
+      data[len++] = byte;
+      p += 2;
+    }
+  } else {
+    error(c, "%s %s: give value and type, or data", what, object);
+  }
+  return len;
+}
+
+
 static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
   int i, ax;
   for (i = 0; i < seq_len(list); i++) {
     yaml_node_t *st = seq_item(c, list, i);
     const char *object = get_str(c, st, "object");
-    const char *hex = get_str(c, st, "data");
     uint8_t data[64];
     size_t len = 0;
     uint16_t index;
@@ -653,46 +700,85 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
     if ((ax = cia402_axis(c, index, 0x607D)) >= 0 && (subindex == 1 || subindex == 2)) c->pp_limits[ax] |= 1u << (subindex - 1);
     if ((ax = cia402_axis(c, index, 0x6060)) >= 0 && subindex == 0 && get(c, st, "value") != NULL)
       c->mode_setting[ax] = (int)get_int(c, st, "value", 0);
-    if (get(c, st, "value") != NULL) {
-      const dtype_t *dt = find_dtype(get_str(c, st, "type"));
-      if (dt == NULL) {
-        error(c, "setting %s: unknown type", object);
+    len = sdo_bytes(c, st, "setting", object, data, sizeof(data));
+    if (len == 0) continue;
+    if ((sc = append(b, sizeof(*sc) + len)) == NULL) {
+      error(c, "out of memory");
+      return;
+    }
+    sc->confType = lcecConfTypeSdoConfig;
+    sc->index = index;
+    sc->subindex = subindex;
+    sc->length = len;
+    memcpy(sc->data, data, len);
+    ((LCEC_CONF_SLAVE_T *)(b->data + slave_off))->sdoConfigLength += sizeof(*sc) + len;
+  }
+}
+
+// ---- init-cmds: what the device's ESI file writes at start ----
+
+/// The ESI file's InitCmds (EtherCAT Setup takes them, docs/component.md "init-cmds"): each
+/// {at: IP|PS, object, value+type | data | from: profile | from: cycle-time, complete, disabled}.
+/// Written before the settings, as SDOs the master writes in PREOP whenever it configures the
+/// slave; from: cycle-time once the servo period is known (lcec_main.c); complete access from
+/// subindex 0 or 1.
+static void init_cmds(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
+  int i;
+  for (i = 0; i < seq_len(list); i++) {
+    yaml_node_t *st = seq_item(c, list, i);
+    const char *object = get_str(c, st, "object");
+    const char *at = get_str(c, st, "at");
+    const char *from = get_str(c, st, "from");
+    int complete = get_bool(c, st, "complete", 0);
+    uint8_t data[64];
+    size_t len = 0;
+    uint16_t index;
+    uint8_t subindex;
+    int ax;
+    LCEC_CONF_SDOCONF_T *sc;
+
+    if (get_bool(c, st, "disabled", 0)) continue;
+    if (parse_object(c, object, &index, &subindex) < 0) continue;
+    if (at == NULL || (strcmp(at, "IP") && strcmp(at, "PS") && strcmp(at, "IP,PS"))) {
+      error(c, "init-cmds %s: at %s is not supported yet (ecat writes them in PREOP, before SAFEOP: IP and PS)",
+            object, at ? at : "(missing)");
+      continue;
+    }
+    if (from != NULL && !strcmp(from, "profile")) {
+      // the drive's mode: the profile decides the value
+      if (!c->cia402 || (ax = cia402_axis(c, index, 0x6060)) < 0 || subindex != 0) {
+        error(c, "init-cmds %s: from: profile is only for a cia402 drive's 0x6060:00", object);
         continue;
       }
-      len = dt->bytes;
-      if (dt->is_float) {
-        double v = get_float(c, st, "value", 0);
-        if (len == 4) {
-          float f = v;
-          memcpy(data, &f, 4);  // little endian on the machines LinuxCNC runs on
-        } else {
-          memcpy(data, &v, 8);
+      {
+        unsigned mode;
+        for (mode = 0; mode < 32 && !((c->cia402_all & ~c->cia402_modes) & (1u << mode)); mode++) {
         }
-      } else {
-        unsigned long long v = (unsigned long long)get_int(c, st, "value", 0);
-        size_t n;
-        for (n = 0; n < len; n++) data[n] = (v >> (8 * n)) & 0xff;
+        data[0] = (uint8_t)(int8_t)mode;
+        len = 1;
+        c->mode_setting[ax] = (int)mode;
       }
-    } else if (hex != NULL) {
-      const char *p = hex;
-      unsigned int byte;
-      int used;
-      while (*p) {
-        if (*p == ' ') {
-          p++;
-          continue;
-        }
-        if (len >= sizeof(data) || sscanf(p, "%2x%n", &byte, &used) != 1 || used != 2) {
-          error(c, "setting %s: data \"%s\" is not hex bytes", object, hex);
-          len = 0;
-          break;
-        }
-        data[len++] = byte;
-        p += 2;
+    } else if (from != NULL && !strcmp(from, "cycle-time")) {
+      LCEC_CONF_SDO_CYCLE_T *ct = append(b, sizeof(*ct));
+      if (ct == NULL) {
+        error(c, "out of memory");
+        return;
       }
-      if (len == 0) continue;
+      ct->confType = lcecConfTypeSdoCycleTime;
+      ct->index = index;
+      ct->subindex = subindex;
+      continue;
+    } else if (from != NULL) {
+      error(c, "init-cmds %s: from must be profile or cycle-time", object);
+      continue;
     } else {
-      error(c, "setting %s: give value and type, or data", object);
+      len = sdo_bytes(c, st, "init-cmds", object, data, sizeof(data));
+      if (len == 0) continue;
+      if ((ax = cia402_axis(c, index, 0x6060)) >= 0 && subindex == 0 && c->cia402 && len == 1)
+        c->mode_setting[ax] = (int)(int8_t)data[0];
+    }
+    if (complete && subindex > 1) {
+      error(c, "init-cmds %s: complete access starts at subindex 0 or 1", object);
       continue;
     }
     if ((sc = append(b, sizeof(*sc) + len)) == NULL) {
@@ -701,7 +787,7 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
     }
     sc->confType = lcecConfTypeSdoConfig;
     sc->index = index;
-    sc->subindex = subindex;
+    sc->subindex = complete ? (subindex ? LCEC_CONF_SDO_COMPLETE_FROM1 : LCEC_CONF_SDO_COMPLETE_SUBIDX) : subindex;
     sc->length = len;
     memcpy(sc->data, data, len);
     ((LCEC_CONF_SLAVE_T *)(b->data + slave_off))->sdoConfigLength += sizeof(*sc) + len;
@@ -1247,6 +1333,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   memset(c->pp_limits, 0, sizeof(c->pp_limits));
   for (a = 0; a < ECAT_CIA402_MAX_AXES; a++) c->mode_setting[a] = -1000;
   serial_settings(c, b, off);
+  init_cmds(c, b, get(c, s, "init-cmds"), off);   // the device's first, the user's settings after
   settings(c, b, get(c, s, "settings"), off);
   if (c->cia402) {
     // the mode: set every cycle (0x6060 in the process data), or once as a setting;

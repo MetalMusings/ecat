@@ -51,6 +51,7 @@ static int load(const char *yaml) {
     switch (t) {
       case lcecConfTypeNone: off += sizeof(LCEC_CONF_NULL_T); break;
       case lcecConfTypeStateTimeouts: off += sizeof(LCEC_CONF_STATE_TIMEOUTS_T); break;
+      case lcecConfTypeSdoCycleTime: off += sizeof(LCEC_CONF_SDO_CYCLE_T); break;
       case lcecConfTypeMaster: off += sizeof(LCEC_CONF_MASTER_T); break;
       case lcecConfTypeSlave: off += sizeof(LCEC_CONF_SLAVE_T); break;
       case lcecConfTypeDcConf: off += sizeof(LCEC_CONF_DC_T); break;
@@ -703,6 +704,42 @@ static void test_cia402_pp(void) {
 
 #define TIMEOUTS(n) ((LCEC_CONF_STATE_TIMEOUTS_T *)nth(lcecConfTypeStateTimeouts, n))
 
+#define CYCLE(n) ((LCEC_CONF_SDO_CYCLE_T *)nth(lcecConfTypeSdoCycleTime, n))
+
+static void test_init_cmds(void) {
+  // before the settings; complete access from 0 or 1; the cycle time later; disabled left out
+  CHECK_EQ(load("ecat: 1\nmaster: {}\nslaves:\n- position: 0\n  name: d\n  profile: generic\n"
+                "  init-cmds:\n"
+                "  - {at: PS, object: '0x8000:06', type: USINT, value: 1}\n"
+                "  - {at: PS, object: '0x8080:01', complete: true, data: '00 00 00 03 03 00'}\n"
+                "  - {at: IP, object: '0x8090:00', complete: true, data: '02 11 22'}\n"
+                "  - {at: PS, object: '0x1C32:02', from: cycle-time}\n"
+                "  - {at: PS, object: '0x8000:07', type: USINT, value: 5, disabled: true}\n"
+                "  settings:\n  - {object: '0x8000:06', type: USINT, value: 2}\n"),
+      0);
+  CHECK_EQ(count(lcecConfTypeSdoConfig), 4);
+  CHECK_EQ(SDO(0)->index, 0x8000);
+  CHECK_EQ(SDO(0)->data[0], 1);                    // the device's first ...
+  CHECK_EQ(SDO(1)->subindex, LCEC_CONF_SDO_COMPLETE_FROM1);
+  CHECK_EQ(SDO(1)->length, 6);
+  CHECK_EQ(SDO(2)->subindex, LCEC_CONF_SDO_COMPLETE_SUBIDX);
+  CHECK_EQ(SDO(3)->data[0], 2);                    // ... the user's setting after
+  CHECK_EQ(count(lcecConfTypeSdoCycleTime), 1);
+  CHECK_EQ(CYCLE(0)->index, 0x1C32);
+  CHECK_EQ(CYCLE(0)->subindex, 2);
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- position: 0\n  name: d\n  profile: generic\n"
+              "  init-cmds:\n  - {at: SO, object: '0x8000:06', type: USINT, value: 1}\n",
+              "init-cmds 0x8000:06: at SO is not supported yet");
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- position: 0\n  name: d\n  profile: generic\n"
+              "  init-cmds:\n  - {at: PS, object: '0x6060:00', from: profile}\n",
+              "from: profile is only for a cia402 drive's 0x6060:00");
+  // the mode from the profile: set, as a setting would (no "neither set nor seen")
+  CHECK_EQ(load(CIA402("pv", P("0x6040:00", 16, "UINT") P("0x60FF:00", 32, "DINT"),
+                       P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT"))
+                "  init-cmds:\n  - {at: PS, object: '0x6060:00', from: profile}\n"), 0);
+  CHECK_EQ(SDO(0)->data[0], 3);
+}
+
 static void test_state_timeouts(void) {
   CHECK_EQ(load("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
                 "state-timeouts-ms: {preop: 6000, safeop-op: 30000}}\n"), 0);
@@ -1075,5 +1112,5 @@ static void test_unused(void) {
 
 RUN_TESTS("config", test_cia402_feedforward, test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
-    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_sync1, test_state_timeouts, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
+    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_sync1, test_state_timeouts, test_init_cmds, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders, test_serial, test_serial_errors, test_unused, test_master_cpus)

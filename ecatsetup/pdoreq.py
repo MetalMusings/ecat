@@ -299,8 +299,8 @@ def cia402_status(mode, modes, axes, have, data=None, mode_settings=None, esi_mo
                 continue
             value = settings.get(a)
             if value is not None:
-                out.append(Status("info", "0x%04X is not mapped: the mode is the setting 0x%04X:00 = %d, "
-                                  "written at every start" % (mo, mo, value)))
+                out.append(Status("info", "0x%04X is not mapped: the mode is written at every start "
+                                  "(0x%04X:00 = %d)" % (mo, mo, value)))
             elif (md, 0) in have:
                 out.append(Status("info", "0x%04X is not mapped and not a setting: the drive must already "
                                   "be in %s (the profile enables it only when 0x%04X shows that); add the "

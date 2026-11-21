@@ -286,7 +286,7 @@ class TestCheckSlave(unittest.TestCase):
         s["settings"] = [{"object": "0x6060:00", "type": "SINT", "value": 8}]
         notes = [t for l, t in self.texts(s) if l == "note"]
         self.assertEqual(len(notes), 2)
-        self.assertIn("the mode is the setting 0x6060:00 = 8", notes[0])
+        self.assertIn("the mode is written at every start (0x6060:00 = 8)", notes[0])
         self.assertIn("0x6061", notes[1])
 
     def test_generic_on_a_drive_that_would_do_for_cia402(self):
@@ -318,7 +318,7 @@ class TestStatus(unittest.TestCase):
         # the mode as a setting: information
         st = pdoreq.cia402_status("csp", [], 1, base, mode_settings={0: 8})
         self.assertEqual([x.level for x in st], ["info", "info"])
-        self.assertIn("the mode is the setting 0x6060:00 = 8", st[0].text)
+        self.assertIn("the mode is written at every start (0x6060:00 = 8)", st[0].text)
         # seen but not set: the drive must already be in the mode
         st = pdoreq.cia402_status("pv", [], 1, {(0x6040, 0), (0x60FF, 0), (0x6041, 0), (0x606C, 0), (0x6061, 0)})
         self.assertEqual([x.level for x in st], ["info"])
@@ -348,8 +348,7 @@ class TestProposal(unittest.TestCase):
         self.assertEqual(p.pdo_way, "")
         self.assertEqual([c.index for c in p.pdos], [0x1600, 0x1A00])
         self.assertEqual([s.level for s in p.status], ["info", "info"])   # the mode as a setting
-        self.assertEqual(p.init_settings, [{"object": "0x6060:00", "name": "Modes of operation",
-                                            "type": "SINT", "value": 8}])
+        self.assertEqual(p.init_cmds, [{"at": "PS", "object": "0x6060:00", "from": "profile"}])
         self.assertEqual(config.check(config.from_proposals([p])), [])
 
     def test_own_mapping_is_built_in_the_open_pdos(self):

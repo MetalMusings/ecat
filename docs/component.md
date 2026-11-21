@@ -344,7 +344,8 @@ file each stopped the load with their own line.
 | `process-data` | `outputs` (master to slave) and `inputs` (slave to master): lists of PDOs. |
 | `dc` | Distributed clocks; leave out for none. |
 | `eoe` | An IP address and more for a slave that speaks Ethernet over EtherCAT; leave out for none (see [eoe](#eoe)). |
-| `settings` | SDOs written to the slave at start, in this order. |
+| `init-cmds` | What the device's ESI file writes at start (its InitCmds; also a modular device's `0xF030` and a drive's mode), written **before** `settings`, in PREOP whenever the master configures the slave. Each row: `at` (`IP` or `PS`; others are not supported yet), `object`, and `value` with `type`, or `data` (hex bytes), or `from: profile` (a cia402 drive's `0x6060:00`: its mode) or `from: cycle-time` (the servo period in ns, UDINT: `0x1C32:02`, `0x1C33:02`); `complete: true` with `data` for complete access from subindex 0 or 1 (from 1 needs the master fork after 1.5); `disabled: true` to leave a row out and keep it, so that EtherCAT Setup's *Update* does not bring it back. EtherCAT Setup fills it from the ESI file; keep your own SDOs in `settings`. |
+| `settings` | SDOs written to the slave at start, in this order, after `init-cmds`. |
 | `sdo-timeout-ms` | How long the slave may take to answer an SDO (its settings at start, and the master's other SDO transfers to it), 1 to 600000 ms; the master's own is 1000 ms. EtherCAT Setup takes the ESI file's `Mailbox/Timeout/ResponseTimeout` where it is longer (2000 ms in most). Needs a master with `ecrt_slave_config_sdo_timeout()` (the master fork after 1.5); with an older one a warning says it is not used. |
 | `state-timeouts-ms` | Longer state change timeouts than the master's (ETG.2000's 3000, 10000, 5000 and 200 ms), for a slave that needs them: `preop` (INIT to PREOP), `safeop-op` (PREOP to SAFEOP and SAFEOP to OP), `back-to-init` (to INIT, and down to PREOP), `back-to-safeop` (OP to SAFEOP), each 1 to 600000 ms; leave a key out for the master's. EtherCAT Setup takes those of the ESI file (`Info/StateMachine/Timeout`) that are longer. |
 
@@ -602,19 +603,18 @@ they are in the process data:
 | `0x603F` error code | input | no |
 
 The drive's mode must be set or seen. With one mode, either `0x6060` is
-in the process data (written every cycle), or the mode is the setting
-`0x6060:00` (type `SINT`, the mode's number: 1 `pp`, 3 `pv`, 8 `csp`, 9
-`csv`), written in PREOP whenever the master configures the slave, as
-StepperOnline's and Rtelligent's ESI files ask with an InitCmd; or at
-least `0x6061` is mapped, so that the profile enables the drive only when
-it shows the mode. A setting `0x6060:00` must say the mode of
-`cia402.mode`. Without any of them the component does not load: "the
-drive's mode is neither set nor seen: add the setting 0x6060:00 = 8 ...".
-EtherCAT Setup proposes the setting where `0x6060` is not mapped (StepperOnline
-A6's default PDOs `0x1701`/`0x1B01`, for example) and keeps it in step when
-the mode is changed in the window. A drive that has one mode only (its
-`0x6502`) gets none. Changing modes while running (`modes`) needs both
-`0x6060` and `0x6061` in the process data.
+in the process data (written every cycle), or the mode is written once at
+start: an `init-cmds` row `{at: PS, object: '0x6060:00', from: profile}`
+(the value is the mode's number: 1 `pp`, 3 `pv`, 8 `csp`, 9 `csv`, as
+StepperOnline's and Rtelligent's ESI files ask with an InitCmd) or a
+setting `0x6060:00` of type `SINT`; or at least `0x6061` is mapped, so
+that the profile enables the drive only when it shows the mode. A value
+written at start must be the mode of `cia402.mode`. Without any of them the
+component does not load: "the drive's mode is neither set nor seen ...".
+EtherCAT Setup proposes the row where `0x6060` is not mapped (StepperOnline
+A6's default PDOs `0x1701`/`0x1B01`, for example). A drive that has one mode
+only (its `0x6502`) gets none. Changing modes while running (`modes`) needs
+both `0x6060` and `0x6061` in the process data.
 
 Other entries of the drive, such as torque or digital inputs, get ordinary
 pins.

@@ -57,60 +57,87 @@ class TestSorting(unittest.TestCase):
     def setUp(self):
         self.dev = device(CMDS, NO_MODE)
         self.found = initcmds.from_esi(self.dev, esi.dictionary(self.dev), "cia402")
+        self.rows = {r["object"]: r for r in self.found.cmds}
 
-    def test_fixed_settings_are_taken_with_their_types(self):
-        self.assertEqual(self.found.settings, [
-            {"object": "0x2001:00", "name": "Brake delay", "type": "INT", "value": -10},
-            {"object": "0x8000:06", "type": "USINT", "value": 1}])
+    def test_fixed_ones_with_their_types_and_transitions(self):
+        self.assertEqual(self.rows["0x2001:00"], {"at": "PS", "object": "0x2001:00", "name": "Brake delay",
+                                                 "type": "INT", "value": -10})
+        self.assertEqual(self.rows["0x8000:06"], {"at": "PS", "object": "0x8000:06", "type": "USINT", "value": 1})
 
-    def test_templates_and_tool_functions_are_skipped(self):
+    def test_complete_access_and_the_cycle_time(self):
+        self.assertEqual(self.rows["0x8090:01"], {"at": "PS", "object": "0x8090:01", "complete": True,
+                                                 "data": "00 00 00 03 03 00"})
+        self.assertEqual(self.rows["0x1C32:02"], {"at": "PS", "object": "0x1C32:02", "from": "cycle-time"})
+        self.assertTrue(any("complete_sdo_from" in n for n in self.found.notes))
+
+    def test_tool_functions_and_other_transitions_are_skipped(self):
         skipped = dict(self.found.skipped)
-        self.assertIn("cycle time", skipped["0x1C32:02"])
         self.assertIn("revision", skipped["0xF081:01"])
         self.assertIn("0x10F3:05", skipped)
-        self.assertIn("complete access", skipped["0x8090:01"])
         self.assertIn("PI", skipped["0x2002:00"])
-        self.assertTrue(any("0x8090:01" in n and "complete access" in n for n in self.found.notes))
+        self.assertNotIn("0xF081:01", self.rows)
 
-    def test_the_profiles_object_is_not_a_setting(self):
-        self.assertEqual(self.found.owned, [(0x6060, 0, 8)])
-        generic = initcmds.from_esi(self.dev, esi.dictionary(self.dev), None)
+    def test_the_profiles_object(self):
+        self.assertEqual(self.rows["0x6060:00"], {"at": "PS", "object": "0x6060:00", "from": "profile"})
+        generic = {r["object"]: r for r in initcmds.from_esi(self.dev, esi.dictionary(self.dev), None).cmds}
         # this dictionary says 16 bits, the InitCmd has one byte: the byte as it is
-        self.assertIn({"object": "0x6060:00", "name": "o", "data": "08"}, generic.settings)
+        self.assertEqual(generic["0x6060:00"], {"at": "PS", "object": "0x6060:00", "name": "o", "data": "08"})
 
     def test_raw_bytes_where_the_type_is_not_known(self):
-        self.assertEqual(initcmds.setting(0x8001, 1, "010203"), {"object": "0x8001:01", "data": "01 02 03"})
+        self.assertEqual(initcmds.value_of(0x8001, 1, "010203"), {"data": "01 02 03"})
 
 
 class TestProposal(unittest.TestCase):
-    def settings(self, p):
-        return config.slave_from_proposal(p)["settings"]
+    def rows(self, p):
+        return config.slave_from_proposal(p).get("init-cmds") or []
 
-    def test_the_mode_is_a_setting_where_0x6060_is_not_mapped(self):
+    def test_init_cmds_apart_from_the_settings(self):
         p = proposal(device(CMDS, NO_MODE), mode="pv")
-        st = self.settings(p)
-        self.assertIn({"object": "0x6060:00", "name": "Modes of operation", "type": "SINT", "value": 3}, st)
-        self.assertIn({"object": "0x2001:00", "name": "Brake delay", "type": "INT", "value": -10}, st)
-        self.assertTrue(any("the mode is the setting 0x6060:00 = 3 (PV)" in n for n in p.notes))
+        s = config.slave_from_proposal(p)
+        self.assertEqual(s["settings"], [])
+        self.assertEqual([r["object"] for r in s["init-cmds"]],
+                         ["0x6060:00", "0x2001:00", "0x8000:06", "0x1C32:02", "0x8090:01"])
+        self.assertTrue(any("the mode (3, PV) is written at every start" in n for n in p.notes))
 
-    def test_no_mode_setting_where_0x6060_is_mapped(self):
-        st = self.settings(proposal(device(CMDS, WITH_MODE)))
-        self.assertFalse(any(x["object"] == "0x6060:00" for x in st))
+    def test_no_mode_row_where_0x6060_is_mapped(self):
+        self.assertFalse(any(r["object"] == "0x6060:00" for r in self.rows(proposal(device(CMDS, WITH_MODE)))))
 
-    def test_no_mode_setting_for_a_drive_with_one_mode(self):
-        st = self.settings(proposal(device(CMDS, NO_MODE, modes=0x80)))
-        self.assertFalse(any(x["object"] == "0x6060:00" for x in st))
-        st = self.settings(proposal(device(CMDS, NO_MODE), drive_modes=0x80))    # read from the drive
-        self.assertFalse(any(x["object"] == "0x6060:00" for x in st))
+    def test_no_mode_row_for_a_drive_with_one_mode(self):
+        self.assertFalse(any(r["object"] == "0x6060:00" for r in self.rows(proposal(device(CMDS, NO_MODE, modes=0x80)))))
+        self.assertFalse(any(r["object"] == "0x6060:00"
+                             for r in self.rows(proposal(device(CMDS, NO_MODE), drive_modes=0x80))))
+
+    def test_a_mode_row_without_an_initcmd(self):
+        self.assertEqual(self.rows(proposal(device([], NO_MODE))),
+                         [{"at": "PS", "object": "0x6060:00", "from": "profile"}])
 
     def test_a_proposed_file_passes_the_check(self):
         for pdos in (NO_MODE, WITH_MODE):
             cfg = config.from_proposals([proposal(device(CMDS, pdos))])
             self.assertEqual(config.check(cfg), [])
 
-    def test_no_initcmds_no_settings(self):
-        p = proposal(device([], WITH_MODE))
-        self.assertEqual(p.init_settings, [])
+    def test_check(self):
+        cfg = config.from_proposals([proposal(device(CMDS, NO_MODE))])
+        rows = cfg["slaves"][0]["init-cmds"]
+        rows.append({"at": "SO", "object": "0x8000:07", "type": "USINT", "value": 1})
+        rows.append({"at": "PS", "object": "0x8000:08", "from": "nothing"})
+        rows.append({"at": "PS", "object": "0x8000:09", "complete": True, "data": "01"})
+        rows[-1]["object"] = "0x8000:02"
+        found = config.check(cfg)
+        self.assertTrue(any("at SO is not supported yet" in e for e in found))
+        self.assertTrue(any("from must be profile or cycle-time" in e for e in found))
+        self.assertTrue(any("complete access starts at subindex 0 or 1" in e for e in found))
+        rows[-3]["disabled"] = True                    # a row turned off is not checked further
+        self.assertFalse(any("at SO" in e for e in config.check(cfg)))
+
+    def test_the_mode_row_counts_as_set(self):
+        cfg = config.from_proposals([proposal(device([], NO_MODE))])
+        self.assertEqual(config.check(cfg), [])
+        cfg["slaves"][0]["init-cmds"][0]["disabled"] = True
+        self.assertTrue(any("neither set nor seen" in e for e in config.check(cfg)))
+
+    def test_no_initcmds_only_the_mode(self):
+        self.assertEqual(proposal(device([], WITH_MODE)).init_cmds, [])
 
 
 TIMEOUTS = ("<Info><StateMachine><Timeout><PreopTimeout>6000</PreopTimeout><SafeopOpTimeout>9000"
@@ -167,7 +194,7 @@ class TestStateTimeouts(unittest.TestCase):
 
 
 class TestRecommendedOnUpdate(unittest.TestCase):
-    """An existing file gets the device's settings only when the user adds them."""
+    """An existing file gets the device's init-cmds only when the user adds them."""
 
     def setUp(self):
         from ecatsetup import session
@@ -177,28 +204,31 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         self.sess.bus = {1: session.BusSlave(info, coe.Dictionary(), self.p)}
         self.sess.cfg = config.from_proposals([self.p])
         self.slave = self.sess.cfg["slaves"][0]
-        self.slave["settings"] = []          # a file made before InitCmds were read
+        del self.slave["init-cmds"]          # a file made before InitCmds were read
         del self.slave["state-timeouts-ms"]
         del self.slave["sdo-timeout-ms"]
 
-    def test_missing_settings_are_named(self):
-        missing = self.sess.missing_init_settings(1)
-        self.assertEqual([st["object"] for st in missing], ["0x2001:00", "0x8000:06", "0x6060:00"])
+    def test_missing_rows_are_named(self):
+        self.assertEqual([r["object"] for r in self.sess.missing_init_cmds(1)],
+                         ["0x6060:00", "0x2001:00", "0x8000:06", "0x1C32:02", "0x8090:01"])
 
-    def test_the_mode_follows_the_files_mode(self):
-        self.slave["cia402"]["mode"] = "pv"
-        self.assertIn({"object": "0x6060:00", "name": "Modes of operation", "type": "SINT", "value": 3},
-                      self.sess.missing_init_settings(1))
-
-    def test_no_mode_setting_where_the_file_maps_0x6060(self):
+    def test_no_mode_row_where_the_file_maps_0x6060_or_sets_it(self):
         self.slave["process-data"]["outputs"][0]["entries"].append(
             {"object": "0x6060:00", "bits": 8, "type": "SINT", "use": "profile"})
-        self.assertNotIn("0x6060:00", [st["object"] for st in self.sess.missing_init_settings(1)])
+        self.assertNotIn("0x6060:00", [r["object"] for r in self.sess.missing_init_cmds(1)])
+        self.slave["process-data"]["outputs"][0]["entries"].pop()
+        self.slave["settings"] = [{"object": "0x6060:00", "type": "SINT", "value": 8}]
+        self.assertNotIn("0x6060:00", [r["object"] for r in self.sess.missing_init_cmds(1)])
+
+    def test_a_row_turned_off_is_not_brought_back(self):
+        self.slave["init-cmds"] = [{"at": "PS", "object": "0x8000:06", "type": "USINT", "value": 1, "disabled": True}]
+        self.assertNotIn("0x8000:06", [r["object"] for r in self.sess.missing_init_cmds(1)])
 
     def test_update_only_recommends(self):
         notes = self.sess.update_from_bus()
-        self.assertEqual(self.sess.slave(1)["settings"], [])
-        self.assertTrue(any("recommended settings" in n and "0x2001:00 = -10" in n for n in notes), notes)
+        self.assertNotIn("init-cmds", self.sess.slave(1))
+        self.assertTrue(any("writes at start what the file does not have yet" in n and "0x2001:00 = -10" in n
+                            and "0x1C32:02 = the cycle time" in n for n in notes), notes)
 
     def test_timeouts_recommended_and_added(self):
         self.assertEqual(self.sess.missing_state_timeouts(1), {"preop": 6000, "back-to-safeop": 1000, "sdo": 2000})
@@ -207,12 +237,13 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         self.assertTrue(any("recommended timeouts" in n and "preop 6000 ms" in n for n in notes))
 
     def test_added_when_asked(self):
-        added = self.sess.add_init_settings(1)
-        self.assertEqual(len(added), 6)
+        added = self.sess.add_device_needs(1)
+        self.assertEqual(len(added), 8)
+        self.assertEqual(len(self.sess.slave(1)["init-cmds"]), 5)
         self.assertEqual(self.sess.slave(1)["state-timeouts-ms"], {"preop": 6000, "back-to-safeop": 1000})
         self.assertEqual(self.sess.slave(1)["sdo-timeout-ms"], 2000)
         self.assertEqual(self.sess.missing_state_timeouts(1), {})
-        self.assertEqual(self.sess.missing_init_settings(1), [])
+        self.assertEqual(self.sess.missing_init_cmds(1), [])
         self.assertEqual(config.check(self.sess.cfg), [])
 
 

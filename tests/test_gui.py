@@ -1693,14 +1693,33 @@ class TestPdoEditing(WindowBase):
     def test_add_what_the_device_needs(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
         self.assertTrue(page.init_button.isHidden())          # the fake bus has no InitCmds
-        missing = [{"object": "0x8000:06", "type": "USINT", "value": 1}]
-        with mock.patch.object(w.session, "missing_init_settings", return_value=missing):
+        missing = [{"at": "PS", "object": "0x8000:06", "type": "USINT", "value": 1},
+                   {"at": "PS", "object": "0x1C32:02", "from": "cycle-time"}]
+        with mock.patch.object(w.session, "missing_init_cmds", return_value=missing):
             page.show_settings(s)
             self.assertFalse(page.init_button.isHidden())
             self.assertIn("0x8000:06 = 1", page.init_button.toolTip())
-        with mock.patch.object(w.session, "add_init_settings", return_value=missing) as add:
-            page.add_init_settings()
+            self.assertIn("0x1C32:02 = the cycle time", page.init_button.toolTip())
+        with mock.patch.object(w.session, "add_device_needs", return_value=missing) as add:
+            page.add_device_needs()
         add.assert_called_once_with(1)
+
+    def test_the_init_cmds_card(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        self.assertTrue(page.ic_card.isHidden())             # none in the file
+        s["init-cmds"] = [{"at": "PS", "object": "0x6060:00", "from": "profile"},
+                          {"at": "PS", "object": "0x8080:01", "complete": True, "data": "00 03"},
+                          {"at": "PS", "object": "0x1C32:02", "from": "cycle-time"}]
+        page.show_settings(s)
+        self.assertFalse(page.ic_card.isHidden())
+        self.assertEqual(page.ic.rowCount(), 3)
+        self.assertEqual(page.ic.item(0, 3).text(), "the mode (CSP)")
+        self.assertEqual(page.ic.item(1, 3).text(), "00 03 (complete access)")
+        self.assertEqual(page.ic.item(2, 4).text(), "the cycle time")
+        page.ic.item(1, 0).setCheckState(gui.Qt.Unchecked)    # turned off: kept, marked
+        self.assertTrue(s["init-cmds"][1]["disabled"])
+        page.ic.item(1, 0).setCheckState(gui.Qt.Checked)
+        self.assertNotIn("disabled", s["init-cmds"][1])
 
     def test_the_mode_setting_follows_the_mode(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x607A, 32), (0x60FF, 32)])],

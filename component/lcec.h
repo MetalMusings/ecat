@@ -353,6 +353,8 @@ typedef struct lcec_slave {
   lcec_slave_dc_t *dc_conf;                  ///< Distributed Clock configuration.
   LCEC_CONF_EOE_T *eoe_conf;                 ///< EoE settings (ethercat.yaml eoe:), NULL if none.
   LCEC_CONF_STATE_TIMEOUTS_T *state_timeouts;  ///< state change timeouts (state-timeouts-ms), NULL if none.
+  LCEC_CONF_SDO_CYCLE_T *cycle_sdos[4];       ///< init-cmds from: cycle-time, written once the period is known
+  int n_cycle_sdos;
   lcec_slave_watchdog_t *wd_conf;            ///< Watchdog configuration.
   lcec_slave_preinit_t proc_preinit;         ///< Callback for pre-init, if any.
   lcec_slave_init_t proc_init;               ///< Callback for initializing device.
