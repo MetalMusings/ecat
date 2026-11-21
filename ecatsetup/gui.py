@@ -1268,7 +1268,20 @@ class SlaveView(QWidget):
         self.supported = QHBoxLayout()
         self.supported.addStretch(1)
         cform.addRow("Supported (0x6502)", self.supported)
+        self.mode_marks = label("", "hint", wrap=True)
+        self.mode_marks.setToolTip("Whether the device's PDOs can give what each mode needs, from its "
+                                   "ESI file: ready (a PDO assignment has it), build (an own mapping "
+                                   "in its open PDOs), impossible, unknown")
+        cform.addRow("PDOs per mode", self.mode_marks)
         cform.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        prof = QHBoxLayout()
+        prof.addWidget(label("Profile:"))
+        self.profile_box = QuietCombo()
+        self.profile_box.setToolTip(self.PROFILE_TIP)
+        self.profile_box.activated.connect(self.profile_chosen)
+        prof.addWidget(self.profile_box, 1)
+        op.add(prof)
+        self.profile_hint = op.add(label("", "hint", wrap=True))
         op.add(self.cia402)
         again = QHBoxLayout()
         self.pdo_set = QuietCombo()
@@ -1448,6 +1461,11 @@ class SlaveView(QWidget):
         self.pd_errors = pd.add(label("", "problemText", wrap=True))
         self.pd_warn = pd.add(label("", "warnText", wrap=True))
         self.pd_notes = pd.add(label("", "hint", wrap=True))
+        self.pd_ways = QWidget()
+        self.pd_ways_lay = QVBoxLayout(self.pd_ways)
+        self.pd_ways_lay.setContentsMargins(0, 0, 0, 0)
+        pd.add(self.pd_ways)
+        self.pd_ways.hide()
         pd_buttons = QHBoxLayout()
         self.pd_add_object = QPushButton("Add object...")
         self.pd_add_object.setToolTip("Map one more object in an open PDO (one the ESI file lets be mapped)")
@@ -1553,6 +1571,7 @@ class SlaveView(QWidget):
         set_pill(self.state, state, state_kind(state))
         set_pill(self.profile, ("Profile: %s" % PROFILE_TEXT.get(s.get("profile"), s.get("profile")))
                  if s else "", "blue")
+        self.show_profile(s, p, b)
         self.where.setText("" if s and b else "not read from the bus" if s else
                            "not in the file: add it with Update from bus")
         self.name.setEnabled(s is not None)
@@ -1633,6 +1652,7 @@ class SlaveView(QWidget):
             chips = p.drive_modes if p and p.drive_modes else ["not read"]
             for m in chips:
                 self.supported.insertWidget(self.supported.count() - 1, pill(m.upper(), "grey"))
+            self.show_mode_marks(s, p)
 
         self.used.setChecked(s.get("unused") is not True)
         self.configure_pdos.setChecked(bool(s.get("configure-pdos", True)))
@@ -2081,6 +2101,101 @@ class SlaveView(QWidget):
         self.loading = False
         self.show_pd_status(s)
 
+    PROFILE_TIP = ("How ecat runs the slave. CiA 402: a drive, with the profile's enable, fault "
+                   "handling and modes. Modular device: I/O terminals, with encoder and serial "
+                   "channels. Generic: every entry a pin. Changing it proposes the slave's PDOs again "
+                   "for the profile (asks first; name and settings are kept).")
+
+    def show_profile(self, s, p, b):
+        """The profile choice: the one recognised (CoE 0x1000 or the ESI file), the one in
+        the file, and generic, which is always there."""
+        self.profile_box.blockSignals(True)
+        self.profile_box.clear()
+        if s is None:
+            self.profile_box.setEnabled(False)
+            self.profile_hint.setText("")
+            self.profile_box.blockSignals(False)
+            return
+        dev = self.win.session.esi_device(self.position)
+        recognised = {402: "cia402", 5001: "mdp"}.get(getattr(p, "recognised", None)) or \
+            {402: "cia402", 5001: "mdp"}.get(getattr(dev, "profile", None))
+        names = [n for n in ("cia402", "mdp", "generic")
+                 if n == "generic" or n == recognised or n == s.get("profile")]
+        for n in names:
+            self.profile_box.addItem(PROFILE_TEXT[n] + ("  (recognised)" if n == recognised else ""), n)
+        self.profile_box.setCurrentIndex(max(self.profile_box.findData(s.get("profile")), 0))
+        self.profile_box.setEnabled(b is not None and not self.win.busy)
+        self.profile_box.setToolTip(self.PROFILE_TIP if b is not None else
+                                    "Read the bus to change the profile: the slave's PDOs are proposed again")
+        hint = ""
+        if recognised:
+            where = "the slave's 0x1000" if p is not None and p.profile_source == "CoE 0x1000" else "its ESI file"
+            hint = "recognised as %s from %s" % (PROFILE_TEXT[recognised], where)
+            if s.get("profile") != recognised:
+                hint += "; %s chosen" % PROFILE_TEXT.get(s.get("profile"), s.get("profile"))
+        self.profile_hint.setText(hint)
+        self.profile_hint.setVisible(bool(self.profile_hint.text()))
+        self.profile_box.blockSignals(False)
+
+    def profile_chosen(self, _index):
+        s = self.win.session.slave(self.position)
+        new = self.profile_box.currentData()
+        if s is None or new == s.get("profile"):
+            return
+        if not self.win.change_profile(self.position, new):
+            # cancelled: the box back to the profile in use
+            self.profile_box.setCurrentIndex(max(self.profile_box.findData(s.get("profile")), 0))
+
+    def show_mode_marks(self, s, p):
+        """Per mode, whether the device's PDOs can give it (from the ESI file)."""
+        dev = self.win.session.esi_device(self.position)
+        c = s.get("cia402") or {}
+        if dev is None or c.get("mode") not in ("csp", "csv", "pv", "pp"):
+            self.mode_marks.setText("no ESI file: not known" if dev is None else "")
+            return
+        supported = None
+        if p and p.drive_modes:
+            supported = sum(1 << b for b, n in propose.CIA402_MODE_BITS.items() if n in p.drive_modes)
+        _whole, each = pdoreq.cia402_verdicts(dev, c["mode"], [], len(c.get("axes") or [1]), supported)
+        self.mode_marks.setText(" · ".join("%s %s" % (m.upper(), v.status) for m, v in each.items()))
+        self.mode_marks.setToolTip("\n".join("%s: %s" % (m.upper(), "; ".join(v.problems))
+                                             for m, v in each.items() if v.problems) or
+                                   self.mode_marks.toolTip())
+
+    def show_ways(self, s):
+        """The ways to get what the profile and its choices need, the recommended first."""
+        while self.pd_ways_lay.count():
+            it = self.pd_ways_lay.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+            elif it.layout():
+                while it.layout().count():
+                    w = it.layout().takeAt(0).widget()
+                    if w:
+                        w.deleteLater()
+        dev = self.win.session.esi_device(self.position)
+        ways = pdoreq.ways_for(s, dev) if s.get("configure-pdos", True) is not False else []
+        ready = [w for w in ways if w.kind == pdoreq.READY][:3]
+        build = [w for w in ways if w.kind == pdoreq.BUILD][:1]
+        ways = ready + build
+        self.pd_ways.setVisible(bool(ways))
+        if not ways:
+            return
+        self.pd_ways_lay.addWidget(label("Ways to get this (choose one: the PDOs are proposed again "
+                                         "with it, the rest of the slave's entry stays):", "hint", wrap=True))
+        bus = self.win.session.bus.get(self.position) is not None
+        for n, w in enumerate(ways):
+            row = QHBoxLayout()
+            text = "%s%s: %s" % ("Recommended: " if n == 0 else "", w.title, w.why)
+            row.addWidget(label(text, wrap=True), 1)
+            use = QPushButton("Use this")
+            use.setEnabled(bus and not self.win.busy)
+            use.setToolTip("Reads the slave and takes this PDO mapping" if bus else
+                           "Read the bus first: the slave is read for this")
+            use.clicked.connect(lambda _c=False, way=w: self.win.apply_way(self.position, way.title, way.set_name))
+            row.addWidget(use)
+            self.pd_ways_lay.addLayout(row)
+
     def show_pd_status(self, s):
         """The lines under the PDOs: what the mode set lacks, and what the ESI file says
         about the PDOs in the file."""
@@ -2110,6 +2225,7 @@ class SlaveView(QWidget):
             box.setText("\n".join(lines))
             box.setVisible(bool(lines))
         self.pd_add_missing.setVisible(bool(self.pd_adds))
+        self.show_ways(s)
 
     def _pd_edit(self, action):
         """Run an edit of the slave's process data; show the reason when it is refused."""
@@ -7563,6 +7679,25 @@ class MainWindow(QMainWindow):
                  lambda notes: self.check(extra=["slave %d: proposed again: %s" % (pos, n)
                                                  for n in notes] or
                                           ["slave %d: proposed again" % pos]))
+
+    def apply_way(self, pos, way, pdo_set=None):
+        """The user chose a way to get the PDOs: the slave is read and only its PDOs replaced."""
+        self.run("Reading slave %d..." % pos,
+                 lambda progress: self.session.apply_pdos(pos, way=None if pdo_set else way,
+                                                          pdo_set=pdo_set),
+                 lambda notes: (self.changed(), self.check(extra=["slave %d: PDOs: %s" % (pos, way)])))
+
+    def change_profile(self, pos, profile):
+        if QMessageBox.question(
+                self, TITLE, "Run slave %d as %s? Its PDOs are proposed again for that profile "
+                "(pins may change); its name, settings and DC stay." % (pos, PROFILE_TEXT[profile]),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return False
+        self.run("Reading slave %d..." % pos,
+                 lambda progress: self.session.change_profile(pos, profile),
+                 lambda notes: (self.changed(), self.check(extra=["slave %d: profile %s" % (pos, PROFILE_TEXT[profile])]
+                                                           + ["slave %d: %s" % (pos, n) for n in notes])))
+        return True
 
     def add_esi(self):
         path = QFileDialog.getExistingDirectory(self, "A folder of ESI files", self.start_dir())

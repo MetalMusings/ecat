@@ -47,7 +47,8 @@ def read_modules(pos, coe, index):
     return out
 
 
-def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=()):
+def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=(), way=None,
+               profile=None):
     """Read one slave and propose its configuration: (info, coe, proposal)."""
     info = tool.slave_info(pos)
     sii = sii_mod.parse(tool.sii(pos))
@@ -64,7 +65,8 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=
     modes = None
     if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in known.objects:
         modes = tool.upload(pos, 0x6502, 0, "uint32")
-    p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set, extra_modes)
+    p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set, extra_modes,
+                        way, profile)
     p.dc_info.sync = dcinfo.read_sync(pos, known)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
@@ -334,6 +336,48 @@ class Session:
             self.cfg["slaves"].sort(key=lambda s: s["position"])
         return list(p.notes)
 
+    # what the PDO part of a slave's entry is made of: replaced together by a way or a profile
+    PDO_KEYS = ("process-data", "encoders", "serial", "configure-pdos")
+
+    def apply_pdos(self, position, way=None, pdo_set=None):
+        """Read the slave and take only its PDOs (process data, encoder and serial
+        channels) from a proposal with the way the user chose ("recommended", a way's
+        title, or a predefined set): the rest of its entry stays, and pins of objects
+        that stay keep the names they had. Returns the proposal's notes."""
+        old = self.slave(position)
+        if old is None:
+            raise ValueError("slave %d is not in the configuration" % position)
+        mode = self._slave_mode(position)
+        info, coe, p = read_slave(position, self.esi_devices, mode, pdo_set,
+                                  extra_modes=self._slave_modes(position, mode), way=way,
+                                  profile=old.get("profile"))
+        self.bus[position] = BusSlave(info, coe, p)
+        new = config.slave_from_proposal(p, name=old.get("name"))
+        _take_pdos(old, new)
+        return list(p.notes)
+
+    def change_profile(self, position, profile):
+        """The user's profile for a slave ("cia402", "mdp", "generic"): its PDOs proposed
+        again for it, the profile's own block set (cia402: the mode, csp unless it had one);
+        name, settings, DC and the rest stay. Returns the proposal's notes."""
+        old = self.slave(position)
+        if old is None:
+            raise ValueError("slave %d is not in the configuration" % position)
+        mode = ((old.get("cia402") or {}).get("mode")) or "csp"
+        info, coe, p = read_slave(position, self.esi_devices, mode, None, profile=profile,
+                                  extra_modes=self._slave_modes(position, mode) if profile == "cia402" else ())
+        self.bus[position] = BusSlave(info, coe, p)
+        new = config.slave_from_proposal(p, name=old.get("name"))
+        _take_pdos(old, new)
+        old["profile"] = new["profile"]
+        if new["profile"] == "cia402":
+            kept = old.get("cia402") or {}
+            old["cia402"] = dict(new["cia402"], **{k: v for k, v in kept.items() if k != "mode"})
+            old["cia402"]["mode"] = mode
+        else:
+            old.pop("cia402", None)
+        return list(p.notes)
+
     def dictionary(self, position):
         """The object dictionary to guide a slave's settings: the slave's own,
         with the ESI file's ranges and defaults added; the ESI's alone when
@@ -423,6 +467,31 @@ class Session:
     def object_name(self, position, index, subindex):
         b = self.bus.get(position)
         return b.coe.name(index, subindex) if b and b.coe else ""
+
+
+def _take_pdos(old, new):
+    """Put new's PDO part into old; a pin of an object that stays keeps its name (and
+    what the user set on it: scale, offset, invert, bit pins)."""
+    kept = {}
+    for d in ((old.get("process-data") or {}).values()):
+        for pdo in d or []:
+            for e in pdo.get("entries") or []:
+                if e.get("pin") or e.get("split"):
+                    kept[e.get("object")] = e
+    for d in ((new.get("process-data") or {}).values()):
+        for pdo in d or []:
+            for e in pdo.get("entries") or []:
+                was = kept.get(e.get("object"))
+                if was is not None and e.get("use") is None and (e.get("pin") or e.get("split")):
+                    for key in ("pin", "split", "hal-type", "scale", "offset", "invert", "extend", "raw"):
+                        e.pop(key, None)
+                        if key in was:
+                            e[key] = copy.deepcopy(was[key])
+    for key in Session.PDO_KEYS:
+        if key in new:
+            old[key] = new[key]
+        else:
+            old.pop(key, None)
 
 
 def pp_problems(slave, dictionary):

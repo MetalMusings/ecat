@@ -132,7 +132,14 @@ Choosing a slave shows:
   would improve the proposal (usually an ESI file). *Choose ESI files...*
   and *Save as quirk file...* (what you chose, kept for the device, see
   [quirk files](#quirk-files)) are here;
-- **Operation and sync**: *Used by LinuxCNC* (untick it for a slave that
+- **Operation and sync**: first the *Profile*: how ecat runs the slave.
+  *CiA 402 drive* (enable, fault handling and the modes below), *Modular
+  device* (I/O terminals, with their encoder and serial channels) or
+  *Generic* (every entry a pin, nothing handled for you). The profile the
+  slave reports (its 0x1000) or its ESI file names is marked *recognised*
+  and proposed; generic is always offered. Choosing another one proposes
+  the slave's PDOs again for it, after asking; its name, settings and DC
+  stay. Then *Used by LinuxCNC* (untick it for a slave that
   is only on the bus: `unused: true`, the slave is left alone, in PREOP,
   with no pins; ecat still checks at start that it is the slave the file
   says), the PDO assignment (the box shows the ESI's
@@ -195,6 +202,23 @@ Choosing a slave shows:
   pin. The *Invert* column makes a bit pin the opposite of the bit (`yes`
   for a bit pin, the names of the bit pins for a bit field), for normally
   closed switches such as an E-stop: no `not` is needed in HAL.
+  The order is: the profile, then its choices (for a drive the mode and the
+  modes it may switch to; for a modular device what its channels are used
+  for), then the PDOs these need. *PDOs per mode*, beside the drive's
+  modes, says for each mode whether the device's PDOs can give it (from
+  its ESI file): *ready* (one of its PDO assignments has it), *build* (an
+  own mapping in its open PDOs), *impossible* (the tooltip says why, such as
+  a mode the drive does not report in 0x6502) or *unknown*. When the
+  mapping in the file lacks something, *Ways to get this* under the table
+  lists what the device offers, the recommended one first: a predefined
+  assignment, fixed PDOs, or an own mapping in the open PDOs, and for a
+  modular device the assignment that gives a channel its index, external
+  latch or more data bytes. Nothing changes until you press *Use this*: the
+  slave is read and only its PDOs are replaced (pins of objects that stay
+  keep their names; the rest of the slave's entry stays). The proposal
+  itself never changes the assignment on its own: it names the better one
+  in its notes ("recommended PDO mapping ... not applied until you choose
+  it").
   Under the table, lines say what the mapping lacks for the drive's
   modes (red: *cannot run as CiA 402 in CSP: 0x607A Target position
   missing*; grey: the mode objects 0x6060/0x6061 are not mapped, which is

@@ -115,7 +115,10 @@ class Proposal:
     pp_limits: dict = field(default_factory=dict)  # PP: (index, subindex) -> the drive's value
     modules: list = None  # a modular device's detected modules (0xF050), or None
     max_velocity: dict = field(default_factory=dict)  # CiA 402: axis -> 0x607F (+ 0x800 n), counts/s
-    pdo_way: str = ""     # a CiA 402 drive: "" (the assignment as it was), or how the PDOs were fitted
+    pdo_way: str = ""     # "" (the assignment as it was), or the way that was applied (the user asked)
+    recommendation: dict = None   # a better PDO assignment, for the user to approve:
+    #                               {"way": title or None, "pdo-set": name or None, "why": text}
+    recognised: int = None        # the profile the slave or its ESI file says (402, 5001, None)
     status: list = field(default_factory=list)    # pdoreq.Status lines under the PDOs
     notes: list = field(default_factory=list)
 
@@ -297,11 +300,15 @@ def _set_with_channel(esi_dev, chosen, sub):
 
 
 def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
-            esi_exact=False, mode="csp", pdo_set=None, extra_modes=()):
+            esi_exact=False, mode="csp", pdo_set=None, extra_modes=(), way=None, profile=None):
     """Make a Proposal for one slave.
 
     info: tool.slave_info(); sii: sii.Sii; coe: coe.Dictionary (may be empty);
     device_type: CoE 0x1000; drive_modes: CoE 0x6502; esi_dev: esi.EsiDevice.
+    extra_modes: the drive's other modes (cia402.modes); way: apply a PDO way the user chose
+    ("recommended", or the title of one of pdoreq's ways), else a better way is only
+    recommended (Proposal.recommendation); profile: "cia402", "mdp" or "generic", the user's
+    choice over the one recognised.
     """
     from . import lcnc_env
     wide = lcnc_env.wide_pins()  # 64-bit integer pins (LinuxCNC 2.10)
@@ -313,6 +320,11 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         p.profile, p.profile_source = device_type & 0xFFFF, "CoE 0x1000"
     elif esi_dev and esi_dev.profile in PROFILE_NAMES:
         p.profile, p.profile_source = esi_dev.profile, "ESI"
+    p.recognised = p.profile
+    if profile is not None:
+        wanted = {"cia402": 402, "mdp": 5001, "generic": None}[profile]
+        if wanted != p.profile:
+            p.profile, p.profile_source = wanted, "chosen"
     if p.profile == 402:
         p.mode = mode
         if drive_modes is not None:
@@ -359,38 +371,52 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     elif not chosen:
         p.notes.append("no PDOs assigned by default; the mapping must be chosen")
 
+    modes_text = ", ".join(m.upper() for m in [mode, *extra_modes])
     if p.profile == 402 and esi_dev and not pdo_set:
         # (an assignment the user asked for is kept as it is)
-        # the mode set needs objects the assignment may lack: another ready way, else an
-        # own mapping in the open PDOs (docs/development.md "Own PDO mapping")
+        # the mode set needs objects the assignment may lack: another ready way, else an own
+        # mapping in the open PDOs (docs/development.md "Own PDO mapping"); recommended, and
+        # applied only when the user says so
         have = {e.index for c in chosen for e in c.entries}
         axes = 1
         while axes < 4 and 0x6041 + axes * AXIS_OFFSET in have:
             axes += 1
-        plan = pdoreq.fit_cia402(esi_dev, chosen, mode, extra_modes, axes, drive_modes)
-        if plan.way is not None:
+        plan = pdoreq.fit_cia402(esi_dev, chosen, mode, extra_modes, axes, drive_modes,
+                                 choose=None if way in (None, "recommended") else way)
+        if plan.way is not None and way is not None:
             chosen = plan.pdos
             p.pdo_way = plan.way.kind
             p.pdo_source = "%s (%s)" % (plan.way.title, "ready" if plan.way.kind == "ready"
-                                        else "built for %s" % ", ".join(m.upper() for m in [mode, *extra_modes]))
-            p.notes.append("PDO mapping: %s, because the default assignment lacks what %s needs"
-                           % (p.pdo_source, ", ".join(m.upper() for m in [mode, *extra_modes])))
+                                        else "built for %s" % modes_text)
+            p.notes.append("PDO mapping: %s, as chosen" % p.pdo_source)
+        elif plan.way is not None:
+            p.recommendation = {"way": plan.way.title, "pdo-set": plan.way.set_name,
+                                "why": "the assignment lacks what %s needs" % modes_text}
+            p.notes.append("recommended PDO mapping: %s (%s); not applied until you choose it"
+                           % (plan.way.title, p.recommendation["why"]))
         elif plan.verdict is not None:
             p.notes += ["the PDOs cannot give %s: %s" % (mode.upper(), t) for t in plan.verdict.problems[:3]]
 
     if p.profile == 5001 and esi_dev and not pdo_set:
         # a terminal whose default assignment lacks the channel its sub-profile is for (an
         # incremental encoder's legacy layout, a serial terminal's 50-word set): the
-        # predefined set that has one
+        # predefined set that has one, recommended
         for sub, kind in ((511, "encoder"), (600, "serial")):
             found = _set_with_channel(esi_dev, chosen, sub)
-            if found is not None:
-                set_, chosen = found
+            if found is None:
+                continue
+            set_, members = found
+            if way is not None:
+                chosen = members
                 p.pdo_way = "ready"
                 p.pdo_source = "ESI predefined assignment \"%s\"" % set_.name
-                p.notes.append("PDO mapping: %s, because the default assignment has no %s channel "
-                               "(sub-profile %d has)" % (p.pdo_source, kind, sub))
-                break
+                p.notes.append("PDO mapping: %s, as chosen" % p.pdo_source)
+            else:
+                p.recommendation = {"way": "predefined set \"%s\"" % set_.name, "pdo-set": set_.name,
+                                    "why": "the assignment has no %s channel (sub-profile %d)" % (kind, sub)}
+                p.notes.append("recommended PDO assignment: \"%s\" (%s); not applied until you "
+                               "choose it" % (set_.name, p.recommendation["why"]))
+            break
 
     pdos = []
     for c in chosen:

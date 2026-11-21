@@ -103,7 +103,9 @@ class Way:
     rx: list = field(default_factory=list)   # PDO indexes (ready) / objects to map (build)
     tx: list = field(default_factory=list)
     sms: dict = None         # ready ways from a predefined set: sm -> PDO indexes
+    set_name: str = None     # the predefined set's name (a ready way from one)
     lacks_good: list = field(default_factory=list)   # (index, subindex) good to have, not in it
+    why: str = ""            # what it gives, for the window
 
 
 @dataclass
@@ -135,7 +137,7 @@ def _combos(pdos, need, direction):
 
 def _way(title, rx, tx, req, sms=None):
     lacks = sorted((req.good_rx | req.good_tx) - (_have(rx) | _have(tx)))
-    return Way(READY, title, [p.index for p in rx], [p.index for p in tx], sms, lacks)
+    return Way(READY, title, [p.index for p in rx], [p.index for p in tx], sms=sms, lacks_good=lacks)
 
 
 def judge(req, esi_dev, supported=None, mode_bits=()):
@@ -165,15 +167,16 @@ def judge(req, esi_dev, supported=None, mode_bits=()):
     candidates = []
     for s in esi_dev.pdo_sets:
         members = [by_index[i] for sm, ids in sorted(s.sms.items()) for i in ids if i in by_index]
-        candidates.append(("predefined set \"%s\"" % s.name, members, s.sms))
+        candidates.append(("predefined set \"%s\"" % s.name, members, s.sms, s.name))
     defaults = [p for p in pdos if p.sm is not None]
     if defaults:
-        candidates.append(("the default assignment", defaults, None))
-    for title, members, sms in candidates:
+        candidates.append(("the default assignment", defaults, None, None))
+    for title, members, sms, name in candidates:
         rx = [p for p in members if p.direction == "rx"]
         tx = [p for p in members if p.direction == "tx"]
         if req.rx <= _have(rx) and req.tx <= _have(tx):
             v.ways.append(_way(title, rx, tx, req, sms))
+            v.ways[-1].set_name = name
     # ready: fixed PDOs, picked per direction
     rxs = _combos(pdos, req.rx, "rx") if req.rx else [()]
     txs = _combos(pdos, req.tx, "tx") if req.tx else [()]
@@ -288,10 +291,11 @@ class Plan:
     verdict: Verdict = None
 
 
-def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=None):
+def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=None, choose=None):
     """The PDOs for a CiA 402 drive: `chosen` (the default assignment) when it holds
     what the mode set needs, else the best ready way, else an own mapping in the
-    open PDO of each direction that lacks something, else `chosen` as it is."""
+    open PDO of each direction that lacks something, else `chosen` as it is.
+    `choose`: the title of the way to take instead of the best one."""
     data = data or load("cia402")
     req = cia402(mode, modes, axes, data)
     have = _have(chosen)
@@ -306,7 +310,7 @@ def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=Non
         sms = [p.sm for p in chosen + esi_dev.pdos if p.direction == direction and p.sm is not None]
         return wanted if wanted is not None else (sms[0] if sms else (2 if direction == "rx" else 3))
 
-    ready = [w for w in v.ways if w.kind == READY]
+    ready = [w for w in v.ways if w.kind == READY and choose in (None, w.title)]
     if ready:
         w = ready[0]
         pdos = []
@@ -323,7 +327,7 @@ def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=Non
         tx=req.tx if not req.tx <= _have([p for p in chosen if p.direction == "tx"]) else set(),
         good_rx=req.good_rx, good_tx=req.good_tx)
     vp = judge(partial, esi_dev, supported, [])
-    build = [w for w in vp.ways if w.kind == BUILD]
+    build = [w for w in vp.ways if w.kind == BUILD and choose in (None, w.title)]
     if not build:
         return Plan(chosen, None, v if v.problems else vp)
     pdos = list(chosen)
@@ -554,4 +558,81 @@ def serial_status(slave, esi_dev, data=None):
         if 0 < have < best:
             out.append(("note", "serial %s: %d data bytes per cycle; the device's set \"%s\" gives %d, "
                         "so a frame goes out in fewer cycles" % (ch.get("name"), have, best_name, best)))
+    return out
+
+
+# --------------------------------------------------------------------------
+# the ways to show for a slave as it is in the file (the window's "Ways to get this")
+
+def _sets_with(esi_dev, has):
+    """The device's predefined sets whose PDOs `has` accepts: [(name, members)]."""
+    by_index = {p.index: p for p in esi_dev.pdos}
+    out = []
+    for st in esi_dev.pdo_sets:
+        members = [by_index[i] for _sm, ids in sorted(st.sms.items()) for i in ids if i in by_index]
+        if has(members):
+            out.append((st.name, members))
+    return out
+
+
+def ways_for(slave, esi_dev, supported=None):
+    """What the user can do about the slave's PDOs as the file has them: [Way], the
+    recommended one first, each with `why` set. Nothing when they already give what the
+    profile and its choices need, or when the ESI file says too little."""
+    if esi_dev is None or not isinstance(slave, dict):
+        return []
+    from . import propose
+    have = {(i, s) for _d, _p, _s, es in _file_pdos(slave) for i, s, _b in es}
+    out = []
+    if slave.get("profile") == "cia402":
+        c = slave.get("cia402") or {}
+        data = load("cia402")
+        mode = c.get("mode")
+        if mode not in data["modes"]:
+            return []
+        modes = [m for m in c.get("modes") or [] if m != mode and m in data["modes"]]
+        axes = len(c.get("axes") or [1])
+        req = cia402(mode, modes, axes, data)
+        if (req.rx | req.tx) <= have:
+            return []
+        chosen = [mode] + modes
+        v = judge(req, esi_dev, supported,
+                  [(data["modes"][m]["bit"], m.upper()) for m in chosen])
+        for w in v.ways:
+            lacks = ", ".join(object_name(i) for i, _s in w.lacks_good)
+            w.why = "has what %s needs%s" % (", ".join(m.upper() for m in chosen),
+                                             "; not %s (good to have)" % lacks if lacks else "")
+            if w.kind == BUILD:
+                w.why = "maps what %s needs in the device's open PDOs" % ", ".join(m.upper() for m in chosen)
+            out.append(w)
+        return out
+    enc = load("mdp-encoder")
+    if enc["sub-profile"] in esi_dev.sub_profiles:
+        channels = slave.get("encoders") or []
+        if not channels:
+            for name, _m in _sets_with(esi_dev, lambda ms: propose.encoder_channels(
+                    [e for p in ms for e in p.entries], True)):
+                out.append(Way(READY, "predefined set \"%s\"" % name, set_name=name))
+                out[-1].why = "has an encoder channel"
+        for ch in channels:
+            try:
+                base = int(str(ch.get("index")), 16)
+            except ValueError:
+                continue
+            for use in ("index", "latch"):
+                req = mdp_encoder(base, (use,), enc)
+                if (req.rx | req.tx) <= have:
+                    continue
+                for w in judge(req, esi_dev).ways:
+                    if w.kind == READY and w.set_name and w.set_name not in [x.set_name for x in out]:
+                        w.why = "gives encoder %s its %s" % (ch.get("name"), enc["uses"][use]["title"])
+                        out.append(w)
+    ser = load("mdp-serial")
+    if ser["sub-profile"] in esi_dev.sub_profiles:
+        best = serial_sets(esi_dev)
+        notes = serial_status(slave, esi_dev, ser)
+        if best and notes:
+            w = Way(READY, "predefined set \"%s\"" % best[0][0], set_name=best[0][0])
+            w.why = "a serial channel with %d data bytes per cycle" % best[0][1]
+            out.append(w)
     return out

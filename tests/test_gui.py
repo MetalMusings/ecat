@@ -1523,6 +1523,7 @@ class TestPdoEditing(WindowBase):
         s["cia402"] = {"mode": "csp"}
         s["identity"] = dict(s["identity"], revision="0x00000001")     # the ESI file's device is exact
         s["process-data"] = self.fslave(outputs, inputs)["process-data"]
+        w.session.bus[1].proposal.recognised = None     # the fake bus's slave is an I/O terminal
         for p in (mock.patch.object(w.session, "esi_device", return_value=self.dev),
                   mock.patch.object(w.session, "dictionary", return_value=coe.Dictionary())):
             p.start()
@@ -1591,6 +1592,55 @@ class TestPdoEditing(WindowBase):
         texts = [w.messages.item(i).text() for i in range(w.messages.count())]
         self.assertTrue(any(t.startswith("ESI file: slave 1") and "0x1701 is fixed" in t for t in texts), texts)
         self.assertFalse(any(t.startswith("Error: ") and "0x1701" in t for t in texts))
+
+    def test_mode_marks_from_the_esi_file(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        # the ESI file's 0x6502 has CSP and CSV only
+        self.assertEqual(page.mode_marks.text(), "CSP ready · CSV build · PV impossible · PP impossible")
+        self.assertIn("PV: the drive does not report PV in 0x6502", page.mode_marks.toolTip())
+
+    def test_ways_are_offered_and_used_only_when_chosen(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        self.assertFalse(page.pd_ways.isHidden())
+        texts = [x.text() for x in page.pd_ways.findChildren(gui.QLabel)]
+        self.assertTrue(any(t.startswith("Recommended: ") for t in texts), texts)
+        self.assertEqual(len(s["process-data"]["outputs"][0]["entries"]), 1)     # nothing applied yet
+        calls = []
+        with mock.patch.object(w.session, "apply_pdos", lambda pos, way=None, pdo_set=None:
+                               calls.append((pos, way, pdo_set)) or []), \
+                mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))):
+            buttons = [b for b in page.pd_ways.findChildren(gui.QPushButton) if b.text() == "Use this"]
+            buttons[0].click()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 1)
+        self.assertTrue(calls[0][1] or calls[0][2])
+
+    def test_no_ways_when_the_mapping_is_enough(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        self.assertTrue(page.pd_ways.isHidden())
+
+    def test_profile_choice(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        items = [page.profile_box.itemData(i) for i in range(page.profile_box.count())]
+        self.assertEqual(items, ["cia402", "generic"])
+        self.assertIn("(recognised)", page.profile_box.itemText(0))
+        calls = []
+        with mock.patch.object(w.session, "change_profile", lambda pos, prof: calls.append((pos, prof)) or []), \
+                mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))), \
+                mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+            page.profile_box.setCurrentIndex(1)
+            page.profile_chosen(1)
+        self.assertEqual(calls, [(1, "generic")])
+
+    def test_profile_choice_cancelled(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        with mock.patch.object(w.session, "change_profile") as change, \
+                mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Cancel):
+            page.profile_box.setCurrentIndex(1)
+            page.profile_chosen(1)
+        change.assert_not_called()
+        self.assertEqual(page.profile_box.currentData(), "cia402")
 
     def test_editing_without_writing_the_pdos_is_refused(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])

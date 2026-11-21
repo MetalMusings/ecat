@@ -3441,3 +3441,45 @@ never written) and *build* (an own mapping in the open PDOs).
 - The window lists the ESI file's objections as "ESI file: ..." apart from the
   file's errors: they do not stop a save, and a grey line says so.
 - `pdoreq.load` reads each file once (again when it changes).
+
+### The choice steps in the window (built 2026-11-21, the user's decisions)
+
+The user's decisions: a better PDO assignment is a *recommendation*, applied
+only when the user chooses it; the profile is chosen in the window; the order
+is slave, profile, the profile's choices, then the PDOs they need.
+
+- `propose(..., way=None, profile=None)`: without `way` nothing is switched
+  any more; `Proposal.recommendation` (`{"way", "pdo-set", "why"}`) and a note
+  name the better way (cia402: `fit_cia402`'s best; MDP: the set with an
+  encoder or serial channel). `way="recommended"` or a way's title applies it
+  (`fit_cia402(choose=)`); `profile` ("cia402", "mdp", "generic") overrides
+  the recognised one (`Proposal.recognised` keeps what was recognised).
+- `Session.apply_pdos(position, way, pdo_set)`: reads the slave and replaces
+  only the PDO part of its entry (process data, encoders, serial,
+  configure-pdos; `session._take_pdos` keeps the pin names and pin settings of
+  objects that stay). `Session.change_profile(position, profile)`: the same
+  for another profile, and the cia402 block set (mode kept, csp by default)
+  or removed.
+- `pdoreq.ways_for(slave, esi_dev)`: the ways for the slave as the file has it
+  (empty when it already has what is needed), each with `why`; cia402 from
+  `judge`, MDP from the sets that give a channel, an encoder use or more
+  serial data bytes. `Way.set_name` names a predefined set's way (applied as
+  `pdo_set`).
+- Window: a *Profile* box at the top of the Operation card (the recognised
+  profile, the file's, generic; a change asks first; Cancel puts the box
+  back), *PDOs per mode* in the CiA 402 form (`cia402_verdicts`, per mode,
+  reasons in the tooltip), *Ways to get this* under the Process data table
+  (at most three ready ways and the build way, the first marked
+  *Recommended*, each with *Use this*; needs the bus, since the slave is
+  read).
+- Not done: way A (the slave's own mapping, `configure-pdos: false`) is not
+  offered: whether the slave's present mapping has the objects is not read.
+  A use per encoder channel is not a stored choice (no key in the file): the
+  ways name the set that gives it.
+- Found while building: `refresh(keep_page=True)` does not redraw the slave
+  page, so a box that a cancelled question should put back stays as chosen
+  unless the page resets it itself (done for the profile box; the PDO
+  assignment box's "Cancel puts the box back" relies on the same refresh and
+  was not looked into).
+- Tests: `scripts/run-tests pdoreq pdoedit mdp prototype capture capturec
+  guidance gui halcheck` (345); mutation-checked.

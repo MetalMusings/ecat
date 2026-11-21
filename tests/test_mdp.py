@@ -95,12 +95,18 @@ class TestRecognition(unittest.TestCase):
         self.assertEqual(proposal(device(), pdo_set="Position only (MDP 511)").encoders, [("enc", 0x6010)])
         self.assertEqual(proposal(device(channels=()), pdo_set="Position only (MDP 511)").encoders, [])
 
-    def test_the_default_without_a_channel_is_replaced_by_a_set_that_has_one(self):
+    def test_the_default_without_a_channel_is_only_recommended(self):
         p = proposal(device())
+        self.assertEqual((p.encoders, p.pdo_way), ([], ""))
+        self.assertEqual(p.recommendation["pdo-set"], "Position only (MDP 511)")
+        self.assertIn("no encoder channel", p.recommendation["why"])
+
+    def test_the_default_without_a_channel_is_replaced_by_a_set_that_has_one(self):
+        p = proposal(device(), way="recommended")
         self.assertEqual(p.encoders, [("enc", 0x6010)])
         self.assertEqual(p.pdo_way, "ready")
         self.assertIn("Position only", p.pdo_source)
-        self.assertTrue(any("no encoder channel" in n for n in p.notes))
+        self.assertTrue(any("as chosen" in n for n in p.notes))
 
     def test_an_assignment_asked_for_is_kept(self):
         p = proposal(device(), pdo_set="Legacy (MDP 510)")
@@ -145,18 +151,21 @@ class TestSerial(unittest.TestCase):
                                  ("Legacy 3 Byte (MDP 600)", 2)])
 
     def test_a_default_without_a_serial_channel_is_replaced_by_the_largest_set(self):
-        p = proposal(serial_device("Standard 98 Byte (MDP 600)"))
+        self.assertEqual(proposal(serial_device("Standard 98 Byte (MDP 600)")).recommendation["pdo-set"],
+                         "Standard 22 Byte (MDP 600)")
+        p = proposal(serial_device("Standard 98 Byte (MDP 600)"), way="recommended")
         self.assertEqual([c[0] for c in p.serial_channels], ["port"])
         self.assertEqual(p.pdo_way, "ready")
         self.assertIn("Standard 22 Byte", p.pdo_source)
-        self.assertTrue(any("no serial channel" in n for n in p.notes))
+        self.assertTrue(any("as chosen" in n for n in p.notes))
 
     def test_size_beats_the_name(self):
         dev = build(SERIAL_PDOS, {"Standard 3 Byte (MDP 600)": {2: [0x1600], 3: [0x1A00]},
                                   "Legacy 22 Byte (MDP 600)": {2: [0x1604], 3: [0x1A04]},
                                   "Standard 98 Byte (MDP 600)": {2: [0x1605], 3: [0x1A05]}},
                     ((5001, 600),), "Standard 98 Byte (MDP 600)", "EL6021")
-        self.assertIn("Legacy 22 Byte", proposal(dev).pdo_source)
+        self.assertEqual(proposal(dev).recommendation["pdo-set"], "Legacy 22 Byte (MDP 600)")
+        self.assertIn("Legacy 22 Byte", proposal(dev, way="recommended").pdo_source)
         self.assertEqual(pdoreq.serial_sets(dev)[0][0], "Legacy 22 Byte (MDP 600)")
 
     def test_a_default_with_a_channel_is_kept(self):
@@ -193,6 +202,34 @@ class TestSerial(unittest.TestCase):
 def slave_of(p):
     s = config.slave_from_proposal(p)
     return s
+
+
+class TestWays(unittest.TestCase):
+    def test_a_terminal_without_a_channel_gets_the_sets_that_have_one(self):
+        dev = device()
+        s = slave_of(proposal(dev))           # the legacy default: no channel
+        ways = pdoreq.ways_for(s, dev)
+        self.assertEqual([w.set_name for w in ways], ["Position only (MDP 511)", "Full (MDP 511)"])
+        self.assertEqual(ways[0].why, "has an encoder channel")
+
+    def test_a_channel_without_index_gets_the_set_that_gives_it(self):
+        dev = device()
+        s = slave_of(proposal(dev, pdo_set="Position only (MDP 511)"))
+        ways = pdoreq.ways_for(s, dev)
+        self.assertEqual([w.set_name for w in ways], ["Full (MDP 511)"])
+        self.assertEqual(ways[0].why, "gives encoder enc its index")
+
+    def test_a_full_channel_needs_no_way(self):
+        dev = device()
+        self.assertEqual(pdoreq.ways_for(slave_of(proposal(dev, pdo_set="Full (MDP 511)")), dev), [])
+
+    def test_serial(self):
+        dev = serial_device("Legacy 3 Byte (MDP 600)")
+        ways = pdoreq.ways_for(config.slave_from_proposal(proposal(dev)), dev)
+        self.assertEqual([(w.set_name, w.why) for w in ways],
+                         [("Standard 22 Byte (MDP 600)", "a serial channel with 22 data bytes per cycle")])
+        dev = serial_device("Standard 22 Byte (MDP 600)")
+        self.assertEqual(pdoreq.ways_for(config.slave_from_proposal(proposal(dev)), dev), [])
 
 
 class TestNotes(unittest.TestCase):

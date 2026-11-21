@@ -339,7 +339,7 @@ class TestProposal(unittest.TestCase):
     def test_own_mapping_is_built_in_the_open_pdos(self):
         dev = make(MAPPABLE, [pdo("RxPdo", 0x1600, [(0x6040, 16)], sm=2),
                               pdo("TxPdo", 0x1A00, [(0x6041, 16)], sm=3)])
-        p = proposal(dev)
+        p = proposal(dev, way="recommended")
         self.assertEqual(p.pdo_way, "build")
         rx = next(c for c in p.pdos if c.direction == "rx")
         tx = next(c for c in p.pdos if c.direction == "tx")
@@ -354,7 +354,7 @@ class TestProposal(unittest.TestCase):
     def test_only_the_direction_that_lacks_something_is_rebuilt(self):
         dev = make(MAPPABLE, [pdo("RxPdo", 0x1701, [(0x6040, 16), (0x607A, 32)], fixed=True, sm=2),
                               pdo("TxPdo", 0x1A00, [(0x6041, 16)], sm=3)])
-        p = proposal(dev)
+        p = proposal(dev, way="recommended")
         self.assertEqual(p.pdo_way, "build")
         self.assertEqual([c.index for c in p.pdos if c.direction == "rx"], [0x1701])
         tx = next(c for c in p.pdos if c.direction == "tx")
@@ -363,7 +363,7 @@ class TestProposal(unittest.TestCase):
     def test_a_covered_output_is_kept_when_only_the_input_is_built(self):
         dev = make(MAPPABLE, [pdo("RxPdo", 0x1600, [(0x6040, 16)], sm=2),
                               pdo("TxPdo", 0x1B01, [(0x6041, 16), (0x6064, 32)], fixed=True, sm=3)])
-        p = proposal(dev)
+        p = proposal(dev, way="recommended")
         self.assertEqual(p.pdo_way, "build")
         self.assertEqual([c.index for c in p.pdos if c.direction == "tx"], [0x1B01])
         rx = next(c for c in p.pdos if c.direction == "rx")
@@ -374,10 +374,36 @@ class TestProposal(unittest.TestCase):
                 pdo("RxPdo", 0x1702, [(0x6040, 16), (0x607A, 32), (0x6060, 8)], fixed=True, exclude=[0x1701]),
                 pdo("TxPdo", 0x1B01, [(0x6041, 16), (0x6064, 32)], fixed=True, sm=3, exclude=[0x1B02]),
                 pdo("TxPdo", 0x1B02, [(0x6041, 16), (0x6064, 32), (0x6061, 8)], fixed=True, exclude=[0x1B01])]
-        p = proposal(make(MAPPABLE, pdos, pdo_config=False), extra=["hm"])
+        p = proposal(make(MAPPABLE, pdos, pdo_config=False), extra=["hm"], way="recommended")
         self.assertEqual(p.pdo_way, "ready")
         self.assertEqual([(c.index, c.sm) for c in p.pdos], [(0x1702, 2), (0x1B02, 3)])
         self.assertEqual([s.level for s in p.status], ["ok"])
+
+    def test_a_better_way_is_only_recommended(self):
+        dev = make(MAPPABLE, [pdo("RxPdo", 0x1600, [(0x6040, 16)], sm=2),
+                              pdo("TxPdo", 0x1A00, [(0x6041, 16)], sm=3)])
+        p = proposal(dev)
+        self.assertEqual(p.pdo_way, "")
+        self.assertEqual([[e.index for e in c.entries] for c in p.pdos], [[0x6040], [0x6041]])
+        self.assertEqual(p.recommendation["way"], "own mapping in the open PDOs")
+        self.assertIn("lacks what CSP needs", p.recommendation["why"])
+        self.assertTrue(any(n.startswith("recommended PDO mapping") for n in p.notes))
+        self.assertEqual(p.status[0].level, "error")
+
+    def test_a_way_can_be_chosen_by_its_title(self):
+        pdos = [pdo("RxPdo", 0x1701, [(0x6040, 16), (0x607A, 32), (0x6060, 8)], fixed=True, exclude=[0x1702]),
+                pdo("RxPdo", 0x1702, [(0x6040, 16), (0x607A, 32), (0x6060, 8), (0x60FF, 32)], fixed=True,
+                    exclude=[0x1701]),
+                pdo("RxPdo", 0x1600, [(0x6040, 16)], sm=2),
+                pdo("TxPdo", 0x1B01, [(0x6041, 16), (0x6064, 32), (0x6061, 8)], fixed=True, sm=3)]
+        dev = make(MAPPABLE, pdos)
+        p = proposal(dev, extra=["hm"])
+        self.assertEqual(p.recommendation["way"], "fixed PDOs 0x1701, 0x1B01")
+        p = proposal(dev, extra=["hm"], way="fixed PDOs 0x1702, 0x1B01")
+        self.assertEqual([c.index for c in p.pdos], [0x1702, 0x1B01])
+        p = proposal(dev, extra=["hm"], way="own mapping in the open PDOs")
+        self.assertEqual(p.pdo_way, "build")
+        self.assertEqual([c.index for c in p.pdos if c.direction == "rx"], [0x1600])
 
     def test_impossible_is_an_error_line_and_a_note(self):
         pdos = [pdo("RxPdo", 0x1600, [(0x6040, 16)], sm=2), pdo("TxPdo", 0x1A00, [(0x6041, 16)], sm=3)]
@@ -397,9 +423,94 @@ class TestProposal(unittest.TestCase):
         dev = make(MAPPABLE, [pdo("RxPdo", 0x1600, [(0x6040, 16), (0x60B8, 16), (0x60FE, 32)], sm=2),
                               pdo("TxPdo", 0x1A00, [(0x6041, 16)], sm=3)])
         dev.max_entries[0x1600] = 2
-        p = proposal(dev)
+        p = proposal(dev, way="recommended")
         rx = next(c for c in p.pdos if c.direction == "rx")
         self.assertEqual([e.index for e in rx.entries], [0x6040, 0x607A])
+
+
+class TestWaysFor(unittest.TestCase):
+    def test_none_when_the_mapping_is_enough(self):
+        dev = make(MAPPABLE, ESI_PDOS)
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX)
+        self.assertEqual(pdoreq.ways_for(s, dev), [])
+        self.assertEqual(pdoreq.ways_for(s, None), [])
+
+    def test_ready_ways_first_then_build(self):
+        dev = make(MAPPABLE, ESI_PDOS)
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        ways = pdoreq.ways_for(s, dev)
+        self.assertEqual([(w.kind, w.title) for w in ways],
+                         [("ready", "the default assignment"), ("build", "own mapping in the open PDOs")])
+        self.assertEqual(ways[0].why, "has what CSP needs; not 0x603F Error code, 0x6061 Modes of "
+                                      "operation display (good to have)")
+        self.assertIn("open PDOs", ways[-1].why)
+
+    def test_the_other_modes_count(self):
+        dev = make(MAPPABLE, ESI_PDOS)
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX)
+        s["cia402"]["modes"] = ["csv"]
+        self.assertIn("CSP, CSV", pdoreq.ways_for(s, dev)[0].why)
+        s["cia402"]["modes"] = ["hm"]          # the device's 0x6502 has no homing: no way
+        self.assertEqual(pdoreq.ways_for(s, dev), [])
+
+    def test_no_mode_no_ways(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], TX)
+        s["cia402"] = {}
+        self.assertEqual(pdoreq.ways_for(s, make(MAPPABLE, ESI_PDOS)), [])
+
+
+class TestSessionWays(unittest.TestCase):
+    """Session.apply_pdos / change_profile: only the PDO part of the entry changes."""
+
+    def setUp(self):
+        from unittest import mock
+        from ecatsetup import session
+        self.dev = make(MAPPABLE + [obj(0x60F4, "T")],
+                        [pdo("RxPdo", 0x1600, [(0x6040, 16)], sm=2),
+                         pdo("TxPdo", 0x1A00, [(0x6041, 16), (0x60F4, 32)], sm=3)])
+        self.calls = []
+
+        def read_slave(pos, devices, mode, pdo_set=None, progress=None, extra_modes=(), way=None,
+                       profile=None):
+            self.calls.append((mode, list(extra_modes), way, profile))
+            return {}, coe.Dictionary(), proposal(self.dev, mode, extra_modes, way=way, profile=profile)
+        patch = mock.patch.object(session, "read_slave", read_slave)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.sess = session.Session([])
+        self.sess.esi_devices = [self.dev]
+        first = proposal(self.dev)
+        self.sess.cfg = config.from_proposals([first])
+        self.slave = self.sess.cfg["slaves"][0]
+        self.slave["settings"] = [{"object": "0x2000:01", "type": "UINT", "value": 3}]
+        tx = self.slave["process-data"]["inputs"][0]["entries"]
+        next(e for e in tx if e["object"] == "0x60F4:00")["pin"] = "my-ferror"
+
+    def test_apply_the_recommended_way(self):
+        self.sess.apply_pdos(1, way="recommended")
+        self.assertEqual([e["object"] for e in self.slave["process-data"]["outputs"][0]["entries"]],
+                         ["0x6040:00", "0x607A:00"])
+        self.assertEqual(self.slave["settings"], [{"object": "0x2000:01", "type": "UINT", "value": 3}])
+        pin = next(e for e in self.slave["process-data"]["inputs"][0]["entries"] if e["object"] == "0x60F4:00")
+        self.assertEqual(pin["pin"], "my-ferror")         # the user's pin name kept
+        self.assertEqual(self.calls[-1][2], "recommended")
+
+    def test_the_other_modes_go_along(self):
+        self.slave["cia402"]["modes"] = ["hm"]
+        self.sess.apply_pdos(1, way="recommended")
+        self.assertEqual(self.calls[-1][:2], ("csp", ["hm"]))
+        self.assertIn("0x6060:00", [e["object"] for e in self.slave["process-data"]["outputs"][0]["entries"]])
+
+    def test_change_to_generic_and_back(self):
+        self.sess.change_profile(1, "generic")
+        self.assertEqual(self.slave["profile"], "generic")
+        self.assertNotIn("cia402", self.slave)
+        e = self.slave["process-data"]["outputs"][0]["entries"][0]
+        self.assertNotEqual(e.get("use"), "profile")      # a pin now
+        self.assertEqual(self.slave["settings"][0]["value"], 3)
+        self.sess.change_profile(1, "cia402")
+        self.assertEqual((self.slave["profile"], self.slave["cia402"]["mode"]), ("cia402", "csp"))
+        self.assertEqual(self.slave["process-data"]["outputs"][0]["entries"][0]["use"], "profile")
 
 
 @unittest.skipUnless(os.path.exists(os.path.expanduser("~/esi/stepperonline")), "no A6 ESI file")
@@ -419,16 +530,16 @@ class TestA6(unittest.TestCase):
         self.assertEqual((default.rx, default.tx), ([0x1701], [0x1B01]))
 
     def test_proposal_for_csp_and_homing_takes_the_fixed_pdos(self):
-        p = proposal(self.dev, extra=["hm"])
+        p = proposal(self.dev, extra=["hm"], way="recommended")
         self.assertEqual(p.pdo_way, "ready")
         self.assertEqual([c.index for c in p.pdos], [0x1702, 0x1B02])
         self.assertEqual([s.level for s in p.status], ["ok"])
 
-    def test_proposal_for_csp_and_homing_takes_the_fixed_pdos(self):
+    def test_proposal_for_csp_and_homing_only_recommends(self):
         p = proposal(self.dev, extra=["hm"])
-        self.assertEqual(p.pdo_way, "ready")
-        self.assertEqual([c.index for c in p.pdos], [0x1702, 0x1B02])
-        self.assertEqual([s.level for s in p.status], ["ok"])
+        self.assertEqual(p.pdo_way, "")
+        self.assertEqual([c.index for c in p.pdos], [0x1701, 0x1B01])
+        self.assertEqual(p.recommendation["way"], "fixed PDOs 0x1702, 0x1B02")
 
     def test_several_modes_need_fixed_pdos_with_the_mode_objects(self):
         v, _ = pdoreq.cia402_verdicts(self.dev, "csp", ["hm"])
