@@ -333,7 +333,8 @@ class TestPropose(unittest.TestCase):
     def test_cia402_missing_entries(self):
         s = self.cia402_sii([sii.PdoEntry(0x6041, 0, "Status Word", "UINT", 16)])
         p = propose.propose({"position": 0, "dc": True}, s, coe.Dictionary(), device_type=0x192)
-        self.assertTrue(any("lack 0x6064" in n for n in p.notes))
+        self.assertTrue(any("cannot run as CiA 402 in CSP" in n and "0x6064 Position actual value" in n
+                            for n in p.notes), p.notes)
 
     def test_cia402_modes(self):
         def drive(cia402, with_mode_objects=True):

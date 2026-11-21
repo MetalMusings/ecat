@@ -47,7 +47,7 @@ def read_modules(pos, coe, index):
     return out
 
 
-def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
+def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=()):
     """Read one slave and propose its configuration: (info, coe, proposal)."""
     info = tool.slave_info(pos)
     sii = sii_mod.parse(tool.sii(pos))
@@ -64,7 +64,7 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None):
     modes = None
     if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in known.objects:
         modes = tool.upload(pos, 0x6502, 0, "uint32")
-    p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set)
+    p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set, extra_modes)
     p.dc_info.sync = dcinfo.read_sync(pos, known)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
@@ -295,7 +295,8 @@ class Session:
         for pos in positions:
             progress("Reading slave %d" % pos)
             mode = self._slave_mode(pos)
-            bus[pos] = BusSlave(*read_slave(pos, self.esi_devices, mode, progress=progress))
+            bus[pos] = BusSlave(*read_slave(pos, self.esi_devices, mode, progress=progress,
+                                            extra_modes=self._slave_modes(pos, mode)))
         self.bus, self.bus_error = bus, None
         self.bus_interface = netif.master_interface()
         return bus
@@ -304,13 +305,19 @@ class Session:
         s = self.slave(pos)
         return ((s or {}).get("cia402") or {}).get("mode") or self.mode
 
+    def _slave_modes(self, pos, mode):
+        """The other modes the slave's entry lists (cia402.modes), without `mode`."""
+        c = (self.slave(pos) or {}).get("cia402") or {}
+        return [m for m in (c.get("modes") or []) if m != mode]
+
     def propose_again(self, position, mode=None, pdo_set=None):
         """Read one slave again and replace its entry with a new proposal in
         the given mode or PDO assignment. Its name and other modes are kept.
         Returns the proposal's notes."""
         old = self.slave(position)
-        info, coe, p = read_slave(position, self.esi_devices, mode or self._slave_mode(position),
-                                  pdo_set)
+        mode = mode or self._slave_mode(position)
+        info, coe, p = read_slave(position, self.esi_devices, mode, pdo_set,
+                                  extra_modes=self._slave_modes(position, mode))
         self.bus[position] = BusSlave(info, coe, p)
         new = config.slave_from_proposal(p, name=(old or {}).get("name"))
         if old is not None:

@@ -22,3 +22,15 @@ several:
 good:
   rx: []
   tx: [0x603F, 0x6061]
+# The objects as a PDO entry (for building a mapping where the device's own
+# dictionary is not read): name, bit length, ESI data type.
+objects:
+  0x6040: {name: Controlword, bits: 16, type: UINT}
+  0x6041: {name: Statusword, bits: 16, type: UINT}
+  0x6060: {name: Modes of operation, bits: 8, type: SINT}
+  0x6061: {name: Modes of operation display, bits: 8, type: SINT}
+  0x607A: {name: Target position, bits: 32, type: DINT}
+  0x6064: {name: Position actual value, bits: 32, type: DINT}
+  0x60FF: {name: Target velocity, bits: 32, type: DINT}
+  0x606C: {name: Velocity actual value, bits: 32, type: DINT}
+  0x603F: {name: Error code, bits: 16, type: UINT}

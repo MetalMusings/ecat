@@ -3294,3 +3294,28 @@ never written) and *build* (an own mapping in the open PDOs).
   own mapping (a way that needs the bus). Order of work after this: 1 the
   proposal with way C and a status line, 2 `--check` against the ESI, 3 editing
   in the window.
+
+### Step 1: the proposal fits the PDOs to the mode set (built 2026-11-21)
+
+- `pdoreq.fit_cia402()` gives the PDOs of a CiA 402 drive: the default
+  assignment when it holds what the mode set needs (as before), else the best
+  ready way (a predefined set or fixed PDOs, fewest missing good-to-have
+  first), else an own mapping in the open PDO of each direction that lacks
+  something (the entries the PDO has by default that are needed stay, then
+  what is missing in the order of the requirement, then what is only good to
+  have; the PDO's maximum cuts from the end, never what is needed). A direction
+  that is already covered is not touched. An assignment the user asked for
+  (`pdo_set`) is never replaced, and without an ESI file nothing is fitted.
+- `propose(..., extra_modes=)` takes the slave's other modes (`cia402.modes`);
+  `session.read_slave` and `propose_again` pass them on, so *Propose again*
+  after adding `hm` finds a mapping that has 0x6060/0x6061.
+- `Proposal.pdo_way` ("", "ready", "build"), `Proposal.pdo_source` says which
+  and why, and `Proposal.status` holds the lines under the PDOs
+  (`pdoreq.cia402_status`): error "cannot run as CiA 402 in CSP: 0x6040
+  Controlword missing" (with what to add), info for 0x6060/0x6061 not mapped
+  with a single mode (the mode is set by SDO at start / not read back), ok
+  "enough for CiA 402 in CSP". Errors are also notes, so the window already
+  shows them; the window's own status line and the Add buttons are step 3.
+- Run for this step: `scripts/run-tests prototype capture pdoreq` (the full
+  suite is left for the release). The old note "the default PDOs lack ...; the
+  mapping must be changed" is replaced by the error line's text.

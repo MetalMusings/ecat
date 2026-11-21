@@ -10,7 +10,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from . import dcinfo, quirks
+from . import dcinfo, pdoreq, quirks
 
 # CiA 402 objects that the drive profile handles itself (no HAL pin); the
 # profile gives them its own pins (component/devices/ecat_cia402.c).
@@ -115,6 +115,8 @@ class Proposal:
     pp_limits: dict = field(default_factory=dict)  # PP: (index, subindex) -> the drive's value
     modules: list = None  # a modular device's detected modules (0xF050), or None
     max_velocity: dict = field(default_factory=dict)  # CiA 402: axis -> 0x607F (+ 0x800 n), counts/s
+    pdo_way: str = ""     # a CiA 402 drive: "" (the assignment as it was), or how the PDOs were fitted
+    status: list = field(default_factory=list)    # pdoreq.Status lines under the PDOs
     notes: list = field(default_factory=list)
 
 
@@ -264,7 +266,7 @@ def _fix_subindexes(pdo_entries, coe, notes, pdo_index):
 
 
 def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
-            esi_exact=False, mode="csp", pdo_set=None):
+            esi_exact=False, mode="csp", pdo_set=None, extra_modes=()):
     """Make a Proposal for one slave.
 
     info: tool.slave_info(); sii: sii.Sii; coe: coe.Dictionary (may be empty);
@@ -326,6 +328,25 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     elif not chosen:
         p.notes.append("no PDOs assigned by default; the mapping must be chosen")
 
+    if p.profile == 402 and esi_dev and not pdo_set:
+        # (an assignment the user asked for is kept as it is)
+        # the mode set needs objects the assignment may lack: another ready way, else an
+        # own mapping in the open PDOs (docs/development.md "Own PDO mapping")
+        have = {e.index for c in chosen for e in c.entries}
+        axes = 1
+        while axes < 4 and 0x6041 + axes * AXIS_OFFSET in have:
+            axes += 1
+        plan = pdoreq.fit_cia402(esi_dev, chosen, mode, extra_modes, axes, drive_modes)
+        if plan.way is not None:
+            chosen = plan.pdos
+            p.pdo_way = plan.way.kind
+            p.pdo_source = "%s (%s)" % (plan.way.title, "ready" if plan.way.kind == "ready"
+                                        else "built for %s" % ", ".join(m.upper() for m in [mode, *extra_modes]))
+            p.notes.append("PDO mapping: %s, because the default assignment lacks what %s needs"
+                           % (p.pdo_source, ", ".join(m.upper() for m in [mode, *extra_modes])))
+        elif plan.verdict is not None:
+            p.notes += ["the PDOs cannot give %s: %s" % (mode.upper(), t) for t in plan.verdict.problems[:3]]
+
     pdos = []
     for c in chosen:
         entries = [Entry(e.index, e.subindex, e.bitlen, e.name, e.data_type, "pin")
@@ -334,19 +355,17 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         pdos.append(PdoChoice(c.sm, c.index, c.direction, c.name, entries))
 
     if p.profile == 402:
-        need_rx, need_tx = CIA402_MODES.get(mode, (set(), set()))
         have = {e.index for pd in pdos for e in pd.entries}
         # several axes (ETG.6010: axis n at index + n * 0x800)
         while p.axes < 4 and 0x6041 + p.axes * AXIS_OFFSET in have:
             p.axes += 1
         if p.axes > 1:
             p.notes.append("%d axes: each gets its own pins (cia402.axes)" % p.axes)
-        missing = set()
-        for a in range(p.axes):
-            missing |= {i + a * AXIS_OFFSET for i in need_rx | need_tx} - have
-        if missing:
-            p.notes.append("the default PDOs lack %s for %s; the mapping must be changed"
-                           % (", ".join("0x%04X" % i for i in sorted(missing)), mode.upper()))
+        p.status = pdoreq.cia402_status(mode, extra_modes, p.axes,
+                                        {(e.index, e.subindex) for pd in pdos for e in pd.entries})
+        for st in p.status:
+            if st.level == "error":
+                p.notes.append(st.text)
 
     # Encoder channels: the encoder function handles their counter and latches.
     mapped = [e for pd in pdos for e in pd.entries]

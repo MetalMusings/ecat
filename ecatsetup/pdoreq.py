@@ -17,6 +17,7 @@ written; not judged here, the slave's content is not known without the bus),
 gives them) and "build" (own mapping in open PDOs).
 """
 
+import dataclasses
 import itertools
 import os
 from dataclasses import dataclass, field
@@ -225,3 +226,126 @@ def cia402_verdicts(esi_dev, mode, modes=(), axes=1, supported=None, data=None):
     each = {m: judge(cia402(m, (), axes, data), esi_dev, supported, bits([m]))
             for m in data["modes"] if not data["modes"][m].get("only-in-modes")}
     return whole, each
+
+
+@dataclass
+class Status:
+    level: str               # "ok", "info" or "error"
+    text: str
+    add: list = field(default_factory=list)   # [(index, "rx" or "tx")] that would fix it
+
+
+def _objects(data, index, axes):
+    """The entry description of an object, also on a later axis."""
+    shift = data["axis-offset"]
+    for a in range(axes):
+        base = index - a * shift
+        if base in data["objects"]:
+            return data["objects"][base]
+    return None
+
+
+def cia402_status(mode, modes, axes, have, data=None):
+    """The lines under a drive's PDOs: what its mode set lacks (error), and what is
+    only a loss (info). `have` is the set of (index, subindex) mapped, both directions."""
+    data = data or load("cia402")
+    req = cia402(mode, modes, axes, data)
+    chosen = [mode] + [m for m in modes if m != mode]
+    out = []
+    missing = [(i, "rx") for i, s in sorted(req.rx) if (i, s) not in have]
+    missing += [(i, "tx") for i, s in sorted(req.tx) if (i, s) not in have]
+    if missing:
+        out.append(Status("error", "cannot run as CiA 402 in %s: %s missing"
+                          % (", ".join(m.upper() for m in chosen),
+                             ", ".join(object_name(i) for i, _ in missing)), missing))
+    if len(chosen) == 1:
+        for index, text in ((0x6060, "the mode is set by SDO at start"),
+                            (0x6061, "the mode is not read back")):
+            if (index, 0) not in have:
+                out.append(Status("info", "%s is not mapped: %s" % (object_name(index), text),
+                                  [(index, "rx" if index == 0x6060 else "tx")]))
+    if not out:
+        out.append(Status("ok", "enough for CiA 402 in %s" % ", ".join(m.upper() for m in chosen)))
+    return out
+
+
+@dataclass
+class Plan:
+    pdos: list                # EsiPdo (with sm) for the proposal
+    way: Way = None           # what was done, None when the assignment was enough
+    verdict: Verdict = None
+
+
+def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=None):
+    """The PDOs for a CiA 402 drive: `chosen` (the default assignment) when it holds
+    what the mode set needs, else the best ready way, else an own mapping in the
+    open PDO of each direction that lacks something, else `chosen` as it is."""
+    data = data or load("cia402")
+    req = cia402(mode, modes, axes, data)
+    have = _have(chosen)
+    if (req.rx | req.tx) <= have:
+        return Plan(chosen)
+    chosen_modes = [mode] + [m for m in modes if m != mode]
+    v = judge(req, esi_dev, supported,
+              [(data["modes"][m]["bit"], m.upper()) for m in chosen_modes if m in data["modes"]])
+    by_index = {p.index: p for p in esi_dev.pdos}
+
+    def sm_of(direction, wanted=None):
+        sms = [p.sm for p in chosen + esi_dev.pdos if p.direction == direction and p.sm is not None]
+        return wanted if wanted is not None else (sms[0] if sms else (2 if direction == "rx" else 3))
+
+    ready = [w for w in v.ways if w.kind == READY]
+    if ready:
+        w = ready[0]
+        pdos = []
+        if w.sms:
+            for sm, ids in sorted(w.sms.items()):
+                pdos += [dataclasses.replace(by_index[i], sm=sm) for i in ids if i in by_index]
+        else:
+            pdos = [dataclasses.replace(by_index[i], sm=sm_of(by_index[i].direction))
+                    for i in w.rx + w.tx]
+        return Plan(pdos, w, v)
+    # an own mapping is needed only in the direction that lacks something
+    partial = Requirement(
+        rx=req.rx if not req.rx <= _have([p for p in chosen if p.direction == "rx"]) else set(),
+        tx=req.tx if not req.tx <= _have([p for p in chosen if p.direction == "tx"]) else set(),
+        good_rx=req.good_rx, good_tx=req.good_tx)
+    vp = judge(partial, esi_dev, supported, [])
+    build = [w for w in vp.ways if w.kind == BUILD]
+    if not build:
+        return Plan(chosen, None, v if v.problems else vp)
+    pdos = list(chosen)
+    for direction, need, good in (("rx", req.rx, req.good_rx), ("tx", req.tx, req.good_tx)):
+        mapped = _have([p for p in pdos if p.direction == direction])
+        if need <= mapped:
+            continue
+        target = next(p for p in esi_dev.pdos if p.direction == direction and not p.fixed)
+        # what the open PDO holds by default stays if it is needed, then what is
+        # missing, then what is only good to have; the PDO's limit cuts the last
+        base = next((p for p in chosen if p.index == target.index), target)
+        entries = [e for e in base.entries if (e.index, e.subindex) in need]
+        have_now = {(e.index, e.subindex) for e in entries}
+        entries += [e for e in base.entries if (e.index, e.subindex) not in need and e.index]
+        for index, sub in sorted(need | good):
+            if (index, sub) in {(e.index, e.subindex) for e in entries}:
+                continue
+            spec = _objects(data, index, axes)
+            if spec is None:
+                continue
+            flag = "R" if direction == "rx" else "T"
+            if esi_dev.mapping and flag not in esi_dev.mapping.get(index, ""):
+                continue
+            entries.append(_new_entry(index, sub, spec))
+        # the needed ones first, so that the limit never cuts them
+        entries.sort(key=lambda e: (e.index, e.subindex) not in need)
+        limit = esi_dev.max_entries.get(target.index)
+        if limit is not None:
+            entries = entries[:limit]
+        pdos = [p for p in pdos if p.direction != direction]
+        pdos.append(dataclasses.replace(target, sm=sm_of(direction), entries=entries))
+    return Plan(pdos, build[0], v)
+
+
+def _new_entry(index, sub, spec):
+    from .esi import EsiEntry
+    return EsiEntry(index, sub, spec["bits"], spec["name"], spec["type"])
