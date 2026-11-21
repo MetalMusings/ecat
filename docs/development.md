@@ -3282,8 +3282,9 @@ never written) and *build* (an own mapping in the open PDOs).
   0x6502 lacks the mode) and `unknown` (no ESI file, or an ESI without a
   dictionary).
 - `esi.EsiDevice` now also holds `pdo_config`, `pdo_assign`, `sdo_info`,
-  `mapping` (object -> R/T/RT), `max_entries` (PDO -> most entries; the
-  MaxValue of subindex 0 is hexadecimal in an ESI, also without `#x`) and
+  `mapping` (object -> R/T/RT), `max_entries` (PDO -> most entries: the
+  MaxValue of subindex 0, decimal unless it starts with `#x`, as every
+  HexDecValue of ETG.2000; the A6's 0x1600 takes 10: 336 bits = 16 + 10 x 32) and
   `drive_modes` (0x6502's default). The ESI cache version is 2.
 - Checked on StepperOnline's A6 ESI: csp ready with 0x1701 + 0x1B01 (the
   default; 0x6061 lacking: the profile writes 0x6060 by SDO), csp + hm ready
@@ -3423,3 +3424,20 @@ never written) and *build* (an own mapping in the open PDOs).
 - Tests: `tests/test_mdp.py` (synthetic EL6021), every rule mutation-checked; run
   `scripts/run-tests mdp pdoreq pdoedit prototype capture capturec guidance` (gui not run:
   nothing in it changed; it ran on the encoder step's propose).
+
+### Fixes after the review (2026-11-21)
+
+- `max_entries` read MaxValue as hexadecimal (the A6's 0x1600 got 16 instead
+  of 10); now decimal unless `#x` (ESI cache version 4).
+- `check_slave` reported two PDOs that exclude each other only when the lower
+  one named the other; now either side counts.
+- `cia402_status` with no or an unknown mode (a hand-edited file) crashed the
+  window's check; it now says nothing (`config.check` names the mode).
+- Encoder notes only for a use the device has a way to give (no "no external
+  latch" on a terminal without one).
+- `pdoedit` refuses every edit when `configure-pdos` is false (nothing would
+  reach the slave); an edit without an ESI file says that whether the device
+  takes it is not known.
+- The window lists the ESI file's objections as "ESI file: ..." apart from the
+  file's errors: they do not stop a save, and a grey line says so.
+- `pdoreq.load` reads each file once (again when it changes).

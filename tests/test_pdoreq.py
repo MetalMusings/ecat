@@ -157,6 +157,15 @@ class TestJudge(unittest.TestCase):
         whole, _ = pdoreq.cia402_verdicts(make(MAPPABLE, pdos, modes=0x100), "csp", supported=0x80)
         self.assertEqual(whole.status, pdoreq.BUILD)
 
+    def test_max_value_is_decimal_unless_hex(self):
+        dev = make(MAPPABLE + ['<Object><Index>#x1600</Index><Name>o</Name><Type>DT1600</Type><BitSize>336</BitSize>'
+                               '<Info><SubItem><Name>SubIndex 000</Name><Info><MaxValue>10</MaxValue></Info>'
+                               '</SubItem></Info></Object>',
+                               '<Object><Index>#x1A00</Index><Name>o</Name><Type>DT1A00</Type><BitSize>336</BitSize>'
+                               '<Info><SubItem><Name>SubIndex 000</Name><Info><MaxValue>#x10</MaxValue></Info>'
+                               '</SubItem></Info></Object>'], [])
+        self.assertEqual(dev.max_entries, {0x1600: 10, 0x1A00: 16})
+
     def test_mapping_facts_read_from_the_esi(self):
         dev = make(MAPPABLE, [])
         self.assertEqual(dev.mapping[0x6040], "R")
@@ -253,6 +262,20 @@ class TestCheckSlave(unittest.TestCase):
         found = sess.pdo_problems()
         self.assertEqual(found[0][0], "error")
         self.assertTrue(found[0][1].startswith("slave 1 (x): PDO 0x1701 is fixed"))
+
+    def test_exclude_named_only_by_the_higher_pdo(self):
+        dev = make(MAPPABLE, [pdo("RxPdo", 0x1701, [(0x6040, 16), (0x607A, 32)], fixed=True),
+                              pdo("RxPdo", 0x1702, [(0x6040, 16), (0x60FF, 32)], fixed=True, exclude=[0x1701])])
+        s = fslave([(0x1701, 2, [(0x6040, 16), (0x607A, 32)]), (0x1702, 2, [(0x6040, 16), (0x60FF, 32)])], [])
+        found = [t for _l, t in pdoreq.check_slave(s, dev) if "exclude" in t]
+        self.assertEqual(found, ["PDO 0x1701 and PDO 0x1702 exclude each other in the ESI file"])
+
+    def test_a_drive_without_a_mode_does_not_crash_the_check(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], TX)
+        s["cia402"] = {}
+        self.assertIsInstance(self.texts(s), list)
+        self.assertEqual(pdoreq.cia402_status(None, [], 1, set()), [])
+        self.assertEqual(pdoreq.cia402_status("bad", ["hm"], 1, set()), [])
 
     def test_unknown_pdo_is_a_warning(self):
         s = fslave([(0x1999, 2, [(0x6040, 16)])], TX)
@@ -385,6 +408,9 @@ class TestA6(unittest.TestCase):
         folder = os.path.expanduser("~/esi/stepperonline")
         files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".xml")]
         self.dev = esi.load_file(files[0])[0]
+
+    def test_the_open_pdo_takes_ten_entries(self):
+        self.assertEqual(self.dev.max_entries[0x1600], 10)     # 336 bits = 16 + 10 x 32
 
     def test_csp_is_ready_with_the_default_assignment(self):
         v, _ = pdoreq.cia402_verdicts(self.dev, "csp")

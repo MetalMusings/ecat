@@ -2088,8 +2088,14 @@ class SlaveView(QWidget):
         self.pd_adds = []
         if s.get("profile") == "cia402":
             c = s.get("cia402") or {}
-            have = {config.parse_obj(e["object"]) for d in (s.get("process-data") or {}).values()
-                    for p in d for e in p.get("entries") or [] if "object" in e}
+            have = set()
+            for d in (s.get("process-data") or {}).values():
+                for p in d or []:
+                    for e in p.get("entries") or []:
+                        try:
+                            have.add(config.parse_obj(e.get("object")))
+                        except ValueError:
+                            pass        # config.check names it
             for st in pdoreq.cia402_status(c.get("mode"), [m for m in c.get("modes") or []
                                                            if m != c.get("mode")],
                                            len(c.get("axes") or [1]), have):
@@ -2118,6 +2124,8 @@ class SlaveView(QWidget):
             return
         if done is None:
             return
+        if self.win.session.esi_device(self.position) is None:
+            done += " (no ESI file: whether the device takes this mapping is not known)"
         self.win.changed()
         self.show_process_data(s)
         self.win.status(done)
@@ -7572,24 +7580,30 @@ class MainWindow(QMainWindow):
 
     def check(self, quiet=False, extra=()):
         errors, problems, notes = self.session.check()
-        pdo = self.session.pdo_problems()      # the PDOs against the ESI files
-        errors = errors + [t for lv, t in pdo if lv == "error"]
+        # the PDOs against the ESI files: what the device would refuse. Shown apart from the
+        # file's errors, since they do not stop a save (an ESI file can be wrong too)
+        pdo = self.session.pdo_problems()
+        esi_errors = [t for lv, t in pdo if lv == "error"]
         by_slave = {}
-        for m in errors + problems:
+        for m in errors + esi_errors + problems:
             by_slave.setdefault(slave_of(m), []).append(m)
         self.messages_by_slave = by_slave
         # DC settings the slaves do not describe: warned about, not errors
         dc = self.session.dc_problems()
-        groups = [(RED, "Error: ", errors), (RED, "Bus: ", problems),
+        groups = [(RED, "Error: ", errors), (RED, "ESI file: ", esi_errors), (RED, "Bus: ", problems),
                   (AMBER, "Warning: ", [t for lv, t in dc + pdo if lv == "warning"]),
                   (GREY, "Bus: ", notes), (GREY, "Note: ", [t for lv, t in dc + pdo if lv == "note"]),
                   (GREY, "", list(extra))]
         if not quiet:
-            if self.session.cfg is not None and not errors and not problems:
+            if self.session.cfg is not None and not errors and not problems and not esi_errors:
                 groups.append((GREEN, "", ["No errors in the file" +
                                            (", and the bus matches it" if self.session.bus else
                                             "; the bus was not read")]))
-            self.status("%d errors" % len(errors + problems) if errors or problems else "Checked")
+            elif self.session.cfg is not None and not errors and not problems:
+                groups.append((GREY, "", ["No errors in the file itself: it can be saved; the ESI "
+                                          "file's objections above are what the device may refuse"]))
+            self.status("%d errors" % len(errors + problems + esi_errors)
+                        if errors or problems or esi_errors else "Checked")
         self.set_messages(groups)
         if not quiet:
             self.refresh(keep_page=True)

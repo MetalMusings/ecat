@@ -1584,6 +1584,21 @@ class TestPdoEditing(WindowBase):
         w, page, s = self.page([(0x1701, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
         self.assertIn("0x1701 is fixed in the ESI file", page.pd_errors.text())
 
+    def test_esi_objections_are_apart_from_the_files_errors(self):
+        w, page, s = self.page([(0x1701, 2, [(0x6040, 16), (0x607A, 32), (0x60FF, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        w.check()
+        texts = [w.messages.item(i).text() for i in range(w.messages.count())]
+        self.assertTrue(any(t.startswith("ESI file: slave 1") and "0x1701 is fixed" in t for t in texts), texts)
+        self.assertFalse(any(t.startswith("Error: ") and "0x1701" in t for t in texts))
+
+    def test_editing_without_writing_the_pdos_is_refused(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        s["configure-pdos"] = False
+        with mock.patch.object(gui.QMessageBox, "warning") as warn:
+            page.add_pd_missing()
+        self.assertIn("not written to this slave", warn.call_args[0][2])
+
 
 class TestCards(unittest.TestCase):
     """Where a proposal came from, and the synchronisation card."""

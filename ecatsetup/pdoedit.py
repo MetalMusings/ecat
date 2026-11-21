@@ -15,6 +15,13 @@ class EditError(ValueError):
     pass
 
 
+def _writable(slave):
+    if slave.get("configure-pdos", True) is False:
+        raise EditError("the PDOs are not written to this slave (Write the PDO mapping to the slave is "
+                        "off): the slave's own mapping is used, so a change here does nothing on the "
+                        "slave. Turn it on to change the mapping")
+
+
 def _pdos(slave, direction):
     return (slave.setdefault("process-data", {}).setdefault(
         "outputs" if direction == "rx" else "inputs", []))
@@ -115,6 +122,7 @@ def add_object(slave, esi_dev, dictionary, index, sub=0, direction=None, pdo=Non
     """Add an object to an open PDO of the right direction; returns the entry.
     `direction` ("rx"/"tx") is needed only for an object that may be mapped both
     ways, `pdo` (an index) to choose which PDO."""
+    _writable(slave)
     axes = len((slave.get("cia402") or {}).get("axes") or [1])
     way = direction_of(index, esi_dev, axes)
     if way in ("rx", "tx"):
@@ -143,6 +151,9 @@ def add_object(slave, esi_dev, dictionary, index, sub=0, direction=None, pdo=Non
                          if p.direction == direction and not p.fixed), None)
         if open_pdo is not None:
             target = add_pdo(slave, esi_dev, open_pdo.index)
+    if target is None and pdo is not None:
+        raise EditError("PDO 0x%04X is not among the %s PDOs in the file"
+                        % (pdo, "output" if direction == "rx" else "input"))
     if target is None:
         fixed = [_index(p) for p in _pdos(slave, direction)]
         if fixed:
@@ -162,6 +173,7 @@ def add_object(slave, esi_dev, dictionary, index, sub=0, direction=None, pdo=Non
 def remove_entry(slave, esi_dev, direction, pdo_pos, entry_pos):
     """Remove an entry (direction "outputs"/"inputs", the PDO's and the entry's
     position in the file); an empty PDO goes with it."""
+    _writable(slave)
     pdos = (slave.get("process-data") or {}).get(direction) or []
     pdo = pdos[pdo_pos]
     ep = _esi_pdo(esi_dev, _index(pdo))
@@ -186,6 +198,7 @@ def addable_pdos(slave, esi_dev):
 
 def add_pdo(slave, esi_dev, index):
     """Add one of the ESI file's PDOs with its entries; returns the PDO's dict."""
+    _writable(slave)
     if esi_dev is None:
         raise EditError("no ESI file for this device: a PDO's entries are not known")
     ep = _esi_pdo(esi_dev, index)
@@ -206,6 +219,7 @@ def add_pdo(slave, esi_dev, index):
 def add_missing(slave, esi_dev, dictionary, adds):
     """Add what pdoreq.cia402_status says is missing: adds is [(index, "rx"/"tx")].
     Returns (entries added, texts of what could not be added)."""
+    _writable(slave)
     added, failed = [], []
     for index, direction in adds:
         try:

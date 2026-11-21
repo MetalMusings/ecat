@@ -205,6 +205,19 @@ class TestNotes(unittest.TestCase):
         self.assertIn("the device's predefined set \"Full (MDP 511)\" has it", notes[0])
         self.assertIn("no external latch", notes[1])
 
+    def test_no_note_for_what_the_device_cannot_give(self):
+        # a device whose sets have index but no external latch (as an EL5151): no latch note
+        sets = {"Legacy (MDP 510)": {2: [0x1600], 3: [0x1A00]},
+                "Index (MDP 511)": {2: [0x1603], 3: [0x1A04]}}
+        no_latch_in = pdo("TxPdo", 0x1A04, [entry(0x6010, 1, 1, "Latch C valid", "BOOL"),
+                                             entry(0x6010, 0x11, 32, "Counter value", "UDINT"),
+                                             entry(0x6010, 0x12, 32, "Latch value", "UDINT")])
+        no_latch_out = pdo("RxPdo", 0x1603, [entry(0x7010, 1, 1, "Enable latch C", "BOOL")])
+        dev = build(LEGACY_OUT + no_latch_out + LEGACY_IN + POSITION_IN + no_latch_in, sets,
+                    ((5001, 511),), "Index (MDP 511)")
+        s = slave_of(proposal(dev))
+        self.assertEqual([x for x in pdoreq.check_slave(s, dev) if x[0] == "note"], [])
+
     def test_a_full_mapping_has_no_notes(self):
         dev = device()
         s = slave_of(proposal(dev, pdo_set="Full (MDP 511)"))

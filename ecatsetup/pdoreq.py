@@ -40,14 +40,23 @@ def object_name(index):
     return "0x%04X %s" % (index, NAMES[index]) if index in NAMES else "0x%04X" % index
 
 
+_loaded = {}
+
+
 def load(profile):
-    """The requirement data for a profile name ("cia402"); None if there is none."""
+    """The requirement data for a profile name ("cia402"); None if there is none.
+    Read once per file (and again when the file changes)."""
     folders = [os.environ["ECATSETUP_PDOREQ"]] if os.environ.get("ECATSETUP_PDOREQ") else [USER, HERE]
     for folder in folders:
         path = os.path.join(folder, profile + ".yaml")
-        if os.path.exists(path):
+        try:
+            stamp = os.stat(path).st_mtime_ns
+        except OSError:
+            continue
+        if _loaded.get(path, (None,))[0] != stamp:
             with open(path) as f:
-                return yaml.safe_load(f)
+                _loaded[path] = (stamp, yaml.safe_load(f))
+        return _loaded[path][1]
     return None
 
 
@@ -249,6 +258,9 @@ def cia402_status(mode, modes, axes, have, data=None):
     """The lines under a drive's PDOs: what its mode set lacks (error), and what is
     only a loss (info). `have` is the set of (index, subindex) mapped, both directions."""
     data = data or load("cia402")
+    if mode not in data["modes"]:
+        return []            # no or an unknown mode: config.check says so
+    modes = [m for m in modes or [] if m in data["modes"]]
     req = cia402(mode, modes, axes, data)
     chosen = [mode] + [m for m in modes if m != mode]
     out = []
@@ -324,7 +336,6 @@ def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=Non
         # missing, then what is only good to have; the PDO's limit cuts the last
         base = next((p for p in chosen if p.index == target.index), target)
         entries = [e for e in base.entries if (e.index, e.subindex) in need]
-        have_now = {(e.index, e.subindex) for e in entries}
         entries += [e for e in base.entries if (e.index, e.subindex) not in need and e.index]
         for index, sub in sorted(need | good):
             if (index, sub) in {(e.index, e.subindex) for e in entries}:
@@ -423,8 +434,9 @@ def check_slave(slave, esi_dev, exact=True):
                         if i and got in ("R", "T") and got != flag:
                             out.append((bad, "%s: %s can only be mapped as %s data in the ESI file"
                                         % (label, object_name(i), "RX" if got == "R" else "TX")))
-            for other in esi_pdo.excludes:
-                if other in names and other != index and index < other:
+            for other in sorted(names):
+                o = by_index.get(other)
+                if other > index and (other in esi_pdo.excludes or (o is not None and index in o.excludes)):
                     out.append((bad, "%s and PDO 0x%04X exclude each other in the ESI file"
                                 % (label, other)))
         if esi_dev.pdo_assign is False:
@@ -491,8 +503,9 @@ def encoder_status(slave, esi_dev=None, data=None):
                 ", ".join("0x%04X:%02X" % x for x in lacks))
             v = judge(req, esi_dev) if esi_dev is not None else None
             sets = [w.title for w in v.ways if w.kind == READY] if v else []
-            if sets:
-                text += "; the device's %s has it" % ", ".join(sets[:2])
+            if not sets:
+                continue        # the device has no way to give it (an EL5151 has no external latch)
+            text += "; the device's %s has it" % ", ".join(sets[:2])
             out.append(("note", text))
     return out
 

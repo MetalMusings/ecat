@@ -162,7 +162,7 @@ def _mapping_facts(d, dev):
                 try:
                     top = _text(sub, "Info/MaxValue")
                     if top:
-                        d.max_entries[index] = number(top if top.lower().startswith(("#x", "0x")) else "#x" + top)
+                        d.max_entries[index] = number(top)     # decimal unless #x (ETG.2000 HexDecValue)
                 except (TypeError, ValueError):
                     pass
         if index == 0x6502:
@@ -183,7 +183,7 @@ def _mapping_facts(d, dev):
         sub = dt.find("SubItem/Info/MaxValue") if dt is not None else None
         if sub is not None and sub.text:
             try:
-                d.max_entries[index] = number("#x" + sub.text.strip()) if not sub.text.lower().startswith(("#x", "0x")) else number(sub.text)
+                d.max_entries[index] = number(sub.text)
             except ValueError:
                 pass
 
@@ -210,7 +210,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 
 def cache_path():

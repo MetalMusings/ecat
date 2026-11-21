@@ -99,6 +99,27 @@ class TestAddObject(unittest.TestCase):
         self.assertNotIn((0x6040, "rx"), found)
 
 
+class TestNotWritten(unittest.TestCase):
+    def test_every_edit_is_refused_when_the_pdos_are_not_written(self):
+        dev = make(MAPPABLE, ESI_PDOS)
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])], configure=False)
+        for edit in (lambda: pdoedit.add_object(s, dev, coe.Dictionary(), 0x607A),
+                     lambda: pdoedit.remove_entry(s, dev, "outputs", 0, 0),
+                     lambda: pdoedit.add_pdo(s, dev, 0x1701),
+                     lambda: pdoedit.add_missing(s, dev, coe.Dictionary(), [(0x607A, "rx")])):
+            with self.assertRaises(pdoedit.EditError) as cm:
+                edit()
+            self.assertIn("not written to this slave", str(cm.exception))
+        self.assertEqual(entries(s), ["0x6040:00"])
+
+    def test_a_pdo_asked_for_that_is_not_in_the_file(self):
+        dev = make(MAPPABLE, ESI_PDOS)
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], [])
+        with self.assertRaises(pdoedit.EditError) as cm:
+            pdoedit.add_object(s, dev, coe.Dictionary(), 0x607A, pdo=0x1601)
+        self.assertIn("not among the output PDOs", str(cm.exception))
+
+
 class TestRemoveAndAddPdo(unittest.TestCase):
     def setUp(self):
         self.dev = make(MAPPABLE, ESI_PDOS)
