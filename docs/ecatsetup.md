@@ -242,7 +242,8 @@ Choosing a slave shows:
   note names), and for a drive whose `0x6060` is not in the process data,
   its mode (`0x6060:00`, which follows the mode chosen above); also the
   state change timeouts its ESI file gives that are longer than the
-  master's (`state-timeouts-ms`). For a file
+  master's (`state-timeouts-ms`), and how long its SDO answers may take
+  (`sdo-timeout-ms`). For a file
   made earlier, *Add what the device needs* adds them (shown when some
   are missing; *Update from bus* names them too, and adds nothing on its
   own). *Add setting...*

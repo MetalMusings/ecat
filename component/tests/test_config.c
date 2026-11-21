@@ -714,6 +714,14 @@ static void test_state_timeouts(void) {
   CHECK_EQ(count(lcecConfTypeStateTimeouts), 0);
   CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
               "state-timeouts-ms: {preop: 0}}\n", "state-timeouts-ms.preop must be 1 to 600000");
+  // the SDO response timeout, alone or with them
+  CHECK_EQ(load("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, sdo-timeout-ms: 2000}\n"), 0);
+  CHECK_EQ(TIMEOUTS(0)->sdo_response, 2000);
+  CHECK_EQ(TIMEOUTS(0)->preop, 0);
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, sdo-timeout-ms: 0}\n",
+              "sdo-timeout-ms must be 1 to 600000");
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, sdo-timeout-ms: 2s}\n",
+              "sdo-timeout-ms must be 1 to 600000");
 }
 
 static void test_sync1(void) {

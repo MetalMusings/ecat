@@ -115,7 +115,8 @@ class TestProposal(unittest.TestCase):
 
 TIMEOUTS = ("<Info><StateMachine><Timeout><PreopTimeout>6000</PreopTimeout><SafeopOpTimeout>9000"
             "</SafeopOpTimeout><BackToInitTimeout>5000</BackToInitTimeout><BackToSafeopTimeout>1000"
-            "</BackToSafeopTimeout></Timeout></StateMachine></Info>")
+            "</BackToSafeopTimeout></Timeout></StateMachine><Mailbox><Timeout><RequestTimeout>100"
+            "</RequestTimeout><ResponseTimeout>2000</ResponseTimeout></Timeout></Mailbox></Info>")
 
 
 class TestStateTimeouts(unittest.TestCase):
@@ -128,6 +129,17 @@ class TestStateTimeouts(unittest.TestCase):
         p = proposal(device([], WITH_MODE, info=TIMEOUTS))
         self.assertEqual(config.slave_from_proposal(p)["state-timeouts-ms"], {"preop": 6000, "back-to-safeop": 1000})
         self.assertNotIn("state-timeouts-ms", config.slave_from_proposal(proposal(device([], WITH_MODE))))
+
+    def test_sdo_timeout(self):
+        dev = device([], WITH_MODE, info=TIMEOUTS)
+        self.assertEqual(dev.sdo_timeout, 2000)
+        s = config.slave_from_proposal(proposal(dev))
+        self.assertEqual(s["sdo-timeout-ms"], 2000)
+        short = device([], WITH_MODE, info=TIMEOUTS.replace(">2000<", ">800<"))
+        self.assertNotIn("sdo-timeout-ms", config.slave_from_proposal(proposal(short)))
+        cfg = config.from_proposals([proposal(dev)])
+        cfg["slaves"][0]["sdo-timeout-ms"] = 0
+        self.assertTrue(any("sdo-timeout-ms must be 1 to 600000" in e for e in config.check(cfg)))
 
     def test_check(self):
         cfg = config.from_proposals([proposal(device([], WITH_MODE, info=TIMEOUTS))])
@@ -153,6 +165,7 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         self.slave = self.sess.cfg["slaves"][0]
         self.slave["settings"] = []          # a file made before InitCmds were read
         del self.slave["state-timeouts-ms"]
+        del self.slave["sdo-timeout-ms"]
 
     def test_missing_settings_are_named(self):
         missing = self.sess.missing_init_settings(1)
@@ -174,15 +187,16 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         self.assertTrue(any("recommended settings" in n and "0x2001:00 = -10" in n for n in notes), notes)
 
     def test_timeouts_recommended_and_added(self):
-        self.assertEqual(self.sess.missing_state_timeouts(1), {"preop": 6000, "back-to-safeop": 1000})
+        self.assertEqual(self.sess.missing_state_timeouts(1), {"preop": 6000, "back-to-safeop": 1000, "sdo": 2000})
         notes = self.sess.update_from_bus()
         self.assertNotIn("state-timeouts-ms", self.sess.slave(1))
-        self.assertTrue(any("recommended state change timeouts" in n and "preop 6000 ms" in n for n in notes))
+        self.assertTrue(any("recommended timeouts" in n and "preop 6000 ms" in n for n in notes))
 
     def test_added_when_asked(self):
         added = self.sess.add_init_settings(1)
-        self.assertEqual(len(added), 5)
+        self.assertEqual(len(added), 6)
         self.assertEqual(self.sess.slave(1)["state-timeouts-ms"], {"preop": 6000, "back-to-safeop": 1000})
+        self.assertEqual(self.sess.slave(1)["sdo-timeout-ms"], 2000)
         self.assertEqual(self.sess.missing_state_timeouts(1), {})
         self.assertEqual(self.sess.missing_init_settings(1), [])
         self.assertEqual(config.check(self.sess.cfg), [])

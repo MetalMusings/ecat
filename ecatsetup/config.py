@@ -93,6 +93,10 @@ def parse_obj(text):
 STATE_TIMEOUTS = {"preop": 3000, "safeop-op": 10000, "back-to-init": 5000, "back-to-safeop": 200}
 
 
+# the time the master gives a slave to answer an SDO (master/sdo_request.h), ms
+SDO_TIMEOUT = 1000
+
+
 def longer_timeouts(esi_timeouts):
     """The ESI file's state timeouts that are longer than the master's defaults."""
     return {k: v for k, v in (esi_timeouts or {}).items()
@@ -201,6 +205,8 @@ def slave_from_proposal(p, name=None):
                      for i, sub, t in PP_LIMITS if (i, sub) in p.pp_limits]
     if getattr(p, "state_timeouts", None):
         s["state-timeouts-ms"] = dict(p.state_timeouts)
+    if getattr(p, "sdo_timeout", None):
+        s["sdo-timeout-ms"] = p.sdo_timeout
     # what the device needs written at start (ESI InitCmds, the drive's mode)
     before = {parse_obj(x["object"]) for x in s["settings"]}
     for st in getattr(p, "init_settings", None) or []:
@@ -954,6 +960,9 @@ def check(cfg, series=None):
                 err("%s: dc sync1-shift-ns needs sync1-cycles (SYNC1 every n SYNC0 cycles)" % where)
         for e in eoe_errors(s.get("eoe")):
             err("%s: %s" % (where, e))
+        v = s.get("sdo-timeout-ms")
+        if v is not None and (isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 600000):
+            err("%s: sdo-timeout-ms must be 1 to 600000 (ms)" % where)
         st = s.get("state-timeouts-ms")
         if st is not None:
             if not isinstance(st, dict):

@@ -345,6 +345,7 @@ file each stopped the load with their own line.
 | `dc` | Distributed clocks; leave out for none. |
 | `eoe` | An IP address and more for a slave that speaks Ethernet over EtherCAT; leave out for none (see [eoe](#eoe)). |
 | `settings` | SDOs written to the slave at start, in this order. |
+| `sdo-timeout-ms` | How long the slave may take to answer an SDO (its settings at start, and the master's other SDO transfers to it), 1 to 600000 ms; the master's own is 1000 ms. EtherCAT Setup takes the ESI file's `Mailbox/Timeout/ResponseTimeout` where it is longer (2000 ms in most). Needs a master with `ecrt_slave_config_sdo_timeout()` (the master fork after 1.5); with an older one a warning says it is not used. |
 | `state-timeouts-ms` | Longer state change timeouts than the master's (ETG.2000's 3000, 10000, 5000 and 200 ms), for a slave that needs them: `preop` (INIT to PREOP), `safeop-op` (PREOP to SAFEOP and SAFEOP to OP), `back-to-init` (to INIT, and down to PREOP), `back-to-safeop` (OP to SAFEOP), each 1 to 600000 ms; leave a key out for the master's. EtherCAT Setup takes those of the ESI file (`Info/StateMachine/Timeout`) that are longer. |
 
 #### PDOs and entries

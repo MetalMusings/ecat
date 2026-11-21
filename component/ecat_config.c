@@ -913,13 +913,14 @@ static int parse_ipv4(ctx_t *c, const char *key, const char *text, uint32_t *out
   return 0;
 }
 
-/// state-timeouts-ms: preop, safeop-op, back-to-init, back-to-safeop (ms, 1 to 600000).
-static void state_timeouts(ctx_t *c, buf_t *b, yaml_node_t *t) {
+/// state-timeouts-ms: preop, safeop-op, back-to-init, back-to-safeop (ms, 1 to 600000);
+/// sdo-timeout-ms: the slave's SDO answers (ms, 1 to 600000). One record for both.
+static void state_timeouts(ctx_t *c, buf_t *b, yaml_node_t *t, yaml_node_t *sdo) {
   static const char *keys[] = {"preop", "safeop-op", "back-to-init", "back-to-safeop"};
   LCEC_CONF_STATE_TIMEOUTS_T *st;
   uint32_t *field[4];
   int i;
-  if (t == NULL) return;
+  if (t == NULL && sdo == NULL) return;
   if ((st = append(b, sizeof(*st))) == NULL) {
     error(c, "out of memory");
     return;
@@ -929,13 +930,23 @@ static void state_timeouts(ctx_t *c, buf_t *b, yaml_node_t *t) {
   field[1] = &st->safeop_op;
   field[2] = &st->back_to_init;
   field[3] = &st->back_to_safeop;
-  for (i = 0; i < 4; i++) {
+  for (i = 0; t != NULL && i < 4; i++) {
     long long v = get_int(c, t, keys[i], 0);
     if (get(c, t, keys[i]) != NULL && (v < 1 || v > 600000)) {
       error(c, "state-timeouts-ms.%s must be 1 to 600000 (ms)", keys[i]);
       continue;
     }
     *field[i] = (uint32_t)v;
+  }
+  if (sdo != NULL) {
+    char *end = NULL;
+    const char *text = sdo->type == YAML_SCALAR_NODE ? (const char *)sdo->data.scalar.value : "";
+    long long v = strtoll(text, &end, 10);
+    if (end == text || *end || v < 1 || v > 600000) {
+      error(c, "sdo-timeout-ms must be 1 to 600000 (ms)");
+    } else {
+      st->sdo_response = (uint32_t)v;
+    }
   }
 }
 
@@ -1175,7 +1186,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     }
   }
   eoe(c, b, get(c, s, "eoe"));
-  state_timeouts(c, b, get(c, s, "state-timeouts-ms"));
+  state_timeouts(c, b, get(c, s, "state-timeouts-ms"), get(c, s, "sdo-timeout-ms"));
   process_data(c, b, get(c, s, "process-data"), (LCEC_CONF_SLAVE_T *)(b->data + off), off);
   if (c->cia402) {
     // what each allowed mode needs, and changing modes the mode objects

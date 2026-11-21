@@ -3615,3 +3615,26 @@ oversampling (`OSFac`), FoE, SoE, SM sizes and FMMUs (the master takes the SII's
   `config.slave_from_proposal` keeps an object written twice in a row (0xF030:00).
 - Tests: `tests/test_slots.py` (a synthetic coupler with DI/DO modules),
   mutation-checked.
+
+### SDO response timeouts (built 2026-11-21)
+
+- `Info/Mailbox/Timeout/ResponseTimeout` in ~3500 devices: 3380 longer than the
+  master's 1000 ms (2000 ms in 3137, 5000 in 142, up to 20 s). RequestTimeout is
+  100 ms nearly everywhere and is not used.
+- Master fork 1d5a16fa (uspace-tool-ipc-fixes, not pushed, no release):
+  `ecrt_slave_config_sdo_timeout(sc, ms)` and `EC_HAVE_SDO_TIMEOUT`; the slave
+  configuration's timeout applies to its configured SDOs (also those configured
+  before), its SDO requests and `ecrt_master_sdo_download/upload` to its position;
+  0 restores the default (`EC_SDO_REQUEST_RESPONSE_TIMEOUT`, now in
+  sdo_request.h). tests/test_sim_sdo_timeout.c (a slave that takes no mail fails
+  after its own time: 300, 1600 ms, and the default); the fork's SDO and mailbox
+  tests pass. Not built for the kernel modules locally (the fork's CI does).
+- ecat: `sdo-timeout-ms` per slave, in the same record as the state timeouts
+  (`LCEC_CONF_STATE_TIMEOUTS_T.sdo_response`); `lcec_main.c` calls the new
+  function where the master has it, else warns. The installed master (1.5) has
+  not: the component built here uses the warning branch. A master release
+  (uspace-v1.6) and ecat's MASTER_MIN are needed for it to work in a package.
+- `esi.EsiDevice.sdo_timeout` (cache version 9); a new proposal takes it where it
+  is longer than 1000 ms; Update and *Add what the device needs* recommend it.
+- EtherCAT Setup's own SDO reads through the `ethercat-uspace` tool still use the
+  master's 1000 ms (the tool has no timeout option).

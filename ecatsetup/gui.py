@@ -2451,7 +2451,7 @@ class SlaveView(QWidget):
 
     def show_settings(self, s):
         missing = self.win.session.missing_init_settings(self.position) + [
-            {"object": "state timeout " + k, "value": "%d ms" % v}
+            {"object": "SDO answer timeout" if k == "sdo" else "state timeout " + k, "value": "%d ms" % v}
             for k, v in sorted(self.win.session.missing_state_timeouts(self.position).items())]
         self.init_button.setVisible(bool(missing))
         self.init_button.setToolTip("Adds %s (from the device's ESI file, or the drive's mode)"

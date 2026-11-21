@@ -119,6 +119,7 @@ class EsiDevice:
     drive_modes: int = None   # default of 0x6502 (supported drive modes)
     channels: list = field(default_factory=list)   # (ProfileNo, AddInfo) per ChannelInfo
     state_timeouts: dict = field(default_factory=dict)  # Info/StateMachine/Timeout, ms by file key
+    sdo_timeout: int = None   # Info/Mailbox/Timeout/ResponseTimeout, ms
     slots: EsiSlots = None    # a modular device's Slots, with the file's Modules
 
     @property
@@ -188,6 +189,10 @@ def _device(path, vendor_id, dev):
             v = None
         if v:
             d.state_timeouts[key] = v
+    try:
+        d.sdo_timeout = number(_text(dev, "Info/Mailbox/Timeout/ResponseTimeout") or None)
+    except (TypeError, ValueError):
+        d.sdo_timeout = None
     for c in dev.findall("Profile/ChannelInfo"):
         try:
             d.channels.append((number(_text(c, "ProfileNo") or None), number(_text(c, "AddInfo") or None)))
@@ -341,7 +346,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 8
+CACHE_VERSION = 9
 
 
 def cache_path():

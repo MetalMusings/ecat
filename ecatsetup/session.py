@@ -256,7 +256,7 @@ class Session:
         for s in self.cfg.get("slaves") or []:
             timeouts = self.missing_state_timeouts(s.get("position"))
             if timeouts:
-                notes.append("slave %s (%s): recommended state change timeouts, from its ESI file: %s; add "
+                notes.append("slave %s (%s): recommended timeouts, from its ESI file: %s; add "
                              "them with \"Add what the device needs\" on its page"
                              % (s["position"], s.get("name"), ", ".join("%s %d ms" % kv for kv in sorted(timeouts.items()))))
             missing = self.missing_init_settings(s.get("position"))
@@ -303,12 +303,16 @@ class Session:
 
     def missing_state_timeouts(self, position):
         """The state change timeouts the proposal from the bus has (the ESI file's, where
-        longer than the master's) that the slave's entry lacks: {key: ms}."""
+        longer than the master's) that the slave's entry lacks: {key: ms}; "sdo" for the
+        SDO response timeout (sdo-timeout-ms)."""
         s, b = self.slave(position), self.bus.get(position)
         if s is None or b is None or not same_kind(s, b.info):
             return {}
         have = s.get("state-timeouts-ms") if isinstance(s.get("state-timeouts-ms"), dict) else {}
-        return {k: v for k, v in (getattr(b.proposal, "state_timeouts", None) or {}).items() if k not in have}
+        out = {k: v for k, v in (getattr(b.proposal, "state_timeouts", None) or {}).items() if k not in have}
+        if getattr(b.proposal, "sdo_timeout", None) and "sdo-timeout-ms" not in s:
+            out["sdo"] = b.proposal.sdo_timeout       # sdo-timeout-ms
+        return out
 
     def add_init_settings(self, position):
         """Add what missing_init_settings and missing_state_timeouts name; returns the
@@ -318,6 +322,9 @@ class Session:
         timeouts = self.missing_state_timeouts(position)
         if s is not None and added:
             s.setdefault("settings", []).extend(added)
+        if s is not None and "sdo" in timeouts:
+            s["sdo-timeout-ms"] = timeouts.pop("sdo")
+            added.append({"object": "sdo-timeout-ms", "value": s["sdo-timeout-ms"]})
         if s is not None and timeouts:
             if not isinstance(s.get("state-timeouts-ms"), dict):
                 s["state-timeouts-ms"] = {}

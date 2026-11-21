@@ -876,6 +876,13 @@ static int ecat_state_timeouts(ec_slave_config_t *sc, const LCEC_CONF_STATE_TIME
     if (ms[map[i].which] && ecrt_slave_config_state_timeout(sc, map[i].from, map[i].to, ms[map[i].which]) != 0)
       return -1;
   }
+#ifdef EC_HAVE_SDO_TIMEOUT
+  if (t->sdo_response && ecrt_slave_config_sdo_timeout(sc, t->sdo_response) != 0) return -1;
+#else
+  if (t->sdo_response)
+    rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "this master has no per-slave SDO timeout (1.6 or later): "
+        "sdo-timeout-ms ignored, the master's 1000 ms is used\n");
+#endif
   return 0;
 #else
   (void)sc;
