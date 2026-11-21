@@ -3249,3 +3249,48 @@ loaded): 10 s, 20027 cycles, late at most 13.5 us, everything taken out again
 - What `hm2_eth` exposes in 2.9 vs 2.10 for the read's time and packet errors.
 - (Answered 2026-11-17: `addf`, `delf` and `unloadrt` work in running
   threads on 2.9 and 2.10; delf first.)
+
+## Own PDO mapping (assignment 2026-11-19)
+
+One ladder for every profile: device -> profile (from CoE 0x1000 or the ESI's
+ProfileNo, preselected, always changeable; generic is always offered) -> the
+profile's choices (cia402: `mode` and `modes`) -> the process data that needs
+(requirement) -> a verdict -> the ways to meet it. The user chooses the
+profile; it is never switched automatically.
+
+Ways: *own* (the slave's mapping as it is, `configure-pdos: false`), *ready*
+(a predefined set, the default assignment or fixed PDOs, as the ESI gives
+them; the master writes a PDO's entries only when they differ, so these are
+never written) and *build* (an own mapping in the open PDOs).
+
+### Step 0: requirement, verdict, ways (built 2026-11-21)
+
+- `ecatsetup/pdoreq/cia402.yaml`: the requirement as data (per mode, what
+  several modes add: 0x6060 and 0x6061, what is good to have: 0x603F, 0x6061;
+  axis n at +0x800). The user's `~/.config/ecatsetup/pdoreq/` (or
+  `$ECATSETUP_PDOREQ`, for tests) replaces a file of the same name. The
+  package installs `pdoreq/` beside `rtrules/`.
+- `ecatsetup/pdoreq.py`: `cia402(mode, modes, axes)` gives the requirement,
+  `judge(req, esi_dev, supported, mode_bits)` the verdict, `cia402_verdicts()`
+  the verdict for the chosen mode set and for every mode on its own (the small
+  table at the mode choice). Verdicts: `ready` (ways: predefined sets, the
+  default assignment, fixed PDOs picked per direction without two that exclude
+  each other, fewest missing good-to-have first), `build` (an open PDO exists,
+  PdoConfig is on, every object is mappable in the right direction by the ESI
+  dictionary's PdoMapping R/T, the entries fit the PDO's maximum),
+  `impossible` (with the reasons, in object numbers and names; also when
+  0x6502 lacks the mode) and `unknown` (no ESI file, or an ESI without a
+  dictionary).
+- `esi.EsiDevice` now also holds `pdo_config`, `pdo_assign`, `sdo_info`,
+  `mapping` (object -> R/T/RT), `max_entries` (PDO -> most entries; the
+  MaxValue of subindex 0 is hexadecimal in an ESI, also without `#x`) and
+  `drive_modes` (0x6502's default). The ESI cache version is 2.
+- Checked on StepperOnline's A6 ESI: csp ready with 0x1701 + 0x1B01 (the
+  default; 0x6061 lacking: the profile writes 0x6060 by SDO), csp + hm ready
+  only with 0x1702 or 0x1703 and 0x1B02-0x1B04, csv/pv ready only with 0x1B04,
+  and an own mapping in 0x1600/0x1A00 for each.
+- Not in step 0: the encoder (MDP 511) and serial requirement files, the
+  ChannelInfo sub-profile reading, the window and `--check`, and the slave's
+  own mapping (a way that needs the bus). Order of work after this: 1 the
+  proposal with way C and a status line, 2 `--check` against the ESI, 3 editing
+  in the window.

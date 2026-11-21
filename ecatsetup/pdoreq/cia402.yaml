@@ -1,0 +1,24 @@
+# What a CiA 402 drive needs in its process data (docs/development.md "Own PDO
+# mapping"). Objects are index numbers; a second axis is shifted by +0x800
+# (ETG.6010). `bit` is the mode's bit in 0x6502 "Supported drive modes".
+profile: cia402
+title: CiA 402 drive
+axis-offset: 0x800
+common:                      # every mode
+  rx: [0x6040]
+  tx: [0x6041]
+modes:
+  csp: {title: Cyclic synchronous position, bit: 7, rx: [0x607A], tx: [0x6064]}
+  csv: {title: Cyclic synchronous velocity, bit: 8, rx: [0x60FF], tx: [0x606C]}
+  pv:  {title: Profile velocity,            bit: 2, rx: [0x60FF], tx: [0x606C]}
+  pp:  {title: Profile position,            bit: 0, rx: [0x607A], tx: [0x6064]}
+  hm:  {title: Homing,                      bit: 5, rx: [], tx: [], only-in-modes: true}
+# With more than one mode the profile writes and checks the mode itself
+# every cycle: 0x6060 out and 0x6061 in must be in the process data.
+several:
+  rx: [0x6060]
+  tx: [0x6061]
+# Never blocking, shown as what a way brings extra or lacks.
+good:
+  rx: []
+  tx: [0x603F, 0x6061]

@@ -70,6 +70,12 @@ class EsiDevice:
     dc_modes: list = field(default_factory=list)
     init_cmds: list = field(default_factory=list)   # (transition, index, subindex, data hex)
     pdo_sets: list = field(default_factory=list)
+    pdo_config: bool = None   # <CoE PdoConfig>: the master may change a PDO's entries
+    pdo_assign: bool = None   # <CoE PdoAssign>: the master may change the SM assignment
+    sdo_info: bool = None     # <CoE SdoInfo>: the slave can list its dictionary
+    mapping: dict = field(default_factory=dict)       # object index -> "R", "T" or "RT"
+    max_entries: dict = field(default_factory=dict)   # PDO index -> most entries it takes
+    drive_modes: int = None   # default of 0x6502 (supported drive modes)
 
 
 def _text(el, path):
@@ -114,11 +120,61 @@ def _device(path, vendor_id, dev):
         for sm in a.findall("Sm"):
             sms[number(sm.get("No"))] = [number(x.text) for x in sm.findall("Pdo") if x.text]
         d.pdo_sets.append(EsiPdoSet(_text(a, "Name"), a.get("Default") in ("1", "true"), sms))
+    coe_el = dev.find("Mailbox/CoE")
+    if coe_el is not None:
+        for attr, name in (("PdoConfig", "pdo_config"), ("PdoAssign", "pdo_assign"),
+                           ("SdoInfo", "sdo_info")):
+            if coe_el.get(attr) is not None:
+                setattr(d, name, coe_el.get(attr) in ("1", "true"))
+    _mapping_facts(d, dev)
     for c in dev.findall("Mailbox/CoE/InitCmd"):
         d.init_cmds.append((",".join(t.text for t in c.findall("Transition")),
                             number(_text(c, "Index")), number(_text(c, "SubIndex") or "0"),
                             _text(c, "Data")))
     return d
+
+
+def _mapping_facts(d, dev):
+    """From the dictionary: which objects may be mapped (Flags/PdoMapping),
+    how many entries a PDO object takes (MaxValue of its subindex 0) and the
+    default of 0x6502."""
+    for o in dev.findall("Profile/Dictionary/Objects/Object"):
+        try:
+            index = number(_text(o, "Index"))
+        except (TypeError, ValueError):
+            continue
+        flag = _text(o, "Flags/PdoMapping").upper()
+        if flag:
+            d.mapping[index] = flag
+        if 0x1600 <= index < 0x1C00:
+            for sub in o.findall("Info/SubItem")[:1]:
+                try:
+                    top = _text(sub, "Info/MaxValue")
+                    if top:
+                        d.max_entries[index] = number(top if top.lower().startswith(("#x", "0x")) else "#x" + top)
+                except (TypeError, ValueError):
+                    pass
+        if index == 0x6502:
+            try:
+                d.drive_modes = number(_text(o, "Info/DefaultValue"))
+            except (TypeError, ValueError):
+                pass
+    # an object whose subitem 0 sits in the data type (as the A6's DT1600 does)
+    types = {_text(x, "Name"): x for x in dev.findall("Profile/Dictionary/DataTypes/DataType")}
+    for o in dev.findall("Profile/Dictionary/Objects/Object"):
+        try:
+            index = number(_text(o, "Index"))
+        except (TypeError, ValueError):
+            continue
+        if index in d.max_entries or not (0x1600 <= index < 0x1800 or 0x1A00 <= index < 0x1C00):
+            continue
+        dt = types.get(_text(o, "Type"))
+        sub = dt.find("SubItem/Info/MaxValue") if dt is not None else None
+        if sub is not None and sub.text:
+            try:
+                d.max_entries[index] = number("#x" + sub.text.strip()) if not sub.text.lower().startswith(("#x", "0x")) else number(sub.text)
+            except ValueError:
+                pass
 
 
 def load_file(path):
@@ -143,7 +199,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 def cache_path():
