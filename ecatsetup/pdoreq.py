@@ -447,8 +447,50 @@ def check_slave(slave, esi_dev, exact=True):
             out.append(("note", "the file runs this CiA 402 drive as generic: the drive profile's "
                         "protections (enable, fault handling, mode) do not apply; its PDOs would "
                         "be enough for CiA 402 in CSP"))
+    out += encoder_status(slave, esi_dev)
     return out
 
 
 def _list(entries):
     return ", ".join("0x%04X:%02X" % (i, s) for i, s, _b in entries if i) or "nothing"
+
+
+# --------------------------------------------------------------------------
+# MDP: an incremental encoder channel (ETG.5001 511)
+
+def mdp_encoder(base, uses=("position",), data=None):
+    """The process data an encoder channel at status index `base` needs for its uses."""
+    data = data or load("mdp-encoder")
+    r = Requirement()
+    for use in uses:
+        spec = data["uses"][use]
+        r.tx |= {(base, s) for s in spec.get("in", [])}
+        r.rx |= {(base + data["output-offset"], s) for s in spec.get("out", [])}
+    return r
+
+
+def encoder_status(slave, esi_dev=None, data=None):
+    """Notes on each encoder channel of a slave: which uses the mapping does not give
+    (the pins that are then missing), and which PDO assignment of the device does."""
+    data = data or load("mdp-encoder")
+    have = {(i, s) for _d, _p, _s, es in _file_pdos(slave) for i, s, _b in es}
+    out = []
+    for ch in slave.get("encoders") or []:
+        try:
+            base = int(str(ch.get("index")), 16)
+        except ValueError:
+            continue
+        for use in ("index", "latch"):
+            req = mdp_encoder(base, (use,), data)
+            lacks = sorted((req.rx | req.tx) - have)
+            if not lacks:
+                continue
+            text = "encoder %s: no %s (%s): %s not mapped" % (
+                ch.get("name"), data["uses"][use]["title"], data["uses"][use]["pins"],
+                ", ".join("0x%04X:%02X" % x for x in lacks))
+            v = judge(req, esi_dev) if esi_dev is not None else None
+            sets = [w.title for w in v.ways if w.kind == READY] if v else []
+            if sets:
+                text += "; the device's %s has it" % ", ".join(sets[:2])
+            out.append(("note", text))
+    return out

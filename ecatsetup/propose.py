@@ -130,15 +130,18 @@ def _short(name):
     return (name or "").split("__")[-1].strip().lower()
 
 
-def encoder_channels(entries):
+def encoder_channels(entries, sub_profile_511=False):
     """Status indexes of the encoder channels among the mapped entries: a
-    16 or 32-bit "Counter value" at S:11 and "Latch C valid" at S:01."""
+    16 or 32-bit "Counter value" at S:11 and "Latch C valid" at S:01. A device
+    whose ESI file lists the sub-profile 511 (incremental encoder) needs no
+    latch C: a channel mapped for its position alone is one too."""
     by = {(e.index, e.subindex): e for e in entries}
     found = []
     for (index, sub), e in sorted(by.items()):
         if (sub == 0x11 and 0x6000 <= index <= 0x6FF0 and index & 0xF == 0
                 and e.bitlen in (16, 32) and _short(e.name) == "counter value"
-                and _short(getattr(by.get((index, 0x01)), "name", "")) == "latch c valid"):
+                and (sub_profile_511
+                     or _short(getattr(by.get((index, 0x01)), "name", "")) == "latch c valid")):
             found.append(index)
     return found
 
@@ -347,6 +350,24 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         elif plan.verdict is not None:
             p.notes += ["the PDOs cannot give %s: %s" % (mode.upper(), t) for t in plan.verdict.problems[:3]]
 
+    if p.profile == 5001 and esi_dev and not pdo_set and 511 in esi_dev.sub_profiles:
+        # an incremental encoder terminal whose default assignment has no encoder channel
+        # (a legacy layout): the first predefined set that has one
+        def has_channel(pdo_list):
+            return bool(encoder_channels([e for c in pdo_list for e in c.entries], True))
+        if not has_channel(chosen):
+            by_index = {d.index: d for d in esi_dev.pdos}
+            for s_ in esi_dev.pdo_sets:
+                members = [dataclasses.replace(by_index[i], sm=sm) for sm, ids in sorted(s_.sms.items())
+                           for i in ids if i in by_index]
+                if has_channel(members):
+                    chosen = members
+                    p.pdo_way = "ready"
+                    p.pdo_source = "ESI predefined assignment \"%s\"" % s_.name
+                    p.notes.append("PDO mapping: %s, because the default assignment has no encoder "
+                                   "channel (the layout of sub-profile 511 has)" % p.pdo_source)
+                    break
+
     pdos = []
     for c in chosen:
         entries = [Entry(e.index, e.subindex, e.bitlen, e.name, e.data_type, "pin")
@@ -370,7 +391,7 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     # Encoder channels: the encoder function handles their counter and latches.
     mapped = [e for pd in pdos for e in pd.entries]
     enc_owned = set()
-    channels = encoder_channels(mapped)
+    channels = encoder_channels(mapped, 511 in getattr(esi_dev, "sub_profiles", ()))
     for n, index in enumerate(channels, 1):
         name = "enc" if len(channels) == 1 else "enc-%d" % n
         p.encoders.append((name, index))

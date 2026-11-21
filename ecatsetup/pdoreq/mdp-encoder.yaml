@@ -1,0 +1,22 @@
+# What an incremental encoder channel (ETG.5001 MDP 511, the layout the ecat encoder
+# function handles) needs in the process data, per use. A channel's inputs are at a
+# status index S (0x6000 + 0x10 n), its outputs at S + 0x1000. Numbers are subindexes.
+# The counter is never set by ecat, so "set counter" is not needed.
+profile: mdp-encoder
+sub-profile: 511
+output-offset: 0x1000
+uses:
+  position:
+    title: position and velocity
+    in: [0x11]
+    pins: pos, velocity, counts, raw-count
+  index:
+    title: index
+    in: [0x01, 0x12]
+    out: [0x01]
+    pins: index-enable
+  latch:
+    title: external latch
+    in: [0x02, 0x12]
+    out: [0x02]
+    pins: latch-enable-pos, latch-pos

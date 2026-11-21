@@ -76,6 +76,12 @@ class EsiDevice:
     mapping: dict = field(default_factory=dict)       # object index -> "R", "T" or "RT"
     max_entries: dict = field(default_factory=dict)   # PDO index -> most entries it takes
     drive_modes: int = None   # default of 0x6502 (supported drive modes)
+    channels: list = field(default_factory=list)   # (ProfileNo, AddInfo) per ChannelInfo
+
+    @property
+    def sub_profiles(self):
+        """The sub-profile numbers (ETG.2000 AddInfo) the device lists, such as 511."""
+        return {a for _p, a in self.channels if a is not None}
 
 
 def _text(el, path):
@@ -127,6 +133,11 @@ def _device(path, vendor_id, dev):
             if coe_el.get(attr) is not None:
                 setattr(d, name, coe_el.get(attr) in ("1", "true"))
     _mapping_facts(d, dev)
+    for c in dev.findall("Profile/ChannelInfo"):
+        try:
+            d.channels.append((number(_text(c, "ProfileNo") or None), number(_text(c, "AddInfo") or None)))
+        except (TypeError, ValueError):
+            pass
     for c in dev.findall("Mailbox/CoE/InitCmd"):
         d.init_cmds.append((",".join(t.text for t in c.findall("Transition")),
                             number(_text(c, "Index")), number(_text(c, "SubIndex") or "0"),
@@ -199,7 +210,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 def cache_path():

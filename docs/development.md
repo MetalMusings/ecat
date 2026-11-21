@@ -3367,3 +3367,38 @@ never written) and *build* (an own mapping in the open PDOs).
   the screenshots (`scripts/docs-screenshots`) were not retaken, the slave
   page has new buttons.
 - Run for this step: `scripts/run-tests pdoreq pdoedit prototype gui capture`.
+
+### MDP: incremental encoder channels (built 2026-11-21)
+
+- `ecatsetup/pdoreq/mdp-encoder.yaml`: what a channel at status index S
+  (`0x6000 + 0x10 n`, outputs at S + 0x1000) needs per use: *position* S:11;
+  *index* adds S:01, S:12 and S+0x1000:01; *external latch* adds S:02, S:12 and
+  S+0x1000:02. ecat never sets the counter, so "set counter" is not needed.
+  `pdoreq.mdp_encoder(base, uses)` gives the requirement, and `judge()` the
+  verdict and the ways (the device's predefined sets) as for a drive.
+- `esi.EsiDevice.channels` / `sub_profiles`: the ChannelInfo `(ProfileNo,
+  AddInfo)` list. In Beckhoff's files the EL5101 lists 5001/510 and 5001/511,
+  the EL7041 511, 703 and 704. The list gives which sub-profiles the *device*
+  has, not which channel is which: a channel's index is found from the mapped
+  entries. (The EL5151 and EL5152 revisions in `~/esi` list none: they are
+  recognised by latch C as before.)
+- `propose.encoder_channels(entries, sub_profile_511)`: with 511 in the
+  device's ESI a channel needs only its counter value at S:11 (before: also
+  latch C at S:01, so a channel mapped for position alone was not found).
+- `propose()`: for a device with sub-profile 511 whose default assignment has
+  no encoder channel (the EL5101's legacy layout), the first predefined set
+  that has one is taken (`pdo_way: ready`, a note says why). An assignment the
+  user asked for is never replaced.
+- `pdoreq.encoder_status()`, shown as notes by `check_slave` (the window's
+  lines under the PDOs, `--check --esi`): for each encoder of the slave the
+  uses the mapping does not give, with the pins that are then missing
+  (`index-enable`; `latch-enable-pos`, `latch-pos`), the objects not mapped,
+  and the device's predefined set that has them.
+- Not done: serial channels (EL6001/EL6021, MDP 600) have no requirement file
+  or verdict yet (the serial function recognises its PDO pairs as before); the
+  *use* is not a choice in the window, the PDO assignment box (the ESI's sets)
+  is how a user gets index or latch, and the notes say which set that is; no
+  new key in the file (the component's file format is unchanged).
+- Tests: `scripts/run-tests mdp pdoreq pdoedit prototype capture capturec
+  guidance gui halcheck`; `tests/test_mdp.py` uses a synthetic ESI with the
+  EL5101's layout; each rule was mutation-checked.
