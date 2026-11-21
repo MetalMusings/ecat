@@ -913,6 +913,32 @@ static int parse_ipv4(ctx_t *c, const char *key, const char *text, uint32_t *out
   return 0;
 }
 
+/// state-timeouts-ms: preop, safeop-op, back-to-init, back-to-safeop (ms, 1 to 600000).
+static void state_timeouts(ctx_t *c, buf_t *b, yaml_node_t *t) {
+  static const char *keys[] = {"preop", "safeop-op", "back-to-init", "back-to-safeop"};
+  LCEC_CONF_STATE_TIMEOUTS_T *st;
+  uint32_t *field[4];
+  int i;
+  if (t == NULL) return;
+  if ((st = append(b, sizeof(*st))) == NULL) {
+    error(c, "out of memory");
+    return;
+  }
+  st->confType = lcecConfTypeStateTimeouts;
+  field[0] = &st->preop;
+  field[1] = &st->safeop_op;
+  field[2] = &st->back_to_init;
+  field[3] = &st->back_to_safeop;
+  for (i = 0; i < 4; i++) {
+    long long v = get_int(c, t, keys[i], 0);
+    if (get(c, t, keys[i]) != NULL && (v < 1 || v > 600000)) {
+      error(c, "state-timeouts-ms.%s must be 1 to 600000 (ms)", keys[i]);
+      continue;
+    }
+    *field[i] = (uint32_t)v;
+  }
+}
+
 /// eoe: ip (with or without /prefix), mask, gateway, dns, hostname, mac, host-ip.
 static void eoe(ctx_t *c, buf_t *b, yaml_node_t *e) {
   LCEC_CONF_EOE_T *ec;
@@ -1149,6 +1175,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     }
   }
   eoe(c, b, get(c, s, "eoe"));
+  state_timeouts(c, b, get(c, s, "state-timeouts-ms"));
   process_data(c, b, get(c, s, "process-data"), (LCEC_CONF_SLAVE_T *)(b->data + off), off);
   if (c->cia402) {
     // what each allowed mode needs, and changing modes the mode objects

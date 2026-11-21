@@ -52,7 +52,8 @@ typedef enum {
   lcecConfTypeInitCmds,
   lcecConfTypeComplexEntry,
   lcecConfTypeModParam,
-  lcecConfTypeEoe
+  lcecConfTypeEoe,
+  lcecConfTypeStateTimeouts
 } LCEC_CONF_TYPE_T;
 
 typedef enum {
@@ -130,6 +131,16 @@ typedef struct {
   uint32_t ip, mask, gateway, dns, host_ip;
   char hostname[LCEC_CONF_STR_MAXLEN];
 } LCEC_CONF_EOE_T;
+
+/// A slave's state change timeouts (ethercat.yaml state-timeouts-ms), in ms; 0 is
+/// the master's default (ETG.2000: 3000, 10000, 5000, 200).
+typedef struct {
+  LCEC_CONF_TYPE_T confType;
+  uint32_t preop;           ///< INIT -> PREOP
+  uint32_t safeop_op;       ///< PREOP -> SAFEOP and SAFEOP -> OP
+  uint32_t back_to_init;    ///< to INIT, and OP/SAFEOP -> PREOP
+  uint32_t back_to_safeop;  ///< OP -> SAFEOP
+} LCEC_CONF_STATE_TIMEOUTS_T;
 
 typedef struct {
   LCEC_CONF_TYPE_T confType;

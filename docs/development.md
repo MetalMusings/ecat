@@ -3569,3 +3569,22 @@ oversampling (`OSFac`), FoE, SoE, SM sizes and FMMUs (the master takes the SII's
 - Correction: turner's EL5101 refusing a typed 0x0700 (AL 0x0030) is not this:
   its ESI file has no SYNC1 mode at all. 1454 modes in Beckhoff's files have
   0x0700/0x0730. Not tried on a slave that uses SYNC1 (we have none).
+
+### State change timeouts (built 2026-11-21)
+
+- `Info/StateMachine/Timeout` (PreopTimeout, SafeopOpTimeout,
+  BackToInitTimeout, BackToSafeopTimeout) in ~1220 devices; longer than the
+  master's defaults (master/fsm_change.c: 3000, 10000, 5000, 200 ms): 738, 765,
+  959 and 779 values, up to 60 s.
+- The file: `state-timeouts-ms: {preop, safeop-op, back-to-init, back-to-safeop}`
+  (1 to 600000 ms). `ecat_config.c` makes a `lcecConfTypeStateTimeouts` record;
+  `lcec_main.c` (`ecat_state_timeouts`, before the SDOs) calls
+  `ecrt_slave_config_state_timeout()` for each transition the master times
+  (the same grouping as fsm_change.c's defaults), with
+  `EC_HAVE_STATE_TIMEOUT` (a warning without it). That table is not unit
+  tested (lcec_main.c is not in the C tests); the record is (test_config.c).
+- `esi.EsiDevice.state_timeouts` (cache version 7); `config.longer_timeouts`,
+  `config.STATE_TIMEOUTS`; a new proposal takes the longer ones; Update and
+  *Add what the device needs* recommend them for an existing file
+  (`Session.missing_state_timeouts`).
+- Not tried on a slave that needs them.

@@ -124,6 +124,7 @@ class Proposal:
     #                               {"way": title or None, "pdo-set": name or None, "why": text}
     recognised: int = None        # the profile the slave or its ESI file says (402, 5001, None)
     status: list = field(default_factory=list)    # pdoreq.Status lines under the PDOs
+    state_timeouts: dict = field(default_factory=dict)  # the ESI's state timeouts longer than the master's
     init_settings: list = field(default_factory=list)  # settings from the ESI's InitCmds, and the
     #                                                    cia402 mode where 0x6060 is not mapped
     notes: list = field(default_factory=list)
@@ -566,6 +567,14 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
             ", ".join(st["object"] for st in qset),
             os.path.basename(quirks.of((p.vendor_id, p.product_code))["path"])))
     p.pdos = pdos
+
+    # The ESI file's state change timeouts, where they are longer than the master's
+    if esi_dev is not None and getattr(esi_dev, "state_timeouts", None):
+        from . import config as config_mod
+        p.state_timeouts = config_mod.longer_timeouts(esi_dev.state_timeouts)
+        if p.state_timeouts:
+            p.notes.append("state change timeouts from the ESI file, longer than the master's: %s"
+                           % ", ".join("%s %d ms" % kv for kv in sorted(p.state_timeouts.items())))
 
     # Settings the device needs written at start: its ESI file's InitCmds, and for a
     # drive whose 0x6060 is not in the process data, the mode (unless it has only one)

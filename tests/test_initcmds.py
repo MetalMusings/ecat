@@ -20,9 +20,9 @@ def init(transition, index, sub, data, complete=False):
             "<Data>%s</Data></InitCmd>" % (' CompleteAccess="1"' if complete else "", transition, index, sub, data))
 
 
-def device(cmds, pdos, profile=402, modes=0x180, objects=MAPPABLE):
+def device(cmds, pdos, profile=402, modes=0x180, objects=MAPPABLE, info=""):
     xml = ('<?xml version="1.0"?><EtherCATInfo><Vendor><Id>1</Id></Vendor><Descriptions><Devices>'
-           '<Device><Type ProductCode="#x1" RevisionNo="#x1">T</Type><Name>T</Name>'
+           '<Device><Type ProductCode="#x1" RevisionNo="#x1">T</Type><Name>T</Name>' + info +
            '<Profile><ProfileNo>%d</ProfileNo><Dictionary><DataTypes/><Objects>%s'
            '<Object><Index>#x6502</Index><Name>m</Name><Type>UDINT</Type><BitSize>32</BitSize>'
            '<Info><DefaultValue>#x%X</DefaultValue></Info><Flags><Access>ro</Access></Flags></Object>'
@@ -113,18 +113,46 @@ class TestProposal(unittest.TestCase):
         self.assertEqual(p.init_settings, [])
 
 
+TIMEOUTS = ("<Info><StateMachine><Timeout><PreopTimeout>6000</PreopTimeout><SafeopOpTimeout>9000"
+            "</SafeopOpTimeout><BackToInitTimeout>5000</BackToInitTimeout><BackToSafeopTimeout>1000"
+            "</BackToSafeopTimeout></Timeout></StateMachine></Info>")
+
+
+class TestStateTimeouts(unittest.TestCase):
+    def test_read_from_the_esi(self):
+        dev = device([], WITH_MODE, info=TIMEOUTS)
+        self.assertEqual(dev.state_timeouts, {"preop": 6000, "safeop-op": 9000, "back-to-init": 5000,
+                                              "back-to-safeop": 1000})
+
+    def test_only_the_longer_ones_are_proposed(self):
+        p = proposal(device([], WITH_MODE, info=TIMEOUTS))
+        self.assertEqual(config.slave_from_proposal(p)["state-timeouts-ms"], {"preop": 6000, "back-to-safeop": 1000})
+        self.assertNotIn("state-timeouts-ms", config.slave_from_proposal(proposal(device([], WITH_MODE))))
+
+    def test_check(self):
+        cfg = config.from_proposals([proposal(device([], WITH_MODE, info=TIMEOUTS))])
+        self.assertEqual(config.check(cfg), [])
+        st = cfg["slaves"][0]["state-timeouts-ms"]
+        st["preop"] = 0
+        st["boot"] = 100
+        found = config.check(cfg)
+        self.assertTrue(any("state-timeouts-ms.preop must be 1 to 600000" in e for e in found))
+        self.assertTrue(any("unknown key 'boot'" in e for e in found))
+
+
 class TestRecommendedOnUpdate(unittest.TestCase):
     """An existing file gets the device's settings only when the user adds them."""
 
     def setUp(self):
         from ecatsetup import session
-        self.p = proposal(device(CMDS, NO_MODE))
+        self.p = proposal(device(CMDS, NO_MODE, info=TIMEOUTS))
         self.sess = session.Session([])
         info = {"position": 1, "vendor_id": 1, "product_code": 1, "revision": 1}
         self.sess.bus = {1: session.BusSlave(info, coe.Dictionary(), self.p)}
         self.sess.cfg = config.from_proposals([self.p])
         self.slave = self.sess.cfg["slaves"][0]
         self.slave["settings"] = []          # a file made before InitCmds were read
+        del self.slave["state-timeouts-ms"]
 
     def test_missing_settings_are_named(self):
         missing = self.sess.missing_init_settings(1)
@@ -145,9 +173,17 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         self.assertEqual(self.sess.slave(1)["settings"], [])
         self.assertTrue(any("recommended settings" in n and "0x2001:00 = -10" in n for n in notes), notes)
 
+    def test_timeouts_recommended_and_added(self):
+        self.assertEqual(self.sess.missing_state_timeouts(1), {"preop": 6000, "back-to-safeop": 1000})
+        notes = self.sess.update_from_bus()
+        self.assertNotIn("state-timeouts-ms", self.sess.slave(1))
+        self.assertTrue(any("recommended state change timeouts" in n and "preop 6000 ms" in n for n in notes))
+
     def test_added_when_asked(self):
         added = self.sess.add_init_settings(1)
-        self.assertEqual(len(added), 3)
+        self.assertEqual(len(added), 5)
+        self.assertEqual(self.sess.slave(1)["state-timeouts-ms"], {"preop": 6000, "back-to-safeop": 1000})
+        self.assertEqual(self.sess.missing_state_timeouts(1), {})
         self.assertEqual(self.sess.missing_init_settings(1), [])
         self.assertEqual(config.check(self.sess.cfg), [])
 

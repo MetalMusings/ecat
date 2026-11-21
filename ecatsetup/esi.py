@@ -80,6 +80,7 @@ class EsiDevice:
     max_entries: dict = field(default_factory=dict)   # PDO index -> most entries it takes
     drive_modes: int = None   # default of 0x6502 (supported drive modes)
     channels: list = field(default_factory=list)   # (ProfileNo, AddInfo) per ChannelInfo
+    state_timeouts: dict = field(default_factory=dict)  # Info/StateMachine/Timeout, ms by file key
 
     @property
     def sub_profiles(self):
@@ -140,6 +141,14 @@ def _device(path, vendor_id, dev):
             if coe_el.get(attr) is not None:
                 setattr(d, name, coe_el.get(attr) in ("1", "true"))
     _mapping_facts(d, dev)
+    for tag, key in (("PreopTimeout", "preop"), ("SafeopOpTimeout", "safeop-op"),
+                     ("BackToInitTimeout", "back-to-init"), ("BackToSafeopTimeout", "back-to-safeop")):
+        try:
+            v = number(_text(dev, "Info/StateMachine/Timeout/" + tag) or None)
+        except (TypeError, ValueError):
+            v = None
+        if v:
+            d.state_timeouts[key] = v
     for c in dev.findall("Profile/ChannelInfo"):
         try:
             d.channels.append((number(_text(c, "ProfileNo") or None), number(_text(c, "AddInfo") or None)))
@@ -217,7 +226,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 6
+CACHE_VERSION = 7
 
 
 def cache_path():

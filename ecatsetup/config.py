@@ -88,6 +88,17 @@ def parse_obj(text):
     return int(m.group(1), 16), int(m.group(2), 16)
 
 
+# the master's state change timeouts (ETG.2000, master/fsm_change.c), ms: a slave's
+# state-timeouts-ms gives longer ones where its ESI file asks for them
+STATE_TIMEOUTS = {"preop": 3000, "safeop-op": 10000, "back-to-init": 5000, "back-to-safeop": 200}
+
+
+def longer_timeouts(esi_timeouts):
+    """The ESI file's state timeouts that are longer than the master's defaults."""
+    return {k: v for k, v in (esi_timeouts or {}).items()
+            if k in STATE_TIMEOUTS and isinstance(v, int) and v > STATE_TIMEOUTS[k]}
+
+
 # the cia402 modes' numbers in 0x6060 (propose.CIA402_MODE_NUMBERS)
 MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
 
@@ -188,6 +199,8 @@ def slave_from_proposal(p, name=None):
             s["dc"]["sync1-shift-ns"] = p.dc_sync1_shift
     s["settings"] = [{"object": obj(i, sub), "type": t, "value": p.pp_limits[(i, sub)]}
                      for i, sub, t in PP_LIMITS if (i, sub) in p.pp_limits]
+    if getattr(p, "state_timeouts", None):
+        s["state-timeouts-ms"] = dict(p.state_timeouts)
     # what the device needs written at start (ESI InitCmds, the drive's mode)
     for st in getattr(p, "init_settings", None) or []:
         if parse_obj(st["object"]) not in {parse_obj(x["object"]) for x in s["settings"]}:
@@ -939,6 +952,16 @@ def check(cfg, series=None):
                 err("%s: dc sync1-shift-ns needs sync1-cycles (SYNC1 every n SYNC0 cycles)" % where)
         for e in eoe_errors(s.get("eoe")):
             err("%s: %s" % (where, e))
+        st = s.get("state-timeouts-ms")
+        if st is not None:
+            if not isinstance(st, dict):
+                err("%s: state-timeouts-ms needs preop, safeop-op, back-to-init and/or back-to-safeop" % where)
+            else:
+                for k, v in st.items():
+                    if k not in STATE_TIMEOUTS:
+                        err("%s: state-timeouts-ms: unknown key %r (%s)" % (where, k, ", ".join(STATE_TIMEOUTS)))
+                    elif isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 600000:
+                        err("%s: state-timeouts-ms.%s must be 1 to 600000 (ms)" % (where, k))
         set_objects = set()
         for st in s.get("settings") or []:
             try:

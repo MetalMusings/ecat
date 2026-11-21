@@ -50,6 +50,7 @@ static int load(const char *yaml) {
     rec[n_rec++] = buf + off;
     switch (t) {
       case lcecConfTypeNone: off += sizeof(LCEC_CONF_NULL_T); break;
+      case lcecConfTypeStateTimeouts: off += sizeof(LCEC_CONF_STATE_TIMEOUTS_T); break;
       case lcecConfTypeMaster: off += sizeof(LCEC_CONF_MASTER_T); break;
       case lcecConfTypeSlave: off += sizeof(LCEC_CONF_SLAVE_T); break;
       case lcecConfTypeDcConf: off += sizeof(LCEC_CONF_DC_T); break;
@@ -700,6 +701,21 @@ static void test_cia402_pp(void) {
 #define NOMODE_OUT P("0x6040:00", 16, "UINT") P("0x607A:00", 32, "DINT")
 #define NOMODE_IN P("0x6041:00", 16, "UINT") P("0x6064:00", 32, "DINT")
 
+#define TIMEOUTS(n) ((LCEC_CONF_STATE_TIMEOUTS_T *)nth(lcecConfTypeStateTimeouts, n))
+
+static void test_state_timeouts(void) {
+  CHECK_EQ(load("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
+                "state-timeouts-ms: {preop: 6000, safeop-op: 30000}}\n"), 0);
+  CHECK_EQ(TIMEOUTS(0)->preop, 6000);
+  CHECK_EQ(TIMEOUTS(0)->safeop_op, 30000);
+  CHECK_EQ(TIMEOUTS(0)->back_to_init, 0);  // the master's default
+  CHECK_EQ(TIMEOUTS(0)->back_to_safeop, 0);
+  CHECK_EQ(load(io), 0);
+  CHECK_EQ(count(lcecConfTypeStateTimeouts), 0);
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
+              "state-timeouts-ms: {preop: 0}}\n", "state-timeouts-ms.preop must be 1 to 600000");
+}
+
 static void test_sync1(void) {
   // the register value (ETG.2000 CycleTime1): (n - 1) * SYNC0 + shift
   CHECK_EQ(ecat_sync1_cycle(0, 1000000, 0), 0);
@@ -1051,5 +1067,5 @@ static void test_unused(void) {
 
 RUN_TESTS("config", test_cia402_feedforward, test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
-    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_sync1, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
+    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_sync1, test_state_timeouts, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders, test_serial, test_serial_errors, test_unused, test_master_cpus)

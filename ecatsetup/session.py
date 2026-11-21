@@ -246,6 +246,11 @@ class Session:
         # what the device needs written at start (ESI InitCmds, the drive's mode): only
         # recommended for an existing file, never added on its own
         for s in self.cfg.get("slaves") or []:
+            timeouts = self.missing_state_timeouts(s.get("position"))
+            if timeouts:
+                notes.append("slave %s (%s): recommended state change timeouts, from its ESI file: %s; add "
+                             "them with \"Add what the device needs\" on its page"
+                             % (s["position"], s.get("name"), ", ".join("%s %d ms" % kv for kv in sorted(timeouts.items()))))
             missing = self.missing_init_settings(s.get("position"))
             if missing:
                 notes.append("slave %s (%s): recommended settings, from its ESI file or for its mode: %s; add "
@@ -288,13 +293,28 @@ class Session:
             out.append(dict(st))
         return out
 
+    def missing_state_timeouts(self, position):
+        """The state change timeouts the proposal from the bus has (the ESI file's, where
+        longer than the master's) that the slave's entry lacks: {key: ms}."""
+        s, b = self.slave(position), self.bus.get(position)
+        if s is None or b is None or not same_kind(s, b.info):
+            return {}
+        have = s.get("state-timeouts-ms") if isinstance(s.get("state-timeouts-ms"), dict) else {}
+        return {k: v for k, v in (getattr(b.proposal, "state_timeouts", None) or {}).items() if k not in have}
+
     def add_init_settings(self, position):
-        """Add what missing_init_settings names; returns the settings added."""
+        """Add what missing_init_settings and missing_state_timeouts name; returns the
+        settings added (and the timeouts, as {"object": "state-timeouts-ms.<key>", "value": ms})."""
         s = self.slave(position)
         added = self.missing_init_settings(position)
+        timeouts = self.missing_state_timeouts(position)
         if s is not None and added:
             s.setdefault("settings", []).extend(added)
-        return added
+        if s is not None and timeouts:
+            if not isinstance(s.get("state-timeouts-ms"), dict):
+                s["state-timeouts-ms"] = {}
+            s["state-timeouts-ms"].update(timeouts)
+        return added + [{"object": "state-timeouts-ms.%s" % k, "value": v} for k, v in sorted(timeouts.items())]
 
     def check(self):
         """Errors in the configuration, and the bus compared with it:

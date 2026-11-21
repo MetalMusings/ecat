@@ -856,6 +856,35 @@ static ec_master_t *lcec_request_master(lcec_master_t *master) {
 /// thread's period is known (the first call of the read function, before the
 /// master is activated). The configuration gives a slave's SYNC0 cycle in servo
 /// periods; here it becomes nanoseconds.
+/// @brief A slave's state change timeouts from the file (0: the master's default),
+/// for each transition the master times (fsm_change.c's defaults name them).
+static int ecat_state_timeouts(ec_slave_config_t *sc, const LCEC_CONF_STATE_TIMEOUTS_T *t) {
+#ifdef EC_HAVE_STATE_TIMEOUT
+  static const struct {
+    ec_al_state_t from, to;
+    int which;  // 0 preop, 1 safeop-op, 2 back-to-init, 3 back-to-safeop
+  } map[] = {
+      {EC_AL_STATE_INIT, EC_AL_STATE_PREOP, 0},   {EC_AL_STATE_PREOP, EC_AL_STATE_SAFEOP, 1},
+      {EC_AL_STATE_SAFEOP, EC_AL_STATE_OP, 1},    {EC_AL_STATE_PREOP, EC_AL_STATE_INIT, 2},
+      {EC_AL_STATE_SAFEOP, EC_AL_STATE_INIT, 2},  {EC_AL_STATE_OP, EC_AL_STATE_INIT, 2},
+      {EC_AL_STATE_SAFEOP, EC_AL_STATE_PREOP, 2}, {EC_AL_STATE_OP, EC_AL_STATE_PREOP, 2},
+      {EC_AL_STATE_OP, EC_AL_STATE_SAFEOP, 3},
+  };
+  const uint32_t ms[4] = {t->preop, t->safeop_op, t->back_to_init, t->back_to_safeop};
+  size_t i;
+  for (i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+    if (ms[map[i].which] && ecrt_slave_config_state_timeout(sc, map[i].from, map[i].to, ms[map[i].which]) != 0)
+      return -1;
+  }
+  return 0;
+#else
+  (void)sc;
+  (void)t;
+  rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX "this master has no per-slave state timeouts: state-timeouts-ms ignored\n");
+  return 0;
+#endif
+}
+
 static void ecat_config_eoe(lcec_master_t *master) {
 #ifdef EC_HAVE_SET_IP
   lcec_slave_t *slave;
@@ -1098,6 +1127,12 @@ int rtapi_app_main(void) {
       rtapi_print_msg(RTAPI_MSG_DBG, LCEC_MSG_PFX "calling ecrt_master_slave_config for slave %s.%s\n", master->name, slave->name);
       if (!(slave->config = ecrt_master_slave_config(master->master, 0, slave->index, slave->vid, slave->pid))) {
         rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "fail to read slave %s.%s configuration\n", master->name, slave->name);
+        goto fail2;
+      }
+
+      if (slave->state_timeouts != NULL && ecat_state_timeouts(slave->config, slave->state_timeouts) != 0) {
+        rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "slave %s.%s: the master did not take the state timeouts\n",
+            master->name, slave->name);
         goto fail2;
       }
 
@@ -1585,6 +1620,15 @@ int lcec_parse_config(void) {
 
         // add to slave
         slave->dc_conf = dc;
+        break;
+
+      case lcecConfTypeStateTimeouts:
+        if (slave == NULL) {
+          rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave node for state timeouts missing\n");
+          goto fail2;
+        }
+        slave->state_timeouts = (LCEC_CONF_STATE_TIMEOUTS_T *)conf;
+        conf += sizeof(LCEC_CONF_STATE_TIMEOUTS_T);
         break;
 
       case lcecConfTypeEoe:
