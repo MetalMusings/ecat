@@ -1633,6 +1633,54 @@ class TestPdoEditing(WindowBase):
             page.profile_chosen(1)
         self.assertEqual(calls, [(1, "generic")])
 
+    def test_profile_round_trip_shows_and_hides_the_drive_parts(self):
+        # generic and back, through the session (the slave read again for the profile)
+        from test_pdoreq import proposal
+        from ecatsetup import session as session_mod
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        s["cia402"]["modes"] = ["hm"]
+        info = w.session.bus[1].info
+
+        def read_slave(pos, devices, mode, pdo_set=None, progress=None, extra_modes=(), way=None, profile=None):
+            p = proposal(self.dev, mode, extra_modes, way=way, profile=profile)
+            p.position = pos
+            return info, None, p
+        with mock.patch.object(session_mod, "read_slave", read_slave), \
+                mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))), \
+                mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+            self.assertFalse(page.cia402.isHidden())
+            page.profile_box.setCurrentIndex(page.profile_box.findData("generic"))
+            page.profile_chosen(0)
+            w.select_slave(0)
+            w.select_slave(1)
+            self.assertEqual(s["profile"], "generic")
+            self.assertNotIn("cia402", s)
+            self.assertEqual(page.profile_box.currentData(), "generic")
+            self.assertTrue(page.cia402.isHidden())           # mode, modes, PDOs per mode
+            self.assertTrue(page.homing_card.isHidden())
+            self.assertIn("recognised as CiA 402 drive", page.profile_hint.text())
+            self.assertIn("Generic chosen", page.profile_hint.text())
+            self.assertEqual([page.profile_box.itemData(i) for i in range(page.profile_box.count())],
+                             ["cia402", "generic"])
+            # and back
+            page.profile_box.setCurrentIndex(page.profile_box.findData("cia402"))
+            page.profile_chosen(0)
+            w.select_slave(0)
+            w.select_slave(1)
+            self.assertEqual((s["profile"], s["cia402"]["mode"]), ("cia402", "csp"))
+            self.assertFalse(page.cia402.isHidden())
+            self.assertIn("CSP", page.mode_marks.text())
+
+    def test_profile_choice_for_a_modular_device(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        items = [page.profile_box.itemData(i) for i in range(page.profile_box.count())]
+        self.assertEqual(items, ["mdp", "generic"])            # the EaserCAT 7000 says 5001
+        self.assertIn("(recognised)", page.profile_box.itemText(0))
+        self.assertTrue(page.cia402.isHidden())
+
     def test_profile_choice_cancelled(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
         with mock.patch.object(w.session, "change_profile") as change, \
