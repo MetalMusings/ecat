@@ -448,6 +448,7 @@ def check_slave(slave, esi_dev, exact=True):
                         "protections (enable, fault handling, mode) do not apply; its PDOs would "
                         "be enough for CiA 402 in CSP"))
     out += encoder_status(slave, esi_dev)
+    out += serial_status(slave, esi_dev)
     return out
 
 
@@ -493,4 +494,51 @@ def encoder_status(slave, esi_dev=None, data=None):
             if sets:
                 text += "; the device's %s has it" % ", ".join(sets[:2])
             out.append(("note", text))
+    return out
+
+
+# --------------------------------------------------------------------------
+# MDP: a serial channel (ETG.5001 600)
+
+def serial_sets(esi_dev):
+    """The device's predefined sets that give a serial channel: [(set name, data bytes of its
+    first channel)], the largest first."""
+    from . import propose
+    if esi_dev is None:
+        return []
+    by_index = {p.index: p for p in esi_dev.pdos}
+    out = []
+    for st in esi_dev.pdo_sets:
+        members = [by_index[i] for _sm, ids in sorted(st.sms.items()) for i in ids if i in by_index]
+        found = propose.serial_channels(members)
+        if found:
+            out.append((st.name, sum(e.bitlen for e in found[0][0].entries) // 8 - 2))
+    return sorted(out, key=lambda x: (-x[1], not x[0].startswith("Standard")))
+
+
+def serial_status(slave, esi_dev, data=None):
+    """Notes on a slave's serial channels: no channel at all in the mapping of a device that
+    has a serial profile, or fewer data bytes per cycle than the device's best set gives."""
+    data = data or load("mdp-serial")
+    if esi_dev is None or data["sub-profile"] not in esi_dev.sub_profiles:
+        return []
+    sets = serial_sets(esi_dev)
+    if not sets:
+        return []
+    best_name, best = sets[0]
+    mine = {p: es for _d, p, _s, es in _file_pdos(slave)}
+    channels = slave.get("serial") or []
+    if not channels:
+        return [("note", "no serial port: the file's PDOs have no serial channel (the serial function "
+                 "handles up to %d data bytes per cycle); the device's %s has one"
+                 % (data["max-data-bytes"], "set \"%s\"" % best_name))]
+    out = []
+    for ch in channels:
+        try:
+            have = sum(b or 0 for _i, _s, b in mine.get(int(str(ch.get("input-pdo")), 16), [])) // 8 - 2
+        except ValueError:
+            continue
+        if 0 < have < best:
+            out.append(("note", "serial %s: %d data bytes per cycle; the device's set \"%s\" gives %d, "
+                        "so a frame goes out in fewer cycles" % (ch.get("name"), have, best_name, best)))
     return out

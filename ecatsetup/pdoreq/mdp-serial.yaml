@@ -1,0 +1,8 @@
+# What a serial channel (ETG.5001 MDP 600: Beckhoff EL6001, EL6002, EL6021, EL6022) needs:
+# an output PDO that starts with the control word ("Ctrl") followed by "Data Out 0" ..., and an
+# input PDO with the status word and "Data In 0" ..., both the same size. The serial function
+# takes up to max-data-bytes data bytes per cycle (a PDO of more, such as the 50 word and
+# 98 byte sets, is not handled: its entries are plain pins).
+profile: mdp-serial
+sub-profile: 600
+max-data-bytes: 22

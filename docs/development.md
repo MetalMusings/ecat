@@ -3402,3 +3402,24 @@ never written) and *build* (an own mapping in the open PDOs).
 - Tests: `scripts/run-tests mdp pdoreq pdoedit prototype capture capturec
   guidance gui halcheck`; `tests/test_mdp.py` uses a synthetic ESI with the
   EL5101's layout; each rule was mutation-checked.
+
+### MDP: serial channels (built 2026-11-21)
+
+- `ecatsetup/pdoreq/mdp-serial.yaml`: sub-profile 600 and the serial
+  function's limit, 22 data bytes per cycle (the 50-word and 98-byte sets of the
+  EL6001/EL6021 have PDOs it does not take, and give plain pins).
+- `pdoreq.serial_sets(esi_dev)`: the predefined sets that give a serial channel with
+  their data bytes, the largest first, "Standard" before "Legacy".
+- `propose()`: for a device with sub-profile 600 (and 511, as before) whose default
+  assignment has no channel of the kind, the set that has one is taken, the serial
+  one with the most data bytes (`propose._set_with_channel`; a user's own choice is kept).
+  Beckhoff's EL6021 and EL6002 already default to a 22-byte set; the change matters
+  for a default that is a 50-word or 98-byte set, or none.
+- `pdoreq.serial_status()`, notes in `check_slave`: no serial port in a device that
+  has the profile (an assignment of 98 bytes was chosen), or fewer data bytes per cycle
+  than the device's best set (the 3- and 5-byte legacy sets: 2 and 4), with the set's name.
+- Not done: no requirement for the other MDP kinds (analog, digital, stepper: they are
+  plain pins and need no function); a window choice of the serial use.
+- Tests: `tests/test_mdp.py` (synthetic EL6021), every rule mutation-checked; run
+  `scripts/run-tests mdp pdoreq pdoedit prototype capture capturec guidance` (gui not run:
+  nothing in it changed; it ran on the encoder step's propose).

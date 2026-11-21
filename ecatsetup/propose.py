@@ -268,6 +268,34 @@ def _fix_subindexes(pdo_entries, coe, notes, pdo_index):
                      "subindexes taken from the CoE dictionary" % (pdo_index, index))
 
 
+def _channels(sub, pdos):
+    """The channels of the kind a sub-profile is for among PDOs (EsiPdo or PdoChoice)."""
+    if sub == 511:
+        return encoder_channels([e for c in pdos for e in c.entries], True)
+    return serial_channels(pdos)
+
+
+def _set_with_channel(esi_dev, chosen, sub):
+    """(predefined set, its PDOs with their sync managers) when the device has sub-profile
+    `sub`, `chosen` has no channel of its kind and a set has: for serial the one with the most
+    data bytes, else the first. Otherwise None."""
+    if sub not in esi_dev.sub_profiles or _channels(sub, chosen):
+        return None
+    by_index = {d.index: d for d in esi_dev.pdos}
+    found = []
+    for st in esi_dev.pdo_sets:
+        members = [dataclasses.replace(by_index[i], sm=sm) for sm, ids in sorted(st.sms.items())
+                   for i in ids if i in by_index]
+        channels = _channels(sub, members)
+        if channels:
+            size = sum(e.bitlen for e in channels[0][0].entries) if sub == 600 else 0
+            found.append(((size, st.name.startswith("Standard")), st, members))
+    if not found:
+        return None
+    best = max(found, key=lambda f: f[0])      # max keeps the first of equal sizes
+    return best[1], best[2]
+
+
 def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
             esi_exact=False, mode="csp", pdo_set=None, extra_modes=()):
     """Make a Proposal for one slave.
@@ -350,23 +378,19 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         elif plan.verdict is not None:
             p.notes += ["the PDOs cannot give %s: %s" % (mode.upper(), t) for t in plan.verdict.problems[:3]]
 
-    if p.profile == 5001 and esi_dev and not pdo_set and 511 in esi_dev.sub_profiles:
-        # an incremental encoder terminal whose default assignment has no encoder channel
-        # (a legacy layout): the first predefined set that has one
-        def has_channel(pdo_list):
-            return bool(encoder_channels([e for c in pdo_list for e in c.entries], True))
-        if not has_channel(chosen):
-            by_index = {d.index: d for d in esi_dev.pdos}
-            for s_ in esi_dev.pdo_sets:
-                members = [dataclasses.replace(by_index[i], sm=sm) for sm, ids in sorted(s_.sms.items())
-                           for i in ids if i in by_index]
-                if has_channel(members):
-                    chosen = members
-                    p.pdo_way = "ready"
-                    p.pdo_source = "ESI predefined assignment \"%s\"" % s_.name
-                    p.notes.append("PDO mapping: %s, because the default assignment has no encoder "
-                                   "channel (the layout of sub-profile 511 has)" % p.pdo_source)
-                    break
+    if p.profile == 5001 and esi_dev and not pdo_set:
+        # a terminal whose default assignment lacks the channel its sub-profile is for (an
+        # incremental encoder's legacy layout, a serial terminal's 50-word set): the
+        # predefined set that has one
+        for sub, kind in ((511, "encoder"), (600, "serial")):
+            found = _set_with_channel(esi_dev, chosen, sub)
+            if found is not None:
+                set_, chosen = found
+                p.pdo_way = "ready"
+                p.pdo_source = "ESI predefined assignment \"%s\"" % set_.name
+                p.notes.append("PDO mapping: %s, because the default assignment has no %s channel "
+                               "(sub-profile %d has)" % (p.pdo_source, kind, sub))
+                break
 
     pdos = []
     for c in chosen:
