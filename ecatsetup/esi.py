@@ -49,6 +49,44 @@ class EsiPdoSet:
 
 
 @dataclass
+class EsiModule:
+    """A module of a modular device (Descriptions/Modules/Module): its PDOs and InitCmds.
+    `slot_pdo`/`slot_index`: per PDO index / per entry or InitCmd index whether it moves
+    with the slot (DependOnSlot) or the slot group (DependOnSlotGroup)."""
+    ident: int
+    name: str
+    pdos: list = field(default_factory=list)        # EsiPdo, indexes as the file has them
+    init_cmds: list = field(default_factory=list)   # (transition, index, subindex, data, complete, (slot, group))
+    pdo_moves: dict = field(default_factory=dict)   # PDO position in pdos -> (with the slot, with the group)
+    entry_moves: dict = field(default_factory=dict)  # (PDO position, entry position) -> (slot, group)
+
+
+@dataclass
+class EsiSlot:
+    name: str
+    idents: list                 # the module idents it takes
+    default: int = None          # the ident marked Default
+    min: int = 1
+    max: int = 1
+    group: int = 0
+    pdo_increment: int = None    # the slot's own, over the device's
+    index_increment: int = None
+    group_pdo_increment: int = None
+    group_index_increment: int = None
+
+
+@dataclass
+class EsiSlots:
+    slots: list = field(default_factory=list)
+    pdo_increment: int = 0
+    index_increment: int = 0
+    group_pdo_increment: int = 0
+    group_index_increment: int = 0
+    download_ident_list: bool = False    # 0xF030 is written to the device
+    modules: dict = field(default_factory=dict)   # ident -> EsiModule (the file's)
+
+
+@dataclass
 class EsiDcMode:
     name: str
     desc: str
@@ -81,6 +119,7 @@ class EsiDevice:
     drive_modes: int = None   # default of 0x6502 (supported drive modes)
     channels: list = field(default_factory=list)   # (ProfileNo, AddInfo) per ChannelInfo
     state_timeouts: dict = field(default_factory=dict)  # Info/StateMachine/Timeout, ms by file key
+    slots: EsiSlots = None    # a modular device's Slots, with the file's Modules
 
     @property
     def sub_profiles(self):
@@ -204,6 +243,76 @@ def _mapping_facts(d, dev):
                 pass
 
 
+def _moves(el):
+    """(with the slot, with the slot group) of an Index element (ETG.2000 tables 67, 94)."""
+    if el is None:
+        return (False, False)
+    return (el.get("DependOnSlot") in ("1", "true"), el.get("DependOnSlotGroup") in ("1", "true"))
+
+
+def _pdo(p, direction):
+    pdo = EsiPdo(number(_text(p, "Index")), direction,
+                 number(p.get("Sm")) if p.get("Sm") else None,
+                 p.get("Fixed") in ("1", "true"), p.get("Mandatory") in ("1", "true"), _text(p, "Name"))
+    for e in p.findall("Entry"):
+        pdo.entries.append(EsiEntry(number(_text(e, "Index")), number(_text(e, "SubIndex") or "0"),
+                                    number(_text(e, "BitLen")), _text(e, "Name"), _text(e, "DataType")))
+    pdo.excludes = [number(x.text) for x in p.findall("Exclude") if x.text]
+    return pdo
+
+
+def _modules(root):
+    """The file's Descriptions/Modules: ident -> EsiModule."""
+    out = {}
+    for m in root.findall("Descriptions/Modules/Module"):
+        t = m.find("Type")
+        try:
+            mod = EsiModule(number(t.get("ModuleIdent") or "0"), _text(m, "Name") or (t.text or "").strip())
+            for tag, direction in (("RxPdo", "rx"), ("TxPdo", "tx")):
+                for p in m.findall(tag):
+                    pdo = _pdo(p, direction)
+                    mod.pdos.append(pdo)
+                    mod.pdo_moves[len(mod.pdos) - 1] = _moves(p.find("Index"))
+                    for k, e in enumerate(p.findall("Entry")):
+                        mod.entry_moves[(len(mod.pdos) - 1, k)] = _moves(e.find("Index"))
+            for c in m.findall("Mailbox/CoE/InitCmd"):
+                mod.init_cmds.append((",".join(x.text for x in c.findall("Transition")),
+                                      number(_text(c, "Index")), number(_text(c, "SubIndex") or "0"),
+                                      _text(c, "Data"), c.get("CompleteAccess") in ("1", "true"),
+                                      _moves(c.find("Index"))))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        out[mod.ident] = mod
+    return out
+
+
+def _slots(dev, modules):
+    el = dev.find("Slots")
+    if el is None:
+        return None
+
+    def num(x, attr):
+        v = x.get(attr)
+        return number(v) if v not in (None, "") else None
+    out = EsiSlots(pdo_increment=num(el, "SlotPdoIncrement") or 0,
+                   index_increment=num(el, "SlotIndexIncrement") or 0,
+                   group_pdo_increment=num(el, "SlotGroupPdoIncrement") or 0,
+                   group_index_increment=num(el, "SlotGroupIndexIncrement") or 0,
+                   download_ident_list=el.get("DownloadModuleIdentList") in ("1", "true"),
+                   modules=modules)
+    for sl in el.findall("Slot"):
+        idents = [number(x.text) for x in sl.findall("ModuleIdent") if x.text]
+        default = next((number(x.text) for x in sl.findall("ModuleIdent")
+                        if x.text and x.get("Default") in ("1", "true")), None)
+        out.slots.append(EsiSlot(_text(sl, "Name"), idents, default,
+                                 num(sl, "MinInstances") if num(sl, "MinInstances") is not None else 1,
+                                 num(sl, "MaxInstances") if num(sl, "MaxInstances") is not None else 1,
+                                 num(sl, "SlotGroup") or 0, num(sl, "SlotPdoIncrement"),
+                                 num(sl, "SlotIndexIncrement"), num(sl, "SlotGroupPdoIncrement"),
+                                 num(sl, "SlotGroupIndexIncrement")))
+    return out
+
+
 def load_file(path):
     """All device descriptions in one ESI file. Broken files give none."""
     try:
@@ -214,9 +323,15 @@ def load_file(path):
         return []
     vendor = number(_text(root, "Vendor/Id") or "0")
     devices = []
+    modules = None
     for dev in root.findall("Descriptions/Devices/Device"):
         try:
-            devices.append(_device(path, vendor, dev))
+            d = _device(path, vendor, dev)
+            if dev.find("Slots") is not None:
+                if modules is None:
+                    modules = _modules(root)     # shared by the file's devices
+                d.slots = _slots(dev, modules)
+            devices.append(d)
         except (TypeError, ValueError, AttributeError):
             continue
     return devices
@@ -226,7 +341,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 
 
 def cache_path():

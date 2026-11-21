@@ -202,8 +202,10 @@ def slave_from_proposal(p, name=None):
     if getattr(p, "state_timeouts", None):
         s["state-timeouts-ms"] = dict(p.state_timeouts)
     # what the device needs written at start (ESI InitCmds, the drive's mode)
+    before = {parse_obj(x["object"]) for x in s["settings"]}
     for st in getattr(p, "init_settings", None) or []:
-        if parse_obj(st["object"]) not in {parse_obj(x["object"]) for x in s["settings"]}:
+        # an object written twice in a row stays (0xF030:00: count 0, the list, the count)
+        if parse_obj(st["object"]) not in before:
             s["settings"].append(dict(st))
     # a quirk file's settings for this device (one saved from an earlier slave)
     have = {parse_obj(st["object"]) for st in s["settings"]}

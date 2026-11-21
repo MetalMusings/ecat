@@ -307,7 +307,8 @@ def _set_with_channel(esi_dev, chosen, sub):
 
 
 def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
-            esi_exact=False, mode="csp", pdo_set=None, extra_modes=(), way=None, profile=None):
+            esi_exact=False, mode="csp", pdo_set=None, extra_modes=(), way=None, profile=None,
+            modules=None):
     """Make a Proposal for one slave.
 
     info: tool.slave_info(); sii: sii.Sii; coe: coe.Dictionary (may be empty);
@@ -315,7 +316,8 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     extra_modes: the drive's other modes (cia402.modes); way: apply a PDO way the user chose
     ("recommended", or the title of one of pdoreq's ways), else a better way is only
     recommended (Proposal.recommendation); profile: "cia402", "mdp" or "generic", the user's
-    choice over the one recognised.
+    choice over the one recognised. modules: the module idents the slave detects (0xF050);
+    with Slots in its ESI file the modules' PDOs, InitCmds and 0xF030 come from there.
     """
     from . import lcnc_env
     wide = lcnc_env.wide_pins()  # 64-bit integer pins (LinuxCNC 2.10)
@@ -373,6 +375,18 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         source, candidates = "slave's SII default assignment", sii.pdos
     p.pdo_source = source
     chosen = [c for c in candidates if c.sm is not None]
+    layout = None
+    if esi_dev is not None and getattr(esi_dev, "slots", None) is not None and modules is not None:
+        from . import slots as slots_mod
+        sms = {c.direction: c.sm for c in esi_dev.pdos if c.sm is not None}
+        layout = slots_mod.layout(esi_dev.slots, list(modules), sms.get("rx", 2), sms.get("tx", 3))
+        chosen = chosen + layout.pdos
+        p.pdo_source = "%s and the modules' PDOs (ESI Slots, %d module%s from 0xF050)" % (
+            source, len(modules), "" if len(modules) == 1 else "s")
+        p.notes += layout.notes + layout.problems
+    elif esi_dev is not None and getattr(esi_dev, "slots", None) is not None:
+        p.notes.append("a modular device (Slots in its ESI file), but its module list (0xF050) was not "
+                       "read: its modules' PDOs are not in the proposal")
     if not chosen and not candidates:
         p.notes.append("no process data (such as a coupler)")
     elif not chosen:
@@ -578,14 +592,18 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
 
     # Settings the device needs written at start: its ESI file's InitCmds, and for a
     # drive whose 0x6060 is not in the process data, the mode (unless it has only one)
-    if esi_dev is not None and esi_dev.init_cmds:
+    module_cmds = layout.init_cmds if layout is not None else []
+    if esi_dev is not None and (esi_dev.init_cmds or module_cmds):
         from . import esi as esi_mod, initcmds
         dictionary = coe if coe is not None and coe.entries else esi_mod.dictionary(esi_dev)
-        found = initcmds.from_esi(esi_dev, dictionary, "cia402" if p.profile == 402 else None)
+        cmds = dataclasses.replace(esi_dev, init_cmds=list(esi_dev.init_cmds) + module_cmds)
+        found = initcmds.from_esi(cmds, dictionary, "cia402" if p.profile == 402 else None)
         p.init_settings += found.settings
         p.notes += found.notes
         if found.settings:
             p.notes.append("settings %s from the ESI file's InitCmds" % ", ".join(st["object"] for st in found.settings))
+    if layout is not None:
+        p.init_settings += layout.settings
     if p.profile == 402:
         mapped = {e.index for pd in pdos for e in pd.entries}
         supported = drive_modes if drive_modes is not None else getattr(esi_dev, "drive_modes", None)

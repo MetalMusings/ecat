@@ -65,8 +65,18 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=
     modes = None
     if device_type is not None and device_type & 0xFFFF == 402 and 0x6502 in known.objects:
         modes = tool.upload(pos, 0x6502, 0, "uint32")
+    # a modular device's modules, before the proposal: with Slots in its ESI file the
+    # modules' PDOs come from there (slots.py)
+    detected = configured = None
+    if sii.has_coe:
+        listed = coe if coe.objects else known
+        if dev is not None and dev.slots is not None and 0xF050 not in listed.objects:
+            listed = coe_mod.Dictionary()
+            listed.objects = {0xF050: "Detected module ident list", 0xF030: "Configured module ident list"}
+        detected = read_modules(pos, listed, 0xF050)
+        configured = read_modules(pos, listed, 0xF030)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set, extra_modes,
-                        way, profile)
+                        way, profile, modules=detected)
     p.dc_info.sync = dcinfo.read_sync(pos, known)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
@@ -76,9 +86,7 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=
                 v = tool.upload(pos, index, 0, "uint32")
                 if v:
                     p.max_velocity[n] = int(v)
-    if coe:
-        detected = read_modules(pos, coe, 0xF050)
-        configured = read_modules(pos, coe, 0xF030)
+    if detected is not None:
         propose.add_modules(p, detected, configured)
     if p.profile == 402 and mode == "pp":
         # proposed from the drive's own values; the user must check them

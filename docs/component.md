@@ -1821,8 +1821,20 @@ What EtherCAT Setup does:
 - When the slave has them, it reads the modules the slave detects
   (`0xF050`, Detected Module Ident List) and those it is configured for
   (`0xF030`, Configured Module Ident List).
-- The process data is taken **as the slave maps it now**, from its SII
-  and CoE: a coupler that maps its modules by itself works.
+- With an ESI file that describes its slots (`Slots` and `Modules`), the
+  modules' PDOs come from there: each module the slave detects is put in
+  the slot that takes it, and the indexes the file marks `DependOnSlot`
+  move by the slot's number (counted from 0) times the slot increment
+  (`SlotPdoIncrement` for PDOs, `SlotIndexIncrement` for entries and
+  InitCmds; a slot's own increment over the device's), `DependOnSlotGroup`
+  ones by the slot group. The modules' InitCmds become settings as the
+  device's own do, and where the file asks for it
+  (`DownloadModuleIdentList`) the configured list `0xF030` is written at
+  start as settings (count 0, the idents, the count). A module that fits no
+  slot, or is not in the file, is named in the notes.
+- Without such an ESI file the process data is taken **as the slave maps
+  it now**, from its SII and CoE: a coupler that maps its modules by itself
+  works.
 - The detected modules are recorded in the file:
 
   ```yaml

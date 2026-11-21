@@ -3588,3 +3588,30 @@ oversampling (`OSFac`), FoE, SoE, SM sizes and FMMUs (the master takes the SII's
   *Add what the device needs* recommend them for an existing file
   (`Session.missing_state_timeouts`).
 - Not tried on a slave that needs them.
+
+### Slots and Modules (built 2026-11-21)
+
+- In `~/esi` only Beckhoff's files have Slots (1212: AF1, AX1, AX8000, MB/MS/MO,
+  ELM72xx with one TwinSAFE slot, VUI/VIx); couplers of other vendors that
+  LinuxCNC users have (WAGO 750-354, Weidmüller UR20) are not there, and we have
+  no modular device: none of this is tried on a slave.
+- `esi.EsiModule`, `EsiSlot`, `EsiSlots` (`EsiDevice.slots`, with the file's
+  `Descriptions/Modules` shared by its devices; cache version 8): PDOs, entries
+  and InitCmds with their DependOnSlot / DependOnSlotGroup flags (by position, so
+  that they survive the cache), slot types with Min/MaxInstances, allowed idents,
+  default, SlotGroup and their own increments; the device's increments and
+  `DownloadModuleIdentList`.
+- `ecatsetup/slots.py`: `assign` (detected modules to slot types, in order, Min/Max
+  instances), `layout` (moved PDO, entry and InitCmd indexes; the same module twice
+  gets its PDO names with the slot number; empty PDOs left out; 0xF030 as settings
+  when the device wants it; problems: a slot whose minimum is not met, a module that
+  fits no slot or is not in the file, two slots with the same PDO index).
+- Slot numbers count from 0 (ETG.2000 does not say; 0 keeps the first slot's
+  indexes as the file gives them, which AX8000's descriptions expect). To be
+  checked with a real device (ETG.5001 would say).
+- `session.read_slave` reads 0xF050/0xF030 before the proposal (also without SDO
+  information when the ESI has Slots); `propose(modules=)` adds the modules' PDOs
+  to the device's own, their InitCmds (through `initcmds.from_esi`) and 0xF030.
+  `config.slave_from_proposal` keeps an object written twice in a row (0xF030:00).
+- Tests: `tests/test_slots.py` (a synthetic coupler with DI/DO modules),
+  mutation-checked.
