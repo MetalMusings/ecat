@@ -2250,7 +2250,9 @@ class SlaveView(QWidget):
             for st in pdoreq.cia402_status(c.get("mode"), [m for m in c.get("modes") or []
                                                            if m != c.get("mode")],
                                            len(c.get("axes") or [1]), have,
-                                           mode_settings=pdoreq.mode_settings(s)):
+                                           mode_settings=pdoreq.mode_settings(s),
+                                           esi_mode=pdoreq.initcmd_mode(
+                                               self.win.session.esi_device(self.position))):
                 (errors if st.level == "error" else notes).append(st.text)
                 self.pd_adds += st.add if st.level == "error" or any(d == "setting" for _i, d in st.add) else []
         for level, text in self.win.session.pdo_problems(self.position):

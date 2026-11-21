@@ -119,6 +119,20 @@ TIMEOUTS = ("<Info><StateMachine><Timeout><PreopTimeout>6000</PreopTimeout><Safe
             "</RequestTimeout><ResponseTimeout>2000</ResponseTimeout></Timeout></Mailbox></Info>")
 
 
+class TestStatusText(unittest.TestCase):
+    def test_the_line_names_the_initcmd(self):
+        from ecatsetup import pdoreq
+        dev = device(CMDS, NO_MODE)
+        self.assertEqual(pdoreq.initcmd_mode(dev), 8)
+        self.assertIsNone(pdoreq.initcmd_mode(device([], NO_MODE)))
+        have = {(0x6040, 0), (0x607A, 0), (0x60FF, 0), (0x6041, 0), (0x6064, 0), (0x606C, 0)}
+        st = pdoreq.cia402_status("pv", [], 1, have, esi_mode=8)
+        self.assertEqual(st[0].level, "error")
+        self.assertIn("its ESI file writes 0x6060 = 8 at start (an InitCmd)", st[0].text)
+        self.assertIn("adds it, as 0x6060:00 = 3 for PV", st[0].text)
+        self.assertIn("add the setting 0x6060:00 = 3", pdoreq.cia402_status("pv", [], 1, have)[0].text)
+
+
 class TestStateTimeouts(unittest.TestCase):
     def test_read_from_the_esi(self):
         dev = device([], WITH_MODE, info=TIMEOUTS)

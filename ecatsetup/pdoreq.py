@@ -260,10 +260,22 @@ def _objects(data, index, axes):
 MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
 
 
-def cia402_status(mode, modes, axes, have, data=None, mode_settings=None):
+def initcmd_mode(esi_dev):
+    """The value an ESI file's InitCmd writes to 0x6060 at start, or None."""
+    for cmd in getattr(esi_dev, "init_cmds", None) or []:
+        if cmd[1] == 0x6060 and cmd[2] == 0 and cmd[3]:
+            try:
+                return int.from_bytes(bytes.fromhex(cmd[3].replace(" ", "")), "little", signed=True)
+            except ValueError:
+                return None
+    return None
+
+
+def cia402_status(mode, modes, axes, have, data=None, mode_settings=None, esi_mode=None):
     """The lines under a drive's PDOs: what its mode set lacks (error), and what is
     only a loss (info). `have` is the set of (index, subindex) mapped, both directions;
-    `mode_settings` {axis: value of its setting 0x6060:00}."""
+    `mode_settings` {axis: value of its setting 0x6060:00}; `esi_mode` the value its
+    ESI file's InitCmd writes to 0x6060 (initcmd_mode), if it has one."""
     data = data or load("cia402")
     if mode not in data["modes"]:
         return []            # no or an unknown mode: config.check says so
@@ -293,6 +305,12 @@ def cia402_status(mode, modes, axes, have, data=None, mode_settings=None):
                 out.append(Status("info", "0x%04X is not mapped and not a setting: the drive must already "
                                   "be in %s (the profile enables it only when 0x%04X shows that); add the "
                                   "setting to put it there" % (mo, mode.upper(), md), [(mo, "setting")]))
+            elif esi_mode is not None and a == 0:
+                out.append(Status("error", "the drive's mode is neither set nor seen: its ESI file writes "
+                                  "0x6060 = %d at start (an InitCmd), which this file does not have yet; "
+                                  "\"Add what the device needs\" (Settings) adds it, as 0x6060:00 = %d for %s, "
+                                  "or map 0x%04X or 0x%04X" % (esi_mode, MODE_NUMBERS[mode], mode.upper(), mo, md),
+                                  [(mo, "setting")]))
             else:
                 out.append(Status("error", "the drive's mode is neither set nor seen: add the setting "
                                   "0x%04X:00 = %d, or map 0x%04X or 0x%04X" % (mo, MODE_NUMBERS[mode], mo, md),
