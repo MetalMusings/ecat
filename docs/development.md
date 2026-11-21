@@ -3319,3 +3319,25 @@ never written) and *build* (an own mapping in the open PDOs).
 - Run for this step: `scripts/run-tests prototype capture pdoreq` (the full
   suite is left for the release). The old note "the default PDOs lack ...; the
   mapping must be changed" is replaced by the error line's text.
+
+### Step 2: the file against the ESI (built 2026-11-21)
+
+- `pdoreq.check_slave(slave, esi_dev, exact)` compares a slave's `process-data`
+  with its ESI description and gives `[(level, text)]`. Level `error` (`warning`
+  when the ESI file is for another revision of the device): a fixed PDO whose
+  entries differ from the ESI's, two PDOs that exclude each other, a PDO under
+  the wrong direction, more entries than the open PDO takes, an object that the
+  dictionary lets be mapped only the other way (R/T), a changed PDO on a device
+  whose PdoConfig is off, another assignment than the default where PdoAssign is
+  off. `warning`: a PDO the ESI does not list. `note`: 0x6060/0x6061 not mapped
+  with a single mode (the profile sets the mode by SDO at start / does not read
+  it back), and a CiA 402 drive run as generic whose PDOs would do for CiA 402
+  in CSP (the profile's protections do not apply). A slave with
+  `configure-pdos: false` and a slave without an ESI file are not checked.
+  What a mode set lacks is still `config.check`'s error (no ESI needed).
+- `Session.pdo_problems()`: the same for every slave of the file, with
+  "slave N (name):"; `ecatsetup --check FILE --esi DIR` prints them (Error:,
+  Warning:, Note:), and the window's Check shows them with the other messages
+  (errors count and block "No errors in the file").
+- Tests: `scripts/run-tests pdoreq prototype guidance capture gui` (the full
+  suite is left for the release); every rule has a test and was mutation-checked.

@@ -848,7 +848,7 @@ def check_file(path, esi_paths=()):
         # settings against the ESI files' object dictionaries
         sess = session.Session(esi_paths)
         sess.cfg = cfg
-        for level, text in sess.setting_problems():
+        for level, text in sess.setting_problems() + sess.pdo_problems():
             print("%s: %s" % (level.capitalize(), text))
     try:
         positions = set(tool.slave_positions())

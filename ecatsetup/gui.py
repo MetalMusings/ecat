@@ -7442,6 +7442,8 @@ class MainWindow(QMainWindow):
 
     def check(self, quiet=False, extra=()):
         errors, problems, notes = self.session.check()
+        pdo = self.session.pdo_problems()      # the PDOs against the ESI files
+        errors = errors + [t for lv, t in pdo if lv == "error"]
         by_slave = {}
         for m in errors + problems:
             by_slave.setdefault(slave_of(m), []).append(m)
@@ -7449,8 +7451,8 @@ class MainWindow(QMainWindow):
         # DC settings the slaves do not describe: warned about, not errors
         dc = self.session.dc_problems()
         groups = [(RED, "Error: ", errors), (RED, "Bus: ", problems),
-                  (AMBER, "Warning: ", [t for lv, t in dc if lv == "warning"]),
-                  (GREY, "Bus: ", notes), (GREY, "Note: ", [t for lv, t in dc if lv == "note"]),
+                  (AMBER, "Warning: ", [t for lv, t in dc + pdo if lv == "warning"]),
+                  (GREY, "Bus: ", notes), (GREY, "Note: ", [t for lv, t in dc + pdo if lv == "note"]),
                   (GREY, "", list(extra))]
         if not quiet:
             if self.session.cfg is not None and not errors and not problems:

@@ -349,3 +349,106 @@ def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=Non
 def _new_entry(index, sub, spec):
     from .esi import EsiEntry
     return EsiEntry(index, sub, spec["bits"], spec["name"], spec["type"])
+
+
+# --------------------------------------------------------------------------
+# the file against the ESI
+
+def _parse(text):
+    import re
+    m = re.match(r"\s*(?:0x)?([0-9A-Fa-f]+)\s*:\s*(?:0x)?([0-9A-Fa-f]+)\s*$", str(text))
+    return (int(m.group(1), 16), int(m.group(2), 16)) if m else None
+
+
+def _file_pdos(slave):
+    """[(direction, pdo index, sm, [(index, subindex, bits)])] of a slave's process data."""
+    out = []
+    pd = slave.get("process-data") or {}
+    for key, direction in (("outputs", "rx"), ("inputs", "tx")):
+        for p in pd.get(key) or []:
+            try:
+                index = int(str(p.get("pdo")), 16)
+            except ValueError:
+                continue
+            entries = []
+            for e in p.get("entries") or []:
+                o = _parse(e.get("object")) if isinstance(e, dict) else None
+                if o is not None:
+                    entries.append((o[0], o[1], e.get("bits")))
+            out.append((direction, index, p.get("sm"), entries))
+    return out
+
+
+def check_slave(slave, esi_dev, exact=True):
+    """The slave's PDOs in the file against what its ESI description allows:
+    [(level, text)], level "error" ("warning" when the ESI file is for another
+    revision of the device), "warning" or "note". Nothing when the PDOs are not
+    written to the slave (configure-pdos: false) or there is no ESI file."""
+    if esi_dev is None or not isinstance(slave, dict):
+        return []
+    out = []
+    bad = "error" if exact else "warning"
+    mine = _file_pdos(slave)
+    if slave.get("configure-pdos", True) and mine:
+        by_index = {p.index: p for p in esi_dev.pdos}
+        names = {i for _d, i, _s, _e in mine}
+        for direction, index, sm, entries in mine:
+            esi_pdo = by_index.get(index)
+            label = "PDO 0x%04X" % index
+            if esi_pdo is None:
+                out.append(("warning", "%s is not in the ESI file's PDOs" % label))
+                continue
+            if esi_pdo.direction != direction:
+                out.append((bad, "%s is a %s PDO in the ESI file, but is listed under %s"
+                            % (label, esi_pdo.direction.upper(),
+                               "outputs" if direction == "rx" else "inputs")))
+                continue
+            theirs = [(e.index, e.subindex, e.bitlen) for e in esi_pdo.entries]
+            same = [(i, s, b) for i, s, b in entries] == theirs
+            if not same:
+                if esi_pdo.fixed:
+                    out.append((bad, "%s is fixed in the ESI file: its entries cannot be changed "
+                                "(it holds %s)" % (label, _list(theirs))))
+                elif esi_dev.pdo_config is False:
+                    out.append((bad, "the ESI file says the device's PDOs cannot be changed "
+                                "(PdoConfig is off), but %s differs from the device's own" % label))
+                else:
+                    limit = esi_dev.max_entries.get(index)
+                    if limit is not None and len([e for e in entries if e[0]]) > limit:
+                        out.append((bad, "%s takes at most %d entries, the file has %d"
+                                    % (label, limit, len([e for e in entries if e[0]]))))
+                    flag = "R" if direction == "rx" else "T"
+                    for i, s, _b in entries:
+                        got = esi_dev.mapping.get(i)
+                        if i and got in ("R", "T") and got != flag:
+                            out.append((bad, "%s: %s can only be mapped as %s data in the ESI file"
+                                        % (label, object_name(i), "RX" if got == "R" else "TX")))
+            for other in esi_pdo.excludes:
+                if other in names and other != index and index < other:
+                    out.append((bad, "%s and PDO 0x%04X exclude each other in the ESI file"
+                                % (label, other)))
+        if esi_dev.pdo_assign is False:
+            theirs = {(p.sm, p.index) for p in esi_dev.pdos if p.sm is not None}
+            ours = {(sm, i) for _d, i, sm, _e in mine}
+            if ours != theirs:
+                out.append((bad, "the ESI file says the device's PDO assignment cannot be changed "
+                            "(PdoAssign is off), but the file assigns other PDOs than its default"))
+    # the profile against what the device is
+    if slave.get("profile") == "cia402":
+        c = slave.get("cia402") or {}
+        have = {(i, s) for _d, _p, _s, es in mine for i, s, _b in es}
+        for st in cia402_status(c.get("mode"), [m for m in c.get("modes") or [] if m != c.get("mode")],
+                                len(c.get("axes") or [1]), have):
+            if st.level == "info":
+                out.append(("note", st.text))
+    elif slave.get("profile") == "generic" and esi_dev.profile == 402 and mine:
+        have = {(i, s) for _d, _p, _s, es in mine for i, s, _b in es}
+        if not [t for t in cia402_status("csp", [], 1, have) if t.level == "error"]:
+            out.append(("note", "the file runs this CiA 402 drive as generic: the drive profile's "
+                        "protections (enable, fault handling, mode) do not apply; its PDOs would "
+                        "be enough for CiA 402 in CSP"))
+    return out
+
+
+def _list(entries):
+    return ", ".join("0x%04X:%02X" % (i, s) for i, s, _b in entries if i) or "nothing"

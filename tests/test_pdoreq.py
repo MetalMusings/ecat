@@ -29,13 +29,13 @@ def obj(index, flag=None, default=None, typ="UINT"):
                "<PdoMapping>%s</PdoMapping>" % flag if flag else ""))
 
 
-def make(objects, pdos, pdo_config=True, modes=0x180):
+def make(objects, pdos, pdo_config=True, modes=0x180, pdo_assign=True):
     xml = ('<?xml version="1.0"?><EtherCATInfo><Vendor><Id>1</Id></Vendor><Descriptions><Devices>'
            '<Device><Type ProductCode="#x1" RevisionNo="#x1">T</Type><Name>T</Name>'
            '<Profile><ProfileNo>402</ProfileNo><Dictionary><DataTypes/><Objects>%s</Objects></Dictionary></Profile>'
-           '%s<Mailbox><CoE PdoAssign="1" PdoConfig="%d"/></Mailbox></Device>'
+           '%s<Mailbox><CoE PdoAssign="%d" PdoConfig="%d"/></Mailbox></Device>'
            '</Devices></Descriptions></EtherCATInfo>'
-           % ("".join(objects) + obj(0x6502, None, modes, "UDINT"), "".join(pdos), int(pdo_config)))
+           % ("".join(objects) + obj(0x6502, None, modes, "UDINT"), "".join(pdos), int(pdo_assign), int(pdo_config)))
     fd, path = tempfile.mkstemp(suffix=".xml")
     os.write(fd, xml.encode())
     os.close(fd)
@@ -161,6 +161,113 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(dev.mapping[0x6040], "R")
         self.assertEqual(dev.drive_modes, 0x180)
         self.assertTrue(dev.pdo_config)
+
+
+def fslave(outputs=(), inputs=(), profile="cia402", mode="csp", configure=True, **kw):
+    def pdos(items):
+        return [{"pdo": "0x%04X" % i, "sm": sm,
+                 "entries": [{"object": "0x%04X:%02X" % (o, 0), "bits": b} for o, b in es]}
+                for i, sm, es in items]
+    s = {"position": 1, "name": "x", "profile": profile, "configure-pdos": configure,
+         "process-data": {"outputs": pdos(outputs), "inputs": pdos(inputs)}}
+    if profile == "cia402":
+        s["cia402"] = {"mode": mode}
+    s.update(kw)
+    return s
+
+
+ESI_PDOS = [pdo("RxPdo", 0x1600, [(0x6040, 16), (0x607A, 32)], sm=2),
+            pdo("RxPdo", 0x1701, [(0x6040, 16), (0x607A, 32)], fixed=True, exclude=[0x1702]),
+            pdo("RxPdo", 0x1702, [(0x6040, 16), (0x60FF, 32)], fixed=True, exclude=[0x1701]),
+            pdo("TxPdo", 0x1A00, [(0x6041, 16), (0x6064, 32)], sm=3)]
+TX = [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])]
+
+
+class TestCheckSlave(unittest.TestCase):
+    def setUp(self):
+        self.dev = make(MAPPABLE, ESI_PDOS)
+        self.dev.max_entries[0x1600] = 3
+
+    def texts(self, slave, dev=None, exact=True):
+        return pdoreq.check_slave(slave, dev or self.dev, exact)
+
+    def test_a_file_like_the_esi_has_no_problems(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX)
+        self.assertEqual([x for x in self.texts(s) if x[0] != "note"], [])
+
+    def test_no_esi_no_check(self):
+        self.assertEqual(pdoreq.check_slave(fslave([(0x1600, 2, [(0x6040, 16)])]), None), [])
+
+    def test_slave_that_is_not_written_is_not_checked(self):
+        s = fslave([(0x1701, 2, [(0x6040, 16)])], TX, configure=False)
+        self.assertEqual([x for x in self.texts(s) if x[0] != "note"], [])
+
+    def test_changed_fixed_pdo(self):
+        s = fslave([(0x1701, 2, [(0x6040, 16), (0x607A, 32), (0x60FF, 32)])], TX)
+        found = self.texts(s)
+        self.assertEqual(found[0][0], "error")
+        self.assertIn("0x1701 is fixed in the ESI file", found[0][1])
+
+    def test_another_revision_only_warns(self):
+        s = fslave([(0x1701, 2, [(0x6040, 16)])], TX)
+        self.assertEqual(self.texts(s, exact=False)[0][0], "warning")
+
+    def test_exclude(self):
+        s = fslave([(0x1701, 2, [(0x6040, 16), (0x607A, 32)]), (0x1702, 2, [(0x6040, 16), (0x60FF, 32)])], TX)
+        self.assertTrue(any("exclude each other" in t for _l, t in self.texts(s)))
+
+    def test_wrong_direction(self):
+        s = fslave(TX, [(0x1600, 3, [(0x6040, 16), (0x607A, 32)])])
+        found = self.texts(s)
+        self.assertTrue(any("is a RX PDO in the ESI file, but is listed under inputs" in t for _l, t in found))
+
+    def test_too_many_entries(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32), (0x60FF, 32), (0x6060, 8)])], TX)
+        self.assertTrue(any("takes at most 3 entries, the file has 4" in t for _l, t in self.texts(s)))
+
+    def test_object_that_cannot_be_mapped_that_way(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x6064, 32)])], TX)     # 0x6064 is a TX object
+        self.assertTrue(any("0x6064 Position actual value can only be mapped as TX" in t
+                            for _l, t in self.texts(s)))
+
+    def test_pdo_config_off(self):
+        dev = make(MAPPABLE, ESI_PDOS, pdo_config=False)
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], TX)
+        self.assertTrue(any("PdoConfig is off" in t for _l, t in self.texts(s, dev)))
+
+    def test_pdo_assign_off(self):
+        dev = make(MAPPABLE, ESI_PDOS, pdo_assign=False)
+        s = fslave([(0x1701, 2, [(0x6040, 16), (0x607A, 32)])], TX)
+        self.assertTrue(any("PdoAssign is off" in t for _l, t in self.texts(s, dev)))
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX)
+        self.assertFalse(any("PdoAssign" in t for _l, t in self.texts(s, dev)))
+
+    def test_session_names_the_slave(self):
+        from ecatsetup import session
+        sess = session.Session([])
+        sess.esi_devices = [self.dev]
+        s = fslave([(0x1701, 2, [(0x6040, 16)])], TX,
+                   identity={"vendor": "0x00000001", "product": "0x00000001", "revision": "0x00000001"})
+        sess.cfg = {"slaves": [s]}
+        found = sess.pdo_problems()
+        self.assertEqual(found[0][0], "error")
+        self.assertTrue(found[0][1].startswith("slave 1 (x): PDO 0x1701 is fixed"))
+
+    def test_unknown_pdo_is_a_warning(self):
+        s = fslave([(0x1999, 2, [(0x6040, 16)])], TX)
+        self.assertEqual(self.texts(s)[0][0], "warning")
+
+    def test_single_mode_without_mode_objects_is_a_note(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX)
+        notes = [t for l, t in self.texts(s) if l == "note"]
+        self.assertEqual(len(notes), 2)
+        self.assertIn("0x6060", notes[0])
+
+    def test_generic_on_a_drive_that_would_do_for_cia402(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX, profile="generic")
+        self.assertTrue(any("runs this CiA 402 drive as generic" in t for _l, t in self.texts(s)))
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], TX, profile="generic")
+        self.assertFalse(any("generic" in t for _l, t in self.texts(s)))
 
 
 class TestStatus(unittest.TestCase):
