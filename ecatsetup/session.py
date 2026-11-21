@@ -377,18 +377,18 @@ class Session:
                 out.append(("warning", "slave %s (%s): %s" % (s["position"], s.get("name"), text)))
         return out
 
-    def pdo_problems(self):
+    def pdo_problems(self, position=None):
         """[(level, text)] about the slaves' PDOs against their ESI files (pdoreq.check_slave):
         "error", "warning" or "note". Nothing for a slave without a matching ESI file."""
         out = []
         for s in (self.cfg or {}).get("slaves") or []:
-            ident = s.get("identity") or {}
-            try:
-                found = esi.find(self.esi_devices, int(str(ident.get("vendor")), 16),
-                                 int(str(ident.get("product")), 16), int(str(ident.get("revision")), 16))
-            except ValueError:
+            if position is not None and s.get("position") != position:
                 continue
-            dev, exact = found
+            dev = self.esi_device(s.get("position"))
+            try:
+                exact = dev is not None and dev.revision == int(str((s.get("identity") or {}).get("revision")), 16)
+            except ValueError:
+                exact = False
             for level, text in pdoreq.check_slave(s, dev, exact):
                 out.append((level, "slave %s (%s): %s" % (s.get("position"), s.get("name"), text)))
         return out

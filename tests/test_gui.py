@@ -1505,6 +1505,86 @@ class TestWindow(WindowBase):
         self.assertTrue(w.header.stop.isHidden())
 
 
+class TestPdoEditing(WindowBase):
+    """Process data editing on the slave page (docs/development.md "Own PDO mapping", step 3)."""
+
+    def setUp(self):
+        super().setUp()
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from test_pdoreq import ESI_PDOS, MAPPABLE, fslave, make
+        self.dev = make(MAPPABLE, ESI_PDOS)
+        self.fslave = fslave
+
+    def page(self, outputs, inputs):
+        from ecatsetup import coe
+        w = self.window()
+        s = w.session.slave(1)
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp"}
+        s["identity"] = dict(s["identity"], revision="0x00000001")     # the ESI file's device is exact
+        s["process-data"] = self.fslave(outputs, inputs)["process-data"]
+        for p in (mock.patch.object(w.session, "esi_device", return_value=self.dev),
+                  mock.patch.object(w.session, "dictionary", return_value=coe.Dictionary())):
+            p.start()
+            self.addCleanup(p.stop)
+        w.select_slave(0)
+        w.select_slave(1)
+        return w, w.slave_page, s
+
+    def test_status_lines_and_add_what_is_missing(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        self.assertIn("cannot run as CiA 402 in CSP", page.pd_errors.text())
+        self.assertIn("0x607A Target position", page.pd_errors.text())
+        self.assertFalse(page.pd_add_missing.isHidden())
+        page.add_pd_missing()
+        self.assertEqual([e["object"] for e in s["process-data"]["outputs"][0]["entries"]],
+                         ["0x6040:00", "0x607A:00"])
+        self.assertTrue(page.pd_errors.isHidden())
+        self.assertTrue(page.pd_add_missing.isHidden())
+        self.assertEqual(page.pd.rowCount(), 4)
+
+    def test_a_fixed_pdo_refuses_and_says_why(self):
+        w, page, s = self.page([(0x1701, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        with mock.patch.object(gui.QMessageBox, "warning") as warn:
+            page.add_pd_missing()
+        self.assertIn("fixed", warn.call_args[0][2])
+        self.assertEqual(len(s["process-data"]["outputs"][0]["entries"]), 1)
+
+    def test_remove_the_selected_entry(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], [(0x1A00, 3, [(0x6041, 16)])])
+        page.pd.setCurrentCell(1, 0)
+        page.remove_pd_entry()
+        self.assertEqual([e["object"] for e in s["process-data"]["outputs"][0]["entries"]], ["0x6040:00"])
+        self.assertEqual(page.pd.rowCount(), 2)
+        self.assertIn("0x607A", page.pd_errors.text())
+
+    def test_remove_from_a_fixed_pdo_is_refused(self):
+        w, page, s = self.page([(0x1701, 2, [(0x6040, 16), (0x607A, 32)])], [(0x1A00, 3, [(0x6041, 16)])])
+        page.pd.setCurrentCell(0, 0)
+        with mock.patch.object(gui.QMessageBox, "warning") as warn:
+            page.remove_pd_entry()
+        self.assertTrue(warn.called)
+        self.assertEqual(page.pd.rowCount(), 3)
+
+    def test_add_object_and_add_pdo_from_the_choice(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+
+        def pick(prefix):
+            return lambda parent, title, label, items, *a: (next(i for i in items if i.startswith(prefix)), True)
+        with mock.patch.object(gui.QInputDialog, "getItem", side_effect=pick("0x6064")):
+            page.add_pd_object()
+        self.assertEqual([e["object"] for e in s["process-data"]["inputs"][0]["entries"]],
+                         ["0x6041:00", "0x6064:00"])
+        s["process-data"]["outputs"] = []
+        with mock.patch.object(gui.QInputDialog, "getItem", side_effect=pick("0x1701")):
+            page.add_pd_pdo()
+        self.assertEqual([p["pdo"] for p in s["process-data"]["outputs"]], ["0x1701"])
+
+    def test_the_esi_check_shows_under_the_table(self):
+        w, page, s = self.page([(0x1701, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        self.assertIn("0x1701 is fixed in the ESI file", page.pd_errors.text())
+
+
 class TestCards(unittest.TestCase):
     """Where a proposal came from, and the synchronisation card."""
 

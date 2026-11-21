@@ -3341,3 +3341,29 @@ never written) and *build* (an own mapping in the open PDOs).
   (errors count and block "No errors in the file").
 - Tests: `scripts/run-tests pdoreq prototype guidance capture gui` (the full
   suite is left for the release); every rule has a test and was mutation-checked.
+
+### Step 3: editing in the window (built 2026-11-21)
+
+- `ecatsetup/pdoedit.py` (no Qt): `add_object` (the direction from the ESI's
+  PdoMapping flag R/T, or asked for when RT; into the first open PDO of the
+  direction, the device's open PDO is added when the file has none; refused for
+  a fixed PDO, past the PDO's entry limit, or when the size of the object is not
+  known from the dictionary, an ESI PDO or the CiA 402 table), `remove_entry`
+  (an emptied PDO goes too), `addable_pdos` / `add_pdo` (a PDO of the ESI file
+  with its entries, not one that excludes or is excluded by a PDO in use, not
+  when PdoAssign is off), `candidates` (what *Add object...* lists), `add_missing`
+  (what the status line's error names; what could not be added is returned as
+  texts). The profile's own objects get `use: profile`, known drive objects
+  their fixed pin names, others a kebab-case pin from the name, kept unique.
+  Every refusal is an `EditError` with the reason and, for fixed PDOs, the way out.
+- The Process data card: three lines under the table (errors, warnings, notes;
+  `show_pd_status`: `pdoreq.cia402_status` for the mode set plus
+  `Session.pdo_problems(position)` for the ESI) and the buttons *Add object...*,
+  *Remove entry*, *Add PDO...* and *Add what is missing* (shown only when the
+  status line names something). An edit calls `MainWindow.changed()`, so it is
+  checked and marked unsaved like any other.
+- Not done: writing a mapping that the device refuses is not detected until
+  the master tries it (an A6 accepting a written 0x1600 is still unproven);
+  the screenshots (`scripts/docs-screenshots`) were not retaken, the slave
+  page has new buttons.
+- Run for this step: `scripts/run-tests pdoreq pdoedit prototype gui capture`.

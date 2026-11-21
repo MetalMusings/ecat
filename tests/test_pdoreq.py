@@ -12,7 +12,8 @@ from ecatsetup import coe, config, esi, pdoreq, propose, sii
 
 def entry(index, bits, name="x"):
     return ("<Entry><Index>#x%04X</Index><SubIndex>0</SubIndex><BitLen>%d</BitLen>"
-            "<Name>%s</Name><DataType>UINT</DataType></Entry>" % (index, bits, name))
+            "<Name>%s</Name><DataType>%s</DataType></Entry>"
+            % (index, bits, name, {8: "SINT", 32: "DINT"}.get(bits, "UINT")))
 
 
 def pdo(kind, index, entries, fixed=False, sm=None, exclude=()):

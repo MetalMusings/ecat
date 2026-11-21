@@ -38,7 +38,7 @@ from PyQt5.QtWidgets import (
     QProxyStyle, QSizePolicy, QSpinBox, QStackedWidget, QStyle, QStyledItemDelegate, QTabBar, QTableWidget,
     QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
 
-from . import (config, dcinfo, diagnose, drivetest, esi, events, explain, fromlcec, guidance, halcheck, halpins,
+from . import (config, dcinfo, diagnose, drivetest, esi, events, explain, fromlcec, guidance, halcheck, halpins, pdoedit, pdoreq,
                homing,
                integrate, lcnc_env, masterstart, measured,
                netif, pindocs, propose, quirks, response, settings, symptoms, tasks, testmode, tool, tuning,
@@ -1445,6 +1445,27 @@ class SlaveView(QWidget):
         self.pd.itemChanged.connect(self.pd_edited)
         self.pd.cellDoubleClicked.connect(self.pd_double_clicked)
         pd.add(self.pd)
+        self.pd_errors = pd.add(label("", "problemText", wrap=True))
+        self.pd_warn = pd.add(label("", "warnText", wrap=True))
+        self.pd_notes = pd.add(label("", "hint", wrap=True))
+        pd_buttons = QHBoxLayout()
+        self.pd_add_object = QPushButton("Add object...")
+        self.pd_add_object.setToolTip("Map one more object in an open PDO (one the ESI file lets be mapped)")
+        self.pd_add_object.clicked.connect(self.add_pd_object)
+        self.pd_remove = QPushButton("Remove entry")
+        self.pd_remove.setToolTip("Take the selected entry out of its PDO (not from a fixed PDO)")
+        self.pd_remove.clicked.connect(self.remove_pd_entry)
+        self.pd_add_pdo = QPushButton("Add PDO...")
+        self.pd_add_pdo.setToolTip("Assign another of the device's PDOs, with its entries")
+        self.pd_add_pdo.clicked.connect(self.add_pd_pdo)
+        self.pd_add_missing = QPushButton("Add what is missing")
+        self.pd_add_missing.setToolTip("Map the objects the mode set needs and the file lacks")
+        self.pd_add_missing.clicked.connect(self.add_pd_missing)
+        for b in (self.pd_add_object, self.pd_remove, self.pd_add_pdo, self.pd_add_missing):
+            pd_buttons.addWidget(b)
+        pd_buttons.addStretch(1)
+        pd.add(pd_buttons)
+        self.pd_adds = []       # what the status line says is missing: [(index, "rx"/"tx")]
         lay.addWidget(pd)
 
         # settings
@@ -1576,7 +1597,8 @@ class SlaveView(QWidget):
             text.setText(t)
         self.esi_button.setVisible(bool(p) and not p.esi_path)
 
-        editable = (self.cia402, self.pdo_set, self.used, self.configure_pdos, self.dc_mode, self.pd, self.st)
+        editable = (self.cia402, self.pdo_set, self.used, self.configure_pdos, self.dc_mode, self.pd, self.st,
+                    self.pd_add_object, self.pd_remove, self.pd_add_pdo, self.pd_add_missing)
         for w in editable:
             w.setEnabled(s is not None)
         if s is None:
@@ -2057,6 +2079,114 @@ class SlaveView(QWidget):
                     self._pd_row(s, direction, pdo, pi, e, ei)
         self.fit_pd_columns()
         self.loading = False
+        self.show_pd_status(s)
+
+    def show_pd_status(self, s):
+        """The lines under the PDOs: what the mode set lacks, and what the ESI file says
+        about the PDOs in the file."""
+        errors, warns, notes = [], [], []
+        self.pd_adds = []
+        if s.get("profile") == "cia402":
+            c = s.get("cia402") or {}
+            have = {config.parse_obj(e["object"]) for d in (s.get("process-data") or {}).values()
+                    for p in d for e in p.get("entries") or [] if "object" in e}
+            for st in pdoreq.cia402_status(c.get("mode"), [m for m in c.get("modes") or []
+                                                           if m != c.get("mode")],
+                                           len(c.get("axes") or [1]), have):
+                (errors if st.level == "error" else notes).append(st.text)
+                self.pd_adds += st.add if st.level == "error" else []
+        for level, text in self.win.session.pdo_problems(self.position):
+            if level == "note" and text in notes:
+                continue
+            {"error": errors, "warning": warns}.get(level, notes).append(
+                text.split("): ", 1)[-1])
+        for box, lines in ((self.pd_errors, errors), (self.pd_warn, warns), (self.pd_notes, notes)):
+            box.setText("\n".join(lines))
+            box.setVisible(bool(lines))
+        self.pd_add_missing.setVisible(bool(self.pd_adds))
+
+    def _pd_edit(self, action):
+        """Run an edit of the slave's process data; show the reason when it is refused."""
+        s = self.win.session.slave(self.position)
+        if s is None:
+            return
+        try:
+            done = action(s, self.win.session.esi_device(self.position),
+                          self.win.session.dictionary(self.position))
+        except pdoedit.EditError as e:
+            QMessageBox.warning(self, TITLE, str(e))
+            return
+        if done is None:
+            return
+        self.win.changed()
+        self.show_process_data(s)
+        self.win.status(done)
+
+    def add_pd_object(self):
+        def action(s, dev, d):
+            found = pdoedit.candidates(s, dev, d)
+            if not found:
+                text, ok = QInputDialog.getText(self, TITLE, "Object to map (such as 0x60F4):")
+                if not ok or not text.strip():
+                    return None
+                try:
+                    index = int(text.strip(), 16)
+                except ValueError:
+                    raise pdoedit.EditError("%s is not an object number" % text)
+                direction = None
+            else:
+                names = ["0x%04X  %s  (%s)" % (i, n or "?", {"rx": "output", "tx": "input"}.get(w, "output or input"))
+                         for i, _sub, n, w in found]
+                text, ok = QInputDialog.getItem(self, TITLE, "Object to map:", names, 0, False)
+                if not ok:
+                    return None
+                index, _sub, _n, way = found[names.index(text)]
+                direction = None
+                if way == "rt":
+                    kind, ok = QInputDialog.getItem(self, TITLE, "As:", ["output (RX)", "input (TX)"], 0, False)
+                    if not ok:
+                        return None
+                    direction = "rx" if kind.startswith("output") else "tx"
+            e = pdoedit.add_object(s, dev, d, index, 0, direction)
+            return "Mapped %s" % e["object"]
+        self._pd_edit(action)
+
+    def remove_pd_entry(self):
+        row = self.pd.currentRow()
+        if row < 0 or row >= len(self.pd_rows):
+            self.win.status("Select the entry to remove")
+            return
+
+        def action(s, dev, _d):
+            direction, pi, ei = self.pd_rows[row]
+            gone = pdoedit.remove_entry(s, dev, direction, pi, ei)
+            return "Removed %s" % gone.get("object")
+        self._pd_edit(action)
+
+    def add_pd_pdo(self):
+        def action(s, dev, _d):
+            found = pdoedit.addable_pdos(s, dev)
+            if not found:
+                raise pdoedit.EditError("no other PDO can be added: the device's ESI file lists none "
+                                        "that is free of the PDOs in use, or it is not known")
+            names = ["0x%04X  %s  (%s, %d entries)" % (p.index, p.name, "output" if p.direction == "rx"
+                                                       else "input", len(p.entries)) for p in found]
+            text, ok = QInputDialog.getItem(self, TITLE, "PDO to add:", names, 0, False)
+            if not ok:
+                return None
+            pdoedit.add_pdo(s, dev, found[names.index(text)].index)
+            return "Added PDO 0x%04X" % found[names.index(text)].index
+        self._pd_edit(action)
+
+    def add_pd_missing(self):
+        adds = list(self.pd_adds)
+
+        def action(s, dev, d):
+            added, failed = pdoedit.add_missing(s, dev, d, adds)
+            if failed:
+                QMessageBox.warning(self, TITLE, "Could not add all:\n\n" + "\n\n".join(failed))
+            return "Added %s" % (", ".join(e["object"] for e in added) or "nothing")
+        self._pd_edit(action)
 
     def fit_pd_columns(self):
         """The columns that few entries use are shown where one does (or when asked

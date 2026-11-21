@@ -194,7 +194,20 @@ Choosing a slave shows:
   cell of the row to go there). Choosing a type again gives back one
   pin. The *Invert* column makes a bit pin the opposite of the bit (`yes`
   for a bit pin, the names of the bit pins for a bit field), for normally
-  closed switches such as an E-stop: no `not` is needed in HAL;
+  closed switches such as an E-stop: no `not` is needed in HAL.
+  Under the table, lines say what the mapping lacks for the drive's
+  modes (red: *cannot run as CiA 402 in CSP: 0x607A Target position
+  missing*; grey: the mode objects 0x6060/0x6061 are not mapped, which is
+  all right with one mode), and what the device's ESI file says about the
+  PDOs in the file (a fixed PDO that was changed, PDOs that exclude each
+  other, too many entries, an object that cannot be mapped that way).
+  *Add what is missing* maps the objects the red line names, *Add
+  object...* any object the ESI file lets be mapped (it goes into the
+  first open PDO of its direction), *Remove entry* takes the selected
+  entry out, and *Add PDO...* assigns another of the device's PDOs with
+  its entries. A PDO that the ESI file marks fixed cannot be edited: the
+  window says so and what to do (*Propose again* chooses ready PDOs that
+  have the objects, or builds a mapping in the open PDO);
 - **Settings**: SDOs written at every start, in PREOP. *Add setting...*
   opens the slave's object dictionary: filter by object or name, objects
   writable in PREOP only (untick to see all), manufacturer objects
