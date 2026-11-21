@@ -219,8 +219,21 @@ def add_pdo(slave, esi_dev, index):
 def add_missing(slave, esi_dev, dictionary, adds):
     """Add what pdoreq.cia402_status says is missing: adds is [(index, "rx"/"tx")].
     Returns (entries added, texts of what could not be added)."""
-    _writable(slave)
     added, failed = [], []
+    if any(d == "setting" for _i, d in adds):
+        # the mode as a setting (not a PDO edit: also where the PDOs are not written)
+        mode = (slave.get("cia402") or {}).get("mode")
+        for index, d in adds:
+            if d != "setting" or mode not in config.MODE_NUMBERS:
+                continue
+            st = {"object": config.obj(index, 0), "name": "Modes of operation", "type": "SINT",
+                  "value": config.MODE_NUMBERS[mode]}
+            slave.setdefault("settings", []).append(st)
+            added.append(st)
+        adds = [(i, d) for i, d in adds if d != "setting"]
+        if not adds:
+            return added, failed
+    _writable(slave)
     for index, direction in adds:
         try:
             added.append(add_object(slave, esi_dev, dictionary, index, 0, direction))

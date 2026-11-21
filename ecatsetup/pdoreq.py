@@ -257,9 +257,13 @@ def _objects(data, index, axes):
     return None
 
 
-def cia402_status(mode, modes, axes, have, data=None):
+MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
+
+
+def cia402_status(mode, modes, axes, have, data=None, mode_settings=None):
     """The lines under a drive's PDOs: what its mode set lacks (error), and what is
-    only a loss (info). `have` is the set of (index, subindex) mapped, both directions."""
+    only a loss (info). `have` is the set of (index, subindex) mapped, both directions;
+    `mode_settings` {axis: value of its setting 0x6060:00}."""
     data = data or load("cia402")
     if mode not in data["modes"]:
         return []            # no or an unknown mode: config.check says so
@@ -274,11 +278,28 @@ def cia402_status(mode, modes, axes, have, data=None):
                           % (", ".join(m.upper() for m in chosen),
                              ", ".join(object_name(i) for i, _ in missing)), missing))
     if len(chosen) == 1:
-        for index, text in ((0x6060, "the mode is set by SDO at start"),
-                            (0x6061, "the mode is not read back")):
-            if (index, 0) not in have:
-                out.append(Status("info", "%s is not mapped: %s" % (object_name(index), text),
-                                  [(index, "rx" if index == 0x6060 else "tx")]))
+        # one mode: set every cycle, or once as a setting; seen, or not
+        shift = data["axis-offset"]
+        settings = mode_settings or {}
+        for a in range(axes):
+            mo, md = 0x6060 + a * shift, 0x6061 + a * shift
+            if (mo, 0) in have:
+                continue
+            value = settings.get(a)
+            if value is not None:
+                out.append(Status("info", "0x%04X is not mapped: the mode is the setting 0x%04X:00 = %d, "
+                                  "written at every start" % (mo, mo, value)))
+            elif (md, 0) in have:
+                out.append(Status("info", "0x%04X is not mapped and not a setting: the drive must already "
+                                  "be in %s (the profile enables it only when 0x%04X shows that); add the "
+                                  "setting to put it there" % (mo, mode.upper(), md), [(mo, "setting")]))
+            else:
+                out.append(Status("error", "the drive's mode is neither set nor seen: add the setting "
+                                  "0x%04X:00 = %d, or map 0x%04X or 0x%04X" % (mo, MODE_NUMBERS[mode], mo, md),
+                                  [(mo, "setting")]))
+            if (md, 0) not in have:
+                out.append(Status("info", "%s is not mapped: the mode is not read back"
+                                  % object_name(md) if a == 0 else "0x%04X is not mapped" % md))
     if not out:
         out.append(Status("ok", "enough for CiA 402 in %s" % ", ".join(m.upper() for m in chosen)))
     return out
@@ -454,18 +475,26 @@ def check_slave(slave, esi_dev, exact=True):
         c = slave.get("cia402") or {}
         have = {(i, s) for _d, _p, _s, es in mine for i, s, _b in es}
         for st in cia402_status(c.get("mode"), [m for m in c.get("modes") or [] if m != c.get("mode")],
-                                len(c.get("axes") or [1]), have):
+                                len(c.get("axes") or [1]), have, mode_settings=mode_settings(slave)):
             if st.level == "info":
                 out.append(("note", st.text))
     elif slave.get("profile") == "generic" and esi_dev.profile == 402 and mine:
         have = {(i, s) for _d, _p, _s, es in mine for i, s, _b in es}
-        if not [t for t in cia402_status("csp", [], 1, have) if t.level == "error"]:
+        req = cia402("csp")
+        if (req.rx | req.tx) <= have:
             out.append(("note", "the file runs this CiA 402 drive as generic: the drive profile's "
                         "protections (enable, fault handling, mode) do not apply; its PDOs would "
                         "be enough for CiA 402 in CSP"))
     out += encoder_status(slave, esi_dev)
     out += serial_status(slave, esi_dev)
     return out
+
+
+def mode_settings(slave):
+    """{axis: value} of a drive's settings 0x6060:00."""
+    from . import config
+    axes = len((slave.get("cia402") or {}).get("axes") or [1])
+    return {a: v for a in range(axes) for v in [config.mode_setting(slave, a)] if v is not None}
 
 
 def _list(entries):

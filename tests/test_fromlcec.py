@@ -137,9 +137,11 @@ def cfg():
              "process-data": {
                  "outputs": [{"pdo": "0x1600", "sm": 2, "entries": [
                      {"object": "0x6040:00", "bits": 16, "type": "UINT", "use": "profile"},
+                     {"object": "0x6060:00", "bits": 8, "type": "SINT", "use": "profile"},
                      {"object": "0x607A:00", "bits": 32, "type": "DINT", "use": "profile"}]}],
                  "inputs": [{"pdo": "0x1A00", "sm": 3, "entries": [
                      {"object": "0x6041:00", "bits": 16, "type": "UINT", "use": "profile"},
+                     {"object": "0x6061:00", "bits": 8, "type": "SINT", "use": "profile"},
                      {"object": "0x6064:00", "bits": 32, "type": "DINT", "use": "profile"}]}]},
              "settings": [{"object": "0x2003:00", "type": "UINT", "value": 100}]}
     io = {"position": 1, "name": "io1", "device": "IO",

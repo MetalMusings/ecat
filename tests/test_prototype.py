@@ -304,7 +304,7 @@ class TestPropose(unittest.TestCase):
             out = [e("0x6040:00", 16, "UINT"), e("0x607A:00", 32, "DINT")]
             out += [e(o, 32 if o.startswith("0x60B1") else 16, "DINT" if o.startswith("0x60B1") else "INT")
                     for o in offsets]
-            inp = [e("0x6041:00", 16, "UINT"), e("0x6064:00", 32, "DINT")]
+            inp = [e("0x6041:00", 16, "UINT"), e("0x6061:00", 8, "SINT"), e("0x6064:00", 32, "DINT")]
             return {"ecat": 1, "master": {}, "slaves": [{
                 "position": 0, "name": "x", "identity": {"vendor": "0x99", "product": "0x1"},
                 "profile": "cia402", "cia402": cia402, "process-data": {
@@ -351,7 +351,21 @@ class TestPropose(unittest.TestCase):
                     "outputs": [{"pdo": "0x1600", "sm": 2, "entries": out}],
                     "inputs": [{"pdo": "0x1A00", "sm": 3, "entries": inp}]}}]}
         self.assertEqual(config.check(drive({"mode": "csp", "modes": ["hm"]})), [])
-        self.assertEqual(config.check(drive({"mode": "csp"}, False)), [])
+        # one mode without the mode objects: the mode is a setting, which says that mode
+        no_objects = drive({"mode": "csp"}, False)
+        self.assertEqual(config.check(no_objects), [
+            "slave 0: the drive's mode is neither set nor seen: add the setting 0x6060:00 = 8 (type SINT, "
+            "the mode at start), or map 0x6060:00 or 0x6061:00"])
+        no_objects["slaves"][0]["settings"] = [{"object": "0x6060:00", "type": "SINT", "value": 8}]
+        self.assertEqual(config.check(no_objects), [])
+        no_objects["slaves"][0]["settings"][0]["value"] = 3
+        self.assertEqual(config.check(no_objects), [
+            "slave 0: the setting 0x6060:00 is 3, but cia402.mode is 8: make them the same (the setting "
+            "is the mode the drive is put in at start)"])
+        no_objects["slaves"][0]["settings"][0]["value"] = 8
+        no_objects["slaves"][0]["cia402"]["mode"] = "pv"
+        config.sync_mode_setting(no_objects["slaves"][0])
+        self.assertEqual(config.mode_setting(no_objects["slaves"][0]), 3)
         errors = config.check(drive({"mode": "csp", "modes": ["hm"]}, False))
         self.assertEqual(len(errors), 2)
         self.assertTrue(all("changing modes needs 0x606" in e for e in errors))

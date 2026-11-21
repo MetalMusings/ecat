@@ -232,7 +232,16 @@ Choosing a slave shows:
   its entries. A PDO that the ESI file marks fixed cannot be edited: the
   window says so and what to do (*Propose again* chooses ready PDOs that
   have the objects, or builds a mapping in the open PDO);
-- **Settings**: SDOs written at every start, in PREOP. *Add setting...*
+- **Settings**: SDOs written at every start, in PREOP. A new proposal
+  already has what the device needs written at start: the settings its
+  ESI file writes then (its InitCmds, such as Beckhoff's channel
+  settings; not the ones the configuring tool fills in itself, such as
+  the cycle time, and not those written with complete access, which a
+  note names), and for a drive whose `0x6060` is not in the process data,
+  its mode (`0x6060:00`, which follows the mode chosen above). For a file
+  made earlier, *Add what the device needs* adds them (shown when some
+  are missing; *Update from bus* names them too, and adds nothing on its
+  own). *Add setting...*
   opens the slave's object dictionary: filter by object or name, objects
   writable in PREOP only (untick to see all), manufacturer objects
   (0x2000-0x5FFF) in bold, with type, size, access and, from the ESI file,

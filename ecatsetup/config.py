@@ -88,6 +88,39 @@ def parse_obj(text):
     return int(m.group(1), 16), int(m.group(2), 16)
 
 
+# the cia402 modes' numbers in 0x6060 (propose.CIA402_MODE_NUMBERS)
+MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
+
+
+def mode_setting(slave, axis=0):
+    """The value of a drive's setting 0x6060:00 (for an axis), or None."""
+    want = (0x6060 + axis * AXIS_OFFSET, 0)
+    for st in slave.get("settings") or []:
+        try:
+            if parse_obj(st.get("object")) == want and "value" in st:
+                return int(st["value"])
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def sync_mode_setting(slave):
+    """After a change of cia402.mode: the setting 0x6060:00 of each axis, where there is
+    one, says the new mode."""
+    c = slave.get("cia402") or {}
+    if slave.get("profile") != "cia402" or c.get("mode") not in MODE_NUMBERS:
+        return
+    axes = len(c.get("axes") or [1])
+    for st in slave.get("settings") or []:
+        try:
+            index, sub = parse_obj(st.get("object"))
+        except ValueError:
+            continue
+        if sub == 0 and any(index == 0x6060 + a * AXIS_OFFSET for a in range(axes)):
+            st["value"] = MODE_NUMBERS[c["mode"]]
+            st["type"] = st.get("type") or "SINT"
+
+
 def default_name(p):
     kind = {"cia402": "drive", "mdp": "io"}.get(PROFILES.get(p.profile), "slave")
     return "%s-%d" % (kind, p.position)
@@ -152,6 +185,10 @@ def slave_from_proposal(p, name=None):
                    "sync0-cycles": p.dc_sync0_factor, "sync0-shift-ns": p.dc_shift}
     s["settings"] = [{"object": obj(i, sub), "type": t, "value": p.pp_limits[(i, sub)]}
                      for i, sub, t in PP_LIMITS if (i, sub) in p.pp_limits]
+    # what the device needs written at start (ESI InitCmds, the drive's mode)
+    for st in getattr(p, "init_settings", None) or []:
+        if parse_obj(st["object"]) not in {parse_obj(x["object"]) for x in s["settings"]}:
+            s["settings"].append(dict(st))
     # a quirk file's settings for this device (one saved from an earlier slave)
     have = {parse_obj(st["object"]) for st in s["settings"]}
     for st in quirks.settings((p.vendor_id, p.product_code)):
@@ -906,6 +943,21 @@ def check(cfg, series=None):
                     err("%s: setting %s data %r is not hex bytes" % (where, st.get("object"), st["data"]))
             else:
                 err("%s: setting %s has neither value nor data" % (where, st.get("object")))
+        if profile == "cia402" and (s.get("cia402") or {}).get("mode") in CIA402_MODES:
+            # the mode: set every cycle (0x6060 mapped), once as a setting, or at least seen
+            # (0x6061: the profile enables only in the mode it shows); a setting says the
+            # mode the profile runs in (ecat_config.c checks the same)
+            number = MODE_NUMBERS[s["cia402"]["mode"]]
+            for a in range(n_axes):
+                o = a * AXIS_OFFSET
+                value = mode_setting(s, a)
+                if value is not None and not other_modes and value != number:
+                    err("%s: the setting %s is %s, but cia402.mode is %d: make them the same (the setting "
+                        "is the mode the drive is put in at start)" % (where, obj(0x6060 + o, 0), value, number))
+                if not other_modes and 0x6060 + o not in owned and 0x6061 + o not in owned and value is None:
+                    err("%s: the drive's mode is neither set nor seen: add the setting %s = %d (type SINT, "
+                        "the mode at start), or map %s or %s"
+                        % (where, obj(0x6060 + o, 0), number, obj(0x6060 + o, 0), obj(0x6061 + o, 0)))
         if profile == "cia402" and "pp" in [(s.get("cia402") or {}).get("mode")] + other_modes:
             # the drive plans PP moves itself: it must know its travel (0x607F,
             # where the drive has it: session.setting_problems)

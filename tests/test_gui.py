@@ -1642,6 +1642,26 @@ class TestPdoEditing(WindowBase):
         change.assert_not_called()
         self.assertEqual(page.profile_box.currentData(), "cia402")
 
+    def test_add_what_the_device_needs(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        self.assertTrue(page.init_button.isHidden())          # the fake bus has no InitCmds
+        missing = [{"object": "0x8000:06", "type": "USINT", "value": 1}]
+        with mock.patch.object(w.session, "missing_init_settings", return_value=missing):
+            page.show_settings(s)
+            self.assertFalse(page.init_button.isHidden())
+            self.assertIn("0x8000:06 = 1", page.init_button.toolTip())
+        with mock.patch.object(w.session, "add_init_settings", return_value=missing) as add:
+            page.add_init_settings()
+        add.assert_called_once_with(1)
+
+    def test_the_mode_setting_follows_the_mode(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x607A, 32), (0x60FF, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32), (0x606C, 32)])])
+        s["settings"] = [{"object": "0x6060:00", "type": "SINT", "value": 8}]
+        page.mode.setCurrentIndex(page.mode.findData("csv"))
+        page.general_edited()
+        self.assertEqual(s["settings"][0]["value"], 9)
+
     def test_editing_without_writing_the_pdos_is_refused(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
         s["configure-pdos"] = False

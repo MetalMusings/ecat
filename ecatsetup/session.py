@@ -243,7 +243,58 @@ class Session:
             self.cfg = fresh
             return ["proposed from the bus"] + netif.fill_master(self.cfg, self.bus_interface)
         self.cfg, notes = update.merge(self.cfg, fresh)
+        # what the device needs written at start (ESI InitCmds, the drive's mode): only
+        # recommended for an existing file, never added on its own
+        for s in self.cfg.get("slaves") or []:
+            missing = self.missing_init_settings(s.get("position"))
+            if missing:
+                notes.append("slave %s (%s): recommended settings, from its ESI file or for its mode: %s; add "
+                             "them with \"Add what the device needs\" on its page"
+                             % (s["position"], s.get("name"), ", ".join(
+                                 "%s = %s" % (st["object"], st.get("value", st.get("data"))) for st in missing)))
         return notes + netif.fill_master(self.cfg, self.bus_interface)
+
+    def missing_init_settings(self, position):
+        """The settings the proposal of the slave read from the bus would write at start
+        (its ESI file's InitCmds; a drive's mode where 0x6060 is not in the file's process
+        data) that its entry lacks. Empty without the bus."""
+        s, b = self.slave(position), self.bus.get(position)
+        if s is None or b is None or not same_kind(s, b.info):
+            return []
+        have = set()
+        for st in s.get("settings") or []:
+            try:
+                have.add(config.parse_obj(st.get("object")))
+            except ValueError:
+                pass
+        mapped = set()
+        for d in (s.get("process-data") or {}).values():
+            for pdo in d or []:
+                for e in pdo.get("entries") or []:
+                    try:
+                        mapped.add(config.parse_obj(e.get("object")))
+                    except ValueError:
+                        pass
+        out = []
+        for st in getattr(b.proposal, "init_settings", None) or []:
+            o = config.parse_obj(st["object"])
+            if o in have:
+                continue
+            if s.get("profile") == "cia402" and (o[0] & 0x7FF) == 0x0060 and 0x6060 <= o[0] < 0x8000:
+                c = s.get("cia402") or {}
+                if o in mapped or c.get("modes") or c.get("mode") not in config.MODE_NUMBERS:
+                    continue        # the mode is set every cycle, or there is nothing to set
+                st = dict(st, value=config.MODE_NUMBERS[c["mode"]])
+            out.append(dict(st))
+        return out
+
+    def add_init_settings(self, position):
+        """Add what missing_init_settings names; returns the settings added."""
+        s = self.slave(position)
+        added = self.missing_init_settings(position)
+        if s is not None and added:
+            s.setdefault("settings", []).extend(added)
+        return added
 
     def check(self):
         """Errors in the configuration, and the bus compared with it:

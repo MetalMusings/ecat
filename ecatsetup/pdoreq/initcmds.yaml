@@ -1,0 +1,18 @@
+# Which of an ESI file's InitCmds (Mailbox/CoE/InitCmd: SDO writes the configuring tool
+# does at a state change) EtherCAT Setup turns into settings of the slave
+# (docs/development.md "ESI InitCmds"). Index ranges are inclusive.
+take:
+  - [0x2000, 0x8FFF]        # vendor objects, profile objects (0x6xxx), MDP settings (0x8xxx)
+skip:
+  - from: 0x1000
+    to: 0x1FFF
+    why: "a communication object the configuring tool fills in itself (such as 0x1C32:02, the cycle time)"
+  - from: 0xF000
+    to: 0xFFFF
+    why: "a device object for the configuring tool (revision, module list, diagnosis messages)"
+transitions:
+  on-time: [IP, PS]         # ecat writes settings in PREOP, before SAFEOP: what these ask
+  early: [SO, SP]           # written in PREOP too, earlier than the file asks: said in a note
+# objects whose value a profile's choice decides, not the file
+profile-owned:
+  cia402: [0x6060]

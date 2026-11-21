@@ -1507,6 +1507,11 @@ class SlaveView(QWidget):
         buttons.addWidget(add)
         buttons.addWidget(remove)
         buttons.addWidget(self.read_now_button)
+        self.init_button = QPushButton("Add what the device needs")
+        self.init_button.setToolTip("Add the settings the device's ESI file writes at start (its InitCmds) "
+                                    "and, for a drive whose 0x6060 is not in the process data, its mode")
+        self.init_button.clicked.connect(self.add_init_settings)
+        buttons.addWidget(self.init_button)
         self.ferror_button = QPushButton("Suggest following-error window")
         self.ferror_button.setToolTip(
             "For a CiA 402 drive: add the drive's following-error window as a setting, "
@@ -2213,9 +2218,10 @@ class SlaveView(QWidget):
                             pass        # config.check names it
             for st in pdoreq.cia402_status(c.get("mode"), [m for m in c.get("modes") or []
                                                            if m != c.get("mode")],
-                                           len(c.get("axes") or [1]), have):
+                                           len(c.get("axes") or [1]), have,
+                                           mode_settings=pdoreq.mode_settings(s)):
                 (errors if st.level == "error" else notes).append(st.text)
-                self.pd_adds += st.add if st.level == "error" else []
+                self.pd_adds += st.add if st.level == "error" or any(d == "setting" for _i, d in st.add) else []
         for level, text in self.win.session.pdo_problems(self.position):
             if level == "note" and text in notes:
                 continue
@@ -2403,7 +2409,21 @@ class SlaveView(QWidget):
         s = self.win.session.slave(self.position)
         return s["process-data"][direction][pi]["entries"][ei]
 
+    def add_init_settings(self):
+        added = self.win.session.add_init_settings(self.position)
+        s = self.win.session.slave(self.position)
+        if s is None or not added:
+            return
+        self.show_settings(s)
+        self.win.changed()
+        self.win.status("Added %s" % ", ".join(st["object"] for st in added))
+
     def show_settings(self, s):
+        missing = self.win.session.missing_init_settings(self.position)
+        self.init_button.setVisible(bool(missing))
+        self.init_button.setToolTip("Adds %s (from the device's ESI file, or the drive's mode)"
+                                    % ", ".join("%s = %s" % (st["object"], st.get("value", st.get("data")))
+                                                for st in missing) if missing else "")
         self.loading = True
         self.st.setRowCount(0)
         for st in s.get("settings") or []:
@@ -2464,6 +2484,7 @@ class SlaveView(QWidget):
         if s.get("profile") == "cia402":
             c = s.setdefault("cia402", {})
             c["mode"] = self.mode.currentData()
+            config.sync_mode_setting(s)
             others = [m for m, cb in self.other_modes.items() if cb.isChecked() and m != c["mode"]]
             for m, cb in self.other_modes.items():
                 cb.setEnabled(m != c["mode"])

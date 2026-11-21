@@ -612,6 +612,7 @@ class TestAxes(Folder):
                 {"object": o, "bits": 16 if o.endswith("40:00") or o.endswith("41:00") else 32,
                  "type": "UINT" if o.endswith("40:00") or o.endswith("41:00") else "DINT",
                  "use": "profile"} for o in objs]
+        x["settings"].append({"object": "0x6860:00", "type": "SINT", "value": 8})   # the second axis's mode
         return c
 
     def test_joints_on_axes(self):

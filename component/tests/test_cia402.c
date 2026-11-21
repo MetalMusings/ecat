@@ -99,50 +99,21 @@ static void test_needs_the_control_and_status_words(void) {
 }
 
 // Without 0x6060 in the process data (StepperOnline A6's default PDOs) the
-// mode is written by SDO at start and read back.
+// mode is a setting (ecat_config.c checks it): the profile writes nothing.
 static const fake_entry_t no_mode_entries[] = {
     {0x6040, 0, 16}, {0x607A, 0, 32}, {0x603F, 0, 16}, {0x6041, 0, 16}, {0x6064, 0, 32}, FAKE_END,
 };
 
-static void test_mode_by_sdo_without_0x6060(void) {
-  uint32_t v = 0;
+static void test_no_sdo_without_0x6060(void) {
   S = fake_slave("x", no_mode_entries, NULL);
-  fake_sdo_set(0x6060, 0, 0);  // the drive starts in no mode
+  fake_sdo_set(0x6060, 0, 0);
   CHECK_EQ(ecat_cia402_init(0, S), 0);
-  CHECK_EQ(fake_sdo_get(0x6060, 0, &v), 0);
-  CHECK_EQ(v, 8);
-  CHECK_EQ(fake_sdo_writes, 1);
-}
-
-static void test_mode_by_sdo_is_the_configured_one(void) {
-  static const fake_entry_t e[] = {{0x6040, 0, 16}, {0x60FF, 0, 32}, {0x6041, 0, 16}, {0x606C, 0, 32}, FAKE_END};
-  lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODE}, {.id = -1}};
-  uint32_t v = 0;
-  mp[0].value.u32 = 3;  // PV
-  S = fake_slave("s", e, mp);
-  CHECK_EQ(ecat_cia402_init(0, S), 0);
-  CHECK_EQ(fake_sdo_get(0x6060, 0, &v), 0);
-  CHECK_EQ(v, 3);
+  CHECK_EQ(fake_sdo_writes, 0);
 }
 
 static void test_no_sdo_with_0x6060_mapped(void) {
   csp_drive();
   CHECK_EQ(fake_sdo_writes, 0);
-}
-
-static void test_mode_refused_by_sdo(void) {
-  S = fake_slave("x", no_mode_entries, NULL);
-  fake_sdo_refuse = 0x6060;
-  CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
-  CHECK(strstr(fake_msgs, "did not take mode 8 by SDO") != NULL);
-}
-
-static void test_mode_not_kept_by_the_drive(void) {
-  S = fake_slave("x", no_mode_entries, NULL);
-  fake_sdo_set(0x6060, 0, 0);
-  fake_sdo_forget = 0x6060;  // takes the download, keeps its own mode
-  CHECK_EQ(ecat_cia402_init(0, S), -EINVAL);
-  CHECK(strstr(fake_msgs, "read back 0") != NULL);
 }
 
 static void test_held_ready_without_enable(void) {
@@ -2504,5 +2475,4 @@ RUN_TESTS("cia402", test_ff_pins_only_with_the_objects, test_ff_velocity, test_f
     test_homing_pp_drive_does_not_stop, test_homing_abandoned_while_halting, test_zero_pin_only_with_the_option,
     test_zero_at_start, test_zero_at_start_wraps_as_the_drive, test_zero_at_start_cleared_by_homing, test_zero_at_start_pp,
     test_zero_at_start_mode_change_into_csp, test_two_axes, test_events_of_the_drive,
-    test_mode_by_sdo_without_0x6060, test_mode_by_sdo_is_the_configured_one, test_no_sdo_with_0x6060_mapped,
-    test_mode_refused_by_sdo, test_mode_not_kept_by_the_drive)
+    test_no_sdo_without_0x6060, test_no_sdo_with_0x6060_mapped)

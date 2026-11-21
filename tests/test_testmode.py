@@ -114,6 +114,8 @@ def cfg():
                       "hal-type": "bool"}]}]}}
         if profile == "cia402":
             s["cia402"] = {"mode": "csp"}
+            # 0x6060 is not mapped: the mode is a setting (config.check needs it set or seen)
+            s["settings"] = [{"object": "0x6060:00", "type": "SINT", "value": 8}]
             s["process-data"] = {"outputs": [{"pdo": "0x1600", "sm": 2, "entries": [
                 {"object": "0x6040:00", "bits": 16, "type": "UINT", "use": "profile"},
                 {"object": "0x607A:00", "bits": 32, "type": "DINT", "use": "profile"}]}],

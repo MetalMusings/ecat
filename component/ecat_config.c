@@ -47,6 +47,7 @@ typedef struct {
   int ff_velocity;    // cia402.feedforward.velocity is given
   int ff_torque;      // cia402.feedforward.torque is given
   unsigned int pp_limits[ECAT_CIA402_MAX_AXES];  // per axis: settings 0x607D:01, 0x607D:02 seen (bits 0-1)
+  int mode_setting[ECAT_CIA402_MAX_AXES];        // per axis: the setting 0x6060:00's value, -1000 without
   unsigned int owned[ECAT_CIA402_MAX_AXES];      // per axis: which of the profile's objects it has (bits of cia402_objects)
   int n_enc;          // the slave's encoder channels
   uint16_t enc_index[MAX_ENCODERS];   // their status indexes
@@ -650,6 +651,8 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
       }
     }
     if ((ax = cia402_axis(c, index, 0x607D)) >= 0 && (subindex == 1 || subindex == 2)) c->pp_limits[ax] |= 1u << (subindex - 1);
+    if ((ax = cia402_axis(c, index, 0x6060)) >= 0 && subindex == 0 && get(c, st, "value") != NULL)
+      c->mode_setting[ax] = (int)get_int(c, st, "value", 0);
     if (get(c, st, "value") != NULL) {
       const dtype_t *dt = find_dtype(get_str(c, st, "type"));
       if (dt == NULL) {
@@ -1192,9 +1195,30 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     }
   }
   memset(c->pp_limits, 0, sizeof(c->pp_limits));
+  for (a = 0; a < ECAT_CIA402_MAX_AXES; a++) c->mode_setting[a] = -1000;
   serial_settings(c, b, off);
   settings(c, b, get(c, s, "settings"), off);
   if (c->cia402) {
+    // the mode: set every cycle (0x6060 in the process data), or once as a setting;
+    // or at least seen (0x6061: the profile enables only in the mode it shows).
+    // A setting must say the mode the profile runs in.
+    unsigned mode = 0;
+    for (mode = 0; mode < 32 && !((c->cia402_all & ~c->cia402_modes) & (1u << mode)); mode++) {
+    }
+    for (a = 0; a < c->n_axes; a++) {
+      unsigned o = a * ECAT_CIA402_AXIS_OFFSET;
+      int set_cyclic = (c->owned[a] & (1u << cia402_object(0x6060, 0))) != 0;
+      int seen = (c->owned[a] & (1u << cia402_object(0x6061, 0))) != 0;
+      if (c->mode_setting[a] != -1000 && !c->cia402_modes && c->mode_setting[a] != (int)mode) {
+        error(c, "the setting 0x%04X:00 is %d, but cia402.mode is %u: make them the same (the setting is the "
+                 "mode the drive is put in at start)", 0x6060 + o, c->mode_setting[a], mode);
+      }
+      if (!c->cia402_modes && !set_cyclic && !seen && c->mode_setting[a] == -1000) {  // modes: checked above
+        error(c, "the drive's mode is neither set nor seen: add the setting 0x%04X:00 = %u (type SINT, the "
+                 "mode at start), or map 0x%04X:00 or 0x%04X:00",
+              0x6060 + o, mode, 0x6060 + o, 0x6061 + o);
+      }
+    }
     // the drive plans PP moves itself: it must know its travel. 0x607F
     // (max profile velocity) is set where the drive has it; not every
     // drive does (the Rtelligent ECT60), so it is not required here.

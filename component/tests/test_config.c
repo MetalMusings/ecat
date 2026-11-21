@@ -599,8 +599,8 @@ static void test_cia402_csp(void) {
   CHECK_EQ(ENTRY(0)->halPin[0], 0);
 }
 
-#define CSP_OUT2 P("0x6840:00", 16, "UINT") P("0x687A:00", 32, "DINT")
-#define CSP_IN2 P("0x6841:00", 16, "UINT") P("0x6864:00", 32, "DINT")
+#define CSP_OUT2 P("0x6840:00", 16, "UINT") P("0x6860:00", 8, "SINT") P("0x687A:00", 32, "DINT")
+#define CSP_IN2 P("0x6841:00", 16, "UINT") P("0x6861:00", 8, "SINT") P("0x6864:00", 32, "DINT")
 
 static void test_cia402_axes(void) {
   CHECK_EQ(load(CIA402("csp, axes: [x1, x2]", CSP_OUT CSP_OUT2, CSP_IN CSP_IN2)), 0);
@@ -625,7 +625,7 @@ static void test_cia402_axes(void) {
 
 static void test_cia402_csv(void) {
   CHECK_EQ(load(CIA402("csv", P("0x6040:00", 16, "UINT") P("0x60FF:00", 32, "DINT"),
-               P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT"))),
+               P("0x6041:00", 16, "UINT") P("0x6061:00", 8, "SINT") P("0x606C:00", 32, "DINT"))),
       0);
   CHECK_EQ(MODPARAM(0)->value.u32, 9);
   // CSV does not need the position objects, but CSP does
@@ -635,7 +635,7 @@ static void test_cia402_csv(void) {
   CHECK(strstr(fake_msgs, "needs 0x6064:00") != NULL);
   // PV needs what CSV needs
   CHECK_EQ(load(CIA402("pv", P("0x6040:00", 16, "UINT") P("0x60FF:00", 32, "DINT"),
-               P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT"))),
+               P("0x6041:00", 16, "UINT") P("0x6061:00", 8, "SINT") P("0x606C:00", 32, "DINT"))),
       0);
   CHECK_EQ(MODPARAM(0)->value.u32, 3);
   CHECK_FAILS(CIA402("pv", P("0x6040:00", 16, "UINT"), P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT")),
@@ -685,6 +685,26 @@ static void test_cia402_pp(void) {
       "the cia402 profile handles this object");
 }
 
+// the mode: set every cycle (0x6060 mapped), once as a setting, or at least seen (0x6061)
+#define NOMODE_OUT P("0x6040:00", 16, "UINT") P("0x607A:00", 32, "DINT")
+#define NOMODE_IN P("0x6041:00", 16, "UINT") P("0x6064:00", 32, "DINT")
+
+static void test_cia402_mode_setting(void) {
+  CHECK_FAILS(CIA402("csp", NOMODE_OUT, NOMODE_IN), "the drive's mode is neither set nor seen");
+  CHECK(strstr(fake_msgs, "add the setting 0x6060:00 = 8 (type SINT") != NULL);
+  CHECK_EQ(load(CIA402("csp", NOMODE_OUT, NOMODE_IN) "  settings:\n  - {object: '0x6060:00', type: SINT, value: 8}\n"), 0);
+  CHECK_EQ(count(lcecConfTypeSdoConfig), 1);
+  CHECK_FAILS(CIA402("csp", NOMODE_OUT, NOMODE_IN) "  settings:\n  - {object: '0x6060:00', type: SINT, value: 3}\n",
+      "the setting 0x6060:00 is 3, but cia402.mode is 8");
+  CHECK_EQ(load(CIA402("pv", P("0x6040:00", 16, "UINT") P("0x60FF:00", 32, "DINT"),
+                       P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT"))
+                "  settings:\n  - {object: '0x6060:00', type: SINT, value: 3}\n"), 0);
+  // seen only (0x6061 mapped): the profile enables only in the mode it shows
+  CHECK_EQ(load(CIA402("csp", NOMODE_OUT, NOMODE_IN P("0x6061:00", 8, "SINT"))), 0);
+  // set every cycle
+  CHECK_EQ(load(CIA402("csp", NOMODE_OUT P("0x6060:00", 8, "SINT"), NOMODE_IN)), 0);
+}
+
 static void test_cia402_modes(void) {
   CHECK_EQ(load(CIA402("csp, modes: [hm]", CSP_OUT, CSP_IN)), 0);
   CHECK_EQ(SLAVE(0)->modParamCount, 2);
@@ -701,6 +721,7 @@ static void test_cia402_modes(void) {
                   P("0x6041:00", 16, "UINT") P("0x6064:00", 32, "DINT")),
       "needs 0x6060:00 with \"use: profile\" to change modes");
   CHECK(strstr(fake_msgs, "needs 0x6061:00") != NULL);
+  CHECK(strstr(fake_msgs, "neither set nor seen") == NULL);   // said once, by the line above
   // other modes: what each needs
   CHECK_EQ(load(CIA402("csp, modes: [pv]", CSP_OUT P("0x60FF:00", 32, "DINT"), CSP_IN P("0x606C:00", 32, "DINT"))), 0);
   CHECK_EQ(MODPARAM(1)->value.u32, 1u << 3);
@@ -820,7 +841,7 @@ static void test_encoder_channels(void) {
                "    inputs:\n"
                "    - pdo: '0x1A00'\n"
                "      sm: 3\n"
-               "      entries:\n" P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT") P("0x6000:11", 32, "UDINT")),
+               "      entries:\n" P("0x6041:00", 16, "UINT") P("0x6061:00", 8, "SINT") P("0x606C:00", 32, "DINT") P("0x6000:11", 32, "UDINT")),
       0);
   CHECK_EQ(SLAVE(0)->modParamCount, 2);
   CHECK_EQ(MODPARAM(0)->id, ECAT_MP_CIA402_MODE);
@@ -1011,5 +1032,5 @@ static void test_unused(void) {
 
 RUN_TESTS("config", test_cia402_feedforward, test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
-    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
+    test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders, test_serial, test_serial_errors, test_unused, test_master_cpus)

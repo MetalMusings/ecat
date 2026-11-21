@@ -39,6 +39,8 @@ PP_LIMITS = [(0x607D, 1, "DINT"), (0x607D, 2, "DINT"), (0x607F, 0, "UDINT")]
 # drive has it (the Rtelligent ECT60 has not): a warning with the dictionary.
 PP_REQUIRED = PP_LIMITS[:2]
 PP_MAX_VELOCITY = PP_LIMITS[2]
+# The modes' numbers in 0x6060/0x6061.
+CIA402_MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
 # 0x6502 "supported drive modes", bit -> name.
 CIA402_MODE_BITS = {0: "PP", 1: "VL", 2: "PV", 3: "TQ", 5: "HM", 6: "IP",
                     7: "CSP", 8: "CSV", 9: "CST"}
@@ -120,6 +122,8 @@ class Proposal:
     #                               {"way": title or None, "pdo-set": name or None, "why": text}
     recognised: int = None        # the profile the slave or its ESI file says (402, 5001, None)
     status: list = field(default_factory=list)    # pdoreq.Status lines under the PDOs
+    init_settings: list = field(default_factory=list)  # settings from the ESI's InitCmds, and the
+    #                                                    cia402 mode where 0x6060 is not mapped
     notes: list = field(default_factory=list)
 
 
@@ -432,11 +436,6 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
             p.axes += 1
         if p.axes > 1:
             p.notes.append("%d axes: each gets its own pins (cia402.axes)" % p.axes)
-        p.status = pdoreq.cia402_status(mode, extra_modes, p.axes,
-                                        {(e.index, e.subindex) for pd in pdos for e in pd.entries})
-        for st in p.status:
-            if st.level == "error":
-                p.notes.append(st.text)
 
     # Encoder channels: the encoder function handles their counter and latches.
     mapped = [e for pd in pdos for e in pd.entries]
@@ -565,6 +564,37 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
             ", ".join(st["object"] for st in qset),
             os.path.basename(quirks.of((p.vendor_id, p.product_code))["path"])))
     p.pdos = pdos
+
+    # Settings the device needs written at start: its ESI file's InitCmds, and for a
+    # drive whose 0x6060 is not in the process data, the mode (unless it has only one)
+    if esi_dev is not None and esi_dev.init_cmds:
+        from . import esi as esi_mod, initcmds
+        dictionary = coe if coe is not None and coe.entries else esi_mod.dictionary(esi_dev)
+        found = initcmds.from_esi(esi_dev, dictionary, "cia402" if p.profile == 402 else None)
+        p.init_settings += found.settings
+        p.notes += found.notes
+        if found.settings:
+            p.notes.append("settings %s from the ESI file's InitCmds" % ", ".join(st["object"] for st in found.settings))
+    if p.profile == 402:
+        mapped = {e.index for pd in pdos for e in pd.entries}
+        supported = drive_modes if drive_modes is not None else getattr(esi_dev, "drive_modes", None)
+        one_mode = supported is not None and bin(supported & 0x3FF).count("1") == 1
+        for a in range(p.axes):
+            index = 0x6060 + a * AXIS_OFFSET
+            if index in mapped or one_mode or extra_modes:
+                continue
+            p.init_settings.append({"object": "0x%04X:00" % index, "name": "Modes of operation",
+                                    "type": "SINT", "value": CIA402_MODE_NUMBERS[mode]})
+            p.notes.append("0x%04X is not in the process data: the mode is the setting 0x%04X:00 = %d (%s), "
+                           "written in PREOP at every start" % (index, index, CIA402_MODE_NUMBERS[mode], mode.upper()))
+        from . import config
+        mine = {"cia402": {"mode": mode, "axes": [None] * p.axes}, "settings": p.init_settings}
+        p.status = pdoreq.cia402_status(mode, extra_modes, p.axes,
+                                        {(e.index, e.subindex) for pd in pdos for e in pd.entries},
+                                        mode_settings=pdoreq.mode_settings(mine))
+        for st in p.status:
+            if st.level == "error":
+                p.notes.append(st.text)
 
     # Distributed clocks: the modes of an ESI file of the slave's revision,
     # else the SII's, else an ESI file's of another revision (dcinfo.py).

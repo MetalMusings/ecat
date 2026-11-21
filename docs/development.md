@@ -3483,3 +3483,58 @@ is slave, profile, the profile's choices, then the PDOs they need.
   was not looked into).
 - Tests: `scripts/run-tests pdoreq pdoedit mdp prototype capture capturec
   guidance gui halcheck` (345); mutation-checked.
+
+### ESI InitCmds and the drive's mode as a setting (built 2026-11-21, the user's decisions)
+
+The user: whether 0x6060/0x6061 are needed is a technical requirement of the
+slave, and the vendor's own statement of what must be written is its ESI
+file's InitCmds; support them, and do the mode the same way. A new proposal
+takes the fixed InitCmds directly (marked by their notes, removable); *Update*
+only recommends; the templates (0x1C32:02 with the servo period) wait until a
+device needs them.
+
+- What a drive technically needs: one mode used all the time: the mode set
+  once before running (a setting), or every cycle (0x6060 mapped), or at least
+  seen (0x6061 mapped: the profile enables only in the mode shown). Modes
+  changed while running: 0x6060 and 0x6061 in the process data. A drive with
+  one mode only (0x6502): nothing.
+- The component's hidden SDO write of the mode (c4b2b15) is gone
+  (`devices/ecat_cia402.c`). `ecat_config.c` and `config.check` check the same:
+  with one mode, a setting 0x6060:00 must equal `cia402.mode`'s number, and
+  "the drive's mode is neither set nor seen" when there is no setting and
+  neither 0x6060 nor 0x6061 is mapped (silent with `modes`, which has its own
+  error). `config.MODE_NUMBERS`, `config.mode_setting`, `config.sync_mode_setting`
+  (the window keeps the setting in step when the mode is changed).
+- `ecatsetup/initcmds.py` + `pdoreq/initcmds.yaml`: InitCmds sorted into
+  settings (0x2000-0x8FFF; typed from the dictionary, or by length; the raw bytes
+  as `data` when the dictionary's type has another size), skipped (0x1xxx:
+  communication objects the tool fills in, such as 0x1C32:02; 0xFxxx: revision,
+  module lists, diagnosis messages; a state change other than IP/PS; complete
+  access, which ecat's settings do not do yet: a note), and objects a profile
+  owns (cia402: 0x6060, whose value the mode decides). `esi.EsiDevice.init_cmds`
+  has a fifth field, complete access (ESI cache version 5).
+- In `~/esi` (4731 devices): InitCmds at IP (2369) and PS (420) only; 1929 in
+  0x1xxx and 775 in 0xFxxx (skipped), 78 in 0x8xxx (Beckhoff channel settings,
+  some with complete access), 7 in 0x6xxx, all 0x6060 (Rtelligent ECT42/60/86
+  with 8, AX2000 with -2, a vendor mode).
+- `propose()`: `Proposal.init_settings` (the InitCmd settings, and 0x6060:00 =
+  the mode for each axis whose 0x6060 is not mapped, unless the drive has one
+  mode or `modes` are set); `config.slave_from_proposal` writes them; the
+  status lines count the mode setting.
+- `Session.missing_init_settings(position)` / `add_init_settings`: what the
+  proposal from the bus would write that the file's entry lacks (the mode only
+  where the file's PDOs lack 0x6060, with the file's mode); `update_from_bus`
+  names them in a note and adds nothing. Window: *Add what the device needs*
+  in the Settings card (shown when something is missing); the Process data
+  status line "neither set nor seen" has *Add what is missing*, which adds the
+  mode setting (`pdoedit.add_missing` with "setting").
+- Tests: `tests/test_initcmds.py`; C `test_cia402_mode_setting`; affected
+  modules only (`scripts/run-tests initcmds pdoreq pdoedit mdp prototype capture
+  capturec guidance gui halcheck`, `make -C component check`,
+  `scripts/check-component-2.9`).
+- Users of 0.23.1 whose A6 runs on its default PDOs (the mode was written by
+  the profile): the component now refuses the file until the setting is there
+  (the window's *Add what the device needs* or the error's text). Say so in the
+  release notes.
+- The test file `~/src/easercat-3000-eoe/test-scripts/a6/a6.yaml` (outside the
+  repository) needs the setting 0x6060:00 = 8 for slave 4.

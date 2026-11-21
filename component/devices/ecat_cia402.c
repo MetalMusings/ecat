@@ -561,21 +561,10 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
     return -EINVAL;
   }
   // 0x6060 not in the process data (such as StepperOnline A6's default PDOs
-  // 0x1701/0x1B01): the mode is written by SDO now, and again by the master
-  // whenever it configures the slave (ecrt_slave_config_sdo, as an ESI
-  // InitCmd), then read back. Without it the drive would be enabled in
-  // whatever mode it has, which the profile could not see either when
-  // 0x6061 is not mapped.
-  if (!d->modes_o.mapped) {
-    uint8_t want = (uint8_t)(int8_t)mode, have = 0;
-    if (lcec_write_sdo8(slave, OBJ_MODES + off, 0, want) != 0 || lcec_read_sdo8(slave, OBJ_MODES + off, 0, &have) != 0 ||
-        have != want) {
-      rtapi_print_msg(RTAPI_MSG_ERR,
-          LCEC_MSG_PFX "%s: 0x%04X is not in the process data and the drive did not take mode %d by SDO (read back %d)\n",
-          name, OBJ_MODES + off, mode, (int8_t)have);
-      return -EINVAL;
-    }
-  }
+  // 0x1701/0x1B01): the mode is a setting of the slave (0x6060 in its
+  // settings, written by the master in PREOP whenever it configures the
+  // slave, as an ESI InitCmd is), which ecat_config.c has checked against
+  // cia402.mode. Nothing is written here.
 
   if ((err = lcec_pin_newf_list(d, pins, name)) != 0) return err;
   if ((err = lcec_param_newf_list(d, params, name)) != 0) return err;

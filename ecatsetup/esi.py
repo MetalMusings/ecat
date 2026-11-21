@@ -68,7 +68,7 @@ class EsiDevice:
     profile: int = None
     pdos: list = field(default_factory=list)
     dc_modes: list = field(default_factory=list)
-    init_cmds: list = field(default_factory=list)   # (transition, index, subindex, data hex)
+    init_cmds: list = field(default_factory=list)   # (transition, index, subindex, data hex, complete access)
     pdo_sets: list = field(default_factory=list)
     pdo_config: bool = None   # <CoE PdoConfig>: the master may change a PDO's entries
     pdo_assign: bool = None   # <CoE PdoAssign>: the master may change the SM assignment
@@ -141,7 +141,7 @@ def _device(path, vendor_id, dev):
     for c in dev.findall("Mailbox/CoE/InitCmd"):
         d.init_cmds.append((",".join(t.text for t in c.findall("Transition")),
                             number(_text(c, "Index")), number(_text(c, "SubIndex") or "0"),
-                            _text(c, "Data")))
+                            _text(c, "Data"), c.get("CompleteAccess") in ("1", "true")))
     return d
 
 
@@ -210,7 +210,7 @@ def load_file(path):
 # and took 50 s to read at every start. An entry is used while its file has
 # the same size and modification time; CACHE_VERSION changes when what is read
 # from a file changes.
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 
 def cache_path():

@@ -283,9 +283,11 @@ class TestCheckSlave(unittest.TestCase):
 
     def test_single_mode_without_mode_objects_is_a_note(self):
         s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX)
+        s["settings"] = [{"object": "0x6060:00", "type": "SINT", "value": 8}]
         notes = [t for l, t in self.texts(s) if l == "note"]
         self.assertEqual(len(notes), 2)
-        self.assertIn("0x6060", notes[0])
+        self.assertIn("the mode is the setting 0x6060:00 = 8", notes[0])
+        self.assertIn("0x6061", notes[1])
 
     def test_generic_on_a_drive_that_would_do_for_cia402(self):
         s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])], TX, profile="generic")
@@ -306,10 +308,21 @@ class TestStatus(unittest.TestCase):
                       st[0].text)
         self.assertEqual(st[0].add, [(0x6040, "rx"), (0x607A, "rx")])
 
-    def test_single_mode_without_mode_objects_is_only_information(self):
-        st = pdoreq.cia402_status("csp", [], 1, {(0x6040, 0), (0x607A, 0), (0x6041, 0), (0x6064, 0)})
+    def test_single_mode_without_mode_objects(self):
+        base = {(0x6040, 0), (0x607A, 0), (0x6041, 0), (0x6064, 0)}
+        # neither set nor seen: an error, fixed by the setting
+        st = pdoreq.cia402_status("csp", [], 1, base)
+        self.assertEqual([x.level for x in st], ["error", "info"])
+        self.assertIn("neither set nor seen: add the setting 0x6060:00 = 8", st[0].text)
+        self.assertEqual(st[0].add, [(0x6060, "setting")])
+        # the mode as a setting: information
+        st = pdoreq.cia402_status("csp", [], 1, base, mode_settings={0: 8})
         self.assertEqual([x.level for x in st], ["info", "info"])
-        self.assertIn("set by SDO at start", st[0].text)
+        self.assertIn("the mode is the setting 0x6060:00 = 8", st[0].text)
+        # seen but not set: the drive must already be in the mode
+        st = pdoreq.cia402_status("pv", [], 1, {(0x6040, 0), (0x60FF, 0), (0x6041, 0), (0x606C, 0), (0x6061, 0)})
+        self.assertEqual([x.level for x in st], ["info"])
+        self.assertIn("must already be in PV", st[0].text)
 
     def test_several_modes_without_mode_objects_is_an_error(self):
         st = pdoreq.cia402_status("csp", ["hm"], 1, {(0x6040, 0), (0x607A, 0), (0x6041, 0), (0x6064, 0)})
@@ -334,7 +347,10 @@ class TestProposal(unittest.TestCase):
         p = proposal(dev)
         self.assertEqual(p.pdo_way, "")
         self.assertEqual([c.index for c in p.pdos], [0x1600, 0x1A00])
-        self.assertEqual([s.level for s in p.status], ["info", "info"])   # 0x6060/0x6061 by SDO
+        self.assertEqual([s.level for s in p.status], ["info", "info"])   # the mode as a setting
+        self.assertEqual(p.init_settings, [{"object": "0x6060:00", "name": "Modes of operation",
+                                            "type": "SINT", "value": 8}])
+        self.assertEqual(config.check(config.from_proposals([p])), [])
 
     def test_own_mapping_is_built_in_the_open_pdos(self):
         dev = make(MAPPABLE, [pdo("RxPdo", 0x1600, [(0x6040, 16)], sm=2),
