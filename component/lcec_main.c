@@ -543,7 +543,7 @@ static int lcec_start_check(lcec_master_t *master) {
   if (lcec_start_check_own_pdos(master, &stop) != 0) {
     rtapi_print_msg(stop ? RTAPI_MSG_ERR : RTAPI_MSG_WARN, LCEC_MSG_PFX
         "a slave's own PDO mapping does not match the configuration%s\n",
-        stop ? ", so ecat does not start (or set master: start-check: false to start anyway)" : "");
+        stop ? ", so ecat does not start: open the configuration in EtherCAT Setup (ecatsetup --gui)" : "");
     return stop ? -1 : 0;
   }
   rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "start check: the bus matches the configuration (%d slaves, %.1f s)\n",

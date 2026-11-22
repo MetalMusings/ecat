@@ -13,7 +13,7 @@
 #include "../ecat_startcheck.h"
 #include "fake.h"
 
-static char said[8][400];
+static char said[8][1024];
 static int said_level[8], n_said;
 
 static void collect(int level, const char *text, void *arg) {
@@ -129,6 +129,8 @@ static void test_own_pdos(void) {
   CHECK_EQ(said_level[0], ECAT_CHECK_ERROR);
   CHECK(strstr(said[0], "slave 4 (a6) runs on its own PDO mapping (configure-pdos: false), but on SM2 it has "
                         "0x1600 (0x6040:00 16, 0x607A:00 32, 0x6060:00 8) where the file has 0x1701 (") != NULL);
+  CHECK(strstr(said[0], "choose the slave's PDOs on its Process data card") != NULL);   // the advice, not cut off
+  CHECK(strstr(said[0], "it can change at a power-off)") != NULL);
   n_said = 0;
   CHECK_EQ(ecat_startcheck_own_pdos(4, "a6", want, 2, other, 1, collect, NULL), 2);  // SM3 missing on the slave
   CHECK(strstr(said[1], "on SM3 it has none") != NULL);

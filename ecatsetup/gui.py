@@ -2319,14 +2319,14 @@ class SlaveView(QWidget):
             in_file = [r for r in rows if r.in_file] if not mine else []
             box.blockSignals(True)
             box.clear()
-            if own_row is not None:
-                level, text = own_row
-                box.addItem(text[0].upper() + text[1:], "own")
-                box.setItemData(0, QBrush({"ok": GREEN, "warning": AMBER}.get(level, GREY)), Qt.ForegroundRole)
-                box.setItemData(0, "Take the PDOs the slave has now and write none (configure-pdos: "
-                                "false). " + text, Qt.ToolTipRole)
-            elif mine:
-                box.addItem("The slave's own (not written; read the bus to see what it has)", None)
+            if mine:
+                # chosen: shown first, as what the file has
+                if own_row is not None:
+                    self._add_own(box, own_row)
+                else:
+                    box.addItem("Not advised: the slave's own (not written; read the bus to see what it has)",
+                                None)
+                    box.setItemData(0, QBrush(RED), Qt.ForegroundRole)
             if not mine and len(in_file) != 1:
                 # several PDOs of the direction in the file (or none): kept as they are
                 box.addItem(" + ".join("0x%04X" % r.index for r in in_file) + " (as in the file)"
@@ -2340,20 +2340,32 @@ class SlaveView(QWidget):
                     r.text, "\nIn the ESI file's default assignment" if r.default else "",
                     "\nCannot be used with " + ", ".join("0x%04X" % i for i in r.excludes)
                     if r.excludes else ""), Qt.ToolTipRole)
+            if own_row is not None and not mine:
+                self._add_own(box, own_row)        # last: not advised
             if mine:
                 current = 0
-                level = own_row[0] if own_row else "info"
+                level = "discouraged"
             else:
                 current = max(box.findData(in_file[0].index) if len(in_file) == 1 else
                               box.findData(None), 0)
                 level = next((r.level for r in rows if len(in_file) == 1 and r is in_file[0]), "info")
             box.setCurrentIndex(current)
             pal = box.palette()
-            pal.setColor(QPalette.ButtonText, {"ok": GREEN, "warning": AMBER}.get(level, GREY)
+            pal.setColor(QPalette.ButtonText, {"ok": GREEN, "warning": AMBER, "discouraged": RED}.get(level, GREY)
                          if level != "info" else self.palette().color(QPalette.ButtonText))
             box.setPalette(pal)
             box.setEnabled(bus and not self.win.busy and box.count() > 1)
             box.blockSignals(False)
+
+    @staticmethod
+    def _add_own(box, own_row):
+        """The slave's own mapping as a choice of a PDO box: red, "Not advised", with why."""
+        _level, text = own_row
+        box.addItem(text[0].upper() + text[1:], "own")
+        n = box.count() - 1
+        box.setItemData(n, QBrush(RED), Qt.ForegroundRole)
+        box.setItemData(n, "Take the PDOs the slave has now and write none (configure-pdos: false). "
+                        + text + "\n\n" + pdoreq.OWN_ADVICE, Qt.ToolTipRole)
 
     def pa_chosen(self, direction):
         """A PDO chosen for one direction: taken at once, the other direction as it is."""
@@ -2364,7 +2376,14 @@ class SlaveView(QWidget):
             return
         if index == "own":
             if s is not None and s.get("configure-pdos", True) is not False:
-                self.win.use_own_pdos(self.position)
+                ask = QMessageBox.question(
+                    self, "The slave's own PDO mapping",
+                    pdoreq.OWN_ADVICE + "\n\nUse the slave's own mapping anyway?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if ask == QMessageBox.Yes:
+                    self.win.use_own_pdos(self.position)
+                else:
+                    self.show_assignment(s)     # the box back to what the file has
             return
         keep = [r.index for r in self.pa_rows if r.in_file and r.direction != direction]
         if s is not None and s.get("configure-pdos", True) is False:

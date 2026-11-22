@@ -1712,7 +1712,8 @@ class TestPdoEditing(WindowBase):
             self.assertTrue(page.init_button.isHidden())
 
     def test_the_slaves_own_mapping_is_offered(self):
-        # way A: the slave's own mapping as the master read it, first in both boxes
+        # way A: the slave's own mapping as the master read it: last in both boxes, red, not
+        # advised, taken only after a yes
         from ecatsetup import tool as tool_mod
         own = tool_mod.parse_pdos("SM2: x\n  RxPDO 0x1600 \"\"\n    PDO entry 0x6040:00, 16 bit, \"\"\n"
                                   "    PDO entry 0x607a:00, 32 bit, \"\"\n"
@@ -1723,14 +1724,23 @@ class TestPdoEditing(WindowBase):
         with mock.patch.object(w.session, "own_mapping", return_value=own):
             page.show_assignment(s)
             rx, tx = page.pa_boxes["rx"], page.pa_boxes["tx"]
-            self.assertEqual((rx.itemData(0), tx.itemData(0)), ("own", "own"))
-            self.assertIn("The slave's own: 0x1600, 0x1A00; has what CSP needs", rx.itemText(0))
+            last = rx.count() - 1
+            self.assertEqual((rx.itemData(last), tx.itemData(tx.count() - 1)), ("own", "own"))
+            self.assertIn("Not advised: the slave's own: 0x1600, 0x1A00; has what CSP needs", rx.itemText(last))
+            self.assertEqual(rx.itemData(last, gui.Qt.ForegroundRole).color(), gui.RED)
+            self.assertIn("power goes off", rx.itemData(last, gui.Qt.ToolTipRole))
             self.assertEqual(rx.currentData(), 0x1701)            # the file's, as before
             calls = []
             with mock.patch.object(w.session, "use_own_pdos", lambda pos: calls.append(pos) or []), \
                     mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))):
-                rx.setCurrentIndex(0)
-                rx.activated.emit(0)
+                with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.No):
+                    rx.setCurrentIndex(last)
+                    rx.activated.emit(last)
+                self.assertEqual(calls, [])                       # No: nothing taken, the box back
+                self.assertEqual(rx.currentData(), 0x1701)
+                with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Yes):
+                    rx.setCurrentIndex(last)
+                    rx.activated.emit(last)
             self.assertEqual(calls, [1])
             # configure-pdos false: the boxes show the slave's own, and a PDO can be chosen again
             s["configure-pdos"] = False

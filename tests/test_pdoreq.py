@@ -510,12 +510,13 @@ class TestOwnMapping(unittest.TestCase):
     def test_judged_against_the_modes(self):
         s = fslave([(0x1600, 2, [(0x6040, 16)])], TX)
         level, text = pdoreq.own_row(s, self.dev, self.own)
-        self.assertEqual(level, "ok")
+        self.assertEqual(level, "discouraged")                # always: it may change at a power-off
+        self.assertTrue(text.startswith("not advised: "), text)
         self.assertIn("the slave's own: 0x1600, 0x1A00; has what CSP needs", text)
         self.assertIn("lost at power-off", text)         # not the ESI file's default
         s["cia402"]["modes"] = ["csv"]
         level, text = pdoreq.own_row(s, self.dev, self.own)
-        self.assertEqual(level, "warning")
+        self.assertEqual(level, "discouraged")
         self.assertIn("lacks 0x606C Velocity actual value, 0x60FF Target velocity", text)
         self.assertIsNone(pdoreq.own_row(s, self.dev, None))
         self.assertIsNone(pdoreq.own_row(s, self.dev, []))
@@ -527,7 +528,7 @@ class TestOwnMapping(unittest.TestCase):
                               "SM3: x\n  TxPDO 0x1a00 \"\"\n    PDO entry 0x6041:00, 16 bit, \"\"\n"
                               "    PDO entry 0x6064:00, 32 bit, \"\"\n")
         _level, text = pdoreq.own_row(fslave(), self.dev, own)
-        self.assertIn("the ESI file's default", text)
+        self.assertIn("the ESI file's default: choose its PDOs instead", text)
 
     def test_a_proposal_from_it(self):
         own = pdoreq.own_pdos(self.own, self.dev)

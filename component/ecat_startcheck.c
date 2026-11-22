@@ -11,7 +11,7 @@
 #include <strings.h>
 
 static void say(ecat_report_t report, void *arg, int level, const char *fmt, ...) {
-  char text[384];
+  char text[1024];  // room for two PDO lists of 160 and the advice
   va_list ap;
 
   va_start(ap, fmt);
@@ -157,7 +157,8 @@ int ecat_startcheck_own_pdos(int position, const char *name, const ecat_pdo_t *w
     pdo_list(h, sizeof(h), have, n_have, sm);
     say(report, arg, ECAT_CHECK_ERROR,
         "slave %d (%s) runs on its own PDO mapping (configure-pdos: false), but on SM%d it has %s "
-        "where the file has %s: run Update in EtherCAT Setup, or let ecat write the mapping",
+        "where the file has %s: in EtherCAT Setup, choose the slave's PDOs on its Process data card, so that ecat "
+        "writes them at every start (taking the slave's own again is not advised: it can change at a power-off)",
         position, name, sm, h, w);
     errors++;
   }

@@ -240,16 +240,21 @@ Choosing a slave shows:
   what the PDO gives for the profile and its modes: green when it has what
   they need (an open PDO: it is filled with it), amber when it lacks
   something (*fixed; lacks 0x6060 Modes of operation*) or cannot be changed.
-  The first line of both boxes is *the slave's own*: the PDOs the slave
-  has now, as the master read them at its scan, judged the same way.
-  Choosing it takes them as they are and writes none (*Write the PDO
-  mapping to the slave* off): for a slave that
-  refuses a mapping, or one set up with its maker's tool. The line says
-  whether it is the ESI file's default (it comes back after a power-off) or
-  what a master or tool last wrote, which is lost at power-off unless the
-  slave stores it. With the bus read, the check compares the file with the
-  slave's own mapping (*Bus:* when they differ), and ecat does the same at
-  start. Choosing a PDO of the device again lets ecat write the mapping.
+  The last line of both boxes, in red, is *Not advised: the slave's own*:
+  the PDOs the slave has now, as the master read them at its scan, judged
+  the same way. Choosing it (after a question) takes them as they are and
+  writes none (*Write the PDO mapping to the slave* off). It is not advised:
+  a slave's own mapping is what a master or a tool last wrote into it, and
+  many slaves keep that only until the power goes off; the configuration
+  then no longer matches and LinuxCNC does not start. Use it only for a
+  slave that refuses every mapping written to it, or whose maker's tool has
+  stored the mapping in it. The line says whether it is the ESI file's
+  default (then choose those PDOs instead: ecat writes the same at every
+  start) or what a master or tool last wrote. With the bus read, the check
+  compares the file with the slave's own mapping (*Bus:* when they differ),
+  and ecat does the same at start, with a line in LinuxCNC's error window
+  naming both. Choosing a PDO of the device again lets ecat write the
+  mapping.
   Unsuitable PDOs are shown, not hidden. Choosing one takes it at once (from
   what was read from the slave; the bus is not read again). An open PDO the
   file already has keeps its entries; a new one is filled with what the
@@ -896,7 +901,7 @@ explains the fault.
 
    | Code | Usually | What to do |
    |---|---|---|
-   | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*PDO assignment*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). If LinuxCNC does not use the slave at all, untick *Used by LinuxCNC* on its page: the slave is then left alone. A slave of the file that does not reach OP stops every drive (the working counter is incomplete), a slave that is not used does not. |
+   | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*PDO assignment*, with the ESI file), or, as a last resort, the slave's own (not advised: it can change at a power-off). If LinuxCNC does not use the slave at all, untick *Used by LinuxCNC* on its page: the slave is then left alone. A slave of the file that does not reach OP stops every drive (the working counter is incomplete), a slave that is not used does not. |
    | 0x0026, 0x0043 | A setting (start-up SDO) was refused, or does not fit the others. | Read the master's messages for the object; check it in the Settings card (*Read present values*), take it out and try again. |
    | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period (0x0036, "DC Sync0 Cycle Time": the slave does not take the servo period as its SYNC0 cycle; the Rtelligent ECT60 refuses 100 us and takes 125 us and up: use a longer period). | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings; [Servo period and performance](#servo-period-and-performance). |
    | 0x001B | Sync manager watchdog: the process data stopped. | LinuxCNC or the test stopped, or the servo thread missed cycles: see the event log. |

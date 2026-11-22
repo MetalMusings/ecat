@@ -564,11 +564,21 @@ def own_pdos(own, esi_dev=None, dictionary=None):
     return out
 
 
+# Why the slave's own mapping is not advised (the user, 2026-11-22: allowed, but advised
+# against): the window asks with this before it takes it.
+OWN_ADVICE = ("A slave's own mapping is what a master or a tool last wrote into it. Many slaves "
+              "keep it only until the power goes off, and then start with another one: the "
+              "configuration no longer matches, and LinuxCNC does not start (ecat stops at load). "
+              "A mapping ecat writes at every start does not have that problem. Use the slave's "
+              "own only for a slave that refuses every mapping written to it, or whose maker's "
+              "tool has stored the mapping in it.")
+
+
 def own_row(slave, esi_dev, own):
-    """What the slave's own mapping gives, for the PDO boxes: (level, text), or None when it
-    was not read. "default" when it is the ESI file's default assignment as the ESI has it
-    (it comes back after a power-off); otherwise it is what a master or a tool put in the
-    slave's RAM, unless stored there."""
+    """What the slave's own mapping gives, for the PDO boxes: ("discouraged", text), or None
+    when it was not read. Always discouraged (OWN_ADVICE); the text says why for this
+    mapping: the ESI file's default (ecat can write the same PDOs) or what a master or a
+    tool put in the slave's RAM (lost at a power-off unless stored), and what it lacks."""
     if not own:
         return None       # not read, or no PDOs (a coupler): nothing to choose
     req, modes = slave_requirement(slave)
@@ -577,16 +587,16 @@ def own_row(slave, esi_dev, own):
     defaults = sorted((p.sm, p.index, tuple((e.index, e.subindex, e.bitlen) for e in p.entries))
                       for p in getattr(esi_dev, "pdos", None) or [] if p.sm is not None)
     mine = sorted((sm, x, tuple((i, s, b) for i, s, b, _n in es)) for sm, _d, x, _n, es in own)
-    origin = ("the ESI file's default" if esi_dev is not None and mine == defaults else
-              "as it is now: what a master or tool last wrote, lost at power-off unless stored in the slave")
+    origin = ("the ESI file's default: choose its PDOs instead, ecat then writes them" if esi_dev is not None
+              and mine == defaults else "as it is now: what a master or tool last wrote, lost at power-off "
+              "unless stored in the slave")
     if req is None:
-        return "info", "the slave's own: %s (%s)" % (names, origin)
-    lacks = sorted((req.rx | req.tx) - have)
-    if lacks:
-        return "warning", "the slave's own: %s; lacks %s (%s)" % (
-            names, ", ".join(object_name(i) for i, _s in lacks), origin)
-    return "ok", "the slave's own: %s; has what %s needs (%s)" % (
-        names, ", ".join(m.upper() for m in modes), origin)
+        what = ""
+    else:
+        lacks = sorted((req.rx | req.tx) - have)
+        what = ("; lacks %s" % ", ".join(object_name(i) for i, _s in lacks) if lacks else
+                "; has what %s needs" % ", ".join(m.upper() for m in modes))
+    return "discouraged", "not advised: the slave's own: %s%s (%s)" % (names, what, origin)
 
 
 def own_differs(slave, own):
@@ -606,8 +616,9 @@ def own_differs(slave, own):
     for sm in sorted(file, key=lambda v: (v is None, v)):
         if key(file[sm]) != key(mine.get(sm, [])):
             return ("runs on its own PDO mapping (configure-pdos: false), but on SM%s the slave has %s "
-                    "where the file has %s: choose \"the slave's own\" again on the Process data card "
-                    "to take what it has, or let ecat write a mapping" % (sm, text(mine.get(sm, [])), text(file[sm])))
+                    "where the file has %s: choose the slave's PDOs on its Process data card, so that ecat "
+                    "writes them at every start (taking the slave's own again is not advised: it can change "
+                    "at a power-off)" % (sm, text(mine.get(sm, [])), text(file[sm])))
     return None
 
 
