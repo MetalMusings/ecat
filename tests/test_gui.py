@@ -1796,6 +1796,20 @@ class TestPdoEditing(WindowBase):
         page.ic.item(0, 0).setCheckState(gui.Qt.Checked)      # ticked: added to the file
         self.assertEqual(s["init-cmds"], [{"at": "PS", "object": "0x6060:00", "from": "profile"}])
         self.assertEqual(page.ic.item(0, 5).text(), "written at start")
+
+    def test_a_command_not_needed_can_still_be_ticked(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x6060, 8)])], [(0x1A00, 3, [(0x6041, 16)])])
+        row = {"at": "PS", "object": "0x6060:00", "from": "profile"}
+        view = [{"row": row, "state": "not-needed", "file_index": None,
+                 "text": "not needed: 0x6060 is in the PDOs: the profile sets the mode every cycle"},
+                {"row": {"object": "0xF081:01"}, "state": "skipped", "file_index": None,
+                 "text": "not written by ecat: a device object"}]
+        with mock.patch.object(w.session, "init_cmd_view", return_value=view):
+            page.show_init_cmds(s)
+            self.assertTrue(page.ic.item(0, 0).flags() & gui.Qt.ItemIsUserCheckable)
+            self.assertFalse(page.ic.item(1, 0).flags() & gui.Qt.ItemIsUserCheckable)
+            page.ic.item(0, 0).setCheckState(gui.Qt.Checked)
+        self.assertEqual(s["init-cmds"], [row])
         s["init-cmds"] = [{"at": "PS", "object": "0x6060:00", "from": "profile"},
                           {"at": "PS", "object": "0x8080:01", "complete": True, "data": "00 03"},
                           {"at": "PS", "object": "0x1C32:02", "from": "cycle-time"}]

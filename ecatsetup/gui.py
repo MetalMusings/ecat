@@ -2576,11 +2576,12 @@ class SlaveView(QWidget):
             n = self.ic.rowCount()
             self.ic.insertRow(n)
             use = QTableWidgetItem("")
-            if v["state"] in ("in-file", "off", "needed", "offered"):
+            if v["state"] != "skipped":       # what ecat can write can be ticked, needed or not
                 use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
                 use.setCheckState(Qt.Checked if v["state"] == "in-file" else Qt.Unchecked)
             else:
                 use.setFlags(use.flags() & ~Qt.ItemIsEditable & ~Qt.ItemIsUserCheckable)
+                use.setToolTip("ecat does not write this command: " + v["text"])
             self.ic.setItem(n, 0, use)
             f = r.get("from")
             value = {"profile": "the mode (%s)" % ((s.get("cia402") or {}).get("mode") or "").upper(),
@@ -2610,7 +2611,7 @@ class SlaveView(QWidget):
                 r.pop("disabled", None)
             else:
                 r["disabled"] = True
-        elif on and v["state"] in ("needed", "offered"):
+        elif on and v["state"] in ("needed", "offered", "not-needed"):
             s.setdefault("init-cmds", []).append(dict(v["row"]))
         else:
             return
