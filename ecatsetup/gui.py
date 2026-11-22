@@ -1397,7 +1397,10 @@ class SlaveView(QWidget):
         self.home_hform = hform
         self.homing_card.add(self.home_text)
         self.homing_card.add(hform)
-        self.home_ini_title = label("In LinuxCNC's INI file:", "hint")
+        self.home_ini_title = QCheckBox("Show the lines for LinuxCNC's INI file")
+        self.home_ini_title.setToolTip("The [JOINT_n] lines for a joint that homes through the drive, "
+                                       "to copy into the INI file (EtherCAT Setup's Apply writes them too)")
+        self.home_ini_title.toggled.connect(self.home_ini_toggled)
         self.homing_card.add(self.home_ini_title)
         self.home_ini = QPlainTextEdit()
         self.home_ini.setReadOnly(True)
@@ -2119,11 +2122,33 @@ class SlaveView(QWidget):
         self.home_ini.setPlainText("\n".join(t for t, _ in lines) if lines else "")
         self.home_ini.setFixedHeight(self.home_ini.fontMetrics().lineSpacing()
                                      * (len(lines or ()) + 2) + 16)
-        for w in (self.home_ini_title, self.home_ini, self.home_copy):
-            w.setVisible(bool(lines))
-        for key, box in self.home_fields.items():
+        self.home_ini_title.setVisible(bool(lines))
+        self.home_ini_toggled()
+        # which object each field writes, and how (a setting, or mapped in the PDOs)
+        axis = self.home_axis_number()
+        mapped = set()
+        for d in (s.get("process-data") or {}).values():
+            for pdo in d or []:
+                for e in pdo.get("entries") or []:
+                    try:
+                        mapped.add(config.parse_obj(e.get("object")))
+                    except ValueError:
+                        pass
+
+        def where(index, sub):
+            index += axis * config.AXIS_OFFSET
+            return "%s 0x%04X:%02X" % ("PDO" if (index, sub) in mapped else "SDO", index, sub)
+        self.home_hform.labelForField(self.home_method).setText("Method (%s)" % where(0x6098, 0))
+        for key, i, sub, _t, text in homing.PARAMS:
+            box = self.home_fields[key]
+            self.home_hform.labelForField(box).setText("%s%s (%s)" % (text[0].upper(), text[1:], where(i, sub)))
             self.home_hform.labelForField(box).setVisible(key in used)
             box.setVisible(key in used)
+
+    def home_ini_toggled(self, *_):
+        shown = not self.home_ini_title.isHidden() and self.home_ini_title.isChecked()
+        for w in (self.home_ini, self.home_copy):
+            w.setVisible(shown)
 
     def homing_edited(self, *_):
         if self.loading:

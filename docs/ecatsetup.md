@@ -168,8 +168,11 @@ Choosing a slave shows:
   ticked twice. *Homing by the drive's own method* is separate, since
   homing is not an `opmode-cmd` value; it shows the card **Homing by the
   drive**: the method (from the drive's `0x60E3`, or all of the standard's),
-  speeds, acceleration, offset, and the INI lines LinuxCNC needs, with
-  *Copy the INI lines*. The choice goes to Settings. Switching modes is
+  speeds, acceleration and offset, each label with the object it writes
+  (*SDO 0x6099:01*: a setting written at start; *PDO* when the object is in
+  the process data), and, behind *Show the lines for LinuxCNC's INI file*,
+  the INI lines LinuxCNC needs with *Copy the INI lines*. The choice goes to
+  Settings. Switching modes is
   built and unit-tested but not yet tried on a drive
   ([Changing modes](component.md#changing-modes));
 - **Serial ports**, for a serial terminal (EL6001, EL6002, EL6021,
