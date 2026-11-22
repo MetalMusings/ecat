@@ -36,9 +36,9 @@ from PyQt5.QtWidgets import (
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea,
     QProxyStyle, QSizePolicy, QSpinBox, QStackedWidget, QStyle, QStyledItemDelegate, QTabBar, QTableWidget,
-    QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter)
+    QTableWidgetItem, QToolButton, QVBoxLayout, QWidget, QCompleter, QShortcut)
 
-from . import (config, dcinfo, diagnose, drivetest, esi, events, explain, fromlcec, guidance, halcheck, halpins, pdoedit, pdoreq,
+from . import (config, dcinfo, helpdocs, diagnose, drivetest, esi, events, explain, fromlcec, guidance, halcheck, halpins, pdoedit, pdoreq,
                homing,
                integrate, lcnc_env, masterstart, measured,
                netif, pindocs, propose, quirks, response, settings, symptoms, tasks, testmode, tool, tuning,
@@ -140,6 +140,11 @@ QPushButton#saveclean {{ background: transparent; color: #8b949e; border: 1px so
 QPushButton#danger {{ background: #b42318; color: white; border: 2px solid white; font-weight: 700;
               padding: 6px 18px; }}
 QPushButton#big {{ padding: 14px; font-size: 15px; font-weight: 600; }}
+QToolButton#helpButton {{ color: {text2}; font-weight: 700; padding: 0 5px; border: 1px solid transparent;
+    border-radius: 9px; }}
+QToolButton#helpButton:hover {{ color: {accent}; border-color: {accent}; }}
+QPushButton#link {{ color: {accent}; border: none; background: transparent; text-align: left; padding: 2px 6px; }}
+QPushButton#link:hover {{ text-decoration: underline; }}
 QPushButton#home-ok {{ color: white; background: #1a7f37; border: 2px solid #14532d;
               border-radius: 6px; font-weight: 700; }}
 QPushButton#home-failed {{ color: white; background: #b42318; border: 2px solid #7a1710;
@@ -432,8 +437,22 @@ class Card(QFrame):
         self.head.addWidget(self.title)
         self.hint = label(hint or "", "hint", wrap=True)
         self.head.addWidget(self.hint, 1)
+        self.help_button = None
+        if title in helpdocs.TOPICS:
+            self.help_button = QToolButton()
+            self.help_button.setText("?")
+            self.help_button.setObjectName("helpButton")
+            self.help_button.setToolTip("Help on this card (F1 for the page)")
+            self.help_button.setAutoRaise(True)
+            self.help_button.clicked.connect(lambda _=False, t=title: self.ask_help(t))
+            self.head.addWidget(self.help_button, 0, Qt.AlignTop)
         if title or hint:
             self.lay.addLayout(self.head)
+
+    def ask_help(self, topic):
+        w = self.window()
+        if hasattr(w, "show_help"):
+            w.show_help(topic)
 
     def set_tone(self, tone):
         if (self.property("tone") or "") != (tone or ""):
@@ -7457,12 +7476,19 @@ class MainWindow(QMainWindow):
         self.test_page = TestPage(self)
         self.hal_page = HalPage(self)
         self.timing_page = TimingPage(self)
+        from .helpview import HelpView
+        self.help_page = HelpView(helpdocs.Docs())
+        self.help_page.back.connect(self.help_back)
+        self.help_from = None   # the page F1 or a ? came from, for Back
         self.tabs.addTab(self.start_page, "Start")
         self.tabs.addTab(self.bus_page, "Bus")
         self.tabs.addTab(self.trouble_page, "Slave status")
         self.tabs.addTab(self.test_page, "Test")
         self.tabs.addTab(self.hal_page, "HAL && LinuxCNC")
         self.tabs.addTab(self.timing_page, "Timing")
+        self.tabs.addTab(self.help_page, "Help")
+        QShortcut(QKeySequence(Qt.Key_F1), self, self.f1)
+        QShortcut(QKeySequence(Qt.Key_Escape), self.help_page, self.help_back)
         self.tabs.currentChanged.connect(lambda _: self.show_current())
         lay.addWidget(self.tabs.strip)
         lay.addWidget(self.tabs, 1)
@@ -7704,9 +7730,73 @@ class MainWindow(QMainWindow):
         else:
             self.tabs.setCurrentWidget(page)
 
+    # the Help tab
+
+    TAB_NAMES = (("start_page", "Start", "tab:start"), ("bus_page", "Bus", "tab:bus"),
+                 ("trouble_page", "Slave status", "tab:status"), ("test_page", "Test", "tab:test"),
+                 ("hal_page", "HAL & LinuxCNC", "tab:hal"), ("timing_page", "Timing", "tab:timing"))
+
+    def help_context(self, page=None):
+        """(text, topic) for what the user works with on a page: the page, or on
+        the Bus page the chosen slave's kind."""
+        page = page if page is not None else (self.help_from or getattr(self, "last_page", None)
+                                              or self.tabs.currentWidget())
+        name, topic = "", "tab:start"
+        for attr, text, key in self.TAB_NAMES:
+            if getattr(self, attr, None) is page:
+                name, topic = text, key
+        if page is self.bus_page and self.current is not None:
+            if self.current == MASTER_ITEM:
+                return "Bus, the master", "tab:bus"
+            s = self.session.slave(self.current) if self.session.cfg else None
+            if s is not None:
+                kind = s.get("profile") or "generic"
+                if kind != "cia402" and s.get("modules"):
+                    kind = "modules"
+                elif kind != "cia402" and s.get("encoders"):
+                    kind = "encoder"
+                elif kind != "cia402" and s.get("serial"):
+                    kind = "serial"
+                what = {"cia402": "CiA 402 drive", "encoder": "encoder channel", "serial": "serial channel",
+                        "modules": "modular device"}.get(kind, "slave")
+                return "slave %s (%s), %s" % (self.current, s.get("name"), what), "profile:" + kind
+        return name, topic
+
+    def f1(self):
+        """F1: the help for what one works with; on the Help tab, back again."""
+        if self.tabs.currentWidget() is self.help_page:
+            self.help_back()
+            return
+        where, topic = self.help_context(self.tabs.currentWidget())
+        self.show_help(topic)
+
+    def show_help(self, topic):
+        """The Help tab at a topic (helpdocs.TOPICS key), with Back to the page one was on."""
+        page = self.tabs.currentWidget()
+        if page is not self.help_page:
+            self.help_from = page
+            name = next((t for a, t, _ in self.TAB_NAMES if getattr(self, a, None) is page), "")
+            self.help_page.set_back("\u2190 Back to %s" % name if name else None)
+        self.help_page.show_topic(topic)
+        self.tabs.setCurrentWidget(self.help_page)
+
+    def help_back(self):
+        if self.help_from is not None and self.tabs.currentWidget() is self.help_page:
+            page, self.help_from = self.help_from, None
+            self.help_page.set_back(None)
+            self.tabs.setCurrentWidget(page)
+
     def show_current(self):
         page = self.tabs.currentWidget()
         key = self.current
+        if page is self.help_page:
+            where, topic = self.help_context()
+            self.help_page.suggest(where, topic)
+            return
+        self.last_page = page
+        if self.help_from is not None:      # left the Help tab by its tab: no Back any more
+            self.help_from = None
+            self.help_page.set_back(None)
         if page is self.bus_page:
             stack = self.bus_page.stack
             if key is None:

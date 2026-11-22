@@ -20,7 +20,7 @@ are in the [reference](reference.md).
 
 Contents:
 
-- [The window](#the-window): a tour of the tabs;
+- [The window](#the-window): a tour of the tabs, and the [Help](#help) tab;
 - [Bringing up a new slave](#bringing-up-a-new-slave): where a proposal
   comes from, ESI files, how-tos for [a spindle
   encoder](#a-spindle-encoder-el5101), [a Modbus VFD on a serial
@@ -442,6 +442,34 @@ One column, top to bottom in the order of the work:
   with `debug_pickconfig=1 linuxcnc` to be asked.
 
 ![HAL check, file contents and Apply to LinuxCNC](images/gui-hal-apply.png)
+
+### Timing
+
+How evenly the computer's real-time threads run, and changing one thing at
+a time to make it better: see [The computer's timing](#the-computers-timing).
+
+### Help
+
+The documents you are reading, in the window: this one, [Getting
+started](getting-started.md) and the [reference](reference.md).
+
+- **F1** opens the section for what you work with: on the slave page the
+  kind of slave (a CiA 402 drive, an encoder channel, ...), elsewhere the
+  page. A **?** at the top right of a card opens the section for that card.
+  **F1** again, **Esc** or *← Back to ...* returns to the page and card
+  you were on.
+- Clicking the *Help* tab shows the section you read last. The line *Where
+  you are* names the section for what you work with now; it changes the
+  text only when you click it.
+- *Contents* shows or hides the headings; the search field lists the
+  sections that have all its words, those with a word in the heading first.
+  Links between sections open in the tab, **Alt+Left** goes back to the
+  section before; links to web pages open in the browser.
+- The text follows the window's light or dark look, and screenshots are
+  made no wider than the text.
+
+The documents are installed with the program (`ecatsetup/docs`), so the
+help needs no network.
 
 ## Bringing up a new slave
 

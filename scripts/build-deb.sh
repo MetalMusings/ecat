@@ -121,10 +121,12 @@ chmod 755 "$ROOT/usr/bin/ecatsetup"
 install -m 755 "$WORK/ecat/scripts/ecat-take-down" "$ROOT/usr/bin/"
 
 install -m 644 "$WORK/ecat/README.md" "$DOC/"
-install -d "$DOC/docs"
-install -m 644 "$WORK/ecat"/docs/*.md "$DOC/docs/"
-install -d "$DOC/docs/images"
-install -m 644 "$WORK/ecat"/docs/images/*.png "$DOC/docs/images/"
+# the documents among the program's own files, for the window's Help tab (Debian may
+# leave /usr/share/doc out of a minimal install); the doc folder points to them
+install -d "$PY/ecatsetup/docs/images"
+install -m 644 "$WORK/ecat"/docs/*.md "$PY/ecatsetup/docs/"
+install -m 644 "$WORK/ecat"/docs/images/*.png "$PY/ecatsetup/docs/images/"
+ln -s /usr/lib/python3/dist-packages/ecatsetup/docs "$DOC/docs"
 install -m 644 "$WORK/ecat/LICENSE" "$DOC/copyright"
 echo "ecat: $(git -C "$SRC" rev-parse HEAD)$WORKTREE" >"$DOC/VERSION"
 

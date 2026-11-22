@@ -3763,3 +3763,37 @@ the rest when a device needs it; SO: refused until a device needs it.
   (InitCmds)" with Use boxes.
 - Tests: C `test_init_cmds`; Python `tests/test_initcmds.py`, test_slots, the window's
   card; mutation-checked.
+
+## The Help tab (2026-11-22)
+
+The user's assignment (2026-11-20): users do not edit `ethercat.yaml`, so the user
+documents do not teach it, and the documents are reachable from the window.
+
+- **The split.** `docs/component.md` is gone. Its file format, every profile's part of
+  the file, loading the component by hand, the full command line and the quirk file
+  format (development stage) are in `docs/reference.md`; the profiles' behaviour and
+  pins, the servo period and the start check are in ecatsetup.md "What the slaves
+  give in LinuxCNC", in the window's terms (fields and cards, not keys).
+- **`ecatsetup/helpdocs.py`** (no Qt): the three documents split at their headings
+  with GitHub's anchors (a heading inside a code block is text), a section's text
+  with or without its subsections (a file's title shows its own text and its
+  chapters), the links between documents, a search (every word in the section's
+  own text, title hits first), and `TOPICS`: which section a tab, a slave's kind or
+  a card (by its title) points to. `tests/test_helpdocs.py` checks that every topic
+  and every link between the documents exists.
+- **`ecatsetup/helpview.py`**: `HelpView`, a widget of its own (it can move into a
+  dock or a window later): Back button, *Contents* toggle, *Where you are* line,
+  search field; a `QTextBrowser` with Qt's `setMarkdown` (Qt 5.15 on Debian 12 and
+  13: no new dependency, no network). Qt makes no heading anchors, hence the split.
+  Images are scaled to the text's width from their own size.
+- **In the window** (`gui.MainWindow`): the seventh tab; F1 opens the topic of the
+  page (`help_context`: on the Bus page the chosen slave's kind) and remembers the
+  page for *Back*; F1 again or Esc returns; a `Card` whose title is a topic gets a
+  `?` button. The text changes only on request; clicking the tab shows the last
+  section, and *Where you are* is a suggestion to click.
+- **Installed** with the program: the deb puts the documents in
+  `ecatsetup/docs` (`/usr/share/doc/linuxcnc-ecat/docs` links there), the rip
+  archive has them beside `ecatsetup/`, a checkout reads `docs/`; `$ECATSETUP_DOCS`
+  overrides.
+- Not yet: links from the text into the window ("Open the Response card"); `?`
+  buttons on cards whose title is not a topic.

@@ -234,7 +234,7 @@ class TestSession(BusTest):
 
 
 try:
-    from PyQt5.QtCore import QEvent
+    from PyQt5.QtCore import QEvent, QUrl
     from PyQt5.QtWidgets import QApplication
     from ecatsetup import gui
 except ImportError:  # pragma: no cover
@@ -2625,3 +2625,81 @@ class TestTimingPage(WindowBase):
             text = f.read()
         self.assertIn("# Real-time check report", text)
         self.assertIn(".json (baseline, reference)", text)
+
+
+class TestHelp(WindowBase):
+    """The Help tab: F1 and ? open the section for what one works with, Back returns."""
+
+    def test_f1_and_back(self):
+        w = self.window()
+        self.assertEqual(w.tabs.bar.tabText(w.tabs.count() - 1), "Help")
+        w.tabs.setCurrentWidget(w.bus_page)
+        w.select(0)
+        w.f1()
+        self.assertIs(w.tabs.currentWidget(), w.help_page)
+        h = w.help_page
+        self.assertEqual(h.docs.sections[h.current].title, "Bringing up a new slave")   # a generic slave
+        self.assertTrue(h.back_button.isVisibleTo(w))
+        self.assertEqual(h.back_button.text(), "← Back to Bus")
+        w.f1()                                          # F1 again: back where one was
+        self.assertIs(w.tabs.currentWidget(), w.bus_page)
+        self.assertFalse(h.back_button.isVisibleTo(w))
+
+    def test_a_cards_question_mark(self):
+        w = self.window()
+        w.tabs.setCurrentWidget(w.hal_page)
+        card = next(c for c in w.hal_page.findChildren(gui.Card)
+                    if c.help_button is not None and c.title.text() == "JOINTS")
+        card.help_button.click()
+        h = w.help_page
+        self.assertEqual(h.docs.sections[h.current].anchor, "joints")
+        self.assertEqual(h.back_button.text(), "← Back to HAL & LinuxCNC")
+        h.back_button.click()
+        self.assertIs(w.tabs.currentWidget(), w.hal_page)
+
+    def test_the_tab_keeps_its_place_and_suggests(self):
+        w = self.window()
+        h = w.help_page
+        h.show_topic("Distributed clocks")
+        w.tabs.setCurrentWidget(w.timing_page)
+        w.tabs.setCurrentWidget(h)                      # by the tab: the last place, a suggestion only
+        self.assertEqual(h.docs.sections[h.current].anchor, "distributed-clocks")
+        self.assertFalse(h.back_button.isVisibleTo(w))
+        self.assertIn("Timing", h.where.text())
+        h.where.click()
+        self.assertEqual(h.docs.sections[h.current].anchor, "the-computers-timing")
+
+    def test_links_search_and_images(self):
+        w = self.window()
+        h = w.help_page
+        w.tabs.setCurrentWidget(h)
+        h.show_topic(("ecatsetup.md", "the-window"))
+        h.link_clicked(QUrl("#distributed-clocks"))
+        self.assertEqual(h.docs.sections[h.current].anchor, "distributed-clocks")
+        h.link_clicked(QUrl("reference.md#dc"))
+        self.assertEqual((h.docs.sections[h.current].file, h.docs.sections[h.current].anchor), ("reference.md", "dc"))
+        h.go_back_in_help()
+        self.assertEqual(h.docs.sections[h.current].anchor, "distributed-clocks")
+        h.search.setText("turn-around SYNC0")
+        self.assertGreater(h.tree.topLevelItemCount(), 1)
+        first = h.tree.topLevelItem(0)
+        h.tree_chosen(first)
+        self.assertIn("turn-around", h.docs.text(h.current, whole=False).lower())
+        h.search.clear()
+        self.assertEqual(h.tree.topLevelItemCount(), len(h.docs.tops()))
+        h.show_topic(("ecatsetup.md", "the-window"))       # has screenshots
+        h.resize(700, 600)
+        h.fit_images()
+        doc = h.text.document()
+        widths = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                fmt = it.fragment().charFormat()
+                if fmt.isImageFormat():
+                    widths.append(fmt.toImageFormat().width())
+                it += 1
+            block = block.next()
+        self.assertTrue(widths)
+        self.assertTrue(all(0 < x <= h.text.viewport().width() for x in widths), widths)
