@@ -220,6 +220,16 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         self.slave["settings"] = [{"object": "0x6060:00", "type": "SINT", "value": 8}]
         self.assertNotIn("0x6060:00", [r["object"] for r in self.sess.missing_init_cmds(1)])
 
+    def test_the_mode_row_follows_the_file_as_it_is_now(self):
+        # read with one set of modes and PDOs, changed in the window since: the file decides
+        self.p.init_cmds = [r for r in self.p.init_cmds if r.get("from") != "profile"]
+        self.assertIn("0x6060:00", [r["object"] for r in self.sess.missing_init_cmds(1)])
+        self.slave["cia402"]["modes"] = ["hm"]          # 0x6060 is then set every cycle
+        self.assertNotIn("0x6060:00", [r["object"] for r in self.sess.missing_init_cmds(1)])
+        del self.slave["cia402"]["modes"]
+        self.slave["init-cmds"] = [{"at": "PS", "object": "0x6060:00", "from": "profile", "disabled": True}]
+        self.assertNotIn("0x6060:00", [r["object"] for r in self.sess.missing_init_cmds(1)])
+
     def test_a_row_turned_off_is_not_brought_back(self):
         self.slave["init-cmds"] = [{"at": "PS", "object": "0x8000:06", "type": "USINT", "value": 1, "disabled": True}]
         self.assertNotIn("0x8000:06", [r["object"] for r in self.sess.missing_init_cmds(1)])

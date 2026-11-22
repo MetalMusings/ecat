@@ -298,18 +298,23 @@ class Session:
                         mapped.add(config.parse_obj(e.get("object")))
                     except ValueError:
                         pass
+        rest = [dict(r) for r in getattr(b.proposal, "init_cmds", None) or []
+                if r.get("from") != "profile" and key(r) not in have]
         out = []
-        for r in getattr(b.proposal, "init_cmds", None) or []:
-            if key(r) in have:
-                continue
-            o = config.parse_obj(r["object"])
-            if r.get("from") == "profile":
-                c = s.get("cia402") or {}
-                if (s.get("profile") != "cia402" or o in mapped or c.get("modes")
-                        or config.mode_setting(s, (o[0] - 0x6060) // config.AXIS_OFFSET) is not None):
-                    continue        # the mode is set every cycle, or already at start
-            out.append(dict(r))
-        return out
+        # a drive's mode at start: decided by the file as it is now (its modes and PDOs may
+        # have changed since the slave was read), not by the proposal
+        c = s.get("cia402") or {}
+        one_mode = len(getattr(b.proposal, "drive_modes", None) or []) == 1
+        if s.get("profile") == "cia402" and not c.get("modes") and not one_mode:
+            for a in range(len(c.get("axes") or [1])):
+                index = 0x6060 + a * config.AXIS_OFFSET
+                row = {"at": "PS", "object": "0x%04X:00" % index, "from": "profile"}
+                if (index, 0) in mapped or config.mode_setting(s, a) is not None or any(
+                        str(r.get("object")).upper() == row["object"].upper()
+                        for r in s.get("init-cmds") or [] if isinstance(r, dict)):
+                    continue        # set every cycle, already at start, or turned off
+                out.append(row)
+        return out + rest
 
     def missing_state_timeouts(self, position):
         """The state change timeouts the proposal from the bus has (the ESI file's, where

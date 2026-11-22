@@ -1645,6 +1645,27 @@ class TestPdoEditing(WindowBase):
         page.other_modes["hm"].setChecked(True)          # homing: 0x6060 and 0x6061 needed too
         self.assertIn("lacks 0x6060", rx.itemText(rx.findData(0x1701)))
         self.assertIn("0x6060", page.pd_errors.text())
+        page.other_modes["hm"].setChecked(False)
+        page.other_modes["csv"].setChecked(True)         # CSV: 0x60FF
+        self.assertIn("0x60FF Target velocity", rx.itemText(rx.findData(0x1701)))
+        self.assertIn("filled with what CSP, CSV needs", rx.itemText(rx.findData(0x1600)))
+        page.other_modes["csv"].setChecked(False)
+        page.mode.setCurrentIndex(page.mode.findData("csv"))  # the mode itself
+        page.mode.activated.emit(page.mode.currentIndex())
+        self.assertIn("lacks 0x60FF Target velocity", rx.itemText(rx.findData(0x1701)))
+        self.assertIn("has what CSV needs", rx.itemText(rx.findData(0x1702)))
+
+    def test_the_device_needs_button_follows_the_modes(self):
+        w, page, s = self.page([(0x1701, 2, [(0x6040, 16), (0x607A, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        page.other_modes["csv"].setChecked(True)          # 0x6060 then set every cycle
+        rows = [{"at": "PS", "object": "0x6060:00", "from": "profile"}]
+        with mock.patch.object(w.session, "missing_init_cmds", side_effect=lambda pos: rows
+                               if not (s.get("cia402") or {}).get("modes") else []):
+            page.other_modes["csv"].setChecked(False)
+            self.assertFalse(page.init_button.isHidden())
+            page.other_modes["csv"].setChecked(True)
+            self.assertTrue(page.init_button.isHidden())
 
     def test_several_pdos_of_a_direction_are_kept_as_they_are(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)]), (0x1701, 2, [(0x607A, 32)])],
@@ -1730,7 +1751,9 @@ class TestPdoEditing(WindowBase):
 
     def test_add_what_the_device_needs(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
-        self.assertTrue(page.init_button.isHidden())          # the fake bus has no InitCmds
+        # the fake bus has no InitCmds, but 0x6060 is not mapped: the mode at start is needed
+        self.assertFalse(page.init_button.isHidden())
+        self.assertIn("0x6060:00 = the mode", page.init_button.toolTip())
         missing = [{"at": "PS", "object": "0x8000:06", "type": "USINT", "value": 1},
                    {"at": "PS", "object": "0x1C32:02", "from": "cycle-time"}]
         with mock.patch.object(w.session, "missing_init_cmds", return_value=missing):

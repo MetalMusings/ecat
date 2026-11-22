@@ -2344,6 +2344,7 @@ class SlaveView(QWidget):
         self.pd_add_missing.setVisible(bool(self.pd_adds))
         self.show_ways(s)
         self.show_assignment(s)
+        self.show_init_button(s)
 
     def _pd_edit(self, action):
         """Run an edit of the slave's process data; show the reason when it is refused."""
@@ -2567,14 +2568,19 @@ class SlaveView(QWidget):
             rows[it.row()]["disabled"] = True
         self.win.changed()
 
-    def show_settings(self, s):
-        self.show_init_cmds(s)
+    def show_init_button(self, s):
+        """*Add what the device needs*: shown while the file lacks a row the device needs
+        (it changes with the modes and the PDOs)."""
         missing = [session_row_text(r) for r in self.win.session.missing_init_cmds(self.position)] + [
             "%s %d ms" % ("SDO answer timeout" if k == "sdo" else "state timeout " + k, v)
             for k, v in sorted(self.win.session.missing_state_timeouts(self.position).items())]
         self.init_button.setVisible(bool(missing))
         self.init_button.setToolTip("Adds what the device's ESI file writes at start (init-cmds) and its "
                                     "timeouts: %s" % ", ".join(missing) if missing else "")
+
+    def show_settings(self, s):
+        self.show_init_cmds(s)
+        self.show_init_button(s)
         self.loading = True
         self.st.setRowCount(0)
         for st in s.get("settings") or []:

@@ -3520,6 +3520,12 @@ suit marked.
   proposes again without the bus (5 ms). `measured._read` parsed its YAML
   files for every slave at every check; now cached by mtime and size. A
   change in the window: 0.55 -> 0.25 s, the rest is Qt drawing.
+- Found by the user next: ticking Homing (or another mode) left the boxes as
+  they were; `general_edited` now redoes `show_pd_status` (lines, ways, PDO
+  boxes, *Add what the device needs*). `Session.missing_init_cmds` decides
+  the mode row (`0x6060:00`, from: profile) from the file as it is now (one
+  mode, 0x6060 not mapped, no setting or row), not from the proposal of
+  when the slave was read.
 - Tests: test_pdoreq (rows, chosen PDOs, the new order on the A6, the
   session without the bus, `sdo_info`), test_gui `test_every_pdo_can_be_chosen`,
   `test_several_pdos_of_a_direction_are_kept_as_they_are`; mutation-checked.
