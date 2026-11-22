@@ -261,8 +261,13 @@ Choosing a slave shows:
   above) or *the cycle time* (the servo period, which ecat fills in at
   start where the vendor's tool would); *complete access* writes a whole
   object at once. Untick *Use* to leave a row out: it stays in the file,
-  turned off, so that *Update from bus* does not bring it back. Not taken
-  from the ESI file: objects the vendor's tool fills in itself (other than
+  turned off, so that *Update from bus* does not bring it back. The card
+  shows every command of the ESI file, also those not used, with a
+  *Status* column: *written at start*, *turned off*, *needed* (amber: the
+  file lacks it and the drive needs it; tick *Use* to add it), *not in the
+  file yet* (amber), *not needed* (grey, such as the mode when `0x6060` is in
+  the PDOs: the profile sets it every cycle) or *not written by ecat* (grey,
+  with the reason). Not taken from the ESI file: objects the vendor's tool fills in itself (other than
   the cycle time), its own functions (such as diagnosis messages), and
   state changes ecat does not write at (only IP and PS); a note names
   what is skipped. A new proposal has these rows already, and also the

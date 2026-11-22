@@ -3533,6 +3533,11 @@ suit marked.
   does not report the mode, unless the file has it; *the PDOs cannot give it*,
   *own PDO mapping*; the reason in the tooltip). *Propose again* became *Start
   over from the bus...*, beside *Used by LinuxCNC* and configure-pdos.
+- Then the InitCmds card is shown whenever the ESI file has a command or the
+  file a row (the user: "where did InitCmds go?"; it was hidden while the file
+  had no rows): `Session.init_cmd_view` gives every row with a state
+  (in-file, off, needed, offered, not-needed, skipped) and why; ticking a row
+  that is not in the file adds it. The card is redone with the PDO status.
 - Tests: test_pdoreq (rows, chosen PDOs, the new order on the A6, the
   session without the bus, `sdo_info`), test_gui `test_every_pdo_can_be_chosen`,
   `test_several_pdos_of_a_direction_are_kept_as_they_are`; mutation-checked.
@@ -3550,7 +3555,9 @@ device needs them.
   once before running (a setting), or every cycle (0x6060 mapped), or at least
   seen (0x6061 mapped: the profile enables only in the mode shown). Modes
   changed while running: 0x6060 and 0x6061 in the process data. A drive with
-  one mode only (0x6502): nothing.
+  one mode only (0x6502): the same as one mode used all the time (it may start
+  in mode 0; until 2026-11-22 the proposal skipped the row for it, which the
+  check then refused).
 - The component's hidden SDO write of the mode (c4b2b15) is gone
   (`devices/ecat_cia402.c`). `ecat_config.c` and `config.check` check the same:
   with one mode, a setting 0x6060:00 must equal `cia402.mode`'s number, and

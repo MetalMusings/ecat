@@ -621,13 +621,13 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         p.init_cmds += [dict(st, at="IP") for st in layout.settings]
     if p.profile == 402:
         mapped = {e.index for pd in pdos for e in pd.entries}
-        supported = drive_modes if drive_modes is not None else getattr(esi_dev, "drive_modes", None)
-        one_mode = supported is not None and bin(supported & 0x3FF).count("1") == 1
+        # also a drive that reports one mode only: it may start in mode 0 (no mode), and the
+        # profile and the check need the mode set or seen (2026-11-22)
         for a in range(p.axes):
             index = 0x6060 + a * AXIS_OFFSET
             obj_text = "0x%04X:00" % index
-            if index in mapped or one_mode or extra_modes:
-                # the mode is set every cycle (or there is nothing to set): no row for it
+            if index in mapped or extra_modes:
+                # the mode is set every cycle: no row for it
                 p.init_cmds = [r for r in p.init_cmds if r["object"] != obj_text]
                 continue
             if not any(r["object"] == obj_text for r in p.init_cmds):

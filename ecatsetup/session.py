@@ -304,8 +304,7 @@ class Session:
         # a drive's mode at start: decided by the file as it is now (its modes and PDOs may
         # have changed since the slave was read), not by the proposal
         c = s.get("cia402") or {}
-        one_mode = len(getattr(b.proposal, "drive_modes", None) or []) == 1
-        if s.get("profile") == "cia402" and not c.get("modes") and not one_mode:
+        if s.get("profile") == "cia402" and not c.get("modes"):
             for a in range(len(c.get("axes") or [1])):
                 index = 0x6060 + a * config.AXIS_OFFSET
                 row = {"at": "PS", "object": "0x%04X:00" % index, "from": "profile"}
@@ -327,6 +326,80 @@ class Session:
         out = {k: v for k, v in (getattr(b.proposal, "state_timeouts", None) or {}).items() if k not in have}
         if getattr(b.proposal, "sdo_timeout", None) and "sdo-timeout-ms" not in s:
             out["sdo"] = b.proposal.sdo_timeout       # sdo-timeout-ms
+        return out
+
+    def init_cmd_view(self, position):
+        """Every InitCmd of the device and every init-cmds row of the file, for the window's
+        card, each with what happens to it (shown, never hidden, the user's wish 2026-11-22):
+        [{"row", "state", "text", "file_index"}]. States: "in-file" (written at start),
+        "off" (disabled: true), "needed" (the file lacks it and the drive needs it),
+        "offered" (the ESI file writes it, the file does not have it), "not-needed" (the
+        profile sets it another way) and "skipped" (ecat does not write it)."""
+        from . import initcmds
+        s = self.slave(position)
+        if s is None:
+            return []
+        dev = self.esi_device(position)
+        found = initcmds.from_esi(dev, self.dictionary(position), s.get("profile")) if dev else None
+        mapped = set()
+        for d in (s.get("process-data") or {}).values():
+            for pdo in d or []:
+                for e in pdo.get("entries") or []:
+                    try:
+                        mapped.add(config.parse_obj(e.get("object")))
+                    except ValueError:
+                        pass
+        c = s.get("cia402") or {}
+
+        def mode_reason(obj_text):
+            """Why the profile's mode row is not needed now, or None."""
+            try:
+                o = config.parse_obj(obj_text)
+            except ValueError:
+                return None
+            if s.get("profile") != "cia402" or not 0x6060 <= o[0] <= 0x6060 + 3 * config.AXIS_OFFSET:
+                return None
+            if o in mapped:
+                return "%s is in the PDOs: the profile sets the mode every cycle" % obj_text[:6]
+            if c.get("modes"):
+                return "the drive switches modes: 0x6060 must be in the PDOs"
+            if config.mode_setting(dict(s, **{"init-cmds": []}), (o[0] - 0x6060) // config.AXIS_OFFSET) is not None:
+                return "a setting writes 0x6060"
+            return None
+
+        out = []
+        listed = set()
+        for i, r in enumerate(s.get("init-cmds") or []):
+            if not isinstance(r, dict):
+                continue
+            listed.add(str(r.get("object")).upper())
+            if r.get("disabled"):
+                out.append({"row": r, "state": "off", "file_index": i,
+                            "text": "turned off: kept in the file, so that Update does not bring it back"})
+                continue
+            why = mode_reason(str(r.get("object"))) if r.get("from") == "profile" else None
+            out.append({"row": r, "state": "in-file", "file_index": i,
+                        "text": "written at start" + ("; not needed now: " + why if why else "")})
+        missing = self.missing_init_cmds(position)
+        for r in missing:
+            listed.add(str(r.get("object")).upper())
+            out.append({"row": r, "state": "needed" if r.get("from") == "profile" else "offered",
+                        "file_index": None,
+                        "text": "needed: the drive's mode is neither set nor seen" if r.get("from") == "profile"
+                        else "the device's ESI file writes this; not in the file yet"})
+        for r in (found.cmds if found else []):
+            if str(r.get("object")).upper() in listed:
+                continue
+            listed.add(str(r.get("object")).upper())
+            why = mode_reason(str(r.get("object"))) if r.get("from") == "profile" else None
+            if why:
+                out.append({"row": r, "state": "not-needed", "file_index": None, "text": "not needed: " + why})
+            elif self.bus.get(position) is None:
+                out.append({"row": r, "state": "offered", "file_index": None,
+                            "text": "the device's ESI file writes this; not in the file yet"})
+        for text, why in (found.skipped if found else []):
+            out.append({"row": {"object": text}, "state": "skipped", "file_index": None,
+                        "text": "not written by ecat: " + why})
         return out
 
     def add_device_needs(self, position):

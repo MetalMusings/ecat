@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -102,10 +103,13 @@ class TestProposal(unittest.TestCase):
     def test_no_mode_row_where_0x6060_is_mapped(self):
         self.assertFalse(any(r["object"] == "0x6060:00" for r in self.rows(proposal(device(CMDS, WITH_MODE)))))
 
-    def test_no_mode_row_for_a_drive_with_one_mode(self):
-        self.assertFalse(any(r["object"] == "0x6060:00" for r in self.rows(proposal(device(CMDS, NO_MODE, modes=0x80)))))
-        self.assertFalse(any(r["object"] == "0x6060:00"
-                             for r in self.rows(proposal(device(CMDS, NO_MODE), drive_modes=0x80))))
+    def test_a_mode_row_also_for_a_drive_with_one_mode(self):
+        # it may start in mode 0; the check wants the mode set or seen (the A6 simulation: CSP only)
+        self.assertTrue(any(r["object"] == "0x6060:00" for r in self.rows(proposal(device(CMDS, NO_MODE, modes=0x80)))))
+        self.assertTrue(any(r["object"] == "0x6060:00"
+                            for r in self.rows(proposal(device(CMDS, NO_MODE), drive_modes=0x80))))
+        cfg = config.from_proposals([proposal(device(CMDS, NO_MODE), drive_modes=0x80)])
+        self.assertFalse(any("neither set nor seen" in e for e in config.check(cfg)))
 
     def test_a_mode_row_without_an_initcmd(self):
         self.assertEqual(self.rows(proposal(device([], NO_MODE))),
@@ -198,7 +202,8 @@ class TestRecommendedOnUpdate(unittest.TestCase):
 
     def setUp(self):
         from ecatsetup import session
-        self.p = proposal(device(CMDS, NO_MODE, info=TIMEOUTS))
+        self.dev = device(CMDS, NO_MODE, info=TIMEOUTS)
+        self.p = proposal(self.dev)
         self.sess = session.Session([])
         info = {"position": 1, "vendor_id": 1, "product_code": 1, "revision": 1}
         self.sess.bus = {1: session.BusSlave(info, coe.Dictionary(), self.p)}
@@ -229,6 +234,31 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         del self.slave["cia402"]["modes"]
         self.slave["init-cmds"] = [{"at": "PS", "object": "0x6060:00", "from": "profile", "disabled": True}]
         self.assertNotIn("0x6060:00", [r["object"] for r in self.sess.missing_init_cmds(1)])
+
+    def test_every_command_is_shown_with_what_happens_to_it(self):
+        with mock.patch.object(self.sess, "esi_device", return_value=self.dev):
+            view = {v["row"]["object"]: v for v in self.sess.init_cmd_view(1)}
+        self.assertEqual(view["0x6060:00"]["state"], "needed")
+        self.assertEqual(view["0x2001:00"]["state"], "offered")
+        self.assertEqual(view["0xF081:01"]["state"], "skipped")
+        self.assertIn("not written by ecat", view["0x10F3:05"]["text"])
+        self.assertEqual(view["0x2002:00"]["state"], "skipped")         # at PI
+        # 0x6060 mapped: the ESI's mode command is shown as not needed
+        self.slave["process-data"]["outputs"][0]["entries"].append(
+            {"object": "0x6060:00", "bits": 8, "type": "SINT", "use": "profile"})
+        self.slave["init-cmds"] = [{"at": "PS", "object": "0x2001:00", "type": "INT", "value": -10,
+                                    "disabled": True}]
+        with mock.patch.object(self.sess, "esi_device", return_value=self.dev):
+            view = {v["row"]["object"]: v for v in self.sess.init_cmd_view(1)}
+        self.assertEqual(view["0x6060:00"]["state"], "not-needed")
+        self.assertIn("in the PDOs", view["0x6060:00"]["text"])
+        self.assertEqual((view["0x2001:00"]["state"], view["0x2001:00"]["file_index"]), ("off", 0))
+        # a mode row the file has while 0x6060 is mapped: written, and said to be not needed now
+        self.slave["init-cmds"].append({"at": "PS", "object": "0x6060:00", "from": "profile"})
+        with mock.patch.object(self.sess, "esi_device", return_value=self.dev):
+            view = {v["row"]["object"]: v for v in self.sess.init_cmd_view(1)}
+        self.assertEqual(view["0x6060:00"]["state"], "in-file")
+        self.assertIn("not needed now", view["0x6060:00"]["text"])
 
     def test_a_row_turned_off_is_not_brought_back(self):
         self.slave["init-cmds"] = [{"at": "PS", "object": "0x8000:06", "type": "USINT", "value": 1, "disabled": True}]

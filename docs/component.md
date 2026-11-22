@@ -612,8 +612,9 @@ that the profile enables the drive only when it shows the mode. A value
 written at start must be the mode of `cia402.mode`. Without any of them the
 component does not load: "the drive's mode is neither set nor seen ...".
 EtherCAT Setup proposes the row where `0x6060` is not mapped (StepperOnline
-A6's default PDOs `0x1701`/`0x1B01`, for example). A drive that has one mode
-only (its `0x6502`) gets none. Changing modes while running (`modes`) needs
+A6's default PDOs `0x1701`/`0x1B01`, for example), also for a drive that
+reports one mode only in `0x6502`: such a drive may still start in mode 0
+(no mode). Changing modes while running (`modes`) needs
 both `0x6060` and `0x6061` in the process data.
 
 Other entries of the drive, such as torque or digital inputs, get ordinary

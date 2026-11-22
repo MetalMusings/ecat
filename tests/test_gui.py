@@ -1787,7 +1787,15 @@ class TestPdoEditing(WindowBase):
 
     def test_the_init_cmds_card(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
-        self.assertTrue(page.ic_card.isHidden())             # none in the file
+        # none in the file, but the mode at start is needed: shown, unticked, amber
+        self.assertFalse(page.ic_card.isHidden())
+        self.assertEqual(page.ic.rowCount(), 1)
+        self.assertEqual(page.ic.item(0, 2).text(), "0x6060:00")
+        self.assertEqual(page.ic.item(0, 0).checkState(), gui.Qt.Unchecked)
+        self.assertIn("needed", page.ic.item(0, 5).text())
+        page.ic.item(0, 0).setCheckState(gui.Qt.Checked)      # ticked: added to the file
+        self.assertEqual(s["init-cmds"], [{"at": "PS", "object": "0x6060:00", "from": "profile"}])
+        self.assertEqual(page.ic.item(0, 5).text(), "written at start")
         s["init-cmds"] = [{"at": "PS", "object": "0x6060:00", "from": "profile"},
                           {"at": "PS", "object": "0x8080:01", "complete": True, "data": "00 03"},
                           {"at": "PS", "object": "0x1C32:02", "from": "cycle-time"}]

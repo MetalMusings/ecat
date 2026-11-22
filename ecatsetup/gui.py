@@ -1570,11 +1570,12 @@ class SlaveView(QWidget):
 
         # what the device's ESI file writes at start (init-cmds), apart from the user's settings
         ic = Card("Written at start by the device's description (InitCmds)",
-                  "From the device's ESI file, written before the settings above whenever the master "
-                  "configures the slave. Untick a row to leave it out (it stays in the file, so that "
-                  "Update does not bring it back). The mode follows the drive's mode; the cycle time is "
-                  "the servo period.")
-        self.ic = table(["Use", "At", "Object", "Value", "From"], 3)
+                  "Every command of the device's ESI file, and the file's own rows, each with what "
+                  "happens to it. Ticked rows are written before the settings above whenever the master "
+                  "configures the slave. Tick a row that is not in the file to add it; untick one to "
+                  "leave it out (it stays in the file, so that Update does not bring it back). The mode "
+                  "follows the drive's mode; the cycle time is the servo period.")
+        self.ic = table(["Use", "At", "Object", "Value", "From", "Status"], 5)
         self.ic.itemChanged.connect(self.init_cmd_toggled)
         ic.add(self.ic)
         self.ic_card = ic
@@ -2374,6 +2375,7 @@ class SlaveView(QWidget):
         self.show_ways(s)
         self.show_assignment(s)
         self.show_init_button(s)
+        self.show_init_cmds(s)
 
     def _pd_edit(self, action):
         """Run an edit of the slave's process data; show the reason when it is refused."""
@@ -2560,42 +2562,61 @@ class SlaveView(QWidget):
         self.win.changed()
         self.win.status("Added %s" % ", ".join(st["object"] for st in added))
 
+    IC_COLOURS = {"needed": "AMBER", "offered": "AMBER", "not-needed": "GREY", "skipped": "GREY", "off": "GREY"}
+
     def show_init_cmds(self, s):
-        rows = [r for r in s.get("init-cmds") or [] if isinstance(r, dict)]
-        self.ic_card.setVisible(bool(rows))
+        """The InitCmds card: every command of the ESI file and every row of the file, each
+        with its state (Session.init_cmd_view); shown whenever there is one."""
+        self.ic_view = self.win.session.init_cmd_view(self.position)
+        self.ic_card.setVisible(bool(self.ic_view))
         self.ic.blockSignals(True)
         self.ic.setRowCount(0)
-        for r in rows:
+        for v in self.ic_view:
+            r = v["row"]
             n = self.ic.rowCount()
             self.ic.insertRow(n)
             use = QTableWidgetItem("")
-            use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-            use.setCheckState(Qt.Unchecked if r.get("disabled") else Qt.Checked)
+            if v["state"] in ("in-file", "off", "needed", "offered"):
+                use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+                use.setCheckState(Qt.Checked if v["state"] == "in-file" else Qt.Unchecked)
+            else:
+                use.setFlags(use.flags() & ~Qt.ItemIsEditable & ~Qt.ItemIsUserCheckable)
             self.ic.setItem(n, 0, use)
             f = r.get("from")
             value = {"profile": "the mode (%s)" % ((s.get("cia402") or {}).get("mode") or "").upper(),
                      "cycle-time": "the servo period, ns"}.get(f) or str(r.get("value", r.get("data", "")))
             if r.get("complete"):
                 value += " (complete access)"
+            colour = {"AMBER": AMBER, "GREY": GREY}.get(self.IC_COLOURS.get(v["state"]))
             for col, text in ((1, r.get("at", "")), (2, r.get("object", "")), (3, value),
-                              (4, {"profile": "the profile", "cycle-time": "the cycle time"}.get(f, "the ESI file"))):
+                              (4, {"profile": "the profile", "cycle-time": "the cycle time"}.get(f, "the ESI file")),
+                              (5, v["text"])):
                 self.ic.setItem(n, col, item(text, font=mono() if col == 2 else None,
-                                             tip=r.get("name") if col == 2 else None))
+                                             tip=r.get("name") if col == 2 else (v["text"] if col == 5 else None),
+                                             colour=colour if col == 5 or v["state"] in ("skipped", "not-needed")
+                                             else None))
         fit_table(self.ic)
         self.ic.blockSignals(False)
 
     def init_cmd_toggled(self, it):
         s = self.win.session.slave(self.position)
-        if s is None or it.column() != 0:
+        if s is None or it.column() != 0 or it.row() >= len(getattr(self, "ic_view", [])):
             return
-        rows = [r for r in s.get("init-cmds") or [] if isinstance(r, dict)]
-        if it.row() >= len(rows):
-            return
-        if it.checkState() == Qt.Checked:
-            rows[it.row()].pop("disabled", None)
+        v = self.ic_view[it.row()]
+        on = it.checkState() == Qt.Checked
+        if v["file_index"] is not None:
+            r = s["init-cmds"][v["file_index"]]
+            if on:
+                r.pop("disabled", None)
+            else:
+                r["disabled"] = True
+        elif on and v["state"] in ("needed", "offered"):
+            s.setdefault("init-cmds", []).append(dict(v["row"]))
         else:
-            rows[it.row()]["disabled"] = True
+            return
         self.win.changed()
+        self.show_init_cmds(s)
+        self.show_pd_status(s)
 
     def show_init_button(self, s):
         """*Add what the device needs*: shown while the file lacks a row the device needs
