@@ -401,6 +401,14 @@ def pdo_set_in_use(slave, proposal):
     return next((n for n, pdos in proposal.pdo_set_pdos.items() if pdos == have), None)
 
 
+# The Process data card's line for a slave without its ESI file (the user, 2026-11-22: the
+# file is not required, but helps a lot; without it the PDO boxes looked empty).
+NO_ESI_PDO_TEXT = ("No ESI file for this device: the PDOs to choose from, the vendor's PDO sets, the DC "
+                   "modes, and the names, units and ranges of its settings come from it. EtherCAT Setup "
+                   "works without it (the slave's own data), but with it is much easier: get the "
+                   "vendor's XML file and choose its folder.")
+
+
 class QuietCombo(QComboBox):
     """A combo box the mouse wheel does not change: scrolling a page over it must not
     pick a value (it once connected pins by itself); the wheel scrolls the page."""
@@ -1509,6 +1517,17 @@ class SlaveView(QWidget):
             self.pa_boxes[direction] = box
             pa_form.addRow(text, box)
         pd.add(self.pa)
+        # without the device's ESI file there are no PDOs to choose from: say so, where one looks
+        self.pa_no_esi = QWidget()
+        row = QHBoxLayout(self.pa_no_esi)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.pa_no_esi_text = label(NO_ESI_PDO_TEXT, "warnText", wrap=True)
+        row.addWidget(self.pa_no_esi_text, 1)
+        add = QPushButton("Choose ESI files...")
+        add.clicked.connect(lambda: self.win.add_esi())
+        row.addWidget(add, 0, Qt.AlignTop)
+        self.pa_no_esi.hide()
+        pd.add(self.pa_no_esi)
         self.pa_rows = []
         self.pd = table(self.PD_COLUMNS, self.PIN)
         self.pd_more = QCheckBox("All columns")
@@ -2311,6 +2330,7 @@ class SlaveView(QWidget):
         own_row = pdoreq.own_row(s, dev, own)
         shown = (dev is not None and bool(dev.pdos)) or own_row is not None
         self.pa.setVisible(shown)
+        self.pa_no_esi.setVisible(dev is None)
         self.pa_rows = pdoreq.assignment_rows(s, dev) if shown else []
         bus = self.win.session.bus.get(self.position) is not None
         mine = s.get("configure-pdos", True) is False     # way A: the slave's own mapping

@@ -130,6 +130,14 @@ ecatsetup --gui
 (You can skip the two commands: when no master answers, the window shows
 the same command and runs it with sudo once you have confirmed it.)
 
+Before you read the bus, get the **ESI files** of your devices: the XML
+files each vendor publishes (on its web site, or with the device). They
+are not required, but they make the work much easier: the PDOs to choose
+from, the vendor's PDO sets, the DC modes and the names and ranges of the
+settings come from them. Put them in a folder (one per vendor is fine) and
+choose it with *Choose ESI files...* on the Bus page; the window remembers
+it ([ESI files](ecatsetup.md#esi-files)).
+
 This only reads. When you are done:
 
 ```

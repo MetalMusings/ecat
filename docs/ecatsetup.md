@@ -502,8 +502,22 @@ matching) or – (not used):
 ### ESI files
 
 For now you provide the ESI file: the vendor's XML, from its web site
-or the device's CD. Without one EtherCAT Setup works from the SII and
-the CoE dictionary, and says what is missing. *Choose ESI files...*
+or the device's CD. It is not required, but it makes the work much
+easier. Without one EtherCAT Setup works from the slave's own data (its
+SII and CoE dictionary), and says what is missing: on *Where the
+configuration comes from*, and on the *Process data* card, whose PDO
+boxes then have nothing to offer. What the ESI file gives:
+
+| | Without the ESI file |
+|---|---|
+| The PDOs to choose from, each with what it gives (*Output PDO*, *Input PDO*) | Only the slave's own mapping, which is not advised |
+| The vendor's PDO sets (*PDO assignment*), such as an EL5101's "Standard 32 Bit (MDP 511)" | The PDOs the slave starts with |
+| The DC modes with their names, SYNC1 cycles and shifts | What the SII says, if anything; else *DC mode with user settings*, typed by hand |
+| Names, units, ranges and value names of settings | What the slave's dictionary has (often less; none without SDO information) |
+| The commands the device needs at start (InitCmds) | None proposed |
+| Longer state change and SDO timeouts, a modular device's slots and modules | The master's defaults; modules as the slave maps them now |
+
+*Choose ESI files...*
 (or `--esi FOLDER` on the command line) reads every XML file in a
 folder. A folder chosen in the window is remembered, in
 `~/.config/ecatsetup/settings.yaml` (or `$ECATSETUP_SETTINGS`), and read

@@ -1556,6 +1556,18 @@ class TestPdoEditing(WindowBase):
         w.select_slave(1)
         return w, w.slave_page, s
 
+    def test_without_the_esi_file_the_card_says_so(self):
+        w = self.window()                        # the fake bus: no ESI file for its slaves
+        w.select_slave(0)
+        page = w.slave_page
+        self.assertFalse(page.pa_no_esi.isHidden())
+        self.assertIn("No ESI file for this device", page.pa_no_esi_text.text())
+        with mock.patch.object(w, "add_esi") as add:
+            next(b for b in page.pa_no_esi.findChildren(gui.QPushButton)).click()
+        add.assert_called_once()
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        self.assertTrue(page.pa_no_esi.isHidden())          # with it: the boxes, no line
+
     def test_status_lines_and_add_what_is_missing(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
         self.assertIn("cannot run as CiA 402 in CSP", page.pd_errors.text())
