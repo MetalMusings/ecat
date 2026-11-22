@@ -20,7 +20,7 @@ from dataclasses import asdict
 
 import yaml
 
-from . import config, diagnose, esi, events, importxml, integrate, lcecxml, masterstart, netif, propose, tool, update
+from . import config, diagnose, esi, events, importxml, integrate, lcecxml, masterstart, netif, pdoreq, propose, tool, update
 from . import session
 from .session import compare_bus, ini_value, read_slave, servo_period  # noqa: F401
 
@@ -128,7 +128,7 @@ def main(argv=None):
     ap.add_argument("--esi", action="append", default=[], help="ESI file or folder (repeatable)")
     ap.add_argument("--ini", help="LinuxCNC INI file, for the servo period")
     ap.add_argument("--compare", help="lcec XML file (ethercat-conf.xml) to compare with")
-    ap.add_argument("--mode", default="csp", choices=sorted(propose.CIA402_MODES),
+    ap.add_argument("--mode", default="csp", choices=pdoreq.main_modes(),
                     help="mode for CiA 402 drives: csp or csv for joints, pv (profile "
                          "velocity) for a spindle or conveyor, pp (profile position) for "
                          "positioning that is not a joint")

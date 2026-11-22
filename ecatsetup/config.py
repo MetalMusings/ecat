@@ -14,8 +14,8 @@ import subprocess
 
 import yaml
 
-from . import quirks
-from .propose import CIA402_PROFILE, CIA402_MODES as CIA402_NEEDS, ENCODER_INPUTS, ENCODER_OUTPUTS, PP_LIMITS, \
+from . import pdoreq, quirks
+from .propose import CIA402_PROFILE, ENCODER_INPUTS, ENCODER_OUTPUTS, PP_LIMITS, \
     PP_REQUIRED
 
 FORMAT_VERSION = 1
@@ -44,7 +44,6 @@ CIA402_MODES = {"csp", "csv", "pv", "pp"}
 # other modes a cia402 drive may switch to (cia402.modes); they need the
 # mode objects to change modes
 CIA402_OTHER_MODES = {"hm", "csp", "csv", "pv", "pp"}
-CIA402_MODE_OBJECTS = {0x6060, 0x6061}
 TRANSPORTS = {"raw", "xdp-native", "xdp-skb"}
 
 _OBJECT = re.compile(r"^0x([0-9a-fA-F]{4}):([0-9a-fA-F]{2})$")
@@ -103,8 +102,8 @@ def longer_timeouts(esi_timeouts):
             if k in STATE_TIMEOUTS and isinstance(v, int) and v > STATE_TIMEOUTS[k]}
 
 
-# the cia402 modes' numbers in 0x6060 (propose.CIA402_MODE_NUMBERS)
-MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
+# the cia402 modes' numbers in 0x6060
+MODE_NUMBERS = pdoreq.MODE_NUMBERS
 
 
 def mode_setting(slave, axis=0):
@@ -989,14 +988,14 @@ def check(cfg, series=None):
         if profile == "cia402":
             rx, tx = set(), set()
             for m in [(s.get("cia402") or {}).get("mode")] + other_modes:
-                r, t = CIA402_NEEDS.get(m, (set(), set()))
+                r, t = pdoreq.mode_objects(m) or (set(), set())
                 rx, tx = rx | r, tx | t
             for a in range(n_axes):
                 off = a * AXIS_OFFSET
                 for i in sorted((rx | tx) - {x - off for x in owned}):
                     err("%s: the cia402 profile needs 0x%04X:00 in the process data" % (where, i + off))
                 if other_modes:
-                    for i in sorted(CIA402_MODE_OBJECTS - {x - off for x in owned} - rx - tx):
+                    for i in sorted(set().union(*pdoreq.several_objects()) - {x - off for x in owned} - rx - tx):
                         err("%s: changing modes needs 0x%04X:00 in the process data"
                             % (where, i + off))
             for e in feedforward_errors(s.get("cia402") or {}, other_modes, owned, n_axes):

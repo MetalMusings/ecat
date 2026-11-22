@@ -272,6 +272,30 @@ def _objects(data, index, axes):
 MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
 
 
+def mode_objects(mode, data=None):
+    """The object indexes (rx, tx) a CiA 402 drive needs for one mode on its own
+    (common + the mode's), or None for a mode it cannot run in alone (homing) or
+    does not know. The one table behind config.check and the proposals."""
+    data = data or load("cia402")
+    spec = data["modes"].get(mode)
+    if spec is None or spec.get("only-in-modes"):
+        return None
+    return (set(data["common"]["rx"]) | set(spec["rx"]),
+            set(data["common"]["tx"]) | set(spec["tx"]))
+
+
+def several_objects(data=None):
+    """The object indexes (rx, tx) a drive needs to change modes (cia402.modes)."""
+    data = data or load("cia402")
+    return set(data["several"]["rx"]), set(data["several"]["tx"])
+
+
+def main_modes(data=None):
+    """The modes a CiA 402 drive can be configured in (cia402.mode)."""
+    data = data or load("cia402")
+    return sorted(m for m in data["modes"] if mode_objects(m, data) is not None)
+
+
 def initcmd_mode(esi_dev):
     """The value an ESI file's InitCmd writes to 0x6060 at start, or None."""
     for cmd in getattr(esi_dev, "init_cmds", None) or []:

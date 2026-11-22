@@ -25,13 +25,6 @@ CIA402_PINS = {
     0x60F4: ("following-error", "sint"), 0x60FD: ("digital-inputs", "uint"),
     0x60FE: ("digital-outputs", "uint"), 0x6063: ("encoder-fb", "sint"),
 }
-# What each CiA 402 cyclic mode needs in the process data.
-CIA402_MODES = {
-    "csp": ({0x6040, 0x607A}, {0x6041, 0x6064}),
-    "csv": ({0x6040, 0x60FF}, {0x6041, 0x606C}),
-    "pv": ({0x6040, 0x60FF}, {0x6041, 0x606C}),
-    "pp": ({0x6040, 0x607A}, {0x6041, 0x6064}),
-}
 # The settings a PP drive must have, since it plans its moves itself: the
 # software position limits and the maximum profile velocity.
 PP_LIMITS = [(0x607D, 1, "DINT"), (0x607D, 2, "DINT"), (0x607F, 0, "UDINT")]
@@ -40,7 +33,7 @@ PP_LIMITS = [(0x607D, 1, "DINT"), (0x607D, 2, "DINT"), (0x607F, 0, "UDINT")]
 PP_REQUIRED = PP_LIMITS[:2]
 PP_MAX_VELOCITY = PP_LIMITS[2]
 # The modes' numbers in 0x6060/0x6061.
-CIA402_MODE_NUMBERS = {"pp": 1, "pv": 3, "hm": 6, "csp": 8, "csv": 9}
+CIA402_MODE_NUMBERS = pdoreq.MODE_NUMBERS
 # 0x6502 "supported drive modes", bit -> name.
 CIA402_MODE_BITS = {0: "PP", 1: "VL", 2: "PV", 3: "TQ", 5: "HM", 6: "IP",
                     7: "CSP", 8: "CSV", 9: "CST"}

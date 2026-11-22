@@ -292,6 +292,9 @@ class TestPropose(unittest.TestCase):
         del out[3]                                 # 0x6841
         self.assertIn("slave 0: the cia402 profile needs 0x6841:00 in the process data",
                       config.check(cfg))
+        del out[0]                                 # 0x6041: every mode needs the statusword
+        self.assertIn("slave 0: the cia402 profile needs 0x6041:00 in the process data",
+                      config.check(cfg))
         slave["cia402"]["axes"] = ["xy", "xy-2"]
         self.assertTrue(any("axis name 'xy' is used" in e for e in config.check(cfg)))
         slave["cia402"]["axes"] = ["a", "b", "c", "d", "e"]
