@@ -2233,8 +2233,8 @@ values itself: they get no pins of their own, and the *Process data* card
 shows what the chosen modes need and what the PDOs lack.
 
 The drive's mode must be set or seen: either the mode is in the process
-data (written every cycle), or it is written once at start (the row *Mode
-of operation* on the *InitCmds* card, or a setting `0x6060:00`), or at
+data (written every cycle), or it is written once at start (the row
+`0x6060:00` on the *InitCmds* card, or a setting of it), or at
 least the drive's mode display is mapped, so that the profile enables the
 drive only when it shows the mode. EtherCAT Setup proposes the start row
 where the mode is not mapped (StepperOnline A6's default PDOs, for
