@@ -9,7 +9,7 @@
 #
 # The package is built against the userspace master package
 # linuxcnc-ethercat-uspace from a uspace-v* release of MetalMusings/ethercat
-# (1.5 or later) and LinuxCNC 2.10. There are no 2.10 packages for Debian 12
+# (1.6 or later) and LinuxCNC 2.10. There are no 2.10 packages for Debian 12
 # or 13 yet (buildbot.linuxcnc.org is gone), so LinuxCNC is built from source
 # at a pinned commit (LINUXCNC_COMMIT, moved on purpose only: the HAL API
 # changed as late as October 2026), without its GUIs and manual pages: ecat
@@ -32,8 +32,8 @@ on:
   workflow_dispatch:
     inputs:
       master_release:
-        description: uspace-v* release of MetalMusings/ethercat with the master package (1.5 or later)
-        default: uspace-v1.5
+        description: uspace-v* release of MetalMusings/ethercat with the master package (1.6 or later)
+        default: uspace-v1.6
   push:
     tags: ['ecat-v*']
 
@@ -41,7 +41,7 @@ permissions:
   contents: read
 
 env:
-  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.5' }}
+  MASTER_RELEASE: ${{ inputs.master_release || 'uspace-v1.6' }}
   LINUXCNC_COMMIT: b0e7b191b92066c771f2063714dc00736899ec95  # 2.10.0~pre2-436, 2026-11-12
 
 jobs:

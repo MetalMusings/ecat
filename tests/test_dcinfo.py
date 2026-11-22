@@ -331,6 +331,7 @@ class TestSync1(unittest.TestCase):
         self.assertTrue(any("sync1-shift-ns must be a whole number of 0 or more" in e for e in config.check(cfg)))
 
 
+@unittest.skipIf(gui is None, "PyQt5 is not installed")
 class TestSyncRow(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

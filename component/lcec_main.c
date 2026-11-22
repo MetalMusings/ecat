@@ -44,7 +44,7 @@ static void lcec_guard_event(struct lcec_master *master, int state, unsigned al_
 // checks for the kernel master.
 #pragma weak ecrt_master
 #pragma weak ecrt_master_get_slave
-// In the userspace master after 1.5 (fork: ecrt_master_get_sync_manager & co.); without
+// In the userspace master 1.6 (fork: ecrt_master_get_sync_manager & co.); without
 // them a slave's own PDO mapping (configure-pdos: false) is not compared at start.
 #pragma weak ecrt_master_get_sync_manager
 #pragma weak ecrt_master_get_pdo
@@ -419,7 +419,7 @@ static int lcec_start_check_own_pdos(lcec_master_t *master, int *stop) {
     if (ecrt_master_get_sync_manager == NULL || ecrt_master_get_pdo == NULL || ecrt_master_get_pdo_entry == NULL) {
       rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX
           "start check: slave %d (%s) runs on its own PDO mapping (configure-pdos: false), which is not "
-          "compared with the configuration: that needs a linuxcnc-ethercat-uspace after 1.5\n",
+          "compared with the configuration: that needs linuxcnc-ethercat-uspace 1.6 or later\n",
           slave->index, slave->name);
       continue;
     }

@@ -98,7 +98,7 @@ def from_esi(esi_dev, dictionary=None, profile=None, axes=1):
         out.cmds.append(row)
     if any("complete" in r for r in out.cmds):
         out.notes.append("complete-access InitCmds need a master with ecrt_slave_config_complete_sdo_from "
-                         "(the master fork after 1.5) where they start at subindex 1")
+                         "(the master package 1.6 or later) where they start at subindex 1")
     return out
 
 

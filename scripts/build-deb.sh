@@ -27,10 +27,10 @@
 set -euo pipefail
 
 PKG=linuxcnc-ecat
-BASE_VERSION=0.23.1
+BASE_VERSION=0.24
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
-MASTER_MIN=1.5
+MASTER_MIN=1.6
 # The oldest 2.9 a 2.9 package asks for (the user's decision, 2026-11-17:
 # Debian 13's own package; the HAL API is the same in the whole series).
 LINUXCNC29_MIN=2.9.4
