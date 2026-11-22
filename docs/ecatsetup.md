@@ -155,7 +155,9 @@ Choosing a slave shows:
   any, what was *measured on the bus* on this kind of device at servo periods that
   were tried ([Measured SYNC0 cycles](#measured-sync0-cycles)), with a warning when
   the servo period is at or below one that was refused,
-  and for a drive the CiA 402 modes (below), *Propose again* and the homing
+  for a drive the CiA 402 modes (below), *Start over from the bus...* (reads the
+  slave and replaces its whole entry with a new proposal, after asking; only
+  the name is kept) and the homing
   card ([cia402](component.md#the-cia402-profile));
 - **CiA 402 modes**, for a drive: *Mode of operation* is the mode the
   drive starts in and runs in. Under *Can also switch to* you tick the
@@ -207,11 +209,12 @@ Choosing a slave shows:
   closed switches such as an E-stop: no `not` is needed in HAL.
   The order is: the profile, then its choices (for a drive the mode and the
   modes it may switch to; for a modular device what its channels are used
-  for), then the PDOs these need. *PDOs per mode*, beside the drive's
-  modes, says for each mode whether the device's PDOs can give it (from
-  its ESI file): *ready* (one of its PDO assignments has it), *build* (an
-  own mapping in its open PDOs), *impossible* (the tooltip says why, such as
-  a mode the drive does not report in 0x6502) or *unknown*. When the
+  for), then the PDOs these need. The mode choices say it themselves: a mode
+  the drive does not report in 0x6502 is greyed out (*not reported by the
+  drive*), a mode the device's PDOs cannot give is marked *the PDOs cannot
+  give it*, and one that needs its open PDOs filled is marked *own PDO
+  mapping*; the tooltip says why. A mode the file already has stays
+  selectable, so that it can be changed. When the
   mapping in the file lacks something, *Ways to get this* under the table
   lists what the device offers, the recommended one first: a predefined
   assignment, then an own mapping in the open PDOs (just what is needed),
@@ -247,8 +250,8 @@ Choosing a slave shows:
   first open PDO of its direction), *Remove entry* takes the selected
   entry out, and *Add PDO...* assigns another of the device's PDOs with
   its entries. A PDO that the ESI file marks fixed cannot be edited: the
-  window says so and what to do (*Propose again* chooses ready PDOs that
-  have the objects, or builds a mapping in the open PDO);
+  window says so and what to do (choose another PDO in *Output PDO* /
+  *Input PDO*: one that has the objects, or the open PDO, which is filled);
 - **Written at start by the device's description (InitCmds)**: what the
   device's ESI file writes at every start (its InitCmds, such as
   Beckhoff's channel settings or StepperOnline's mode), a modular
@@ -471,8 +474,8 @@ has not been tried at a machine yet.
    with, which for an EL5101 is the *legacy* layout (`0x7000:01`, `:02`,
    `0x6000:01` to `:03`: Ctrl, Value, Status, Value, Latch). The encoder
    function does not handle it, and the proposal says so in its notes.
-2. **Read the bus again** (*Read the bus*, or *Propose again* on the
-   slave). *Where the configuration comes from* shows ✓ for the ESI file.
+2. **Read the bus again** (*Read the bus*, or *Start over from the bus...*
+   on the slave). *Where the configuration comes from* shows ✓ for the ESI file.
    The proposal now uses the ESI file's default assignment, *Standard 16
    Bit (MDP 511)*, and finds the channel: the notes say *encoder enc:
    channel 0x6010 ...*, and the counter and latch entries are marked

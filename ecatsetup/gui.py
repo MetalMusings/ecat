@@ -1256,6 +1256,7 @@ class SlaveView(QWidget):
                       "own pins.")
         hm.toggled.connect(self.general_edited)
         self.other_modes["hm"] = hm
+        self.OTHER_MODE_TIPS = {m: cb.toolTip() for m, cb in self.other_modes.items()}
         cform.addRow("Homing", hm)
         self.zero_at_start = QCheckBox("Position counts from 0 at start")
         self.zero_at_start.setToolTip(
@@ -1265,14 +1266,6 @@ class SlaveView(QWidget):
             "0x2010 (Zero Position).")
         self.zero_at_start.toggled.connect(self.general_edited)
         cform.addRow("Start position", self.zero_at_start)
-        self.supported = QHBoxLayout()
-        self.supported.addStretch(1)
-        cform.addRow("Supported (0x6502)", self.supported)
-        self.mode_marks = label("", "hint", wrap=True)
-        self.mode_marks.setToolTip("Whether the device's PDOs can give what each mode needs, from its "
-                                   "ESI file: ready (a PDO assignment has it), build (an own mapping "
-                                   "in its open PDOs), impossible, unknown")
-        cform.addRow("PDOs per mode", self.mode_marks)
         cform.setRowWrapPolicy(QFormLayout.WrapLongRows)
         prof = QHBoxLayout()
         prof.addWidget(label("Profile:"))
@@ -1292,12 +1285,6 @@ class SlaveView(QWidget):
         self.pdo_set.setMinimumContentsLength(16)
         self.pdo_set.activated.connect(self.pdo_set_chosen)
         again.addWidget(self.pdo_set, 1)
-        self.again = QPushButton("Propose again")
-        self.again.setToolTip("Read the slave and replace its process data, DC and settings with "
-                              "a new proposal for the chosen mode and PDO assignment. The name is "
-                              "kept.")
-        self.again.clicked.connect(self.propose_again)
-        again.addWidget(self.again)
         op.add(again)
         self.used = QCheckBox("Used by LinuxCNC")
         self.used.setToolTip("Untick for a slave that is only on the bus: ecat checks that it is the slave "
@@ -1309,6 +1296,16 @@ class SlaveView(QWidget):
         self.configure_pdos = QCheckBox("Write the PDO mapping to the slave (configure-pdos)")
         self.configure_pdos.toggled.connect(self.general_edited)
         op.add(self.configure_pdos)
+        over = QHBoxLayout()
+        self.again = QPushButton("Start over from the bus...")
+        self.again.setToolTip("Read the slave and replace its whole entry (process data, pins, DC, "
+                              "settings, init-cmds) with a new proposal for the chosen profile and "
+                              "mode. The name is kept; asks first. To change only the PDOs, use the "
+                              "PDO boxes on the Process data card.")
+        self.again.clicked.connect(self.propose_again)
+        over.addWidget(self.again)
+        over.addStretch(1)
+        op.add(over)
         sync = QHBoxLayout()
         sync.addWidget(label("Sync:"))
         self.dc_mode = QuietCombo()
@@ -1701,17 +1698,9 @@ class SlaveView(QWidget):
             self.mode.setCurrentIndex(max(i, 0))
             for m, cb in self.other_modes.items():
                 cb.setChecked(m in (c.get("modes") or []))
-                cb.setEnabled(m != c.get("mode"))
+            self.show_mode_choices(s)
             self.show_opmode_hint(c)
             self.zero_at_start.setChecked(bool(c.get("zero-at-start")))
-            while self.supported.count() > 1:
-                w = self.supported.takeAt(0).widget()
-                if w:
-                    w.deleteLater()
-            chips = p.drive_modes if p and p.drive_modes else ["not read"]
-            for m in chips:
-                self.supported.insertWidget(self.supported.count() - 1, pill(m.upper(), "grey"))
-            self.show_mode_marks(s, p)
 
         self.used.setChecked(s.get("unused") is not True)
         self.configure_pdos.setChecked(bool(s.get("configure-pdos", True)))
@@ -2214,21 +2203,61 @@ class SlaveView(QWidget):
             # cancelled: the box back to the profile in use
             self.profile_box.setCurrentIndex(max(self.profile_box.findData(s.get("profile")), 0))
 
-    def show_mode_marks(self, s, p):
-        """Per mode, whether the device's PDOs can give it (from the ESI file)."""
+    MODE_TEXTS = {"csp": "Cyclic synchronous position (CSP)",
+                  "csv": "Cyclic synchronous velocity (CSV)",
+                  "pv": "Profile velocity (PV), a spindle or conveyor",
+                  "pp": "Profile position (PP), positioning that is not a joint"}
+
+    def mode_judgement(self, s):
+        """{mode: (selectable, mark, why)} for the drive: whether it reports the mode in 0x6502
+        (the slave's, else its ESI file's) and whether the device's PDOs can give it (each mode
+        on its own, from the ESI file). Empty where nothing is known."""
+        b = self.win.session.bus.get(self.position)
+        p = b.proposal if b else None
         dev = self.win.session.esi_device(self.position)
-        c = s.get("cia402") or {}
-        if dev is None or c.get("mode") not in ("csp", "csv", "pv", "pp"):
-            self.mode_marks.setText("no ESI file: not known" if dev is None else "")
-            return
         supported = None
         if p and p.drive_modes:
-            supported = sum(1 << b for b, n in propose.CIA402_MODE_BITS.items() if n in p.drive_modes)
-        _whole, each = pdoreq.cia402_verdicts(dev, c["mode"], [], len(c.get("axes") or [1]), supported)
-        self.mode_marks.setText(" · ".join("%s %s" % (m.upper(), v.status) for m, v in each.items()))
-        self.mode_marks.setToolTip("\n".join("%s: %s" % (m.upper(), "; ".join(v.problems))
-                                             for m, v in each.items() if v.problems) or
-                                   self.mode_marks.toolTip())
+            supported = sum(1 << bit for bit, n in propose.CIA402_MODE_BITS.items() if n in p.drive_modes)
+        elif dev is not None and dev.drive_modes is not None:
+            supported = dev.drive_modes
+        bits = {n.lower(): bit for bit, n in propose.CIA402_MODE_BITS.items()}
+        out = {}
+        for m in list(self.MODE_TEXTS) + ["hm"]:
+            if supported is not None and not supported & (1 << bits[m]):
+                out[m] = (False, "not reported by the drive",
+                          "The drive does not report %s in 0x6502 (supported drive modes)" % m.upper())
+        c = s.get("cia402") or {}
+        if dev is not None:
+            _whole, each = pdoreq.cia402_verdicts(dev, c.get("mode") or "csp", [],
+                                                  len(c.get("axes") or [1]), supported)
+            for m, v in each.items():
+                if m in out:
+                    continue
+                if v.status == pdoreq.IMPOSSIBLE:
+                    out[m] = (True, "the PDOs cannot give it", "; ".join(v.problems))
+                elif v.status == pdoreq.BUILD:
+                    out[m] = (True, "own PDO mapping", "The device's ready PDOs lack what %s needs: "
+                              "the open PDOs are filled with it" % m.upper())
+        return out
+
+    def show_mode_choices(self, s):
+        """The marks in the mode box and the other modes' boxes: what the drive reports and
+        what the device's PDOs can give, in the choices themselves."""
+        c = s.get("cia402") or {}
+        marks = self.mode_judgement(s)
+        model = self.mode.model()
+        for n in range(self.mode.count()):
+            m = self.mode.itemData(n)
+            ok, mark, why = marks.get(m, (True, "", ""))
+            self.mode.setItemText(n, self.MODE_TEXTS[m] + (" - " + mark if mark else ""))
+            self.mode.setItemData(n, why or None, Qt.ToolTipRole)
+            model.item(n).setEnabled(ok or m == c.get("mode"))
+        for m, cb in self.other_modes.items():
+            ok, mark, why = marks.get(m, (True, "", ""))
+            base = "Homing by the drive's own method" if m == "hm" else m.upper()
+            cb.setText(base + (" (%s)" % mark if mark else ""))
+            cb.setToolTip(why or self.OTHER_MODE_TIPS.get(m, ""))
+            cb.setEnabled(m != c.get("mode") and (ok or cb.isChecked()))
 
     def show_assignment(self, s):
         """The PDO choice per direction: every PDO of the device, the file's chosen."""
@@ -2643,8 +2672,7 @@ class SlaveView(QWidget):
             c["mode"] = self.mode.currentData()
             config.sync_mode_setting(s)
             others = [m for m, cb in self.other_modes.items() if cb.isChecked() and m != c["mode"]]
-            for m, cb in self.other_modes.items():
-                cb.setEnabled(m != c["mode"])
+            self.show_mode_choices(s)
             self.show_opmode_hint({"mode": c["mode"], "modes": others})
             if others:
                 c["modes"] = others

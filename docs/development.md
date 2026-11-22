@@ -3526,6 +3526,13 @@ suit marked.
   the mode row (`0x6060:00`, from: profile) from the file as it is now (one
   mode, 0x6060 not mapped, no setting or row), not from the proposal of
   when the slave was read.
+- Then (the user: the two rows under *Start position* had become
+  redundant): *Supported (0x6502)* and *PDOs per mode* are gone; the mode box
+  and the *Can also switch to* / Homing boxes carry the marks
+  (`SlavePage.mode_judgement` / `show_mode_choices`: greyed out when the drive
+  does not report the mode, unless the file has it; *the PDOs cannot give it*,
+  *own PDO mapping*; the reason in the tooltip). *Propose again* became *Start
+  over from the bus...*, beside *Used by LinuxCNC* and configure-pdos.
 - Tests: test_pdoreq (rows, chosen PDOs, the new order on the A6, the
   session without the bus, `sdo_info`), test_gui `test_every_pdo_can_be_chosen`,
   `test_several_pdos_of_a_direction_are_kept_as_they_are`; mutation-checked.

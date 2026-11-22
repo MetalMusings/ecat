@@ -157,10 +157,11 @@ def add_object(slave, esi_dev, dictionary, index, sub=0, direction=None, pdo=Non
     if target is None:
         fixed = [_index(p) for p in _pdos(slave, direction)]
         if fixed:
-            raise EditError("the %s PDOs %s are fixed in the ESI file: choose another PDO "
-                            "assignment (Propose again fits one to the modes), or add an open PDO"
+            raise EditError("the %s PDOs %s are fixed in the ESI file: choose the open PDO "
+                            "(or another) in the %s PDO box, or add an open PDO"
                             % ("output" if direction == "rx" else "input",
-                               ", ".join("0x%04X" % i for i in fixed)))
+                               ", ".join("0x%04X" % i for i in fixed),
+                               "Output" if direction == "rx" else "Input"))
         raise EditError("no %s PDO in the file to add to: use Add PDO" % ("output" if direction == "rx" else "input"))
     limit = esi_dev.max_entries.get(_index(target)) if esi_dev else None
     if limit is not None and len(target.get("entries") or []) >= limit:

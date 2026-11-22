@@ -1593,11 +1593,31 @@ class TestPdoEditing(WindowBase):
         self.assertTrue(any(t.startswith("ESI file: slave 1") and "0x1701 is fixed" in t for t in texts), texts)
         self.assertFalse(any(t.startswith("Error: ") and "0x1701" in t for t in texts))
 
-    def test_mode_marks_from_the_esi_file(self):
+    def test_mode_marks_in_the_choices(self):
+        # what the drive reports and what the PDOs can give, in the mode choices themselves
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
         # the ESI file's 0x6502 has CSP and CSV only
-        self.assertEqual(page.mode_marks.text(), "CSP ready · CSV build · PV impossible · PP impossible")
-        self.assertIn("PV: the drive does not report PV in 0x6502", page.mode_marks.toolTip())
+        texts = {page.mode.itemData(n): page.mode.itemText(n) for n in range(page.mode.count())}
+        self.assertEqual(texts["csp"], "Cyclic synchronous position (CSP)")
+        self.assertEqual(texts["csv"], "Cyclic synchronous velocity (CSV) - own PDO mapping")
+        self.assertIn("not reported by the drive", texts["pv"])
+        model = page.mode.model()
+        enabled = {page.mode.itemData(n): model.item(n).isEnabled() for n in range(page.mode.count())}
+        self.assertEqual(enabled, {"csp": True, "csv": True, "pv": False, "pp": False})
+        self.assertIn("0x6502", page.mode.itemData(page.mode.findData("pv"), gui.Qt.ToolTipRole))
+        self.assertTrue(page.other_modes["csv"].isEnabled())
+        self.assertEqual(page.other_modes["csv"].text(), "CSV (own PDO mapping)")
+        self.assertFalse(page.other_modes["pp"].isEnabled())
+        self.assertFalse(page.other_modes["hm"].isEnabled())
+        self.assertIn("0x6502", page.other_modes["hm"].toolTip())
+        self.assertFalse(page.other_modes["csp"].isEnabled())     # the mode itself
+        page.other_modes["pp"].setChecked(True)                  # a file that has it anyway
+        self.assertTrue(page.other_modes["pp"].isEnabled())      # can be unticked
+
+    def test_start_over_beside_the_whole_slave_choices(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        self.assertEqual(page.again.text(), "Start over from the bus...")
+        self.assertTrue(page.again.isEnabled())
 
     def test_ways_are_offered_and_used_only_when_chosen(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
@@ -1729,7 +1749,7 @@ class TestPdoEditing(WindowBase):
             w.select_slave(1)
             self.assertEqual((s["profile"], s["cia402"]["mode"]), ("cia402", "csp"))
             self.assertFalse(page.cia402.isHidden())
-            self.assertIn("CSP", page.mode_marks.text())
+            self.assertIn("CSP", page.mode.currentText())
 
     def test_profile_choice_for_a_modular_device(self):
         w = self.window()
