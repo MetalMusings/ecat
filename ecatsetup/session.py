@@ -295,14 +295,7 @@ class Session:
         def key(r):
             return (str(r.get("object")).upper(), bool(r.get("complete")), r.get("at"))
         have = {key(r) for r in s.get("init-cmds") or [] if isinstance(r, dict)}
-        mapped = set()
-        for d in (s.get("process-data") or {}).values():
-            for pdo in d or []:
-                for e in pdo.get("entries") or []:
-                    try:
-                        mapped.add(config.parse_obj(e.get("object")))
-                    except ValueError:
-                        pass
+        mapped = _mapped(s)
         rest = [dict(r) for r in getattr(b.proposal, "init_cmds", None) or []
                 if r.get("from") != "profile" and key(r) not in have]
         out = []
@@ -345,15 +338,9 @@ class Session:
         if s is None:
             return []
         dev = self.esi_device(position)
-        found = initcmds.from_esi(dev, self.dictionary(position), s.get("profile")) if dev else None
-        mapped = set()
-        for d in (s.get("process-data") or {}).values():
-            for pdo in d or []:
-                for e in pdo.get("entries") or []:
-                    try:
-                        mapped.add(config.parse_obj(e.get("object")))
-                    except ValueError:
-                        pass
+        found = initcmds.from_esi(dev, self.dictionary(position), s.get("profile"),
+                                  len(config.axes(s)) or 1) if dev else None
+        mapped = _mapped(s)
         c = s.get("cia402") or {}
 
         def mode_reason(obj_text):
@@ -388,10 +375,21 @@ class Session:
         missing = self.missing_init_cmds(position)
         for r in missing:
             listed.add(str(r.get("object")).upper())
-            out.append({"row": r, "state": "needed" if r.get("from") == "profile" else "offered",
-                        "file_index": None,
-                        "text": "needed: the drive's mode is neither set nor seen" if r.get("from") == "profile"
-                        else "the device's ESI file writes this; not in the file yet"})
+            seen = False
+            if r.get("from") == "profile":
+                try:
+                    index = config.parse_obj(str(r.get("object")))[0]
+                    seen = (index + 1, 0) in mapped        # the mode display, 0x6061 (+ 0x800 per axis)
+                except ValueError:
+                    pass
+            if r.get("from") != "profile":
+                state, text = "offered", "the device's ESI file writes this; not in the file yet"
+            elif seen:
+                state, text = "offered", ("recommended: the mode is only seen (the mode display is mapped), "
+                                          "so the drive is enabled only once it shows it; this sets it at start")
+            else:
+                state, text = "needed", "needed: the drive's mode is neither set nor seen"
+            out.append({"row": r, "state": state, "file_index": None, "text": text})
         for r in (found.cmds if found else []):
             if str(r.get("object")).upper() in listed:
                 continue
@@ -633,6 +631,15 @@ class Session:
             old["cia402"]["mode"] = mode
         else:
             old.pop("cia402", None)
+        # the drive's mode row (init-cmds from: profile) belongs to the cia402 profile
+        rows = [r for r in old.get("init-cmds") or [] if r.get("from") != "profile"]
+        if new["profile"] == "cia402":
+            have = {r.get("object") for r in rows}
+            rows += [r for r in new.get("init-cmds") or [] if r.get("from") == "profile" and r.get("object") not in have]
+        if rows:
+            old["init-cmds"] = rows
+        else:
+            old.pop("init-cmds", None)
         return list(p.notes)
 
     def dictionary(self, position):
@@ -788,3 +795,16 @@ def load_yaml_text(text):
     if not isinstance(cfg, dict):
         raise ValueError("not a YAML mapping")
     return cfg
+
+
+def _mapped(slave):
+    """The objects (index, subindex) a slave's entry maps, both directions."""
+    mapped = set()
+    for d in ((slave or {}).get("process-data") or {}).values():
+        for pdo in d or []:
+            for e in pdo.get("entries") or []:
+                try:
+                    mapped.add(config.parse_obj(e.get("object")))
+                except ValueError:
+                    pass
+    return mapped

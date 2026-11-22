@@ -315,12 +315,20 @@ class TestSync1(unittest.TestCase):
         self.assertTrue(any("turns SYNC1 on, but no sync1-cycles" in w for w in config.dc_warnings(cfg)))
         cfg["slaves"][0]["dc"]["sync1-cycles"] = 2
         self.assertEqual(config.dc_warnings(cfg), [])
-        for bad in (-1, "2", True):
+        for unreadable in ("0x03G0", True, "0x"):   # half typed in the window: no crash, the check says it
+            cfg["slaves"][0]["dc"] = {"assign-activate": unreadable}
+            self.assertEqual(config.dc_warnings(cfg), [])
+        cfg["slaves"][0]["dc"] = {"assign-activate": "0x0700", "sync1-cycles": 2}
+        for bad in (-1, "2", True, 65536):
             cfg["slaves"][0]["dc"]["sync1-cycles"] = bad
             self.assertTrue(any("sync1-cycles must be a whole number" in e for e in config.check(cfg)), bad)
         cfg["slaves"][0]["dc"]["sync1-cycles"] = 0
         cfg["slaves"][0]["dc"]["sync1-shift-ns"] = 500
         self.assertTrue(any("sync1-shift-ns needs sync1-cycles" in e for e in config.check(cfg)))
+        cfg["slaves"][0]["dc"]["sync1-shift-ns"] = 0             # as the component: 0 needs no cycle
+        self.assertFalse(any("sync1" in e for e in config.check(cfg)))
+        cfg["slaves"][0]["dc"].update({"sync1-cycles": 1, "sync1-shift-ns": -1000})
+        self.assertTrue(any("sync1-shift-ns must be a whole number of 0 or more" in e for e in config.check(cfg)))
 
 
 class TestSyncRow(unittest.TestCase):

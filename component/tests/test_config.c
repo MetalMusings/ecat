@@ -495,6 +495,11 @@ static void test_dc(void) {
               "dc: {assign-activate: '0x700', sync1-cycles: -1}}\n", "dc sync1-cycles must be 0 to 65535");
   CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
               "dc: {assign-activate: '0x700', sync1-shift-ns: 5}}\n", "dc sync1-shift-ns needs sync1-cycles");
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
+              "dc: {assign-activate: '0x700', sync1-cycles: 1, sync1-shift-ns: -1000}}\n",
+              "dc sync1-shift-ns must be 0 or more");
+  CHECK_EQ(load("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
+                "dc: {assign-activate: '0x300', sync1-shift-ns: 0}}\n"), 0);   // 0 needs no cycle
   // without dc: none
   CHECK_EQ(load(io), 0);
   CHECK_EQ(count(lcecConfTypeDcConf), 0);
@@ -573,6 +578,22 @@ static void test_settings(void) {
   CHECK_FAILS(SETTINGS("  - {object: '0x8000:01', value: 3}\n"), "setting 0x8000:01: unknown type");
   CHECK_FAILS(SETTINGS("  - {object: '0x8000:01', type: UINT}\n"), "give value and type, or data");
   CHECK_FAILS(SETTINGS("  - {object: '0x8000:01', type: UINT, value: 1.5}\n"), "value: \"1.5\" is not a number");
+
+  // long data (a complete-access block): up to ECAT_SDO_DATA_MAX bytes, then a clear error
+  {
+    static char yaml[8192];
+    char hex[2 * 1025 + 1];
+    int n;
+    for (n = 0; n < 1025; n++) memcpy(hex + 2 * n, "a5", 2);
+    hex[2 * 1024] = 0;
+    snprintf(yaml, sizeof(yaml), SETTINGS("  - {object: '0x8000:00', data: '%s'}\n"), hex);
+    CHECK_EQ(load(yaml), 0);
+    CHECK_EQ(SDO(0)->length, 1024);
+    hex[2 * 1024] = 'a';
+    hex[2 * 1025] = 0;
+    snprintf(yaml, sizeof(yaml), SETTINGS("  - {object: '0x8000:00', data: '%s'}\n"), hex);
+    CHECK_FAILS(yaml, "data is longer than 1024 bytes");
+  }
 }
 
 // ---- the cia402 profile ----------------------------------------------
@@ -738,6 +759,10 @@ static void test_init_cmds(void) {
                        P("0x6041:00", 16, "UINT") P("0x606C:00", 32, "DINT"))
                 "  init-cmds:\n  - {at: PS, object: '0x6060:00', from: profile}\n"), 0);
   CHECK_EQ(SDO(0)->data[0], 3);
+  // modes may list the mode itself: the row still gets the mode's number
+  CHECK_EQ(load(CIA402("csp, modes: [csp, hm]", CSP_OUT, CSP_IN)
+                "  init-cmds:\n  - {at: PS, object: '0x6060:00', from: profile}\n"), 0);
+  CHECK_EQ(SDO(0)->data[0], 8);
 }
 
 static void test_state_timeouts(void) {
@@ -751,6 +776,8 @@ static void test_state_timeouts(void) {
   CHECK_EQ(count(lcecConfTypeStateTimeouts), 0);
   CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
               "state-timeouts-ms: {preop: 0}}\n", "state-timeouts-ms.preop must be 1 to 600000");
+  CHECK_FAILS("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, "
+              "state-timeouts-ms: {pre-op: 6000}}\n", "state-timeouts-ms: unknown key \"pre-op\"");
   // the SDO response timeout, alone or with them
   CHECK_EQ(load("ecat: 1\nmaster: {}\nslaves:\n- {position: 0, name: d, profile: generic, sdo-timeout-ms: 2000}\n"), 0);
   CHECK_EQ(TIMEOUTS(0)->sdo_response, 2000);

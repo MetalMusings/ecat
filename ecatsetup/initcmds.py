@@ -53,15 +53,16 @@ def value_of(index, sub, data, dictionary=None):
     return out
 
 
-def from_esi(esi_dev, dictionary=None, profile=None):
+def from_esi(esi_dev, dictionary=None, profile=None, axes=1):
     """The InitCmds of a device description (and its modules', moved to their slots), as
     init-cmds rows, notes and what is skipped. `profile` ("cia402", ...): an object it owns
-    becomes a row with `from: profile`."""
+    becomes a row with `from: profile`, also on a later axis (+ 0x800 each, `axes` of them)."""
     out = Found()
     if esi_dev is None:
         return out
     rules = _rules()
     owned = set(rules.get("profile-owned", {}).get(profile) or [])
+    shift = pdoreq.load("cia402")["axis-offset"]          # a drive's later axes
     templates = {pdoreq_obj(k): v for k, v in (rules.get("templates") or {}).items()}
     seen = set()
     for cmd in esi_dev.init_cmds:
@@ -69,14 +70,14 @@ def from_esi(esi_dev, dictionary=None, profile=None):
         complete = len(cmd) > 4 and bool(cmd[4])
         when = [t.strip().upper() for t in (transitions or "").split(",") if t.strip()]
         text = _obj(index, sub)
-        on_time = [t for t in when if t in rules["transitions"]["on-time"]]
+        on_time = [t for t in rules["transitions"]["on-time"] if t in when]   # in ecat's order: IP,PS
         if not on_time:
             out.skipped.append((text, "at %s, a state change ecat does not write at yet" % ",".join(when)))
             continue
         row = {"at": ",".join(on_time), "object": text}
         if (index, sub) in templates:
             row["from"] = templates[(index, sub)]
-        elif index in owned:
+        elif any(index == o + a * shift for o in owned for a in range(max(1, axes))):
             row["from"] = "profile"
         else:
             why = next((r["why"] for r in rules["skip"] if r["from"] <= index <= r["to"]), None)

@@ -611,7 +611,7 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         from . import esi as esi_mod, initcmds
         dictionary = coe if coe is not None and coe.entries else esi_mod.dictionary(esi_dev)
         cmds = dataclasses.replace(esi_dev, init_cmds=list(esi_dev.init_cmds) + module_cmds)
-        found = initcmds.from_esi(cmds, dictionary, "cia402" if p.profile == 402 else None)
+        found = initcmds.from_esi(cmds, dictionary, "cia402" if p.profile == 402 else None, p.axes)
         p.init_cmds += found.cmds
         p.notes += found.notes
         if found.cmds:

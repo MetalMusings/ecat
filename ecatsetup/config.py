@@ -133,6 +133,9 @@ def mode_setting(slave, axis=0):
 
 
 INIT_AT = ("IP", "PS", "IP,PS")
+# The longest SDO a setting or init-cmds row may write, in bytes (ECAT_SDO_DATA_MAX in
+# component/ecat_config.c).
+SDO_DATA_MAX = 1024
 INIT_FROM = ("profile", "cycle-time")
 
 
@@ -164,14 +167,16 @@ def init_cmd_errors(slave):
             if f not in INIT_FROM:
                 out.append("init-cmds %s: from must be profile or cycle-time" % o)
             elif f == "profile" and not (slave.get("profile") == "cia402" and sub == 0
-                                         and (index - 0x6060) % AXIS_OFFSET == 0 and 0x6060 <= index < 0x8000):
+                                         and (index - 0x6060) % AXIS_OFFSET == 0
+                                         and 0 <= (index - 0x6060) // AXIS_OFFSET < len(axes(slave))):
                 out.append("init-cmds %s: from: profile is only for a cia402 drive's 0x6060:00" % o)
         elif "value" in r:
             if r.get("type") not in DATA_TYPES:
                 out.append("init-cmds %s: unknown type %r" % (o, r.get("type")))
         elif "data" in r:
             try:
-                bytes.fromhex(str(r["data"]))
+                if len(bytes.fromhex(str(r["data"]))) > SDO_DATA_MAX:
+                    out.append("init-cmds %s: data is longer than %d bytes" % (o, SDO_DATA_MAX))
             except ValueError:
                 out.append("init-cmds %s: data %r is not hex bytes" % (o, r["data"]))
         else:
@@ -349,7 +354,7 @@ def dc_warnings(cfg):
     out = []
     for s in (cfg or {}).get("slaves") or []:
         dc = s.get("dc") if isinstance(s, dict) else None
-        if isinstance(dc, dict) and _assign_value(dc.get("assign-activate")) & 0x0400 and not dc.get("sync1-cycles"):
+        if isinstance(dc, dict) and (_assign_value(dc.get("assign-activate")) or 0) & 0x0400 and not dc.get("sync1-cycles"):
             out.append("slave %s (%s): assign-activate %s turns SYNC1 on, but no sync1-cycles is given: SYNC1 "
                        "then has no cycle of its own and the slave may refuse SAFEOP (AL 0x0030); give sync1-cycles "
                        "(SYNC1 every n SYNC0 cycles, from the DC mode in the ESI file)"
@@ -1011,13 +1016,14 @@ def check(cfg, series=None):
                     int(str(aa), 16)
                 except ValueError:
                     err("%s: dc assign-activate %r is not a hex number, such as 0x0300" % (where, aa))
-            for key, low in (("sync1-cycles", 0), ("sync1-shift-ns", None)):
+            # the same rules as ecat_config.c
+            for key, high in (("sync1-cycles", 65535), ("sync1-shift-ns", None)):
                 v = dc.get(key)
                 if v is None:
                     continue
-                if isinstance(v, bool) or not isinstance(v, int) or (low is not None and v < low):
-                    err("%s: dc %s must be a whole number%s" % (where, key, " of 0 or more" if low == 0 else ""))
-            if dc.get("sync1-shift-ns") is not None and not dc.get("sync1-cycles"):
+                if isinstance(v, bool) or not isinstance(v, int) or v < 0 or (high is not None and v > high):
+                    err("%s: dc %s must be a whole number of 0%s" % (where, key, " to %d" % high if high else " or more"))
+            if dc.get("sync1-shift-ns") and not dc.get("sync1-cycles"):
                 err("%s: dc sync1-shift-ns needs sync1-cycles (SYNC1 every n SYNC0 cycles)" % where)
         for e in eoe_errors(s.get("eoe")):
             err("%s: %s" % (where, e))
@@ -1058,7 +1064,8 @@ def check(cfg, series=None):
                     err("%s: setting %s has unknown type %r" % (where, st.get("object"), st.get("type")))
             elif "data" in st:
                 try:
-                    bytes.fromhex(str(st["data"]))
+                    if len(bytes.fromhex(str(st["data"]))) > SDO_DATA_MAX:
+                        err("%s: setting %s data is longer than %d bytes" % (where, st.get("object"), SDO_DATA_MAX))
                 except ValueError:
                     err("%s: setting %s data %r is not hex bytes" % (where, st.get("object"), st["data"]))
             else:

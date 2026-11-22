@@ -34,6 +34,9 @@ typedef struct {
 } buf_t;
 
 #define MAX_ENCODERS 16
+/// The longest SDO a setting or init-cmds row may write (bytes); ecatsetup/config.py
+/// SDO_DATA_MAX is the same.
+#define ECAT_SDO_DATA_MAX 1024
 
 typedef struct {
   yaml_document_t *doc;
@@ -43,6 +46,7 @@ typedef struct {
   int cia402;         // the slave being read has the cia402 profile
   unsigned int cia402_modes;  // the other modes it may switch to (bit n: mode n)
   unsigned int cia402_all;    // mode and modes
+  unsigned int cia402_main;   // the mode's number (cia402.mode), also when modes lists it
   int n_axes;         // the drive's axes (cia402.axes), 1 without
   int ff_velocity;    // cia402.feedforward.velocity is given
   int ff_torque;      // cia402.feedforward.torque is given
@@ -661,7 +665,11 @@ static size_t sdo_bytes(ctx_t *c, yaml_node_t *st, const char *what, const char 
         p++;
         continue;
       }
-      if (len >= cap || sscanf(p, "%2x%n", &byte, &used) != 1 || used != 2) {
+      if (len >= cap) {
+        error(c, "%s %s: data is longer than %zu bytes", what, object, cap);
+        return 0;
+      }
+      if (sscanf(p, "%2x%n", &byte, &used) != 1 || used != 2) {
         error(c, "%s %s: data \"%s\" is not hex bytes", what, object, hex);
         return 0;
       }
@@ -680,7 +688,7 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
   for (i = 0; i < seq_len(list); i++) {
     yaml_node_t *st = seq_item(c, list, i);
     const char *object = get_str(c, st, "object");
-    uint8_t data[64];
+    uint8_t data[ECAT_SDO_DATA_MAX];
     size_t len = 0;
     uint16_t index;
     uint8_t subindex;
@@ -730,7 +738,7 @@ static void init_cmds(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
     const char *at = get_str(c, st, "at");
     const char *from = get_str(c, st, "from");
     int complete = get_bool(c, st, "complete", 0);
-    uint8_t data[64];
+    uint8_t data[ECAT_SDO_DATA_MAX];
     size_t len = 0;
     uint16_t index;
     uint8_t subindex;
@@ -751,9 +759,7 @@ static void init_cmds(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
         continue;
       }
       {
-        unsigned mode;
-        for (mode = 0; mode < 32 && !((c->cia402_all & ~c->cia402_modes) & (1u << mode)); mode++) {
-        }
+        unsigned mode = c->cia402_main;
         data[0] = (uint8_t)(int8_t)mode;
         len = 1;
         c->mode_setting[ax] = (int)mode;
@@ -1012,6 +1018,15 @@ static void state_timeouts(ctx_t *c, buf_t *b, yaml_node_t *t, yaml_node_t *sdo)
     return;
   }
   st->confType = lcecConfTypeStateTimeouts;
+  if (t != NULL && t->type == YAML_MAPPING_NODE) {  // a misspelt key is an error, as in ecatsetup's check
+    yaml_node_pair_t *p;
+    for (p = t->data.mapping.pairs.start; p < t->data.mapping.pairs.top; p++) {
+      const char *k = scalar(node(c, p->key));
+      for (i = 0; i < 4 && (k == NULL || strcmp(k, keys[i])); i++) {
+      }
+      if (i == 4) error(c, "state-timeouts-ms: unknown key \"%s\" (preop, safeop-op, back-to-init, back-to-safeop)", k ? k : "");
+    }
+  }
   field[0] = &st->preop;
   field[1] = &st->safeop_op;
   field[2] = &st->back_to_init;
@@ -1137,6 +1152,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
   }
   c->cia402 = profile != NULL && !strcmp(profile, "cia402");
   c->cia402_modes = 0;
+  c->cia402_main = 0;
   c->cia402_all = 0;
   memset(c->owned, 0, sizeof(c->owned));
   c->n_axes = 1;
@@ -1157,6 +1173,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       mp->value.u32 = 8;
     }
     c->cia402_all = 1u << mp->value.u32;
+    c->cia402_main = mp->value.u32;
     ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount = 1;
     c->cia402_modes = cia402_modes(c, get(c, get(c, s, "cia402"), "modes"));
     c->cia402_all |= c->cia402_modes;
@@ -1268,6 +1285,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
       }
       dcc->sync1Cycle = (uint32_t)n;
       dcc->sync1Shift = (int32_t)get_int(c, dc, "sync1-shift-ns", 0);
+      if (dcc->sync1Shift < 0) error(c, "dc sync1-shift-ns must be 0 or more (SYNC1 after SYNC0, in ns)");
       if (dcc->sync1Shift != 0 && n == 0) error(c, "dc sync1-shift-ns needs sync1-cycles");
     }
   }
@@ -1339,9 +1357,7 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
     // the mode: set every cycle (0x6060 in the process data), or once as a setting;
     // or at least seen (0x6061: the profile enables only in the mode it shows).
     // A setting must say the mode the profile runs in.
-    unsigned mode = 0;
-    for (mode = 0; mode < 32 && !((c->cia402_all & ~c->cia402_modes) & (1u << mode)); mode++) {
-    }
+    unsigned mode = c->cia402_main;
     for (a = 0; a < c->n_axes; a++) {
       unsigned o = a * ECAT_CIA402_AXIS_OFFSET;
       int set_cyclic = (c->owned[a] & (1u << cia402_object(0x6060, 0))) != 0;

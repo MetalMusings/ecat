@@ -1352,7 +1352,7 @@ class SlaveView(QWidget):
         self.sync1_cycles.valueChanged.connect(self.general_edited)
         sync1.addWidget(self.sync1_cycles)
         self.sync1_shift = QSpinBox()
-        self.sync1_shift.setRange(-10000000, 10000000)
+        self.sync1_shift.setRange(0, 10000000)
         self.sync1_shift.setPrefix("shift ")
         self.sync1_shift.setSuffix(" ns")
         self.sync1_shift.setToolTip("SYNC1 after SYNC0, in ns (less than the SYNC0 cycle)")

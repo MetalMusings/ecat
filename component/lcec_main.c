@@ -1730,7 +1730,9 @@ int lcec_parse_config(void) {
           rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "init-cmds from: cycle-time: no slave, or more than 4\n");
           goto fail2;
         }
-        slave->cycle_sdos[slave->n_cycle_sdos++] = (LCEC_CONF_SDO_CYCLE_T *)conf;
+        // copied: conf_buf is freed at the end of parsing, these are used later
+        slave->cycle_sdos[slave->n_cycle_sdos] = LCEC_ALLOCATE(LCEC_CONF_SDO_CYCLE_T);
+        memcpy(slave->cycle_sdos[slave->n_cycle_sdos++], conf, sizeof(LCEC_CONF_SDO_CYCLE_T));
         conf += sizeof(LCEC_CONF_SDO_CYCLE_T);
         break;
 
@@ -1739,7 +1741,8 @@ int lcec_parse_config(void) {
           rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave node for state timeouts missing\n");
           goto fail2;
         }
-        slave->state_timeouts = (LCEC_CONF_STATE_TIMEOUTS_T *)conf;
+        slave->state_timeouts = LCEC_ALLOCATE(LCEC_CONF_STATE_TIMEOUTS_T);  // copied, as above
+        memcpy(slave->state_timeouts, conf, sizeof(LCEC_CONF_STATE_TIMEOUTS_T));
         conf += sizeof(LCEC_CONF_STATE_TIMEOUTS_T);
         break;
 
@@ -1748,7 +1751,8 @@ int lcec_parse_config(void) {
           rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "Slave node for eoe config missing\n");
           goto fail2;
         }
-        slave->eoe_conf = (LCEC_CONF_EOE_T *)conf;
+        slave->eoe_conf = LCEC_ALLOCATE(LCEC_CONF_EOE_T);  // copied, as above
+        memcpy(slave->eoe_conf, conf, sizeof(LCEC_CONF_EOE_T));
         conf += sizeof(LCEC_CONF_EOE_T);
         break;
 

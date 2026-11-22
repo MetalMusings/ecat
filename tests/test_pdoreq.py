@@ -662,7 +662,12 @@ class TestSessionWays(unittest.TestCase):
         self.assertTrue(session.sdo_info(sii))
 
     def test_change_to_generic_and_back(self):
+        def mode_rows():
+            return [r for r in self.slave.get("init-cmds") or [] if r.get("from") == "profile"]
+        self.assertEqual(len(mode_rows()), 1)               # 0x6060 not mapped: the mode row
         self.sess.change_profile(1, "generic")
+        self.assertEqual(mode_rows(), [])                   # only for a cia402 drive
+        self.assertFalse([e for e in config.check(self.sess.cfg) if "init-cmds" in e or "mode" in e])
         self.assertEqual(self.slave["profile"], "generic")
         self.assertNotIn("cia402", self.slave)
         e = self.slave["process-data"]["outputs"][0]["entries"][0]
@@ -671,6 +676,8 @@ class TestSessionWays(unittest.TestCase):
         self.sess.change_profile(1, "cia402")
         self.assertEqual((self.slave["profile"], self.slave["cia402"]["mode"]), ("cia402", "csp"))
         self.assertEqual(self.slave["process-data"]["outputs"][0]["entries"][0]["use"], "profile")
+        self.assertEqual(len(mode_rows()), 1)               # back with the drive
+        self.assertFalse([e for e in config.check(self.sess.cfg) if "init-cmds" in e or "mode" in e])
 
 
 @unittest.skipUnless(os.path.exists(os.path.expanduser("~/esi/stepperonline")), "no A6 ESI file")

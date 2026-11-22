@@ -84,6 +84,17 @@ class TestSorting(unittest.TestCase):
         # this dictionary says 16 bits, the InitCmd has one byte: the byte as it is
         self.assertEqual(generic["0x6060:00"], {"at": "PS", "object": "0x6060:00", "name": "o", "data": "08"})
 
+    def test_written_on_both_transitions_in_ecats_order(self):
+        rows = initcmds.from_esi(device([init("PS,IP", 0x2001, 0, "0100")], NO_MODE), None, "cia402").cmds
+        self.assertEqual(rows[0]["at"], "IP,PS")      # the file listed PS first; check takes IP,PS only
+
+    def test_a_later_axis_mode_is_the_profiles(self):
+        dev = device([init("PS", 0x6860, 0, "08")], NO_MODE)
+        two = {r["object"]: r for r in initcmds.from_esi(dev, None, "cia402", axes=2).cmds}
+        self.assertEqual(two["0x6860:00"].get("from"), "profile")
+        one = {r["object"]: r for r in initcmds.from_esi(dev, None, "cia402", axes=1).cmds}
+        self.assertNotEqual(one["0x6860:00"].get("from"), "profile")
+
     def test_raw_bytes_where_the_type_is_not_known(self):
         self.assertEqual(initcmds.value_of(0x8001, 1, "010203"), {"data": "01 02 03"})
 
@@ -131,6 +142,14 @@ class TestProposal(unittest.TestCase):
         self.assertTrue(any("at SO is not supported yet" in e for e in found))
         self.assertTrue(any("from must be profile or cycle-time" in e for e in found))
         self.assertTrue(any("complete access starts at subindex 0 or 1" in e for e in found))
+        rows.append({"at": "PS", "object": "0x8000:00", "complete": True, "data": "a5" * 1025})
+        self.assertTrue(any("data is longer than 1024 bytes" in e for e in config.check(cfg)))
+        rows[-1]["data"] = "a5" * 1024
+        self.assertFalse(any("0x8000:00" in e for e in config.check(cfg)))
+        rows.pop()
+        rows.append({"at": "PS", "object": "0x6860:00", "from": "profile"})   # a second axis this drive lacks
+        self.assertTrue(any("0x6860:00: from: profile is only" in e for e in config.check(cfg)))
+        rows.pop()
         rows[-3]["disabled"] = True                    # a row turned off is not checked further
         self.assertFalse(any("at SO" in e for e in config.check(cfg)))
 
@@ -243,6 +262,14 @@ class TestRecommendedOnUpdate(unittest.TestCase):
         self.assertEqual(view["0xF081:01"]["state"], "skipped")
         self.assertIn("not written by ecat", view["0x10F3:05"]["text"])
         self.assertEqual(view["0x2002:00"]["state"], "skipped")         # at PI
+        # the mode display mapped: the row is recommended, not needed (the check passes without it)
+        inputs = self.slave["process-data"]["inputs"][0]["entries"]
+        inputs.append({"object": "0x6061:00", "bits": 8, "type": "SINT", "use": "profile"})
+        with mock.patch.object(self.sess, "esi_device", return_value=self.dev):
+            view = {v["row"]["object"]: v for v in self.sess.init_cmd_view(1)}
+        self.assertEqual(view["0x6060:00"]["state"], "offered")
+        self.assertIn("recommended", view["0x6060:00"]["text"])
+        inputs.pop()
         # 0x6060 mapped: the ESI's mode command is shown as not needed
         self.slave["process-data"]["outputs"][0]["entries"].append(
             {"object": "0x6060:00", "bits": 8, "type": "SINT", "use": "profile"})
