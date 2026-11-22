@@ -453,6 +453,8 @@ a time to make it better: see [The computer's timing](#the-computers-timing).
 The documents you are reading, in the window: this one, [Getting
 started](getting-started.md) and the [reference](reference.md).
 
+![The Help tab after F1 on a slave's page](images/gui-help.png)
+
 - **F1** opens the section for what you work with: on the slave page the
   kind of slave (a CiA 402 drive, an encoder channel, ...), elsewhere the
   page. A **?** at the top right of a card opens the section for that card.

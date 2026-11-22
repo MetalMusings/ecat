@@ -7,7 +7,7 @@ program. Usage:
     scripts/docs-screenshots [--out DIR] [NAME ...]
 
 NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-test, gui-response,
-gui-status, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply, gui-timing);
+gui-status, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply, gui-timing, gui-help);
 without names all are taken. Look at them before committing: a change in
 the window can need another state than the one shown here.
 """
@@ -22,7 +22,7 @@ from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-sync", "gui-response", "gui-status",
-         "gui-settings", "gui-settings-picker", "gui-hal", "gui-hal-apply", "gui-timing"]
+         "gui-settings", "gui-settings-picker", "gui-hal", "gui-hal-apply", "gui-timing", "gui-help"]
 
 # English system messages (strerror) and no display: set before anything loads
 if os.environ.get("LC_ALL") != "C":
@@ -136,6 +136,13 @@ class Shots:
             self.settings(w)
         if self.want("gui-timing"):
             self.timing(w)
+        if self.want("gui-help"):
+            # F1 on the slave page: the section for that kind of slave, with Back
+            w.show_tab(w.bus_page)
+            w.select(0)
+            w.f1()
+            w.status("Help")
+            self.save(w, "gui-help")
         self.close(w)
 
     def timing(self, w):

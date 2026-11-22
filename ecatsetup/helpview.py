@@ -65,6 +65,7 @@ class HelpView(QWidget):
         self.text = QTextBrowser()
         self.text.setOpenLinks(False)
         self.text.anchorClicked.connect(self.link_clicked)
+        self.text.document().setDocumentMargin(14)
         if self.docs.folder:
             self.text.setSearchPaths([self.docs.folder])
         self.split.addWidget(self.text)
@@ -153,6 +154,7 @@ class HelpView(QWidget):
             md += "\n\n" + "\n".join("- [%s](#%s)" % (self.docs.sections[c].title, self.docs.sections[c].anchor)
                                      for c in s.children)
         self.text.setMarkdown(md)
+        self.text.document().setDocumentMargin(14)
         self.fit_images()
         self.text.verticalScrollBar().setValue(0)
         self.mark_current()
