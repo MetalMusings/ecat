@@ -1472,6 +1472,22 @@ class SlaveView(QWidget):
         # process data
         pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
                                   "without one; entries the profile handles have no pins.")
+        # every PDO the device has, ticked as assigned; what does not suit is marked, not
+        # hidden (pdoreq.assignment_rows)
+        self.pa_title = pd.add(label("PDO assignment: tick the PDOs to use. Each line says what it "
+                                     "gives for the profile and its modes; a PDO that excludes a "
+                                     "ticked one is unticked when you tick it.", "hint", wrap=True))
+        self.pa = table(["Use", "PDO", "Name", "What it gives"], 3)
+        self.pa.itemChanged.connect(self.pa_toggled)
+        pd.add(self.pa)
+        pa_buttons = QHBoxLayout()
+        self.pa_use = QPushButton("Use the ticked PDOs")
+        self.pa_use.clicked.connect(self.pa_apply)
+        pa_buttons.addWidget(self.pa_use)
+        self.pa_state = label("", "hint", wrap=True)
+        pa_buttons.addWidget(self.pa_state, 1)
+        pd.add(pa_buttons)
+        self.pa_rows = []
         self.pd = table(self.PD_COLUMNS, self.PIN)
         self.pd_more = QCheckBox("All columns")
         self.pd_more.setToolTip("Scale, Offset, Bit pins and Invert are shown when an entry uses "
@@ -1702,6 +1718,7 @@ class SlaveView(QWidget):
         for name in (p.pdo_sets if p else []):
             self.pdo_set.addItem("PDO assignment: " + name, name)
         self.pdo_set.setCurrentIndex(max(self.pdo_set.findData(pdo_set_in_use(s, p)), 0))
+        self.pdo_set.setVisible(bool(p and p.pdo_sets))
         self.again.setEnabled(b is not None and not win.busy)
 
         self.show_dc(s)
@@ -2210,6 +2227,74 @@ class SlaveView(QWidget):
                                              for m, v in each.items() if v.problems) or
                                    self.mode_marks.toolTip())
 
+    def show_assignment(self, s):
+        """The PDO assignment list: every PDO of the device, the ones in the file ticked."""
+        dev = self.win.session.esi_device(self.position)
+        shown = dev is not None and bool(dev.pdos) and s.get("configure-pdos", True) is not False
+        for w in (self.pa_title, self.pa, self.pa_use, self.pa_state):
+            w.setVisible(shown)
+        self.pa_rows = pdoreq.assignment_rows(s, dev) if shown else []
+        self.pa.blockSignals(True)
+        self.pa.setRowCount(0)
+        for r in self.pa_rows:
+            n = self.pa.rowCount()
+            self.pa.insertRow(n)
+            use = QTableWidgetItem("")
+            use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+            use.setCheckState(Qt.Checked if r.in_file else Qt.Unchecked)
+            self.pa.setItem(n, 0, use)
+            tip = "%s PDO%s%s" % ("Output (RxPDO)" if r.direction == "rx" else "Input (TxPDO)",
+                                  ", in the ESI file's default assignment" if r.default else "",
+                                  "; cannot be used with " + ", ".join("0x%04X" % i for i in r.excludes)
+                                  if r.excludes else "")
+            self.pa.setItem(n, 1, item("0x%04X" % r.index, font=mono(), tip=tip))
+            self.pa.setItem(n, 2, item("%s %s" % ("out" if r.direction == "rx" else "in", r.name), tip=tip))
+            self.pa.setItem(n, 3, item(r.text, colour={"ok": GREEN, "warning": AMBER}.get(r.level, GREY)))
+        fit_table(self.pa)
+        self.pa.blockSignals(False)
+        self.pa_update()
+
+    def pa_ticked(self):
+        return {r.index for n, r in enumerate(self.pa_rows)
+                if self.pa.item(n, 0) is not None and self.pa.item(n, 0).checkState() == Qt.Checked}
+
+    def pa_update(self):
+        ticked = self.pa_ticked()
+        in_file = {r.index for r in self.pa_rows if r.in_file}
+        bus = self.win.session.bus.get(self.position) is not None
+        self.pa_use.setEnabled(bus and not self.win.busy and ticked != in_file and bool(ticked))
+        self.pa_use.setToolTip("Reads the slave and takes the ticked PDOs as its process data; an "
+                               "open PDO is filled with what the profile needs. The rest of the "
+                               "slave's entry stays." if bus else
+                               "Read the bus first: the slave is read for this")
+        clash = [(a.index, b.index) for a in self.pa_rows for b in self.pa_rows
+                 if a.index < b.index and {a.index, b.index} <= ticked
+                 and (b.index in a.excludes or a.index in b.excludes)]
+        lines = []
+        if ticked != in_file:
+            lines.append("Not taken yet: press the button.")
+        lines += ["0x%04X and 0x%04X exclude each other" % c for c in clash]
+        for direction, text in (("rx", "outputs"), ("tx", "inputs")):
+            if any(r.direction == direction for r in self.pa_rows) and not any(
+                    r.direction == direction and r.index in ticked for r in self.pa_rows):
+                lines.append("no PDO ticked for the %s" % text)
+        self.pa_state.setText(" ".join(lines))
+
+    def pa_toggled(self, it):
+        if it.column() != 0 or it.row() >= len(self.pa_rows):
+            return
+        if it.checkState() == Qt.Checked:
+            r = self.pa_rows[it.row()]
+            self.pa.blockSignals(True)
+            for n, o in enumerate(self.pa_rows):
+                if o.index != r.index and (o.index in r.excludes or r.index in o.excludes):
+                    self.pa.item(n, 0).setCheckState(Qt.Unchecked)
+            self.pa.blockSignals(False)
+        self.pa_update()
+
+    def pa_apply(self):
+        self.win.assign_pdos(self.position, sorted(self.pa_ticked()))
+
     def show_ways(self, s):
         """The ways to get what the profile and its choices need, the recommended first."""
         while self.pd_ways_lay.count():
@@ -2277,6 +2362,7 @@ class SlaveView(QWidget):
             box.setVisible(bool(lines))
         self.pd_add_missing.setVisible(bool(self.pd_adds))
         self.show_ways(s)
+        self.show_assignment(s)
 
     def _pd_edit(self, action):
         """Run an edit of the slave's process data; show the reason when it is refused."""
@@ -7790,6 +7876,13 @@ class MainWindow(QMainWindow):
                  lambda notes: self.check(extra=["slave %d: proposed again: %s" % (pos, n)
                                                  for n in notes] or
                                           ["slave %d: proposed again" % pos]))
+
+    def assign_pdos(self, pos, indexes):
+        """The user ticked the slave's PDOs: the slave is read and only its PDOs replaced."""
+        text = ", ".join("0x%04X" % i for i in indexes)
+        self.run("Reading slave %d..." % pos,
+                 lambda progress: self.session.assign_pdos(pos, indexes),
+                 lambda notes: (self.changed(), self.check(extra=["slave %d: PDOs: %s" % (pos, text)])))
 
     def apply_way(self, pos, way, pdo_set=None):
         """The user chose a way to get the PDOs: the slave is read and only its PDOs replaced."""

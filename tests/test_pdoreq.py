@@ -516,6 +516,25 @@ class TestSessionWays(unittest.TestCase):
         self.assertEqual(self.calls[-1][:2], ("csp", ["hm"]))
         self.assertIn("0x6060:00", [e["object"] for e in self.slave["process-data"]["outputs"][0]["entries"]])
 
+    def test_assign_the_ticked_pdos(self):
+        from unittest import mock
+        from ecatsetup import session
+
+        def read_slave(pos, devices, mode, pdo_set=None, progress=None, extra_modes=(), way=None,
+                       profile=None, assignment=None):
+            return {}, coe.Dictionary(), proposal(self.dev, mode, extra_modes, assignment=assignment)
+        self.slave["process-data"]["outputs"][0]["entries"].append(
+            {"object": "0x2000:01", "bits": 16, "pin": "mine"})      # the user's own entry
+        with mock.patch.object(session, "read_slave", read_slave), \
+                mock.patch.object(self.sess, "esi_device", return_value=self.dev):
+            self.sess.assign_pdos(1, [0x1600, 0x1A00])
+        # an open PDO the file has keeps its entries (the status lines say what is missing)
+        self.assertEqual([e["object"] for e in self.slave["process-data"]["outputs"][0]["entries"]],
+                         ["0x6040:00", "0x2000:01"])
+        pin = next(e for e in self.slave["process-data"]["inputs"][0]["entries"] if e["object"] == "0x60F4:00")
+        self.assertEqual(pin["pin"], "my-ferror")
+        self.assertEqual(self.slave["settings"][0]["value"], 3)
+
     def test_change_to_generic_and_back(self):
         self.sess.change_profile(1, "generic")
         self.assertEqual(self.slave["profile"], "generic")
@@ -544,9 +563,18 @@ class TestA6(unittest.TestCase):
         default = next(w for w in v.ways if w.title == "the default assignment")
         self.assertEqual((default.rx, default.tx), ([0x1701], [0x1B01]))
 
-    def test_proposal_for_csp_and_homing_takes_the_fixed_pdos(self):
+    def test_proposal_for_csp_and_homing_fills_the_open_pdos(self):
+        # the open PDOs with just what is needed come before fixed PDOs (the user, 2026-11-22)
         p = proposal(self.dev, extra=["hm"], way="recommended")
-        self.assertEqual(p.pdo_way, "ready")
+        self.assertEqual(p.pdo_way, "build")
+        self.assertEqual([c.index for c in p.pdos], [0x1600, 0x1A00])
+        rx, tx = ([(e.index, e.subindex) for e in c.entries] for c in p.pdos)
+        self.assertTrue({(0x6040, 0), (0x607A, 0), (0x6060, 0)} <= set(rx), rx)
+        self.assertTrue({(0x6041, 0), (0x6064, 0), (0x6061, 0)} <= set(tx), tx)
+        self.assertEqual([s.level for s in p.status], ["ok"])
+
+    def test_the_fixed_pdos_can_still_be_chosen(self):
+        p = proposal(self.dev, extra=["hm"], way="fixed PDOs 0x1702, 0x1B02")
         self.assertEqual([c.index for c in p.pdos], [0x1702, 0x1B02])
         self.assertEqual([s.level for s in p.status], ["ok"])
 
@@ -554,13 +582,40 @@ class TestA6(unittest.TestCase):
         p = proposal(self.dev, extra=["hm"])
         self.assertEqual(p.pdo_way, "")
         self.assertEqual([c.index for c in p.pdos], [0x1701, 0x1B01])
-        self.assertEqual(p.recommendation["way"], "fixed PDOs 0x1702, 0x1B02")
+        self.assertEqual(p.recommendation["way"], "own mapping in the open PDOs")
 
     def test_several_modes_need_fixed_pdos_with_the_mode_objects(self):
         v, _ = pdoreq.cia402_verdicts(self.dev, "csp", ["hm"])
         self.assertEqual({tuple(w.rx) for w in v.ways if w.kind == "ready"},
                          {(0x1702,), (0x1703,)})
-        self.assertEqual(v.ways[-1].kind, pdoreq.BUILD)
+        self.assertEqual(v.ways[0].kind, pdoreq.BUILD)
+
+    def test_every_pdo_is_a_row_with_what_it_gives(self):
+        s = fslave([(0x1701, 2, [(0x6040, 16)])], [(0x1B01, 3, [(0x6041, 16)])])
+        s["cia402"]["modes"] = ["hm"]
+        rows = {r.index: r for r in pdoreq.assignment_rows(s, self.dev)}
+        self.assertEqual(sorted(rows), sorted(p.index for p in self.dev.pdos))
+        self.assertEqual([i for i, r in sorted(rows.items()) if r.in_file], [0x1701, 0x1B01])
+        self.assertEqual(rows[0x1701].level, "warning")
+        self.assertIn("lacks 0x6060", rows[0x1701].text)
+        self.assertEqual((rows[0x1702].level, rows[0x1B02].level), ("ok", "ok"))
+        self.assertEqual(rows[0x1600].level, "ok")
+        self.assertIn("open: filled with what CSP, HM needs", rows[0x1600].text)
+        self.assertIn(0x1702, rows[0x1701].excludes)
+
+    def test_the_chosen_pdos_are_taken_and_the_open_one_filled(self):
+        p = proposal(self.dev, extra=["hm"], assignment=[0x1600, 0x1B02])
+        self.assertEqual(p.pdo_way, "chosen")
+        self.assertEqual([(c.index, c.sm) for c in p.pdos], [(0x1600, 2), (0x1B02, 3)])
+        rx = [e.index for e in p.pdos[0].entries]
+        self.assertIn(0x6060, rx)
+        self.assertEqual([s.level for s in p.status], ["ok"])
+        self.assertIsNone(p.recommendation)
+        # what the user ticked is taken as it is, also when it lacks something
+        p = proposal(self.dev, extra=["hm"], assignment=[0x1701, 0x1B01])
+        self.assertEqual([c.index for c in p.pdos], [0x1701, 0x1B01])
+        self.assertIsNone(p.recommendation)
+        self.assertEqual(p.status[0].level, "error")
 
 
 if __name__ == "__main__":

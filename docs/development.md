@@ -3484,6 +3484,37 @@ is slave, profile, the profile's choices, then the PDOs they need.
 - Tests: `scripts/run-tests pdoreq pdoedit mdp prototype capture capturec
   guidance gui halcheck` (345); mutation-checked.
 
+### Choosing the PDOs by hand (built 2026-11-22, the user's wish)
+
+From the user's try on the A6 simulation: with homing ticked the window
+complained that 0x6060/0x6061 were missing, but the assignment could not be
+chosen again. The A6 has no predefined sets, only fixed PDOs (0x1701-0x1705,
+0x1B01-0x1B04) and open ones (0x1600, 0x1A00). The *PDO assignment* box
+offered only "the slave's own". The user: the normal way is the open PDOs,
+filled with what is needed; every PDO should be visible, with what does not
+suit marked.
+
+- `pdoreq.judge` orders its ways: the vendor's own combinations (a predefined
+  set, the default assignment) first, then the build way, then fixed PDOs
+  (`_rank`). `fit_cia402` takes the build way before fixed PDOs. The A6 with
+  CSP + HM is now recommended 0x1600/0x1A00 filled (0x6060 and 0x6061
+  added), not 0x1702/0x1B02.
+- `pdoreq.assignment_rows(slave, esi_dev)`: one `PdoRow` per PDO of the
+  ESI file (direction, fixed, default, in the file, excludes, level, text).
+  `pdoreq.assigned(esi_dev, indexes, slave)`: those PDOs with their sync
+  manager. An open one is filled (`_filled`, shared with `fit_cia402`) with
+  what the profile needs and the other chosen PDOs of its direction lack.
+- `propose(..., assignment=[indexes])` takes them as they are
+  (`pdo_way` "chosen"), with no fitting and no recommendation.
+  `Session.assign_pdos(position, indexes)` reads the slave and takes only the
+  PDO part. An open PDO the file already has keeps its entries.
+- Window: the *PDO assignment* table in the Process data card (Use / PDO /
+  Name / What it gives). Ticking a PDO unticks those it excludes. *Use the
+  ticked PDOs* needs the bus. The predefined-set box is hidden for a device
+  without sets.
+- Tests: test_pdoreq (rows, chosen PDOs, the new order on the A6, the
+  session), test_gui `test_every_pdo_can_be_ticked`; mutation-checked.
+
 ### ESI InitCmds and the drive's mode as a setting (built 2026-11-21, the user's decisions)
 
 The user: whether 0x6060/0x6061 are needed is a technical requirement of the

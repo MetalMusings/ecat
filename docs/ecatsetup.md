@@ -142,9 +142,10 @@ Choosing a slave shows:
   stay. Then *Used by LinuxCNC* (untick it for a slave that
   is only on the bus: `unused: true`, the slave is left alone, in PREOP,
   with no pins; ecat still checks at start that it is the slave the file
-  says), the PDO assignment (the box shows the ESI's
-  predefined assignment the file uses; choosing another proposes the slave
-  again with it, after asking), `configure-pdos`, the Sync
+  says), the PDO assignment (for a device whose ESI file has predefined
+  assignments, the box shows the one the file uses; choosing another proposes
+  the slave again with it, after asking; the box is hidden for a device
+  without them), `configure-pdos`, the Sync
   choice (free run, one of the slave's DC modes, or DC mode with user settings; see
   [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift (and,
   for a mode that uses SYNC1, a row with SYNC1 every n SYNC0 cycles and its
@@ -213,7 +214,8 @@ Choosing a slave shows:
   a mode the drive does not report in 0x6502) or *unknown*. When the
   mapping in the file lacks something, *Ways to get this* under the table
   lists what the device offers, the recommended one first: a predefined
-  assignment, fixed PDOs, or an own mapping in the open PDOs, and for a
+  assignment, then an own mapping in the open PDOs (just what is needed),
+  then fixed PDOs (which may bring entries nobody asked for), and for a
   modular device the assignment that gives a channel its index, external
   latch or more data bytes. Nothing changes until you press *Use this*: the
   slave is read and only its PDOs are replaced (pins of objects that stay
@@ -221,6 +223,17 @@ Choosing a slave shows:
   itself never changes the assignment on its own: it names the better one
   in its notes ("recommended PDO mapping ... not applied until you choose
   it").
+  Above the table, *PDO assignment* lists every PDO in the device's ESI
+  file, with the ones in the file ticked. Each line says what the PDO gives
+  for the profile and its modes: green when it has what they need (an open
+  PDO: it is filled with it), amber when it lacks something (*fixed; lacks
+  0x6060 Modes of operation*) or cannot be changed. Unsuitable PDOs are
+  shown, not hidden. Ticking a PDO unticks the ones it excludes. *Use the
+  ticked PDOs* reads the slave and takes them as its process data. An open
+  PDO the file already has keeps its entries; a new one is filled with what
+  the profile needs. Pins of objects that stay keep their names, and the rest
+  of the slave's entry stays. The list is not shown when
+  *Write the PDO mapping to the slave* is off.
   Under the table, lines say what the mapping lacks for the drive's
   modes (red: *cannot run as CiA 402 in CSP: 0x607A Target position
   missing*; grey: the mode objects 0x6060/0x6061 are not mapped, which is

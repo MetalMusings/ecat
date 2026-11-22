@@ -48,7 +48,7 @@ def read_modules(pos, coe, index):
 
 
 def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=(), way=None,
-               profile=None):
+               profile=None, assignment=None):
     """Read one slave and propose its configuration: (info, coe, proposal)."""
     info = tool.slave_info(pos)
     sii = sii_mod.parse(tool.sii(pos))
@@ -76,7 +76,7 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=
         detected = read_modules(pos, listed, 0xF050)
         configured = read_modules(pos, listed, 0xF030)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set, extra_modes,
-                        way, profile, modules=detected)
+                        way, profile, modules=detected, assignment=assignment)
     p.dc_info.sync = dcinfo.read_sync(pos, known)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
@@ -422,6 +422,36 @@ class Session:
 
     # what the PDO part of a slave's entry is made of: replaced together by a way or a profile
     PDO_KEYS = ("process-data", "encoders", "serial", "configure-pdos")
+
+    def assign_pdos(self, position, indexes):
+        """Read the slave and take the PDOs the user ticked (`indexes`, the device's PDO
+        numbers) as its process data: an open PDO the file already has keeps its entries,
+        a new one is filled with what the profile needs; the rest of its entry stays.
+        Returns the proposal's notes."""
+        old = self.slave(position)
+        if old is None:
+            raise ValueError("slave %d is not in the configuration" % position)
+        mode = self._slave_mode(position)
+        info, coe, p = read_slave(position, self.esi_devices, mode,
+                                  extra_modes=self._slave_modes(position, mode),
+                                  profile=old.get("profile"), assignment=list(indexes))
+        self.bus[position] = BusSlave(info, coe, p)
+        new = config.slave_from_proposal(p, name=old.get("name"))
+        dev = self.esi_device(position)
+        fixed = {d.index for d in dev.pdos if d.fixed} if dev else set()
+        had = {(key, str(pdo.get("pdo")).upper()): pdo
+               for key, pdos in (old.get("process-data") or {}).items() for pdo in pdos or []}
+        for key, pdos in (new.get("process-data") or {}).items():
+            for pdo in pdos or []:
+                was = had.get((key, str(pdo.get("pdo")).upper()))
+                try:
+                    index = int(str(pdo.get("pdo")), 16)
+                except ValueError:
+                    continue
+                if was is not None and index not in fixed:
+                    pdo["entries"] = copy.deepcopy(was.get("entries") or [])
+        _take_pdos(old, new)
+        return list(p.notes)
 
     def apply_pdos(self, position, way=None, pdo_set=None):
         """Read the slave and take only its PDOs (process data, encoder and serial

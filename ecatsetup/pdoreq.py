@@ -135,6 +135,14 @@ def _combos(pdos, need, direction):
     return out
 
 
+def _rank(w):
+    return 0 if w.kind == READY and (w.set_name or w.sms is None and w.title == DEFAULT_WAY) \
+        else 1 if w.kind == BUILD else 2
+
+
+DEFAULT_WAY = "the default assignment"
+
+
 def _way(title, rx, tx, req, sms=None):
     lacks = sorted((req.good_rx | req.good_tx) - (_have(rx) | _have(tx)))
     return Way(READY, title, [p.index for p in rx], [p.index for p in tx], sms=sms, lacks_good=lacks)
@@ -170,7 +178,7 @@ def judge(req, esi_dev, supported=None, mode_bits=()):
         candidates.append(("predefined set \"%s\"" % s.name, members, s.sms, s.name))
     defaults = [p for p in pdos if p.sm is not None]
     if defaults:
-        candidates.append(("the default assignment", defaults, None, None))
+        candidates.append((DEFAULT_WAY, defaults, None, None))
     for title, members, sms, name in candidates:
         rx = [p for p in members if p.direction == "rx"]
         tx = [p for p in members if p.direction == "tx"]
@@ -220,6 +228,10 @@ def judge(req, esi_dev, supported=None, mode_bits=()):
         v.ways.append(Way(BUILD, "own mapping in the open PDOs", sorted(req.rx), sorted(req.tx)))
         if v.status == UNKNOWN:
             v.status = BUILD
+        # the order to offer them in: the vendor's own combinations (a predefined set, the
+        # default assignment) first, then the open PDOs filled with just what is needed,
+        # then fixed PDOs, which bring entries nobody asked for
+        v.ways.sort(key=_rank)
     elif v.status != READY:
         v.status = UNKNOWN if all("does not say" in t for t in problems) else IMPOSSIBLE
         v.problems += problems
@@ -350,7 +362,8 @@ def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=Non
         return wanted if wanted is not None else (sms[0] if sms else (2 if direction == "rx" else 3))
 
     ready = [w for w in v.ways if w.kind == READY and choose in (None, w.title)]
-    if ready:
+    if ready and (_rank(ready[0]) == 0 or choose is not None or not any(
+            w.kind == BUILD for w in v.ways)):
         w = ready[0]
         pdos = []
         if w.sms:
@@ -375,29 +388,146 @@ def fit_cia402(esi_dev, chosen, mode, modes=(), axes=1, supported=None, data=Non
         if need <= mapped:
             continue
         target = next(p for p in esi_dev.pdos if p.direction == direction and not p.fixed)
-        # what the open PDO holds by default stays if it is needed, then what is
-        # missing, then what is only good to have; the PDO's limit cuts the last
         base = next((p for p in chosen if p.index == target.index), target)
-        entries = [e for e in base.entries if (e.index, e.subindex) in need]
-        entries += [e for e in base.entries if (e.index, e.subindex) not in need and e.index]
-        for index, sub in sorted(need | good):
-            if (index, sub) in {(e.index, e.subindex) for e in entries}:
-                continue
-            spec = _objects(data, index, axes)
-            if spec is None:
-                continue
-            flag = "R" if direction == "rx" else "T"
-            if esi_dev.mapping and flag not in esi_dev.mapping.get(index, ""):
-                continue
-            entries.append(_new_entry(index, sub, spec))
-        # the needed ones first, so that the limit never cuts them
-        entries.sort(key=lambda e: (e.index, e.subindex) not in need)
-        limit = esi_dev.max_entries.get(target.index)
-        if limit is not None:
-            entries = entries[:limit]
         pdos = [p for p in pdos if p.direction != direction]
-        pdos.append(dataclasses.replace(target, sm=sm_of(direction), entries=entries))
+        pdos.append(dataclasses.replace(target, sm=sm_of(direction),
+                                        entries=_filled(esi_dev, base, need, good, axes, data)))
     return Plan(pdos, build[0], v)
+
+
+def _filled(esi_dev, base, need, good, axes=1, data=None):
+    """The entries of an open PDO filled for a requirement: what it holds by default
+    stays if it is needed, then what is missing, then what is only good to have; the
+    PDO's limit cuts the last (the needed ones come first, so it never cuts them)."""
+    data = data or load("cia402")
+    direction = base.direction
+    entries = [e for e in base.entries if (e.index, e.subindex) in need]
+    entries += [e for e in base.entries if (e.index, e.subindex) not in need and e.index]
+    for index, sub in sorted(need | good):
+        if (index, sub) in {(e.index, e.subindex) for e in entries}:
+            continue
+        spec = _objects(data, index, axes)
+        if spec is None:
+            continue
+        flag = "R" if direction == "rx" else "T"
+        if esi_dev.mapping and flag not in esi_dev.mapping.get(index, ""):
+            continue
+        entries.append(_new_entry(index, sub, spec))
+    entries.sort(key=lambda e: (e.index, e.subindex) not in need)
+    limit = esi_dev.max_entries.get(base.index)
+    return entries[:limit] if limit is not None else entries
+
+
+# --------------------------------------------------------------------------
+# choosing the PDOs by hand (the window's PDO assignment list): every PDO of the
+# device shown, what does not suit marked, never hidden
+
+@dataclass
+class PdoRow:
+    index: int
+    direction: str           # "rx" or "tx"
+    name: str
+    fixed: bool
+    default: bool            # in the ESI file's default assignment
+    in_file: bool            # assigned in the slave's process data now
+    excludes: list           # PDO indexes it cannot be assigned with
+    level: str               # "ok", "warning" or "info" (nothing to judge it by)
+    text: str                # what it gives or lacks
+
+
+def slave_requirement(slave, data=None):
+    """(Requirement, its modes' names) of a slave's profile and choices, or (None, [])."""
+    if not isinstance(slave, dict) or slave.get("profile") != "cia402":
+        return None, []
+    data = data or load("cia402")
+    c = slave.get("cia402") or {}
+    mode = c.get("mode")
+    if mode not in data["modes"]:
+        return None, []
+    modes = [m for m in c.get("modes") or [] if m != mode and m in data["modes"]]
+    return cia402(mode, modes, len(c.get("axes") or [1]), data), [mode] + modes
+
+
+def assignment_rows(slave, esi_dev):
+    """Every PDO of the device for the window's PDO assignment list: [PdoRow], outputs
+    first, each judged against what the slave's profile and choices need."""
+    if esi_dev is None:
+        return []
+    req, modes = slave_requirement(slave)
+    names = ", ".join(m.upper() for m in modes)
+    in_file = {(d, i) for d, i, _s, _e in _file_pdos(slave or {})}
+    rows = []
+    for direction in ("rx", "tx"):
+        need = (req.rx if direction == "rx" else req.tx) if req else set()
+        good = (req.good_rx if direction == "rx" else req.good_tx) if req else set()
+        flag = "R" if direction == "rx" else "T"
+        for p in esi_dev.pdos:
+            if p.direction != direction:
+                continue
+            row = PdoRow(p.index, direction, p.name, p.fixed, p.sm is not None,
+                         (direction, p.index) in in_file, list(p.excludes), "info", "")
+            if p.fixed:
+                row.text = "fixed: %d entries" % len([e for e in p.entries if e.index])
+                if req is not None:
+                    lacks = sorted(need - _have([p]))
+                    extra = sorted(good - _have([p]))
+                    if lacks:
+                        row.level = "warning"
+                        row.text = "fixed; lacks %s" % ", ".join(object_name(i) for i, _s in lacks)
+                    else:
+                        row.level = "ok"
+                        row.text = "fixed; has what %s needs%s" % (
+                            names, "; not %s (good to have)" % ", ".join(object_name(i) for i, _s in extra)
+                            if extra else "")
+            else:
+                if not esi_dev.pdo_config:
+                    row.level = "warning"
+                    row.text = ("open, but the ESI file does not let the master change it "
+                                "(PdoConfig): its entries stay as the device has them")
+                elif req is None:
+                    row.text = "open: its entries can be changed (Add object, Remove entry)"
+                else:
+                    bad = [i for i, _s in sorted(need) if esi_dev.mapping and
+                           flag not in esi_dev.mapping.get(i, "")]
+                    limit = esi_dev.max_entries.get(p.index)
+                    if bad:
+                        row.level = "warning"
+                        row.text = "open; cannot map %s" % ", ".join(object_name(i) for i in bad)
+                    elif limit is not None and len(need) > limit:
+                        row.level = "warning"
+                        row.text = "open; takes %d entries, %d are needed" % (limit, len(need))
+                    else:
+                        row.level = "ok"
+                        row.text = "open: filled with what %s needs" % names
+            rows.append(row)
+    return rows
+
+
+def assigned(esi_dev, indexes, slave=None):
+    """The device's PDOs `indexes` (the user's choice) as EsiPdos with their sync
+    manager, an open one filled with what the slave's profile needs (when the ESI file
+    lets the master change it)."""
+    req, _modes = slave_requirement(slave)
+    axes = len(((slave or {}).get("cia402") or {}).get("axes") or [1])
+    sms = {}
+    for p in esi_dev.pdos:
+        if p.sm is not None:
+            sms.setdefault(p.direction, p.sm)
+    out = []
+    for p in esi_dev.pdos:
+        if p.index not in indexes:
+            continue
+        sm = sms.get(p.direction, 2 if p.direction == "rx" else 3)
+        q = dataclasses.replace(p, sm=sm)
+        if not p.fixed and esi_dev.pdo_config and req is not None:
+            need = req.rx if p.direction == "rx" else req.tx
+            # what the other chosen PDOs of the direction give is not mapped twice
+            others = _have([o for o in esi_dev.pdos if o.index in indexes and o.index != p.index
+                            and o.direction == p.direction])
+            good = req.good_rx if p.direction == "rx" else req.good_tx
+            q = dataclasses.replace(q, entries=_filled(esi_dev, p, need - others, good - others, axes))
+        out.append(q)
+    return out
 
 
 def _new_entry(index, sub, spec):
