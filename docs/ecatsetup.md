@@ -223,17 +223,19 @@ Choosing a slave shows:
   itself never changes the assignment on its own: it names the better one
   in its notes ("recommended PDO mapping ... not applied until you choose
   it").
-  Above the table, *PDO assignment* lists every PDO in the device's ESI
-  file, with the ones in the file ticked. Each line says what the PDO gives
-  for the profile and its modes: green when it has what they need (an open
-  PDO: it is filled with it), amber when it lacks something (*fixed; lacks
-  0x6060 Modes of operation*) or cannot be changed. Unsuitable PDOs are
-  shown, not hidden. Ticking a PDO unticks the ones it excludes. *Use the
-  ticked PDOs* reads the slave and takes them as its process data. An open
-  PDO the file already has keeps its entries; a new one is filled with what
-  the profile needs. Pins of objects that stay keep their names, and the rest
-  of the slave's entry stays. The list is not shown when
-  *Write the PDO mapping to the slave* is off.
+  Above the table, *Output PDO* and *Input PDO* offer every PDO of that
+  direction in the device's ESI file, the file's one chosen. Each line says
+  what the PDO gives for the profile and its modes: green when it has what
+  they need (an open PDO: it is filled with it), amber when it lacks
+  something (*fixed; lacks 0x6060 Modes of operation*) or cannot be changed.
+  Unsuitable PDOs are shown, not hidden. Choosing one takes it at once (from
+  what was read from the slave; the bus is not read again). An open PDO the
+  file already has keeps its entries; a new one is filled with what the
+  profile needs. Pins of objects that stay keep their names, and the rest of
+  the slave's entry stays. Where the file has several PDOs of a direction,
+  the box says so ("0x1A00 + 0x1A01 (as in the file)"); *Add PDO...* adds
+  one more. The boxes are not shown when *Write the PDO mapping to the
+  slave* is off.
   Under the table, lines say what the mapping lacks for the drive's
   modes (red: *cannot run as CiA 402 in CSP: 0x607A Target position
   missing*; grey: the mode objects 0x6060/0x6061 are not mapped, which is

@@ -3508,12 +3508,21 @@ suit marked.
   (`pdo_way` "chosen"), with no fitting and no recommendation.
   `Session.assign_pdos(position, indexes)` reads the slave and takes only the
   PDO part. An open PDO the file already has keeps its entries.
-- Window: the *PDO assignment* table in the Process data card (Use / PDO /
-  Name / What it gives). Ticking a PDO unticks those it excludes. *Use the
-  ticked PDOs* needs the bus. The predefined-set box is hidden for a device
-  without sets.
+- Window: *Output PDO* / *Input PDO* boxes in the Process data card (the
+  user found a table too large: boxes as for the mode). Choosing one takes it
+  at once. The predefined-set box is hidden for a device without sets.
+- Speed (the user: a change took several seconds, the first scan long):
+  `read_slave` waited the whole 20 s of `tool.sdos_settled` for a slave
+  without SDO information (the A6: SII CoE details 0x0D, bit 1 clear), whose
+  listing stays empty. `session.sdo_info(sii)` skips the wait for such a
+  slave. Plasma bus with the A6 simulation: scan 22 s -> 2.4 s. The proposal
+  keeps what was read (`Proposal.reads`, not a field), so `assign_pdos`
+  proposes again without the bus (5 ms). `measured._read` parsed its YAML
+  files for every slave at every check; now cached by mtime and size. A
+  change in the window: 0.55 -> 0.25 s, the rest is Qt drawing.
 - Tests: test_pdoreq (rows, chosen PDOs, the new order on the A6, the
-  session), test_gui `test_every_pdo_can_be_ticked`; mutation-checked.
+  session without the bus, `sdo_info`), test_gui `test_every_pdo_can_be_chosen`,
+  `test_several_pdos_of_a_direction_are_kept_as_they_are`; mutation-checked.
 
 ### ESI InitCmds and the drive's mode as a setting (built 2026-11-21, the user's decisions)
 

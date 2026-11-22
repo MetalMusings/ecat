@@ -1615,27 +1615,34 @@ class TestPdoEditing(WindowBase):
         self.assertEqual(calls[0][0], 1)
         self.assertTrue(calls[0][1] or calls[0][2])
 
-    def test_every_pdo_can_be_ticked(self):
-        # the user's wish 2026-11-22: choose among the PDOs there are, the unsuitable marked
+    def test_every_pdo_can_be_chosen(self):
+        # the user's wish 2026-11-22: choose among the PDOs there are, the unsuitable marked,
+        # taken at once
         w, page, s = self.page([(0x1701, 2, [(0x6040, 16), (0x607A, 32)])],
                                [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
         self.assertFalse(page.pa.isHidden())
-        self.assertEqual([page.pa.item(n, 1).text() for n in range(page.pa.rowCount())],
-                         ["0x1600", "0x1701", "0x1702", "0x1A00"])
-        ticked = [page.pa.item(n, 1).text() for n in range(page.pa.rowCount())
-                  if page.pa.item(n, 0).checkState() == gui.Qt.Checked]
-        self.assertEqual(ticked, ["0x1701", "0x1A00"])
-        self.assertIn("lacks 0x607A", page.pa.item(2, 3).text())      # shown, not hidden
-        self.assertFalse(page.pa_use.isEnabled())                      # nothing changed yet
-        page.pa.item(2, 0).setCheckState(gui.Qt.Checked)               # 0x1702 excludes 0x1701
-        self.assertEqual(page.pa.item(1, 0).checkState(), gui.Qt.Unchecked)
-        self.assertTrue(page.pa_use.isEnabled())
-        self.assertIn("Not taken yet", page.pa_state.text())
+        rx, tx = page.pa_boxes["rx"], page.pa_boxes["tx"]
+        self.assertEqual([rx.itemData(i) for i in range(rx.count())], [0x1600, 0x1701, 0x1702])
+        self.assertEqual(rx.currentData(), 0x1701)
+        self.assertEqual(tx.currentData(), 0x1A00)
+        n = rx.findData(0x1702)
+        self.assertIn("lacks 0x607A", rx.itemText(n))                  # shown, not hidden
+        self.assertEqual(rx.itemData(n, gui.Qt.ForegroundRole).color(), gui.AMBER)
         calls = []
         with mock.patch.object(w.session, "assign_pdos", lambda pos, idx: calls.append((pos, idx)) or []), \
                 mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))):
-            page.pa_use.click()
-        self.assertEqual(calls, [(1, [0x1702, 0x1A00])])
+            rx.setCurrentIndex(rx.findData(0x1701))
+            rx.activated.emit(rx.currentIndex())                       # the same: nothing
+            rx.setCurrentIndex(rx.findData(0x1600))
+            rx.activated.emit(rx.currentIndex())
+        self.assertEqual(calls, [(1, [0x1600, 0x1A00])])
+
+    def test_several_pdos_of_a_direction_are_kept_as_they_are(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)]), (0x1701, 2, [(0x607A, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        rx = page.pa_boxes["rx"]
+        self.assertEqual(rx.itemText(0), "0x1600 + 0x1701 (as in the file)")
+        self.assertIsNone(rx.currentData())
 
     def test_no_ways_when_the_mapping_is_enough(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x607A, 32)])],

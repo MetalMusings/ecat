@@ -1472,21 +1472,24 @@ class SlaveView(QWidget):
         # process data
         pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
                                   "without one; entries the profile handles have no pins.")
-        # every PDO the device has, ticked as assigned; what does not suit is marked, not
-        # hidden (pdoreq.assignment_rows)
-        self.pa_title = pd.add(label("PDO assignment: tick the PDOs to use. Each line says what it "
-                                     "gives for the profile and its modes; a PDO that excludes a "
-                                     "ticked one is unticked when you tick it.", "hint", wrap=True))
-        self.pa = table(["Use", "PDO", "Name", "What it gives"], 3)
-        self.pa.itemChanged.connect(self.pa_toggled)
+        # the PDO of each direction, chosen from every PDO the device has; each says what it
+        # gives, what does not suit is marked, not hidden (pdoreq.assignment_rows)
+        self.pa = QWidget()
+        pa_form = QFormLayout(self.pa)
+        pa_form.setContentsMargins(0, 0, 0, 0)
+        self.pa_boxes = {}
+        for direction, text in (("rx", "Output PDO"), ("tx", "Input PDO")):
+            box = QuietCombo()
+            box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            box.setMinimumContentsLength(30)
+            box.setToolTip("The device's %s PDOs, each with what it gives for the profile and its "
+                           "modes. Choosing one takes it at once (pins of objects that stay keep "
+                           "their names); an open PDO is filled with what the profile needs."
+                           % ("output (RxPDO)" if direction == "rx" else "input (TxPDO)"))
+            box.activated.connect(lambda _i, d=direction: self.pa_chosen(d))
+            self.pa_boxes[direction] = box
+            pa_form.addRow(text, box)
         pd.add(self.pa)
-        pa_buttons = QHBoxLayout()
-        self.pa_use = QPushButton("Use the ticked PDOs")
-        self.pa_use.clicked.connect(self.pa_apply)
-        pa_buttons.addWidget(self.pa_use)
-        self.pa_state = label("", "hint", wrap=True)
-        pa_buttons.addWidget(self.pa_state, 1)
-        pd.add(pa_buttons)
         self.pa_rows = []
         self.pd = table(self.PD_COLUMNS, self.PIN)
         self.pd_more = QCheckBox("All columns")
@@ -2228,72 +2231,50 @@ class SlaveView(QWidget):
                                    self.mode_marks.toolTip())
 
     def show_assignment(self, s):
-        """The PDO assignment list: every PDO of the device, the ones in the file ticked."""
+        """The PDO choice per direction: every PDO of the device, the file's chosen."""
         dev = self.win.session.esi_device(self.position)
         shown = dev is not None and bool(dev.pdos) and s.get("configure-pdos", True) is not False
-        for w in (self.pa_title, self.pa, self.pa_use, self.pa_state):
-            w.setVisible(shown)
+        self.pa.setVisible(shown)
         self.pa_rows = pdoreq.assignment_rows(s, dev) if shown else []
-        self.pa.blockSignals(True)
-        self.pa.setRowCount(0)
-        for r in self.pa_rows:
-            n = self.pa.rowCount()
-            self.pa.insertRow(n)
-            use = QTableWidgetItem("")
-            use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-            use.setCheckState(Qt.Checked if r.in_file else Qt.Unchecked)
-            self.pa.setItem(n, 0, use)
-            tip = "%s PDO%s%s" % ("Output (RxPDO)" if r.direction == "rx" else "Input (TxPDO)",
-                                  ", in the ESI file's default assignment" if r.default else "",
-                                  "; cannot be used with " + ", ".join("0x%04X" % i for i in r.excludes)
-                                  if r.excludes else "")
-            self.pa.setItem(n, 1, item("0x%04X" % r.index, font=mono(), tip=tip))
-            self.pa.setItem(n, 2, item("%s %s" % ("out" if r.direction == "rx" else "in", r.name), tip=tip))
-            self.pa.setItem(n, 3, item(r.text, colour={"ok": GREEN, "warning": AMBER}.get(r.level, GREY)))
-        fit_table(self.pa)
-        self.pa.blockSignals(False)
-        self.pa_update()
-
-    def pa_ticked(self):
-        return {r.index for n, r in enumerate(self.pa_rows)
-                if self.pa.item(n, 0) is not None and self.pa.item(n, 0).checkState() == Qt.Checked}
-
-    def pa_update(self):
-        ticked = self.pa_ticked()
-        in_file = {r.index for r in self.pa_rows if r.in_file}
         bus = self.win.session.bus.get(self.position) is not None
-        self.pa_use.setEnabled(bus and not self.win.busy and ticked != in_file and bool(ticked))
-        self.pa_use.setToolTip("Reads the slave and takes the ticked PDOs as its process data; an "
-                               "open PDO is filled with what the profile needs. The rest of the "
-                               "slave's entry stays." if bus else
-                               "Read the bus first: the slave is read for this")
-        clash = [(a.index, b.index) for a in self.pa_rows for b in self.pa_rows
-                 if a.index < b.index and {a.index, b.index} <= ticked
-                 and (b.index in a.excludes or a.index in b.excludes)]
-        lines = []
-        if ticked != in_file:
-            lines.append("Not taken yet: press the button.")
-        lines += ["0x%04X and 0x%04X exclude each other" % c for c in clash]
-        for direction, text in (("rx", "outputs"), ("tx", "inputs")):
-            if any(r.direction == direction for r in self.pa_rows) and not any(
-                    r.direction == direction and r.index in ticked for r in self.pa_rows):
-                lines.append("no PDO ticked for the %s" % text)
-        self.pa_state.setText(" ".join(lines))
+        for direction, box in self.pa_boxes.items():
+            rows = [r for r in self.pa_rows if r.direction == direction]
+            in_file = [r for r in rows if r.in_file]
+            box.blockSignals(True)
+            box.clear()
+            if len(in_file) != 1:
+                # several PDOs of the direction in the file (or none): kept as they are
+                box.addItem(" + ".join("0x%04X" % r.index for r in in_file) + " (as in the file)"
+                            if in_file else "none", None)
+            for r in rows:
+                box.addItem("0x%04X  %s: %s" % (r.index, r.name, r.text), r.index)
+                n = box.count() - 1
+                box.setItemData(n, QBrush({"ok": GREEN, "warning": AMBER}.get(r.level, GREY)),
+                                Qt.ForegroundRole)
+                box.setItemData(n, "%s%s%s" % (
+                    r.text, "\nIn the ESI file's default assignment" if r.default else "",
+                    "\nCannot be used with " + ", ".join("0x%04X" % i for i in r.excludes)
+                    if r.excludes else ""), Qt.ToolTipRole)
+            current = max(box.findData(in_file[0].index) if len(in_file) == 1 else 0, 0)
+            box.setCurrentIndex(current)
+            level = next((r.level for r in rows if len(in_file) == 1 and r is in_file[0]), "info")
+            pal = box.palette()
+            pal.setColor(QPalette.ButtonText, {"ok": GREEN, "warning": AMBER}.get(level, GREY)
+                         if level != "info" else self.palette().color(QPalette.ButtonText))
+            box.setPalette(pal)
+            box.setEnabled(bus and not self.win.busy and bool(rows))
+            box.blockSignals(False)
 
-    def pa_toggled(self, it):
-        if it.column() != 0 or it.row() >= len(self.pa_rows):
+    def pa_chosen(self, direction):
+        """A PDO chosen for one direction: taken at once, the other direction as it is."""
+        box = self.pa_boxes[direction]
+        index = box.currentData()
+        if index is None:
             return
-        if it.checkState() == Qt.Checked:
-            r = self.pa_rows[it.row()]
-            self.pa.blockSignals(True)
-            for n, o in enumerate(self.pa_rows):
-                if o.index != r.index and (o.index in r.excludes or r.index in o.excludes):
-                    self.pa.item(n, 0).setCheckState(Qt.Unchecked)
-            self.pa.blockSignals(False)
-        self.pa_update()
-
-    def pa_apply(self):
-        self.win.assign_pdos(self.position, sorted(self.pa_ticked()))
+        keep = [r.index for r in self.pa_rows if r.in_file and r.direction != direction]
+        if [r.index for r in self.pa_rows if r.in_file and r.direction == direction] == [index]:
+            return
+        self.win.assign_pdos(self.position, sorted(keep + [index]))
 
     def show_ways(self, s):
         """The ways to get what the profile and its choices need, the recommended first."""

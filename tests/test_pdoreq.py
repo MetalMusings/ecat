@@ -528,12 +528,29 @@ class TestSessionWays(unittest.TestCase):
         with mock.patch.object(session, "read_slave", read_slave), \
                 mock.patch.object(self.sess, "esi_device", return_value=self.dev):
             self.sess.assign_pdos(1, [0x1600, 0x1A00])
+            # what was read is kept: the next choice needs no bus
+            self.sess.bus[1].info = {"position": 1, "dc": False}
+            self.sess.bus[1].proposal.reads = {"sii": drive_sii(), "device_type": 0x20192,
+                                               "drive_modes": 0x1AD, "dev": self.dev, "exact": True,
+                                               "detected": None, "configured": None}
+            with mock.patch.object(session, "read_slave", side_effect=AssertionError("bus read")):
+                self.sess.assign_pdos(1, [0x1600, 0x1A00])
         # an open PDO the file has keeps its entries (the status lines say what is missing)
         self.assertEqual([e["object"] for e in self.slave["process-data"]["outputs"][0]["entries"]],
                          ["0x6040:00", "0x2000:01"])
         pin = next(e for e in self.slave["process-data"]["inputs"][0]["entries"] if e["object"] == "0x60F4:00")
         self.assertEqual(pin["pin"], "my-ferror")
         self.assertEqual(self.slave["settings"][0]["value"], 3)
+
+    def test_no_wait_for_a_dictionary_the_slave_does_not_give(self):
+        from ecatsetup import session
+        sii = drive_sii()
+        sii.coe_details = 0x0D          # SDO, PDO assign/config; no SDO information (the A6)
+        self.assertFalse(session.sdo_info(sii))
+        sii.coe_details = 0x2F
+        self.assertTrue(session.sdo_info(sii))
+        sii.coe_details = 0             # not filled in: look as before
+        self.assertTrue(session.sdo_info(sii))
 
     def test_change_to_generic_and_back(self):
         self.sess.change_profile(1, "generic")

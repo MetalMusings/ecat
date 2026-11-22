@@ -11,6 +11,7 @@ Only the periods that were tried count: a result "ok at 125 us" and
 "refused at 100 us" say nothing about 110 us.
 """
 
+import copy
 import datetime
 import glob
 import os
@@ -28,13 +29,26 @@ def user_file():
     return os.path.join(d, "sync0.yaml")
 
 
+_cache = {}     # path -> ((mtime, size), entries): the window checks every slave after each change
+
+
 def _read(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return []
+    stamp = (st.st_mtime_ns, st.st_size)
+    hit = _cache.get(path)
+    if hit is not None and hit[0] == stamp:
+        return copy.deepcopy(hit[1])
     try:
         with open(path) as f:
             data = yaml.safe_load(f) or []
     except (OSError, yaml.YAMLError):
         return []
-    return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
+    out = [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
+    _cache[path] = (stamp, out)
+    return copy.deepcopy(out)
 
 
 def _key(entry):

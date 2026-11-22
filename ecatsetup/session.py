@@ -47,13 +47,22 @@ def read_modules(pos, coe, index):
     return out
 
 
+def sdo_info(sii):
+    """Whether the slave lists its object dictionary (SII CoE details bit 1, ETG.2010);
+    True when the SII leaves the CoE details empty."""
+    return not sii.coe_details or bool(sii.coe_details & 0x02)
+
+
 def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=(), way=None,
                profile=None, assignment=None):
     """Read one slave and propose its configuration: (info, coe, proposal)."""
     info = tool.slave_info(pos)
     sii = sii_mod.parse(tool.sii(pos))
-    coe = coe_mod.Dictionary(tool.sdos_settled(pos, progress=progress)) if sii.has_coe \
-        else coe_mod.Dictionary()
+    # a slave whose SII says it has no SDO information (such as StepperOnline's A6) gives
+    # the master no dictionary to list: waiting for one to settle would only run out the
+    # timeout (20 s)
+    coe = coe_mod.Dictionary(tool.sdos_settled(pos, progress=progress)) \
+        if sii.has_coe and sdo_info(sii) else coe_mod.Dictionary()
     dev, exact = esi.find(esi_devices, sii.vendor_id, sii.product_code, sii.revision)
     # what the slave has: its own dictionary, or, when it gives none (no SDO
     # information, such as StepperOnline's A6), the ESI file's
@@ -77,6 +86,9 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=
         configured = read_modules(pos, listed, 0xF030)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set, extra_modes,
                         way, profile, modules=detected, assignment=assignment)
+    # what was read, so that the PDOs can be proposed again without the bus (assign_pdos)
+    p.reads = {"sii": sii, "device_type": device_type, "drive_modes": modes, "dev": dev,
+               "exact": exact, "detected": detected, "configured": configured}
     p.dc_info.sync = dcinfo.read_sync(pos, known)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
@@ -432,9 +444,24 @@ class Session:
         if old is None:
             raise ValueError("slave %d is not in the configuration" % position)
         mode = self._slave_mode(position)
-        info, coe, p = read_slave(position, self.esi_devices, mode,
-                                  extra_modes=self._slave_modes(position, mode),
-                                  profile=old.get("profile"), assignment=list(indexes))
+        b = self.bus.get(position)
+        reads = getattr(b.proposal, "reads", None) if b is not None else None
+        if reads is not None:
+            # proposed again from what was read: no bus traffic, at once
+            info, coe = b.info, b.coe
+            p = propose.propose(info, reads["sii"], coe, reads["device_type"], reads["drive_modes"],
+                                reads["dev"], reads["exact"], mode, None,
+                                self._slave_modes(position, mode), None, old.get("profile"),
+                                modules=reads["detected"], assignment=list(indexes))
+            if reads["detected"] is not None:
+                propose.add_modules(p, reads["detected"], reads["configured"])
+            was = b.proposal
+            p.reads, p.dc_info.sync = reads, was.dc_info.sync
+            p.max_velocity, p.pp_limits = was.max_velocity, was.pp_limits
+        else:
+            info, coe, p = read_slave(position, self.esi_devices, mode,
+                                      extra_modes=self._slave_modes(position, mode),
+                                      profile=old.get("profile"), assignment=list(indexes))
         self.bus[position] = BusSlave(info, coe, p)
         new = config.slave_from_proposal(p, name=old.get("name"))
         dev = self.esi_device(position)
