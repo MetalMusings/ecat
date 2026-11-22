@@ -570,8 +570,8 @@ convenience lcec's drivers give.
 | `mdp`, `generic` | digital I/O (`el1xxx`, `el2xxx`, `el2202`, `digitalcombo`, `easyio`, `epocat`, `ex260`, `ep9214`), status bits (`el95xx`, `el9410`), `passive` | Done |
 | Encoder (MDP 511) | `el5101`, `el5151`, `el5152`, the encoder channels of `el7342`/`em7004` | Done |
 | `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Built (`cia402.axes`, objects 0x800 apart, pins per axis); not tried on such a drive. |
-| Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog terminals](component.md#analog-inputs-and-outputs)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
-| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale, error reset (HAL lines) and lcec modParams are a quirk file ([stepper terminals](component.md#stepper-and-dc-motor-terminals), [quirk files](ecatsetup.md#quirk-files)). Not tried on a terminal. `el2521` (pulse train) not yet. |
+| Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog terminals](ecatsetup.md#analog-inputs-and-outputs)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
+| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale, error reset (HAL lines) and lcec modParams are a quirk file ([stepper terminals](ecatsetup.md#stepper-and-dc-motor-terminals), [quirk files](ecatsetup.md#quirk-files)). Not tried on a terminal. `el2521` (pulse train) not yet. |
 | Absolute encoders (SSI, EnDat) | `el5002`, `el5032` | Check first whether `generic` plus settings is enough. |
 
 The order is set by what users run; analog I/O and the EL7041 are
@@ -628,7 +628,7 @@ described.
   better is known; swapped drives of the same type are not noticed
   automatically.
 - **File format**: YAML, `ethercat.yaml`
-  ([file format](component.md#the-configuration-file)).
+  ([file format](reference.md#the-configuration-file)).
 - **Scaling**: in HAL, as today. `ethercat.hal` sets each joint's
   `pos-scale` from `linuxcnc.joints` ([writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **INI keys**: `[ETHERCAT]CONFIG`, and `HALFILE = ethercat-load.hal`
@@ -639,7 +639,7 @@ described.
   ([writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc)).
 - **CiA 402 homing**: `index-enable` with the drive's own homing
   (`modes: [hm]`); no homing module. Tried on the plasma cutter's X axis
-  ([cia402](component.md#the-cia402-profile)). PP and PV were tried on the plasma
+  ([cia402](ecatsetup.md#cia-402-drives)). PP and PV were tried on the plasma
   cutter's three ECT60 drives on 2026-11-10 ([test mode](ecatsetup.md#pp-pv-and-homing-at-the-machine)):
   the ECT60 sometimes acknowledges a set-point without starting (the
   profile gives it again), and torque homing (method 36) ends only with an integral gain in
@@ -854,7 +854,7 @@ in this order:
 3. **The bus changed**, matched by type and order (b); modular devices
    best effort. Built 2026-11-10: *Update from bus* shows the changes and
    what depends on missing slaves first; connections of missing slaves
-   are removed; modules recorded and compared ([modular devices](component.md#modular-devices)).
+   are removed; modules recorded and compared ([modular devices](ecatsetup.md#modular-devices)).
 4. **From a simulated configuration** (a): recognising and replacing the
    simulation, copying library files, the scale, the INI check. Built
    2026-11-10 ([writing into LinuxCNC](ecatsetup.md#from-a-simulated-configuration)).
@@ -1620,7 +1620,7 @@ acceleration. The plan, agreed with the user:
    to its EEPROM itself: alarm ALF1.3 "too frequent writing") a separate step.
 3. **Feedforward from LinuxCNC** through `0x60B1` / `0x60B2` (built
    2026-11-16, design A: the profile works them out from `pos-cmd`; docs/
-   component.md "Feedforward in CSP"; C tests in component/tests/test_cia402.c
+   ecatsetup.md "Feedforward in CSP"; C tests in component/tests/test_cia402.c
    and test_config.c, mutation-checked; config.check, halpins, the Response
    card prints `cia402.feedforward.torque` from a torque measurement). Not
    tried on a drive: the ECT60 has neither object; the A6 has `0x60B1` in its
@@ -1909,7 +1909,7 @@ the bus; 0.5 MB/s is fast enough. The test slave will be an EaserCAT board
 
 ### Done: the ecat side (2026-11-15)
 
-`eoe:` per slave in `ethercat.yaml` ([component.md](component.md#eoe)):
+`eoe:` per slave in `ethercat.yaml` ([reference](reference.md#eoe)):
 `ecat_config.c` writes an `LCEC_CONF_EOE_T` record, `lcec_main.c` calls
 `ecrt_slave_config_eoe_*` beside `ecrt_slave_config_dc`. These calls need no
 IPC: the master's library runs inside `ecat.so`, so they only fill the slave
@@ -2058,7 +2058,7 @@ it (`EC_HAVE_EOE_HOST_ADDRESS`; an older master gives an error line), with
 the same rules in `ecat_config.c` and `config.eoe_errors()`; the window
 also warns about a subnet the PC already has (`config.host_networks()`,
 from `ip -j -4 addr`). Routing and bridging are documented, not configured,
-and the idle master sets nothing ([component.md](component.md#eoe)).
+and the idle master sets nothing ([reference](reference.md#eoe)).
 
 Tried on the EaserCAT 3000 in halrun, no `ip` command by hand: the device
 down and without an address under the idle master; all five slaves in OP
@@ -2150,7 +2150,7 @@ commit b0e7b191b9, 2.10.0~pre2-436; `. scripts/rip-environment`, `sudo make
 setuid` done). The component (points 1-7) and EtherCAT Setup (8-9) are ported
 and unit-tested (C and Python); the new keys `extend` and `raw`, the 64-bit
 integer pins for LINT/ULINT and the hal-type names are in
-[component.md](component.md). Not done: 10 and 11 (need halrun against the
+[What the slaves give in LinuxCNC](ecatsetup.md#what-the-slaves-give-in-linuxcnc). Not done: 10 and 11 (need halrun against the
 bus), steps 3-6 of the order of work below.
 
 ### Decision (2026-11-17): one code base for 2.9 and 2.10
@@ -2495,7 +2495,7 @@ What it found, on its first run:
   only into the process data and checked 0x6061 only when mapped, and the
   drive came up with 0x6060 = 0. Now the mode is written by SDO at load and
   read back when 0x6060 is not mapped, and the master writes it again at
-  each configuration (docs/component.md, cia402). The A6's ESI asks for the
+  each configuration (docs/ecatsetup.md, CiA 402 drives). The A6's ESI asks for the
   same with an InitCmd (0x6060 = 8 at PS), which ecat does not read.
 - The ESI file's dictionary has other entries for 0x1702 and 0x1B04 than
   its PDO definitions of the same index (0x60B8 twice in 0x1702, no 0x60F4 in

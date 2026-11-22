@@ -717,7 +717,7 @@ static void settings(ctx_t *c, buf_t *b, yaml_node_t *list, size_t slave_off) {
 
 // ---- init-cmds: what the device's ESI file writes at start ----
 
-/// The ESI file's InitCmds (EtherCAT Setup takes them, docs/component.md "init-cmds"): each
+/// The ESI file's InitCmds (EtherCAT Setup takes them, docs/reference.md, slaves: init-cmds): each
 /// {at: IP|PS, object, value+type | data | from: profile | from: cycle-time, complete, disabled}.
 /// Written before the settings, as SDOs the master writes in PREOP whenever it configures the
 /// slave; from: cycle-time once the servo period is known (lcec_main.c); complete access from

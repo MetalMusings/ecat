@@ -84,7 +84,7 @@ SERIAL = [
 ]
 FUNCTIONS = ["ecat.read-all", "ecat.write-all"]
 
-# Defaults of the parameters a user may set (docs/component.md); a parameter
+# Defaults of the parameters a user may set (docs/ecatsetup.md "What the slaves give in LinuxCNC"); a parameter
 # not listed has no default shown.
 DEFAULTS = {
     "pos-scale": 1.0, "velo-scale": 1.0, "auto-fault-reset": True,

@@ -5460,7 +5460,7 @@ def config_pins(cfg):
         names = config.axes(s)
         for n, a in enumerate(names):
             rows.append((s["position"], "CiA 402 axis %d" % n if len(names) > 1 else "CiA 402 profile",
-                         "%s.*" % a, "", "see docs/component.md"))
+                         "%s.*" % a, "", "see docs/ecatsetup.md, CiA 402 drives"))
         for ch in s.get("encoders") or []:
             prefix = "%s.%s." % (name, ch.get("name"))
             pins = sorted((p, t, d) for p, (t, d) in halpins.pins(cfg).items()
@@ -5471,7 +5471,7 @@ def config_pins(cfg):
                               "io": "both ways"}[d]))
             if not pins:
                 rows.append((s["position"], "encoder %s" % ch.get("index"), prefix + "*", "",
-                             "see docs/component.md"))
+                             "see docs/ecatsetup.md, CiA 402 drives"))
     return rows
 
 

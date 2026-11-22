@@ -237,7 +237,7 @@ def add_modules(p, detected, configured):
                                                        else "s", ids))
     if configured is not None and configured and configured != detected:
         p.notes.append("modules configured in 0xF030 (%s) differ from those detected: the slave "
-                       "may refuse OP until 0xF030 matches (see docs/component.md)"
+                       "may refuse OP until 0xF030 matches (see docs/ecatsetup.md, Modular devices)"
                        % (", ".join("0x%08X" % m for m in configured)))
 
 
@@ -647,8 +647,8 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     # else the SII's, else an ESI file's of another revision (dcinfo.py).
     p.has_eoe = sii.has_eoe
     if sii.has_eoe:
-        p.notes.append("This slave supports EoE (Ethernet over EtherCAT): an eoe: block in its entry gives it an "
-                       "IP address (docs/component.md)")
+        p.notes.append("This slave supports EoE (Ethernet over EtherCAT): the Network (EoE) card gives it an "
+                       "IP address (docs/ecatsetup.md, A device's web page over EoE)")
     p.dc_info = d = dcinfo.build(info, sii, esi_dev, esi_exact)
     modes = d.modes()
     # The first mode is the slave's default: a drive lists DC first, an I/O

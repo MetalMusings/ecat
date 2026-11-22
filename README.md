@@ -32,8 +32,8 @@ ecat has two parts:
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | What gets installed, and how to try ecat step by step without disturbing your setup, from the safest. Start here. |
-| [EtherCAT Setup](docs/ecatsetup.md) | The window, bringing up a new slave (with how-tos for a spindle encoder, a Modbus VFD on a serial terminal and a device's web page over EoE), the test mode (with [tuning a servo drive, step by step](docs/ecatsetup.md#tuning-a-servo-drive-step-by-step)), writing into LinuxCNC, the event log and report, quirk files, and the command line. |
-| [The ecat component](docs/component.md) | Using the component in HAL, how short a servo period can be and what to expect (measured down to 125 us), the `ethercat.yaml` file format, and what drives (cia402), encoder channels, serial channels, analog and stepper terminals and modular devices give you. |
+| [EtherCAT Setup](docs/ecatsetup.md) | The window, bringing up a new slave (with how-tos for a spindle encoder, a Modbus VFD on a serial terminal and a device's web page over EoE), the test mode (with [tuning a servo drive, step by step](docs/ecatsetup.md#tuning-a-servo-drive-step-by-step)), writing into LinuxCNC, [what the slaves give in LinuxCNC](docs/ecatsetup.md#what-the-slaves-give-in-linuxcnc) (the component, how short a servo period can be, the pins and behaviour of drives, encoder and serial channels, analog and stepper terminals and modular devices), the computer's timing, the event log and report, and quirk files. |
+| [Reference](docs/reference.md) | The `ethercat.yaml` file format (which you do not need to edit: the window writes it), loading the component by hand, every command-line option, and the format of quirk files. |
 | [Developing ecat](docs/development.md) | Building and testing, the design draft, what the prototype found on a real bus, the plan for fault tests at a machine, how to get at devices we do not have, and the design of the real-time check. |
 
 ## Install
@@ -44,7 +44,7 @@ and has no Debian packages, so most people run it run-in-place (built from
 source, see [Developing ecat](docs/development.md#linuxcnc-210)): ecat then
 comes as an archive with an installer, tested against one LinuxCNC commit
 (named in the release notes). On 2.9 the integer pins have 32 bits instead of
-64 ([the component](docs/component.md)) and HAL names take 47 characters instead of
+64 ([the file format](docs/reference.md#pdos-and-entries)) and HAL names take 47 characters instead of
 55 (`ecatsetup --check` names a pin that is too long); otherwise ecat does the
 same on both.
 
@@ -85,10 +85,10 @@ with sudo, see [Starting the master](docs/ecatsetup.md#starting-the-master).
 The window opens on a *Start* page that lists the tasks and the steps of
 each ([EtherCAT Setup](docs/ecatsetup.md)). It needs `python3-pyqt5`. The
 same functions are available as options for scripts (`ecatsetup --help`,
-[Command line](docs/ecatsetup.md#command-line)).
+[Command line](docs/reference.md#command-line)).
 
 In a HAL file, the component replaces `lcec_conf` and `lcec`
-([The ecat component](docs/component.md#using-the-component)):
+([Loading the component by hand](docs/reference.md#loading-the-component-by-hand)):
 
 ```
 loadrt ecat config=ethercat.yaml

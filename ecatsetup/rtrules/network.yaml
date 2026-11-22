@@ -24,7 +24,7 @@
   check: The event log (working counter zero) and the late maximum, in use (attach), at the machine's period.
   source:
     - text: ecat's documentation, master irq-cpu
-      url: https://github.com/MetalMusings/ecat/blob/main/docs/component.md#master
+      url: https://github.com/MetalMusings/ecat/blob/main/docs/ecatsetup.md#servo-period-and-performance
   seen-here: "here 2026-11-16: lost cycles at 250 and 200 us until irq-cpu was set"
   tests:
     present:

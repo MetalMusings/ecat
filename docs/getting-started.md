@@ -6,8 +6,9 @@ that you want to keep. Everything below can be undone.
 
 Where to go next: [EtherCAT Setup](ecatsetup.md) for the program (its
 window, the test mode, writing into LinuxCNC, troubleshooting) and
-[The ecat component](component.md) for the configuration file and what
-each kind of slave gives you in HAL.
+[What the slaves give in LinuxCNC](ecatsetup.md#what-the-slaves-give-in-linuxcnc) for what
+each kind of slave gives you in HAL; the [reference](reference.md) has the
+configuration file's format and every command-line option.
 
 ## What gets installed, and what does not change
 
@@ -113,7 +114,7 @@ ecatsetup --import path/to/ethercat-conf.xml --ini machine.ini --write /tmp/ethe
 
 The window opens on a *Start* page (a tour of it: [the window](ecatsetup.md#the-window)). `--import` turns an lcec XML file
 into an ecat file; `--check` checks a file (see
-[file format](component.md#the-configuration-file)). Open the result and look at what
+[file format](reference.md#the-configuration-file)). Open the result and look at what
 it proposes.
 
 **2. Reading the bus.** Reading needs a master. Stop the kernel master

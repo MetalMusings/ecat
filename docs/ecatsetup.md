@@ -2,8 +2,8 @@
 
 EtherCAT Setup (`ecatsetup`) reads the slaves on the bus (SII, CoE
 dictionary, ESI files), proposes their process data, distributed clocks
-and HAL pins, lets you check and edit the result as an `ethercat.yaml`
-([the file format](component.md#the-configuration-file)), tests it
+and HAL pins, lets you check and edit the result (kept as an
+`ethercat.yaml` that you do not need to edit yourself), tests it
 without LinuxCNC, and writes it into a LinuxCNC configuration. It also
 diagnoses slaves that do not reach OP and watches a running LinuxCNC.
 
@@ -15,7 +15,8 @@ The window is the way to use it. Apart from the test mode it only reads
 from the bus, and reading needs a running userspace master
 ([Getting started](getting-started.md)). Everything the window does with
 a file can also be done from the [command line](#command-line), which is
-what scripts use.
+what scripts use. The file's format and every option of the command line
+are in the [reference](reference.md).
 
 Contents:
 
@@ -29,6 +30,11 @@ Contents:
   the steps to answer them;
 - [Test mode](#test-mode): I/O, SDOs, moving a drive, homing;
 - [Writing the configuration into LinuxCNC](#writing-the-configuration-into-linuxcnc);
+- [What the slaves give in LinuxCNC](#what-the-slaves-give-in-linuxcnc):
+  the component, the servo period, and the pins and behaviour of [CiA 402
+  drives](#cia-402-drives), [encoder channels](#encoder-channels), [serial
+  channels](#serial-channels), analog and stepper terminals, EoE and
+  modular devices;
 - [The computer's timing](#the-computers-timing): how late the real-time
   threads start, why, and changing one thing at a time;
 - [Event log and report](#event-log-and-report): what to send when asking
@@ -119,7 +125,7 @@ slaves follow the servo thread" sets it to 100 cycles when it was more or
 unset; more than 100 is warned about, since the slaves' clock then wanders),
 and the global
 shift time (`auto` lets the component find it; see
-[file format](component.md#the-configuration-file)).
+[file format](reference.md#the-configuration-file)).
 
 ![Bus: a slave](images/gui-slave.png)
 
@@ -140,12 +146,12 @@ Choosing a slave shows:
   and proposed; generic is always offered. Choosing another one proposes
   the slave's PDOs again for it, after asking; its name, settings and DC
   stay. Then *Used by LinuxCNC* (untick it for a slave that
-  is only on the bus: `unused: true`, the slave is left alone, in PREOP,
-  with no pins; ecat still checks at start that it is the slave the file
-  says), the PDO assignment (for a device whose ESI file has predefined
+  is only on the bus: the slave is left alone, in PREOP,
+  with no pins; ecat still checks at start that it is the slave the
+  configuration says), the PDO assignment (for a device whose ESI file has predefined
   assignments, the box shows the one the file uses; choosing another proposes
   the slave again with it, after asking; the box is hidden for a device
-  without them), `configure-pdos`, the Sync
+  without them), *Write the PDO mapping to the slave*, the Sync
   choice (free run, one of the slave's DC modes, or DC mode with user settings; see
   [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift (and,
   for a mode that uses SYNC1, a row with SYNC1 every n SYNC0 cycles and its
@@ -158,7 +164,7 @@ Choosing a slave shows:
   for a drive the CiA 402 modes (below), *Start over from the bus...* (reads the
   slave and replaces its whole entry with a new proposal, after asking; only
   the name is kept) and the homing
-  card ([cia402](component.md#the-cia402-profile));
+  card ([cia402](#cia-402-drives));
 - **CiA 402 modes**, for a drive: *Mode of operation* is the mode the
   drive starts in and runs in. Under *Can also switch to* you tick the
   modes it may switch to while it runs, with the pin `opmode-cmd`: for
@@ -174,9 +180,9 @@ Choosing a slave shows:
   the INI lines LinuxCNC needs with *Copy the INI lines*. The choice goes to
   Settings. Switching modes is
   built and unit-tested but not yet tried on a drive
-  ([Changing modes](component.md#changing-modes));
+  ([Changing modes](#changing-modes));
 - **Serial ports**, for a serial terminal (EL6001, EL6002, EL6021,
-  EL6022; [serial channels](component.md#serial-channels)): a row per
+  EL6022; [serial channels](#serial-channels)): a row per
   channel with its port (`/dev/ttyECAT4`), the baud rate at start, the
   frame (data bits, parity, stop bits: the device's), *Send continuous*
   (for Modbus RTU above 38400 baud) and *RS485 (half duplex)*, which adds
@@ -184,8 +190,8 @@ Choosing a slave shows:
   none, an EL6001). Under it the lines for mb2hal's INI file for each
   port, with *Copy the mb2hal lines*;
 - **Network (EoE)**, for a slave that speaks Ethernet over EtherCAT (its
-  SII lists the protocol) or has an `eoe:` block
-  ([eoe](component.md#eoe)): *Give the slave an IP address* adds the block,
+  SII lists the protocol) or already has an address
+  ([A device's web page over EoE](#a-devices-web-page-over-eoe)): *Give the slave an IP address* adds one,
   starting from a subnet `192.168.N.x` that no other slave and none of the
   computer's own networks is in (the slave `.2`, the computer `.1`);
   switching it off removes the block. The fields are the slave's address
@@ -237,7 +243,7 @@ Choosing a slave shows:
   The first line of both boxes is *the slave's own*: the PDOs the slave
   has now, as the master read them at its scan, judged the same way.
   Choosing it takes them as they are and writes none (*Write the PDO
-  mapping to the slave* off, `configure-pdos: false`): for a slave that
+  mapping to the slave* off): for a slave that
   refuses a mapping, or one set up with its maker's tool. The line says
   whether it is the ESI file's default (it comes back after a power-off) or
   what a master or tool last wrote, which is lost at power-off unless the
@@ -404,7 +410,7 @@ One column, top to bottom in the order of the work:
   (E-stop, home switches, probe, spindle, plasmac's torch and sensors ...)
   that the simulation still drives or reads, or that nothing does, with
   a choice of the slaves' pins of the right type for each (see
-  [what is still simulated](#what-is-still-simulated)). Select a row to
+  [what is still simulated](#from-a-simulated-configuration)). Select a row to
   read what the LinuxCNC pin does (for example `plasmac.breakaway`), with
   links to the pin's section and to the whole page (QtPlasmaC, motion,
   halui ...) in LinuxCNC's documentation on linuxcnc.org. The text comes
@@ -481,7 +487,7 @@ another that follows ETG.5001 MDP 511) to be LinuxCNC's spindle encoder,
 for threading and other spindle-synchronised moves. The encoder function
 of the component does the work; the steps are to give EtherCAT Setup what
 it needs to propose it, and to connect two pins. Status: the encoder
-function has run an EL5101 (see [encoder channels](component.md#encoder-channels));
+function has run an EL5101 (see [encoder channels](#encoder-channels));
 connecting the spindle pins from the window is built and unit-tested, and
 has not been tried at a machine yet.
 
@@ -523,7 +529,7 @@ has not been tried at a machine yet.
    where `pos` returns to 0. Only then run the machine.
 
 See [Inputs and outputs](#inputs-and-outputs) for the connection pins in
-general, and [encoder channels](component.md#encoder-channels) for every
+general, and [encoder channels](#encoder-channels) for every
 pin of the channel (`velocity`, `counts`, `reset`, the external latch).
 
 ### A Modbus VFD on a serial terminal (EL6021)
@@ -536,7 +542,7 @@ it would use `/dev/ttyUSB0`. The same goes for the EL6001 (RS232) and the
 two-channel EL6002 and EL6022. Status: built from Beckhoff's manual and ESI
 files; tried with `mb2hal` over a real wire against a slave of our own made
 to behave as an EL6021 (2400 to 115200 baud, in `halrun`), not on a real
-terminal yet (see [serial channels](component.md#serial-channels)).
+terminal yet (see [serial channels](#serial-channels)).
 
 What you need from the VFD's manual: its Modbus address (slave id), baud
 rate, parity and stop bits, and the registers for run/stop, the speed
@@ -638,7 +644,7 @@ browser on the computer opens `http://<the slave's address>/` while
 LinuxCNC runs. Status: tried on one slave of our own (an EaserCAT 3000
 with a small web server), in halrun and in LinuxCNC with the machine
 moving ([development.md](development.md#eoe)); not on a bought device.
-The reference is [eoe](component.md#eoe).
+The reference is [eoe](reference.md#eoe).
 
 What you need: a slave that speaks EoE (its manual says so, and the
 slave's page in the window then has the *Network (EoE)* card), and the
@@ -726,7 +732,7 @@ master running) warn:
 - the slave is the DC reference clock (the first used slave with DC on,
   after ETG.1020; `--check` names it, with or without the bus), but its chip
   has no DC system time: the bus has no reference clock
-  ([dc](component.md#dc));
+  ([dc](reference.md#dc));
 - DC is on, but the chip has no DC clock: the slave will not reach OP
   with DC (an EL2008: the master says "Slave seems not to support
   distributed clocks!" and "Failed to set DC cycle times", and the slave
@@ -778,7 +784,7 @@ the master's pins (`ecat.0.*`):
   the old fixed margins of 50 us);
 - **where the network card's interrupts are**, against the CPU that is isolated
   for real time (`isolcpus=`): on the other CPUs the arrival of a frame waits
-  behind the GUI and other work (`master: irq-cpu` pins them);
+  behind the GUI and other work (*Interrupts on CPU* on the *Master* page pins them);
 - what was **measured on the kinds of drive** that run with SYNC0 here at this
   servo period (below).
 
@@ -802,7 +808,7 @@ whether the slaves are in OP.
 
 What the rows mean for how short a servo period can be, and what was
 measured on one machine, is in [Servo period and
-performance](component.md#servo-period-and-performance).
+performance](#servo-period-and-performance).
 
 ### Keeping what you chose
 
@@ -848,7 +854,7 @@ explains the fault.
    the same devices at the same positions. A slave added, moved or
    replaced is named there; *Update the file from the bus* brings the
    file in line and says what changed. LinuxCNC's start check says the
-   same in its log when `ecat` loads (`master.start-check`).
+   same in its log when `ecat` loads ([The component in LinuxCNC](#the-component-in-linuxcnc)).
 
 ### Step 2: why it is not in OP
 
@@ -862,7 +868,7 @@ explains the fault.
    |---|---|---|
    | 0x0017, 0x001D, 0x001E, 0x0024, 0x0025 | The process data mapping is not accepted. | Choose another PDO set (*PDO assignment*, with the ESI file), use the slave's own assignment, or clear *Write the PDO mapping to the slave* (`configure-pdos: false`). If LinuxCNC does not use the slave at all, untick *Used by LinuxCNC* on its page: the slave is then left alone. A slave of the file that does not reach OP stops every drive (the working counter is incomplete), a slave that is not used does not. |
    | 0x0026, 0x0043 | A setting (start-up SDO) was refused, or does not fit the others. | Read the master's messages for the object; check it in the Settings card (*Read present values*), take it out and try again. |
-   | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period (0x0036, "DC Sync0 Cycle Time": the slave does not take the servo period as its SYNC0 cycle; the Rtelligent ECT60 refuses 100 us and takes 125 us and up: use a longer period). | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings; [Servo period and performance](component.md#servo-period-and-performance). |
+   | 0x0027, 0x0028, 0x002C, 0x002D, 0x0030, 0x0035, 0x0036 | Distributed clocks: needed, wrong, or not possible at this period (0x0036, "DC Sync0 Cycle Time": the slave does not take the servo period as its SYNC0 cycle; the Rtelligent ECT60 refuses 100 us and takes 125 us and up: use a longer period). | [Distributed clocks](#distributed-clocks): the Sync choice and its warnings; [Servo period and performance](#servo-period-and-performance). |
    | 0x001B | Sync manager watchdog: the process data stopped. | LinuxCNC or the test stopped, or the servo thread missed cycles: see the event log. |
    | 0x0020, 0x0060, 0x0011 | The slave needs a power cycle, reset itself, or follows an earlier error. | Power the slave off and on; restart the master. |
 
@@ -1149,40 +1155,32 @@ The first lines say where most of the error comes from. What to do:
 
 A drive with `0x60B1` (velocity offset) and `0x60B2` (torque offset) can
 take its feedforward from LinuxCNC: the profile works them out from
-`pos-cmd` every cycle ([component.md, feedforward in
-CSP](component.md#feedforward-in-csp)). It removes the position loop's lag
+`pos-cmd` every cycle ([feedforward in
+CSP](#feedforward-in-csp)). It removes the position loop's lag
 without touching the drive's gains.
 
-- The objects must be in the drive's outputs, as `use: profile` (the
-  proposal does that when the drive's PDOs have them), and the drive must
+- The objects must be in the drive's outputs (the
+  proposal maps them when the drive's PDOs have them), and the drive must
   be told to use them: a vendor setting, such as StepperOnline A6's
   C01.13 = 5 and C01.16 = 5. Add that setting to the slave's Settings, and
   turn the drive's own feedforward off.
 - The card then has a **Feedforward from LinuxCNC** row: *Velocity* (the
   share of the command's velocity, 1.0 for all of it), *Torque per
   acceleration* and *Limit* (the torque offset's, % of rated; 30 unless the
-  file says otherwise). A field is greyed out when the drive lacks its
+  configuration says otherwise). A field is greyed out when the drive lacks its
   object. The line under it says what the test runs with now, and what
   the configuration has.
 - Measure without it first. With `0x6077` recorded, the measurement puts
   the torque per acceleration it found in the field (and the result shows
-  it as *as feedforward from LinuxCNC: cia402: {feedforward: {torque:
-  0.05}}*).
+  it as *as feedforward from LinuxCNC*).
 - Set *Velocity* to 1, press **Try in the test**, and measure again: the
   comparison names the change (*feedforward velocity 0 -> 1*). **Off**
   sets both to 0 in the test. A measurement with a large acceleration may
   need a higher *Limit*.
-- **Keep in the configuration** writes the values as the slave's
-  `cia402.feedforward` (only those the drive has objects for; both 0
-  removes it). Save the file; *Apply* (HAL & LinuxCNC page) then writes
-  `setp <drive>.velo-scale` with the joint's scale, which `0x60B1` needs
-  (counts per second). In the file it looks like
-
-  ```yaml
-  cia402:
-    mode: csp
-    feedforward: {velocity: 1.0, torque: 0.05}
-  ```
+- **Keep in the configuration** keeps the values for the slave (only
+  those the drive has objects for; both 0 removes them). Save; *Apply*
+  (HAL & LinuxCNC page) then writes `setp <drive>.velo-scale` with the
+  joint's scale, which `0x60B1` needs (counts per second).
 
 - Without the window, the same while a test or LinuxCNC runs:
   `halcmd setp <drive>.ff-velocity-gain 1.0`, `halcmd setp
@@ -1279,7 +1277,7 @@ first part of tuning, the measuring.
   - at each stop, the overshoot and the time until the position stays
     within a band (3 counts, at least 0.002 mm);
   - the torque at constant speed (friction) and per acceleration, when
-    `0x6077` is recorded, with the `cia402.feedforward` line for it; whether
+    `0x6077` is recorded, with the feedforward value for it; whether
     it reached the test's torque limit (then the result is the limit's, not
     the drive's). The torque is set against the motor's acceleration, from
     `pos-fb` (smoothed so that a count's step is at most 1 % of the
@@ -1323,11 +1321,11 @@ first part of tuning, the measuring.
   **Undo** writes the drive's own value back. Values still being tried are
   written back when the test stops or the window closes, and offered back
   at the next start if the program ended without that.
-- **Feedforward from LinuxCNC** (drives with `0x60B1` / `0x60B2` as
-  `use: profile`): *Try in the test* sets the drive's `ff-velocity-gain`,
+- **Feedforward from LinuxCNC** (drives with `0x60B1` / `0x60B2` in
+  their outputs): *Try in the test* sets the drive's `ff-velocity-gain`,
   `ff-torque-per-accel` and `ff-torque-max` in the test's HAL, *Off* sets
-  the first two to 0, *Keep in the configuration* writes
-  `cia402.feedforward`. A measurement with the torque recorded fills in
+  the first two to 0, *Keep in the configuration* keeps
+  them. A measurement with the torque recorded fills in
   the torque per acceleration while the test runs without it. See
   [Feedforward from LinuxCNC](#feedforward-from-linuxcnc).
 - **Make the move long enough**: the drive's lag settles only after a few
@@ -1378,7 +1376,7 @@ has it. PP was tried again from the window on X that day, steps of 1 and
 5 mm, with the component of that day:
 
 - **PP** works on X, Y and Z, steps of 1 and 5 mm in both directions,
-  after two findings, both in the profile ([cia402](component.md#the-cia402-profile)): the
+  after two findings, both in the profile ([cia402](#cia-402-drives)): the
   ECT60 acknowledges a set-point sometimes without starting (target
   reached stays set), so the profile gives it again; and with control
   word bit 5 ("change set immediately") set it acknowledged and did not
@@ -1395,7 +1393,7 @@ has it. PP was tried again from the window on X that day, steps of 1 and
   had no integral gain (`0x2030:06` = 0). With `0x2030:06` = 100 and a
   larger `0x2022` it ends: the drive sets "homing attained" and zeroes
   the position at the stop, twice in a row
-  ([cia402](component.md#homing-by-the-drive)).
+  ([cia402](#homing-by-the-drive)).
 - Z hangs in a spring suspension and moves when its drive is disabled:
   with the drive off, the axis can drift.
 - Everything the test wrote to the drives was read back and restored.
@@ -1484,8 +1482,8 @@ not running), EtherCAT Setup offers to start one:
 
 The dialog shows the whole command, for example
 `sudo /usr/bin/ethercat-uspace start -- -i enp2s0 -t xdp-native`, and nothing
-runs until you answer Yes. The interface and transport come from the file's
-`master:` section when it names an interface that exists here; otherwise the
+runs until you answer Yes. The interface and transport come from the *Master*
+page when it names an interface that exists here; otherwise the
 master's own `ethercat-uspace.conf` decides. When neither names one (no file
 yet, as for a first look at a bus, and no active `INTERFACE=` line in
 `ethercat-uspace.conf`), you are first asked which network card the slaves are
@@ -1506,8 +1504,8 @@ the tool). With the kernel master loaded it shows
 `sudo systemctl stop ethercat` first, as above.
 
 A master that runs but does not fit is offered a restart: it has no link,
-sees no slaves, or sits on another network card than the file's
-`master.interface` (found by comparing the card's MAC address with the one the
+sees no slaves, or sits on another network card than the configuration's
+(found by comparing the card's MAC address with the one the
 master reports). The dialog shows `ethercat-uspace stop` followed by the start
 command, and nothing runs until you answer Yes. A master that a program has
 activated (LinuxCNC) is never called stale: it is in use. The offer comes once
@@ -1583,7 +1581,7 @@ net x-amp-fault x.drv-fault => joint.0.amp-fault-in
 and `index-enable` both ways if the drive homes by itself (`modes:
 [hm]`; then `HOME_USE_INDEX = YES` must be set in the joint's INI section, which
 the INI check says if it is not). The scale is counts per machine unit. The choice is kept in
-`ethercat.yaml` (see [file format](component.md#linuxcnc)).
+`ethercat.yaml` (see [file format](reference.md#linuxcnc)).
 
 When your HAL files already connect a joint to a drive, the program
 proposes the same connection with the same `pos-scale` (*Take over from
@@ -1703,7 +1701,7 @@ than one master is refused: ecat drives one.
   when you write, the component's `loadrt` and `addf` lines and the nets
   between it and lcec's pins are commented out. Its other pins become the
   drive's pins of the same name (`cia402.X.drv-fault` becomes
-  `X.drv-fault`; `csp-mode` goes, the mode is `cia402.mode`). A net that
+  `X.drv-fault`; `csp-mode` goes, the mode is the drive page's *Mode of operation*). A net that
   also takes the drive's position elsewhere (`lcec.0.X.actual-position =>
   cia402.X.drv-actual-position ddt.0.in`) keeps that reader, on the
   profile's pin (`X.drv-actual-position => ddt.0.in`). A drive without the
@@ -1719,8 +1717,8 @@ than one master is refused: ecat drives one.
   (`lcec.0.all-op` becomes `ecat.0.all-op`), the slaves' state pins
   (`slave-online` ...), or the same name. A row's *Use* button takes its
   suggestion; *Use the suggestions* takes every suggestion for the rows
-  without a choice. Writing is refused while a row has none. The choices are kept in `ethercat.yaml` as
-  `linuxcnc.old-pins` ([the file format](component.md#linuxcnc)).
+  without a choice. Writing is refused while a row has none. The choices are kept in the
+  configuration.
 - **Names.** The slaves keep the proposal's names; *Name the slaves as lcec
   did* gives them the XML file's (`X`, `E7000`), as on the Bus page. The
   choices follow a rename.
@@ -1737,7 +1735,7 @@ than one master is refused: ecat drives one.
   *Add all these settings*); nothing is added unasked. A drive that does
   not keep a value has its own again after a power cycle, so check the list.
   A command lcec wrote as a setting (the ECT60's `0x2010` Zero Position) is
-  offered as what replaces it (`cia402.zero-at-start`).
+  offered as what replaces it (*Start position: Position counts from 0 at start*).
 
 Tried on a copy of the plasma cutter's lcec configuration (three ECT60
 through the cia402 component, an EaserCAT 7000 with bit pins), against
@@ -1755,8 +1753,8 @@ the slaves, their axes and encoder channels with their type, the
 component's default and a *Value* you can type: `pos-scale` and
 `velocity-window-ms` of an encoder channel, `enable-timeout-ms`,
 `auto-fault-reset` and the PV and PP timeouts of a drive, and so on (the
-[component's](component.md) tables say what each does). Empty keeps the
-default. The value is kept in `linuxcnc.params` of `ethercat.yaml` and
+[component's](#what-the-slaves-give-in-linuxcnc) tables say what each does). Empty keeps the
+default. The value is kept in the configuration and
 written as a `setp` line in `ethercat.hal` under `# parameters`:
 
 ```
@@ -1804,8 +1802,7 @@ net home-x io.din-0 => joint.0.home-sw-in
 net io-dout-1 motion.digital-out-00 => io.dout-1
 ```
 
-The choice is kept in `ethercat.yaml` as `linuxcnc.nets`
-([file format](component.md#linuxcnc)). The arrow is written when
+The choice is kept in the configuration. The arrow is written when
 one pin of the net is known to write it. The check refuses a net with two
 pins known to write it, with pins of different HAL types, with a pin a
 joint already takes, or without any slave pin.
@@ -1918,7 +1915,7 @@ The window shows the changes first, with what depends on slaves that are
 missing: joints and connected pins (removed from the file), and lines in
 your HAL files that use their pins (`--update --ini` prints those too);
 then the HAL check lists what to fix. A modular device whose modules
-changed is reported ([modular devices](component.md#modular-devices)).
+changed is reported ([modular devices](#modular-devices)).
 
 **Renames.** Renaming a slave in the program offers to rename its pins in
 your HAL files in the configuration folder too (each kept as `.bak`;
@@ -1962,7 +1959,7 @@ yours does not have (a spindle encoder, an I/O terminal).
    master stopped).
 3. Lower the joints' `MAX_VELOCITY` (for example to 5 mm/s) and keep the
    drives' power switch, or the machine's E-stop, within reach. Drive
-   limits (`settings`, such as the ECT60's following-error window `0x2022`)
+   limits (settings, such as the ECT60's following-error window `0x2022`)
    are not needed for the first run, but they are the drive's own
    protection: see the *Settings* card.
 4. In a second terminal follow the event log while you test:
@@ -2045,6 +2042,1270 @@ both joints 10 mm as measured, the encoder and its index by hand, the
 cable pulled (the drives shut down in a millisecond, all in OP 11 s after
 the cable was back), the software E-stop, and a clean stop.
 
+## What the slaves give in LinuxCNC
+
+### The component in LinuxCNC
+
+The `ecat` HAL component runs the EtherCAT master inside LinuxCNC. It
+reads the configuration EtherCAT Setup saves, and gives each slave HAL
+pins. *Apply* writes the lines that load it
+([Writing the configuration into LinuxCNC](#writing-the-configuration-into-linuxcnc)):
+`ethercat-load.hal` loads it, and its two functions run first and last in
+the servo thread. What that means:
+
+- Slave pins are `<slave name>.<pin>`, with the name from the slave's
+  page; the master's
+  are `ecat.0.*` (`ecat.0.all-op`, ...) and `ecat.*`.
+- Only the slaves of the configuration take part. A slave that is on the
+  bus but not in it, or one whose *Used by LinuxCNC* box is off, is left
+  alone: no configuration, no pins, it stays in PREOP (its state is not
+  touched). `ecat.0.all-op` means that every slave of the configuration is in OP (the
+  `state-*` pins still tell the states of the whole bus), so a slave that
+  only sits on the bus does not keep it false, nor stop a drive.
+- At load the component compares the bus with the configuration: vendor
+  and product of each slave, and, for a slave whose *Write the PDO mapping
+  to the slave* box is off, the slave's own PDO mapping. When they differ
+  it does not start, with one line per slave in LinuxCNC's log (for
+  example "slave 2 is EL2008 ...; the configuration expects EL1008 there"):
+  read the bus again and use *Update from bus*. A different revision is
+  only a warning. It also refuses to start when the kernel EtherCAT master
+  is loaded for the same network card: `sudo systemctl stop ethercat` (and
+  `disable` to keep it stopped).
+- The bus stops in order by itself when LinuxCNC (or `halcmd stop`)
+  stops the threads. Otherwise the slaves would lose their process data
+  in OP and stop with an error (sync manager watchdog 0x001B,
+  synchronization error 0x001A), and CiA 402 drives latch a
+  communication fault (0x7500 on the ECT60, after one or two missed
+  cycles). A stop guard, an RTAPI task with the servo period beside the
+  servo thread, sends the process data unchanged when `ecat.write-all`
+  is more than a quarter period late; after 10 such cycles in a row it
+  sets every output to zero and takes the slaves to PREOP, and unloading
+  waits for it. `ecat.0.guard-state` shows it (0 the servo thread runs, 1
+  taking the slaves down, 2 done) and `ecat.0.guard-cycles` counts the
+  cycles it sent; while the machine runs that stays 0. After `halcmd stop` and `start`
+  the slaves are asked back to OP; DC slaves (such as the ECT60) then stop
+  in SAFEOP with a synchronization error, as they did before the guard:
+  restart instead.
+- `ecat.take-down` does the same on request while the thread runs, and
+  `ecat-take-down` sets it and waits for PREOP; it is no longer needed in
+  `[HAL]SHUTDOWN`.
+- The cycle time is the servo thread's period, taken at the first call
+  of `ecat.read-all`; distributed clocks are configured then, before the
+  master is activated.
+- Profiles `cia402`, `mdp` and `generic` are supported. A `cia402` drive
+  gets the CiA 402 state machine and scaled position and velocity pins in
+  the component, with the pins of the cia402 HAL component
+  ([CiA 402 drives](#cia-402-drives)).
+- Incremental encoder channels laid out as in MDP 511 (EL5101, EL5151,
+  EL5152, EL7041, ...) get position, velocity, index and latch pins, like
+  LinuxCNC's encoder component ([encoder channels](#encoder-channels)).
+
+A configuration imported from lcec can keep lcec's pin names by naming
+the slaves `lcec.0.<name>`, so that existing HAL files work with only the
+lines above changed.
+
+
+### Servo period and performance
+
+How short can LinuxCNC's servo period be with ecat? It depends on the drives, the
+network card and the computer; these are numbers from one machine (a plasma
+cutter: three Rtelligent ECT60 drives and an EaserCAT 7000 on an Intel N100 with an
+`igc` card on `xdp-native`, PREEMPT_RT, the servo thread on an isolated CPU,
+LinuxCNC 2.10 with QtPlasmaC, 2026-11-16). They show what is possible, not what
+your machine will do: measure yours (below).
+
+| Servo period | What was seen |
+|---|---|
+| 1 ms | The usual setting. Every earlier test of the component ran here. |
+| 250 us | Works. In LinuxCNC with the machine moving and a heavy CPU load (`stress-ng`, 10 min): the servo thread 9-13 us on average, 68 us at most; one lost cycle at the start of the load (before the card's interrupts were pinned, see below). |
+| 200 us | Works: 270 s under load in `halrun` and 3 minutes of a running program in LinuxCNC without a lost cycle (with the interrupts pinned). Before they were pinned, one lost cycle came in about 100 s of real use. |
+| 175 us | Clean from the start in `halrun` under load (40 s). |
+| 150 us | Works: 10 minutes under load with the machine moving, no lost cycle after the start-up burst (below), the servo thread 84 us at most. |
+| 125 us | Works, and is the shortest these drives take: 10 minutes under load, SYNC0 at two cycles of turn-around throughout, the servo thread 63 us at most (half the period). |
+| 100 us and below | Does not work with these drives: the ECT60 refuses a SYNC0 cycle of 100 us (the bus never reaches OP, AL status 0x0036 "DC Sync0 Cycle Time"; LinuxCNC shows "amplifier fault"). |
+
+What to expect from it:
+
+- **The drives set the floor.** A drive's minimum SYNC0 cycle is in its manual, not
+  reliably in the slave: the ECT60's ESI file gives none and its CoE object
+  `0x1C32:05` reads nonsense. EtherCAT Setup shows what was measured on a kind of
+  device on its slave page (*Measured on the bus*) and warns when the servo
+  period is at or below a period the device refused. Find yours by trying, and
+  keep it with *Remember this period* ([Measured SYNC0 cycles](#measured-sync0-cycles)).
+- **Pin the network card's interrupts** on the CPU of the servo thread:
+  *Interrupts on CPU* 3 on the *Master* page for `isolcpus=3`. By default they are
+  handled on the CPUs that also run the GUI, the mouse and the graphics, and a
+  frame's arrival can wait behind them: a cycle is then lost now and then at
+  250 us and shorter. The *Synchronisation* card says where they are. The
+  kernel needs an isolated CPU for the servo thread (here
+  `isolcpus=3 nohz_full=3 rcu_nocbs=3 irqaffinity=0-2`).
+- **A lost cycle stops the drives.** One cycle in which the working counter is
+  not complete shuts the drives down (CiA 402 profile, by design: they stay
+  shut down until `enable` drops). At 1 ms it was not seen in the tests; at
+  250 us and shorter it is the thing to watch, in the event log
+  (`working counter zero`) and in the *Synchronisation* card.
+- **A burst when the bus starts at 150 us and shorter.** About 1.4 s after the bus is
+  activated, when the automatic SYNC0 shift takes effect, the working counter is lost
+  for about a second (150 events at 150 and 125 us). LinuxCNC is in E-stop then and
+  nothing that runs is shut down, but do not switch the machine on in the first
+  seconds. It is not the interrupts, and a fixed shift did not remove it.
+- **The thread's own time grows with the machine.** Alone, `ecat` takes 4-5 us per
+  cycle here; with LinuxCNC's motion code and QtPlasmaC in the same thread, 9-13 us on
+  average and 60-85 us at most. At 125 us that is up to two thirds of the period.
+- **The automatic SYNC0 shift keeps two cycles of turn-around** only while the
+  period has room: the two margins and the spread of the frames' send time have to
+  fit. The margins are 50 us, and a sixth of the period when that is less, so 125 us
+  keeps 83 us for the spread. The *Synchronisation* card shows the room.
+- Serial channels and EoE share the bus frames; neither was measured at short
+  periods.
+
+Measure your own:
+
+1. Copy your configuration and set `SERVO_PERIOD` in the copy (and *Interrupts
+   on CPU* on the *Master* page); keep the machine off for the first seconds.
+2. Start LinuxCNC (or the I/O test, in *EtherCAT Setup*) and read the
+   *Synchronisation* card: all slaves in OP, two cycles of turn-around, `pll-err`
+   spread, the room for two cycles, where the interrupts are.
+3. Load the computer as you will (a running program, the GUI, `stress-ng`) for ten
+   minutes, jog and cut, and read the event log: `working counter zero` is a lost
+   cycle. `latency-histogram --nox --base N --servo N` (LinuxCNC's own tool) shows the
+   thread's latency without the bus.
+4. Shorten the period in steps. When a drive refuses OP, or cycles are lost, go back
+   one step. Use *Remember this period for the drives...* on the Test page after a
+   run that was good, so that the slave page knows it next time.
+
+### CiA 402 drives
+
+Status: first version, 2026-11-08. It has run a plasma cutter's LinuxCNC
+configuration with three CiA 402 closed-loop stepper drives (ECT60) in
+CSP: enabling without a jerk, jogging, E-stop at rest and during motion,
+homing, and a program with lines and arcs at 1000 and 3000 mm/min. The
+following errors were the same as with lcec and the cia402 component
+(about 0.3 mm at 1000 mm/min and 0.8 mm at 3000 mm/min, from the drives'
+own position loop).
+
+A slave with the profile *CiA 402 drive* (the *Profile* box on its page) is a
+CiA 402 (ETG.6010) drive. The `ecat` component then runs the drive's state machine in every
+cycle and gives it scaled position and velocity pins, like the separate
+[cia402 HAL component](https://github.com/dbraun1981/hal-cia402) does
+together with lcec, but inside `ecat` and without the HAL nets between
+them.
+
+On the slave's page, *Mode of operation* is the mode the drive runs in
+when enabled: CSP (cyclic synchronous position) or CSV (cyclic
+synchronous velocity) for a joint, or for a drive that is not a joint,
+PV (profile velocity, such as a spindle) or PP (profile position, such
+as a tool changer or an indexer), below. *Can also switch to* lists other
+modes the drive may change to: homing by the drive's own method, and
+CSP, CSV, PV and PP to choose with `opmode-cmd`, below. The profile
+handles the drive's control and status words, mode, targets and actual
+values itself: they get no pins of their own, and the *Process data* card
+shows what the chosen modes need and what the PDOs lack.
+
+The drive's mode must be set or seen: either the mode is in the process
+data (written every cycle), or it is written once at start (the row *Mode
+of operation* on the *InitCmds* card, or a setting `0x6060:00`), or at
+least the drive's mode display is mapped, so that the profile enables the
+drive only when it shows the mode. EtherCAT Setup proposes the start row
+where the mode is not mapped (StepperOnline A6's default PDOs, for
+example), also for a drive that reports one mode only: such a drive may
+still start in mode 0 (no mode). Changing modes while running needs both
+mode objects (`0x6060`, `0x6061`) in the process data.
+
+Other entries of the drive, such as torque or digital inputs, get ordinary
+pins.
+
+#### Pins (CiA 402)
+
+Pins are `<slave name>.<pin>`.
+
+| Pin | Type | Dir | |
+|---|---|---|---|
+| `enable` | bool | in | Enable the drive. Connect `joint.N.amp-enable-out`. |
+| `pos-cmd` | real | in | Position command (`csp`), machine units. |
+| `velocity-cmd` | real | in | Velocity command (`csv`, `pv`). |
+| `fault-reset` | bool | in | A rising edge resets a drive fault. |
+| `watchdog` | uint | in | Must change within `watchdog-ms`, if that is set. |
+| `pos-fb` | real | out | Position feedback, machine units. |
+| `velocity-fb` | real | out | Velocity feedback. |
+| `drv-fault` | bool | out | The drive was shut down while enabled; connect `joint.N.amp-fault-in`. |
+| `fault-reason` | sint | out | Why, below. |
+| `cia-state` | sint | out | The drive's state, below. |
+| `statusword`, `controlword` | uint | out | As read and written. |
+| `opmode`, `opmode-display` | sint | out | As written and read. |
+| `error-code` | uint | out | `0x603F`, if mapped. |
+| `drv-actual-position`, `drv-actual-velocity` | sint | out | Unscaled feedback. |
+| `drv-target-position`, `drv-target-velocity` | sint | out | Unscaled commands as written. |
+| `pos-zero` | sint | out | With `zero-at-start`: the drive's position taken as 0, in counts. |
+| `velocity-ff` | real | out | With `0x60B1`: the velocity fed forward, machine units/s (written × `velo-scale`). |
+| `torque-ff` | real | out | With `0x60B2`: the torque fed forward, % of rated torque (written in per mille). |
+| `stat-switchon-ready`, `stat-switched-on`, `stat-op-enabled`, `stat-fault`, `stat-voltage-enabled`, `stat-quick-stop`, `stat-switchon-disabled`, `stat-warning`, `stat-remote`, `stat-target-reached` | bool | out | Status word bits. |
+| `opmode-no-mode`, `opmode-homing`, `opmode-cyclic-position`, `opmode-cyclic-velocity` | bool | out | From `opmode-display`. |
+
+Parameters:
+
+| Parameter | Default | |
+|---|---|---|
+| `pos-scale` | 1.0 | Counts per machine unit. |
+| `velo-scale` | 1.0 | Velocity counts per machine unit. |
+| `auto-fault-reset` | true | Reset a drive fault on a rising edge of `enable`. |
+| `enable-timeout-ms` | 2000 | Time allowed to reach "Operation enabled"; 0 for no limit. |
+| `watchdog-ms` | 0 | Watchdog time for the `watchdog` pin; 0 for off. |
+| `mode` | | The configured mode, 8 (CSP), 9 (CSV), 3 (PV) or 1 (PP); read only. |
+| `ff-velocity-gain` | the kept feedforward, else 0 | With `0x60B1`: the share of the velocity fed forward. |
+| `ff-torque-per-accel` | the kept feedforward, else 0 | With `0x60B2`: % of rated torque per machine unit/s². |
+| `ff-torque-max` | the kept limit, else 30 | With `0x60B2`: the torque offset's limit, % (never above 300). |
+
+`cia-state`: 0 not ready to switch on, 1 switch on disabled, 2 ready to
+switch on, 3 switched on, 4 operation enabled, 5 quick stop active,
+6 fault reaction active, 7 fault, -1 unknown (no valid process data).
+
+`fault-reason`: 0 none, 1 drive fault, 2 no valid process data (working
+counter or slave not in OP), 3 "Operation enabled" not reached in time,
+4 the drive left "Operation enabled" by itself, 5 watchdog, 6 the drive
+does not report the configured mode, does not change mode within 1 s,
+or does not stop for a mode change within `stop-timeout-ms`, 7 `pos-cmd`
+(CSP) or `velocity-cmd` (CSV, PV) is not a finite number (NaN or
+infinite), and in PP `pp-target` or `pp-velocity`, or `opmode-cmd` asks
+for a mode that is not configured,
+8 the drive reports a homing error, 9 homing not done within
+`home-timeout-ms`, 10 a PP move not done within `pp-timeout-ms`, 11 the
+master's DC sync check for the drive timed out (see Behaviour), 12 the
+drive moved more than `home-max-travel` while homing.
+
+#### Behaviour (CiA 402)
+
+- Without `enable` the drive is held in "Ready to switch on" (control word
+  `0x06`): power stage off.
+- With `enable` the profile steps it through "Switched on" to "Operation
+  enabled". It enables operation only if the drive reports the configured
+  mode, when `0x6061` is mapped.
+- Until the drive is in "Operation enabled", the target position is its
+  actual position and the target velocity is 0, so it does not move when
+  it is enabled. After that it follows `pos-cmd` or `velocity-cmd`.
+- If, while `enable` is true, the drive faults, leaves "Operation enabled"
+  by itself, does not get there within `enable-timeout-ms`, the process
+  data stops being valid, `watchdog` stops changing, or the command is NaN
+  or infinite (it is never turned into a target), the profile shuts
+  the drive down and sets `drv-fault` and `fault-reason`. It stays shut down
+  until `enable` goes false, also if the cause goes away.
+- The same holds when the master's DC sync check for the drive timed out
+  (`<slave>.slave-dc-sync-failed`, `fault-reason` 11): the master then
+  starts SYNC0 on a clock that is not synchronized with the other slaves
+  and the servo thread, and the drive is not run at all until a new
+  configuration passes the check (needs linuxcnc-ethercat-uspace 0.5 or
+  later).
+- A drive fault is reset by a rising edge of `fault-reset`, or of `enable`
+  with `auto-fault-reset`; bit 7 of the control word is held for up to
+  100 ms.
+
+#### A joint in CSV
+
+In CSP the drive closes the position loop itself, at its own rate. In
+CSV it only follows a velocity, so LinuxCNC closes the position loop,
+with a `pid` in the servo thread between motion and the drive, as for an
+analog servo amplifier in velocity mode. CSP is usually the better
+choice: in CSV the bus delay (two or three servo cycles from command to
+feedback) is inside LinuxCNC's loop and limits the gain.
+
+```
+loadrt pid names=x-pid
+addf ecat.read-all       servo-thread
+addf motion-command-handler servo-thread
+addf motion-controller   servo-thread
+addf x-pid.do-pid-calcs  servo-thread
+addf ecat.write-all      servo-thread
+
+setp x-drive.pos-scale  [JOINT_0]SCALE
+setp x-drive.velo-scale [JOINT_0]SCALE
+setp x-pid.Pgain     [JOINT_0]P
+setp x-pid.Igain     [JOINT_0]I
+setp x-pid.Dgain     [JOINT_0]D
+setp x-pid.FF1       [JOINT_0]FF1
+setp x-pid.maxoutput [JOINT_0]MAX_OUTPUT
+
+net x-enable  joint.0.amp-enable-out => x-drive.enable x-pid.enable
+net x-pos-cmd joint.0.motor-pos-cmd  => x-pid.command
+net x-vel-cmd joint.0.vel-cmd        => x-pid.command-deriv
+net x-pos-fb  x-drive.pos-fb         => x-pid.feedback joint.0.motor-pos-fb
+net x-vel-fb  x-drive.velocity-fb    => x-pid.feedback-deriv
+net x-vel     x-pid.output           => x-drive.velocity-cmd
+net x-fault   x-drive.drv-fault      => joint.0.amp-fault-in
+```
+
+- `velo-scale` is the drive's velocity unit per machine unit per second:
+  `SCALE` when the drive counts velocity in position counts per second;
+  check the drive's manual (some use rpm or counts per millisecond).
+- `pid.output` is then a velocity in machine units per second. With
+  `FF1 = 1.0` the feedforward gives the velocity of the path, and the
+  P term only corrects the error. `P` is in 1/s (velocity per unit of
+  following error): start small, such as 20, with `I = D = 0`, and raise
+  it while watching the following error in halscope.
+- `MAX_OUTPUT` a bit above `MAX_VELOCITY` keeps a fault from asking for
+  full speed.
+- The order of the functions matters: the pid must run after
+  `motion-controller` and before `ecat.write-all`, or its output reaches
+  the drive a cycle late.
+
+#### Changing modes
+
+With modes ticked in *Can also switch to* (for example PV with PP ticked,
+a spindle that also positions), the
+drive gets the pin `opmode-cmd` (sint, in): 0 for *Mode of operation*, or the number of
+one of the modes: 1 PP, 3 PV, 8 CSP, 9 CSV. `opmode` shows the mode
+written, `opmode-display` the drive's. A number that is not a configured mode shuts the drive down (`fault-reason` 7); homing (6) goes by its
+own pins.
+
+A drive that is not enabled changes at once, and is enabled only once it
+reports the new mode. An enabled drive changes in steps:
+
+1. It is stopped: in PV and PP halted (control word bit 8) until it
+   reports zero speed or target reached, at least two cycles; in CSP
+   and CSV the target is held at the actual position, or velocity 0, for
+   two cycles. If it does not stop within `stop-timeout-ms`, it is shut
+   down (`fault-reason` 6).
+2. The new mode is written to `0x6060`, and `0x6061` must follow within
+   1 s (`fault-reason` 6).
+3. The new mode starts from the actual values: CSP follows `pos-cmd` only
+   once it is within 10 counts of the actual position (until then the
+   drive holds the position taken when it entered CSP, a fixed target:
+   writing the moving actual position would let a drive that still moves,
+   or feeds the target's velocity forward, run on), CSV `velocity-cmd`
+   only once it is 0, PV ramps to `velocity-cmd`, and PP moves only on a
+   new `pp-start`.
+
+Asked back to the old mode before step 2, the drive goes on in it. The
+mode objects `0x6060` and `0x6061` must be in the process data, and each
+allowed mode's objects; PP's limits must be settings (the *Settings* card).
+
+A joint should stay in CSP or CSV: LinuxCNC must be the only one that
+plans its motion. The other modes are for drives that are not joints.
+
+#### Profile velocity (PV)
+
+In PV the drive ramps to `velocity-cmd` with its own
+acceleration and deceleration (`0x6083`, `0x6084`; set them on the
+*Settings* card). It is for a drive that LinuxCNC does not move as a joint: a
+spindle, a conveyor, a pump. The drive follows `velocity-cmd` as soon as
+it is in "Operation enabled", and stands still at 0.
+
+Extra pins and parameter:
+
+| Pin | Type | Dir | |
+|---|---|---|---|
+| `at-speed` | bool | out | The drive runs at `velocity-cmd` (status word bit 10). Connect `spindle.N.at-speed`. |
+| `zero-speed` | bool | out | The drive reports zero speed (status word bit 12). |
+
+| Parameter | Default | |
+|---|---|---|
+| `stop-timeout-ms` | 10000 | Time allowed to stop before the drive is switched off; 0 to switch off at once. |
+
+- When `enable` goes false, or the profile shuts the drive down (a NaN
+  command, the watchdog, ...), a running drive is first halted (control
+  word bit 8) with its own deceleration, and switched off when it
+  reports zero speed or after `stop-timeout-ms`. It does not coast.
+  Enabled again while it slows down, it runs up again. When the drive
+  faults, or the bus stops, it cannot be halted; it does its own fault
+  reaction.
+- The status word answers a new control word or target two servo cycles
+  later, when SYNC0 falls after the frame has reached the drive: the frame
+  sent at the end of cycle n is used at SYNC0 in cycle n, and its answer
+  comes with the frame of cycle n + 1, read at the start of cycle n + 2.
+  *Global shift time* `auto` (the *Master* page) places SYNC0 so, and
+  `ecat.0.turnaround-cycles` shows 2. So `at-speed` waits two cycles after
+  a new target, so that it never reports the old target as reached, and a
+  drive is halted for at least two cycles before "zero speed" is believed.
+  A turn-around of three cycles (SYNC0 before the frame, such as
+  a global shift time of 0) is a configuration error: these status bits can
+  then be taken one cycle too early.
+
+  To be confirmed in use: two cycles is measured only for the mode
+  display (`0x6061`) of ECT60 drives. A drive with a slower internal cycle
+  may update "target reached" or "zero speed" later. If use shows that,
+  more cycles must be allowed, for example as a parameter per drive.
+  Please report drives where `at-speed` or a stop comes too early.
+
+For a spindle:
+
+```
+net spindle-vel  spindle.0.speed-out-rps => spindle-drive.velocity-cmd
+net spindle-on   spindle.0.on            => spindle-drive.enable
+net spindle-at   spindle-drive.at-speed  => spindle.0.at-speed
+```
+
+with `velo-scale` the drive's velocity units per revolution per second.
+
+#### Profile position (PP)
+
+In PP the drive moves to a position on its own, with its own
+trajectory: for positioning that LinuxCNC does not do as a joint, such
+as a tool changer, an indexer, a stop or a loader. The drive must know
+its travel, so its software limits `0x607D:01` and `0x607D:02` must be
+settings; the maximum profile velocity `0x607F` too where the drive
+has it (the Rtelligent ECT60 has not: the check warns when the drive has
+it and the configuration does not set it). EtherCAT Setup proposes the
+drive's present values as settings rows.
+
+Acceleration and deceleration are `0x6083` and `0x6084`, also settings.
+
+Extra pins and parameters:
+
+| Pin | Type | Dir | |
+|---|---|---|---|
+| `pp-target` | real | in | Target position, machine units (`pos-scale`). |
+| `pp-velocity` | real | in | Profile velocity (`velo-scale`), if `0x6081` is in the process data; otherwise the drive's setting. |
+| `pp-start` | bool | in | A rising edge starts a move to `pp-target`. |
+| `pp-relative` | bool | in | The move is relative to the last target. |
+| `pp-halt` | bool | in | Stop (control word bit 8); released, the move goes on. |
+| `pp-done` | bool | out | At the target of the last move. |
+
+| Parameter | Default | |
+|---|---|---|
+| `pp-timeout-ms` | 60000 | Time allowed for a move, not counting time halted; 0 for no limit. |
+| `pp-immediate` | 0 | Also set control word bit 5, "change set immediately", with every set-point. Off by default: with it the ECT60 acknowledged a set-point and did not move (tried 2026-11-10). |
+| `stop-timeout-ms` | 10000 | As in PV. |
+
+- The drive moves only on a rising edge of `pp-start`: enabling it, or
+  changing `pp-target`, does not move it.
+- The profile does the set-point handshake: it sets control word bit 4
+  (new set-point, with bit 6 for relative, and bit 5 "change
+  immediately" if `pp-immediate`), waits for the drive's acknowledge (status word bit 12), and
+  clears bit 4. A start during a move replaces it; a start while the
+  drive still acknowledges the last one is given as soon as it can be.
+- A drive that acknowledges a set-point but does not take it (target
+  reached stays set; the ECT60 does this now and then) gets it again: if
+  target reached has not cleared 6 cycles after the acknowledge, the
+  profile gives the same set-point once more, at most twice. A move too
+  short for the drive to show counts as done after that.
+- `pp-done` is set when the drive reports target reached after it has
+  acknowledged the set-point, so it never answers an earlier move, and
+  not while halted (target reached then means standing still) or for
+  two cycles after the halt is released.
+- When `enable` goes false or the drive is shut down during a move, it is
+  halted first, as in PV.
+
+##### From G-code
+
+An indexer or a tool carousel can be moved from G-code with motion's
+I/O pins: `M68` sets an analog output (the target), `M64`/`M65` a digital
+output (the start), and `M66` waits for a digital input (the result).
+Motion has four of each by default (`num_dio` and `num_aio` of
+`motmod`).
+
+```
+net indexer-on     motion.motion-enabled => indexer.enable
+net indexer-target motion.analog-out-00  => indexer.pp-target
+net indexer-start  motion.digital-out-00 => indexer.pp-start
+net indexer-done   indexer.pp-done       => motion.digital-in-00
+```
+
+A subroutine, `o<index> call [90]`, in `nc_files/subroutines/index.ngc`
+(or a directory in `[RS274NGC]SUBROUTINE_PATH`):
+
+```
+o<index> sub
+  M68 E0 Q#1            (target)
+  M64 P0                (pp-start: rising edge)
+  M66 P0 L1 Q10         (wait for pp-done to rise, at most 10 s)
+  M65 P0
+  o1 if [#5399 EQ -1]
+    (abort, indexer did not reach its target)
+  o1 endif
+o<index> endsub
+M2
+```
+
+- `M66 ... L1` waits for a rising edge of `pp-done`, not for it to be
+  high: it is still high from the last move until the drive takes the
+  new set-point, a few cycles after the start.
+- `M64`, `M65` and `M68` act at once, not in step with the motion of
+  the joints; the program waits at `M66`, with the joints standing.
+- For a tool changer, the same lines go into an `M6` remap.
+- `drv-fault` can be connected to the E-stop chain or to a
+  `motion.digital-in` that the subroutine checks; a drive shut down
+  during a move does not raise `pp-done`, so `M66` times out.
+
+#### Several axes
+
+A drive with two or more axes in one slave (ETG.6010 "multi-axis": a
+two-axis ECT60x2, ECR60x2 or EL72xx with channel offset) keeps each
+axis's objects 0x800 apart: the second axis's control word is `0x6840`,
+its target position `0x687A`, and so on. EtherCAT Setup gives each axis
+a name of its own (the slave's, with `-1`, `-2`).
+
+Each axis then has all of this section's pins and parameters under its own
+name (`xy-1.enable`, `xy-2.pos-cmd`, ...) and its own state: one axis can
+be enabled, faulted or homing while the other is not. The slave's name
+is left for its other pins. The mode, the other modes and *Start position*
+apply to every axis; every axis needs the objects of its modes, and in PP its own
+limits (`0x687D:01` ...) as settings.
+
+EtherCAT Setup proposes the axes when the drive's process data has a
+status word at `0x6841` (and so on), names them after the slave (`-1`,
+`-2`) and renames them with it. Joints connect to an axis like to a
+drive (the *Joints* card), and the test
+mode moves one axis at a time (choose it in the *Move* card). Its limits
+are written to that axis's objects.
+
+Built and unit-tested, not tried on a drive with several axes.
+
+#### Zero at start
+
+Some drives keep their position counter from an earlier run as long as
+they have power; the Rtelligent ECT60 does. A machine configuration that
+needs the position to start at 0 when LinuxCNC starts ticks *Start
+position: Position counts from 0 at start* on the drive's page.
+
+When the bus first reaches OP after `ecat` is loaded, the drive's
+position is taken as 0: it is kept in the pin `pos-zero` (counts), taken
+off `pos-fb`, and added to the target written to the drive (`pos-cmd` in
+CSP, an absolute `pp-target` in PP). `pos-fb` is 0 until then. Nothing is
+written to the drive, so it works on any drive, and the drive's own
+counts stay visible in `drv-actual-position` and `drv-target-position`.
+
+- It is taken once per load of `ecat`. A bus that drops and comes back
+  keeps it; a drive that lost power counts from its own 0 again, and the
+  machine must be homed, as without the option.
+- Homing by the drive sets `pos-zero` back to 0: the
+  drive's position is then the homed one.
+- The 32-bit counter wraps as the drive's does.
+
+This replaces writing a "zero position" command as a setting, such as
+the ECT60's `0x2010` (Zero Position), which is a command rather than a
+setting and did not take effect as a start-up SDO on the ECT60.
+
+#### Feedforward in CSP
+
+In CSP the drive gets only a position each cycle and works out the
+velocity and acceleration itself; a drive whose own feedforward is off or
+weak lags by velocity / its position gain (40 /s at 100 mm/s is 2.5 mm).
+CiA 402 drives can take them from the controller instead: `0x60B1`
+(velocity offset) is added to the drive's velocity reference, `0x60B2`
+(torque offset, per mille of rated torque) to its torque reference.
+Map them in the drive's output PDO (the *Process data* card), and set the
+values with the Response card's *Feedforward from LinuxCNC* row, which
+tries them in the test and keeps them in the configuration.
+
+- The profile works them out from `pos-cmd`, cycle by cycle: the
+  velocity is the step since the last cycle over the period, the
+  acceleration the change of that. They come from the same stream as the
+  target, so they are in step with it; nothing needs connecting in HAL.
+- `0x60B1` gets `ff-velocity-gain` × velocity × `velo-scale`: the drive's
+  velocity unit per machine unit/s, counts per second for most drives,
+  the same as `pos-scale`. EtherCAT Setup's *Apply* writes `setp
+  <drive>.velo-scale` with the joint's `pos-scale` for a drive with
+  feedforward, and its drive test sets it in CSP too. Left at
+  its default 1, `0x60B1` is `pos-scale` times too small and does nearly
+  nothing. `0x60B2` gets `ff-torque-per-accel` × acceleration, within ±
+  `ff-torque-max`.
+- Both are 0 unless the drive follows `pos-cmd` in CSP in "Operation
+  enabled": while enabling, after a fault, during a mode change or
+  homing, in other modes. The first cycle of following starts from
+  velocity 0 and the second from acceleration 0, so neither kicks when
+  `pos-cmd` is far from where the profile last saw it.
+- The drive must be told to use them: a vendor setting, such as
+  StepperOnline A6's C01.13 = 5 (speed feedforward from communication) and
+  C01.16 = 5 (torque). Without that the drive ignores them. Leave the
+  drive's own feedforward off when it takes LinuxCNC's.
+- `torque` is what the Response card in EtherCAT Setup measures as torque
+  per acceleration (with `0x6077` recorded); its *Feedforward from
+  LinuxCNC* row tries the values in the test and keeps them in the configuration
+  ([tuning a servo drive, step by step](#tuning-a-servo-drive-step-by-step)).
+  The card also shows whether the lag went: its comparison names the
+  feedforward that changed between two measurements.
+- `0x60B1` and `0x60B2` are always the profile's when mapped (written 0
+  without feedforward), and the parameters can be changed while the
+  machine runs (`setp x.ff-velocity-gain 0.8`).
+
+Built and unit-tested (component/tests: values, scaling, limits, no kick,
+CSP only); tried on a bus against a simulated drive (an EaserCAT 3000
+firmware, docs/development.md "Feedforward tried on a simulated drive",
+with the Response card at 100 and 1000 counts/mm, and in LinuxCNC 2.10),
+not yet on a real drive with these objects (the ECT60 has neither).
+
+#### Homing by the drive
+
+With *Homing: Homing by the drive's own method* ticked (and the mode
+objects `0x6060` and `0x6061` in the process data), the drive can home by its own method (CiA 402 mode 6), like
+the cia402 component's homing. It works with any mode: a joint in CSP
+homes through motion (`index-enable`), and a drive that is not a joint,
+such as an indexer in PP or a spindle in PV, homes on the `home` pin. The method, speeds, acceleration and home
+offset are the drive's objects `0x6098`, `0x6099`, `0x609A` and `0x607C`;
+the *Homing by the drive* card sets them.
+
+Extra pins and parameter:
+
+| Pin | Type | Dir | |
+|---|---|---|---|
+| `index-enable` | bool | io | Connect `joint.N.index-enable`. A rising edge starts homing; it is cleared when the drive has homed. |
+| `home` | bool | in | A rising edge starts homing: for a drive that is not a joint (from an M-code, ladder or a tool changer), or for tests without motion. |
+| `stat-homing` | bool | out | Homing is in progress. |
+| `stat-homed` | bool | out | The drive has homed; until homing starts again. |
+| `home-error` | bool | out | The last homing failed, timed out or went beyond `home-max-travel`. |
+| `pos-actual` | real | out | The drive's position, as `pos-fb` but also while `pos-fb` follows `pos-cmd` during homing: what the axis really does. |
+| `home-travel` | real | out | The distance the drive has covered in this homing, both ways counted, in machine units; 0 when the next homing starts. |
+
+| Parameter | Default | |
+|---|---|---|
+| `home-timeout-ms` | 60000 | Time allowed for homing; 0 for no limit. |
+| `home-max-travel` | 0 | The longest distance the drive may cover while homing, both ways counted, in machine units; 0 for no limit. |
+
+Homing is started only while the drive is enabled, in "Operation
+enabled", and only by a new rising edge. The profile then:
+
+1. in PV and PP, halts the drive (control word bit 8) and waits until it
+   stands still, as for a [mode change](#changing-modes): zero speed in
+   PV, target reached in PP, at the earliest after two cycles. A drive
+   that does not stop within `stop-timeout-ms` is shut down
+   (`fault-reason` 6). In CSP and CSV the target is held at once;
+2. writes mode 6 and waits for the drive to report it (within 1 s);
+3. sets control word bit 4 and waits for "homing attained" and "target
+   reached" (status word bits 12 and 10). A drive that still shows these
+   from an earlier homing gets 20 ms to clear them;
+4. clears bit 4, writes the mode in use, holds the target at the
+   actual position, and waits for the drive to report the mode;
+5. clears `index-enable` and sets `stat-homed`.
+
+After homing the drive goes on in its mode from the new position: CSP
+follows `pos-cmd` again only once it is within 10 counts of the drive's
+position, so a command from before homing does not make it jump back
+(through motion, `pos-cmd` matches at once); PV ramps to `velocity-cmd`
+again; PP waits for a new `pp-start`. Homing is not a value of
+`opmode-cmd`: it is started by its edge and ends in the mode it began
+in.
+
+Until then, while homing was started by `index-enable`, `pos-fb` follows
+`pos-cmd`, so that motion sees no following error while it moves the
+joint slowly in its index search. When `index-enable` is cleared, `pos-fb`
+becomes the drive's position after homing, as an encoder's count resets
+at its index, and motion counts the joint from it (below).
+
+In the INI file, home the joint on an index pulse: `HOME_USE_INDEX =
+YES`, `HOME_SEARCH_VEL = 0` to start the index search where the joint
+is, and a small `HOME_LATCH_VEL`. As with an encoder whose count is
+reset at its index, motion then takes the drive's position as counted
+from the index: it sets the motor offset to `-HOME_OFFSET` (LinuxCNC's
+`homing.c`, state `HOME_SET_INDEX_POSITION`), so the joint is
+`HOME_OFFSET` where the drive's position is 0, and the drive's position
+plus `HOME_OFFSET` everywhere else. Where the drive stands after homing
+does not matter. Most drives give the home point the position of their
+home offset `0x607C` (the sign and whether it is applied depend on the
+drive and the method: an ECT60 with method 35 gives it 0 whatever
+`0x607C` is), so the home point is at `HOME_OFFSET` plus that offset in
+machine coordinates. A drive that stops past its home point, or moves to
+its zero, is still placed right: motion counts on the drive's position,
+not on where the move ended. Motion's final move then goes to `HOME`;
+it is 0 long when the drive stands at its position 0 and `HOME` equals
+`HOME_OFFSET`. (With `HOME_INDEX_NO_ENCODER_RESET = YES` motion instead
+gives the joint `HOME_OFFSET` where it stands when `index-enable` is
+cleared.)
+
+#### What motion sees while the drive homes
+
+Motion does not see the move. From the rising edge of `index-enable`
+until the profile clears it, `pos-fb` follows `pos-cmd`, which motion
+moves slowly at `HOME_LATCH_VEL`; the display shows that, not the axis.
+Motion's following error check sees nothing, and neither do its soft
+limits (which it does not apply before homing anyway). What stops a
+homing that goes wrong, for example a method that searches for a switch
+that is not wired:
+
+- the drive itself: its limit switches, following error and torque
+  limit;
+- `home-max-travel`: the profile counts the distance the drive covers
+  (`home-travel`, both ways) and shuts it down with `fault-reason` 12
+  past the limit. Set it a little above what one homing needs, at most
+  the axis length. A step of more than half the limit in one cycle is
+  taken as the drive setting its position at home and is not counted;
+  so read `home-travel` after a homing with the limit set (say, to the
+  axis length) to choose the value;
+- `home-timeout-ms`;
+- `enable` from motion (E-stop, machine off), as always.
+
+`pos-actual` shows the real position meanwhile, for halscope or a
+display pin.
+
+```
+[JOINT_0]
+HOME_SEARCH_VEL = 0
+HOME_LATCH_VEL = 1
+HOME_USE_INDEX = YES
+HOME_OFFSET = 10
+HOME = 10
+```
+
+```
+net x-index-enable  joint.0.index-enable <=> x-drive.index-enable
+```
+
+In EtherCAT Setup the homing card on the slave's page (*Homing by the
+drive*) lists the methods the drive supports, writes the choice and the
+objects it needs as settings, and shows the INI lines above for the
+joint that uses the drive, with the `index-enable` net, ready to copy.
+It does not change the INI file.
+
+A homing error (status word bit 13), a timeout or more than
+`home-max-travel` shuts the drive down,
+like the faults above, and sets `home-error`. If motion abandons homing
+(clears `index-enable`), or `enable` goes false, the profile stops the
+drive's homing and returns to the configured mode without a fault.
+
+Tried on a plasma cutter's ECT60 drive (2026-11-09) with method 35
+(homing on the current position): homing took 0.25 s; with
+`HOME_OFFSET = HOME = 10` the joint read 10 where the drive homed, also
+with `0x607C` set. The drive's position jumped by up to 150 mm when it
+homed, and the largest following error, measured every servo cycle
+through homing, was 0.02 mm. A method that finds the same place every
+time is still to be found for that machine: its home switches are not
+wired to the drives, and the ECT60's torque homing against a hard stop
+(methods 36 and 37, set up in `0x2030`) did not work there. Method 36
+moves towards the negative end (CCW). With the homing velocity
+`0x6099:01` at 2000 pulses/s the axis moved at about a third of that,
+and at 500 or 1000 pulses/s not at all, also with 80 % of the current in
+`0x2030:01`; each time the drive stopped with error 0x8611 (closed-loop
+tracking error over the limit in `0x2022`). The profile shut the drive
+down on the drive fault, as for any other.
+
+What Rtelligent's manual says (ECT Series User Manual, section 2.4.6;
+[PDF](https://rtelligentglobal.com/uploads/Rtelligent-ECT-Series-User-Manual1.pdf)):
+the ECT60 supports the homing methods 17 to 30, 35, 36 and 37 (`0x6098`,
+INT8, default 17). Methods 36 and 37 are torque homing, without external
+limit signals: the drive decides from its own torque output that a
+mechanical stop is reached. The manual describes both as running CCW at
+high speed and ending at the stop (37 is probably CW; not tried). The
+parameters are `0x2030:01` the maximum torque output and `0x2030:02` the
+torque that says the motor is at the stop, both in percent of the current
+set in `0x2000`; `0x2030:03` the motor speed at the stop (RPM);
+`0x2030:04` how long that holds (units of 50 us); `0x2030:05` and `:06` the
+speed loop's P and I gain during torque homing. `0x204C` ("HM method
+select", 0 or 1) switches between two descriptions of the methods; 36 and
+37 exist only with 0 (the default). Homing starts with a rising edge on
+control word bit 4 in mode 6, and a rising edge on bit 8 stops it, as the
+profile does it. The manual does not say how the torque, speed and time
+conditions combine.
+
+**Torque homing works on the ECT60 when the speed loop has an integral
+gain** (found 2026-11-10, with the drive test, on X; the drive left
+`0x2030:06` at 0 and torque homing never ended). With `0x2030:06` = 0 the
+speed loop is a P regulator: it pushes the axis against the stop with only
+about 750 mA, never reaching the detect torque (`0x2030:02`, 50 % of the
+4000 mA in `0x2000` = 2000 mA; `actual-torque` reads in mA), and ends in
+a following-error fault 0x8611 when `0x2022` is too small. With the I gain
+at 100 the current rises to the detect level in about 1.6 s, the drive
+sets "homing attained" (status word bit 12), and the position becomes 0
+at the stop. Two runs in a row, from 10 mm and 30 mm away, both ended
+this way (the axis presses about 0.3 mm further while the current rises,
+so the stop's stiffness sets the repeatability). The settings that
+worked, as settings of the slave:
+
+| Object | Type | Value | |
+|---|---|---|---|
+| `0x6098:00` | SINT | 36 | torque homing, towards CCW (X-) |
+| `0x6099:01` | UDINT | 3000 | pulses/s |
+| `0x6099:02` | UDINT | 1000 | |
+| `0x2030:01` | UINT | 70 | max torque output, % of `0x2000` |
+| `0x2030:02` | UINT | 50 | torque that says "at the stop" |
+| `0x2030:03` | UINT | 20 | speed at the stop, RPM |
+| `0x2030:04` | UINT | 2000 | hold time, 50 us units |
+| `0x2030:05` | UINT | 1000 | speed loop P (the drive's own) |
+| `0x2030:06` | UINT | 100 | speed loop I (the drive's own: 0) |
+| `0x2022:00` | UDINT | 100000 | following-error window, see below |
+
+`0x2022` has to be larger than what the position reference runs away
+while the axis is stopped and the current rises: about 4000 counts or
+more at these speeds, so the drive's 4000 is too tight. With 20000 and no
+I gain the drive still faulted (0x8611) after 4.5 s at the stop; with
+100000 and the I gain both runs ended before any fault. Not tried: `0x2030:03` at 200 with the I gain, method
+37 (no stop to try it against in X+), other axes. Run the homing from
+LinuxCNC only after trying it with the drive test, away from the stop
+at first, with the emergency stop within reach.
+
+Earlier on 2026-11-10 with the drive test and `0x6099:01` at 3000
+pulses/s, 70 % in `0x2030:01`, detect limits of 50 % and 60 % and a
+following-error window of 200 mm: X moves towards X− at about half the
+commanded speed, stops softly at the end stop with 70 to 80 % torque,
+and the drive never sets "homing attained" (status word bit 12), so the
+homing does not end. Method 36 is not usable on the ECT60 as it is.
+
+PP and PV were tried on the same machine on 2026-11-10: PV runs as
+expected on X, Y and Z; PP works with the set-point given again as above
+([test mode](#pp-pv-and-homing-at-the-machine)). The ECT60s
+were delivered with `0x6098` = 17 (negative limit switch): a drive that
+is homed without a switch drives into its end stop. Use method 35, or
+choose the method on the *Homing by the drive* card.
+
+#### From lcec and the cia402 component
+
+The *From lcec* card ([From an lcec configuration](#from-an-lcec-configuration))
+does this: the cia402 component and its nets to lcec's pins go, the drive
+gets the CiA 402 profile, and the other `cia402.<axis>.` pins and
+parameters become the slave's (`x-drive.pos-cmd`, `setp x-drive.pos-scale
+100`). Connect `drv-fault` to `joint.N.amp-fault-in`, so that LinuxCNC
+stops when a drive is shut down.
+
+### Encoder channels
+
+Status: first version, 2026-11-08. It has run an EL5101 with a 3000-line
+(12000 counts per turn) encoder, 32-bit counter: counting both ways,
+velocity, and the index found twice 12000 counts apart.
+
+An incremental encoder channel whose objects are laid out as in ETG.5001
+MDP 511 gets position, velocity, index and latch pins from the `ecat`
+component, like LinuxCNC's `encoder` component. This is not tied to one
+terminal: Beckhoff uses the layout in the EL5101, EL5151, EL5152, EL7041,
+EL7047, EL7342, EP5101 and others (about 40 families in Beckhoff's ESI
+files), and a slave can have several channels, also next to a stepper or
+servo channel.
+
+A channel has its inputs at a status index S (`0x6000 + 0x10 × n`) and
+its outputs at S + `0x1000`. The channel handles these entries itself
+(they get no pins of their own):
+
+| Object | | |
+|---|---|---|
+| S:01 | input, 1 bit | latch C valid |
+| S:02 | input, 1 bit | latch extern valid |
+| S:03 | input, 1 bit | set counter done |
+| S:11 | input, 16 or 32 bits | counter value; needed |
+| S:12 | input, as S:11 | latch value |
+| S+0x1000:01 | output, 1 bit | enable latch C |
+| S+0x1000:02 | output, 1 bit | enable latch extern on positive edge |
+| S+0x1000:03 | output, 1 bit | set counter |
+| S+0x1000:04 | output, 1 bit | enable latch extern on negative edge |
+| S+0x1000:11 | output, as S:11 | set counter value |
+
+The channel's other entries, such as the states of inputs A, B and C,
+open circuit or frequency, keep ordinary pins.
+
+EtherCAT Setup finds the channels, a "Counter value" at S:11 with
+"Latch C valid" at S:01, and proposes them, named `enc`, or `enc-1`,
+`enc-2`, ... when a slave has several. The EL5101's default PDO assignment
+has a 16-bit counter; the PDO set "Standard 32 Bit (MDP 511)" gives the
+32-bit one. Both work, since the count is extended (below). A how-to:
+[A spindle encoder (EL5101)](#a-spindle-encoder-el5101).
+
+#### Pins (encoder)
+
+Pins are `<slave name>.<channel name>.<pin>`.
+
+| Pin | Type | Dir | |
+|---|---|---|---|
+| `pos` | real | out | Position: counts / `pos-scale`, from the index or reset. |
+| `velocity` | real | out | Velocity in units per second, over `velocity-window-ms`. |
+| `counts` | sint | out | Counts from the index or reset. |
+| `raw-count` | sint | out | The terminal's counter as read. |
+| `index-enable` | bool | I/O | Set it to find the index: at the index pulse, `pos` becomes 0 and the pin is cleared. Connect it to `joint.N.index-enable` or `spindle.N.index-enable`. Only there when latch C is mapped. |
+| `reset` | bool | in | While true, `pos` is 0 at the current count. |
+| `latch-enable-pos`, `latch-enable-neg` | bool | I/O | Arm the external latch input for a rising or falling edge; cleared when it latches. Only there when the external latch is mapped. |
+| `latch-pos` | real | out | The position at the latched edge. |
+| `ok` | bool | out | The process data is valid (working counter, slave in OP). |
+
+Parameters:
+
+| Parameter | Default | |
+|---|---|---|
+| `pos-scale` | 1.0 | Counts per unit. |
+| `velocity-window-ms` | 10 | Time over which `velocity` is measured, at most 256 cycles. Its resolution is one count per window: 100 counts/s at 10 ms. |
+
+#### Behaviour (encoder)
+
+- The counter, 16 or 32 bits, is extended to 64 bits, so `pos` does not
+  wrap. The counter must move less than half its range in one cycle
+  (32767 counts for 16 bits).
+- `pos` is 0 when the component starts.
+- The terminal's counter is never set; `index-enable` and `reset` move a
+  reference instead. So `pos` jumps only at the index or a reset, never
+  through a counter write that lands a cycle late.
+- An index or latch is taken only after its "valid" bit was seen false
+  since the pin was set, so an old latch is not taken for a new one.
+- When the process data is not valid, `ok` is false, `pos` holds and
+  `velocity` is 0. When it is valid again, counting goes on from there;
+  if the terminal lost power meanwhile, the position is off and the axis
+  must be homed again.
+
+#### From lcec
+
+lcec's EL5101 driver had pins such as `enc-pos`, `enc-index-c-enable` and
+`enc-pos-scale` (a pin there, a parameter here):
+
+| lcec | ecat |
+|---|---|
+| `lcec.0.X.enc-pos` | `X.enc.pos` |
+| `lcec.0.X.enc-count` | `X.enc.counts` |
+| `lcec.0.X.enc-raw-count` | `X.enc.raw-count` |
+| `lcec.0.X.enc-index-c-enable` | `X.enc.index-enable` |
+| `lcec.0.X.enc-reset` | `X.enc.reset` |
+| `lcec.0.X.enc-pos-scale` | `X.enc.pos-scale` (parameter: `setp`) |
+| `lcec.0.X.enc-index-ext-pos-enable` | `X.enc.latch-enable-pos` (sets `latch-pos`, does not reset `pos`) |
+
+lcec's EL5101 driver mapped the old (non-MDP) objects at `0x6000`/`0x7000`;
+those are not handled here.
+
+### Serial channels
+
+Status: first version (2026-11-15), not tried on a terminal: we have none.
+Tried 2026-11-16 on a real bus against a slave of our own that behaves as
+an EL6021 (bytes and mb2hal over a real wire, 2400 to 115200 baud; see
+[development.md](development.md)): that shows the function, the port and
+the settings at work, not that Beckhoff's manual was read right.
+Built from Beckhoff's manual (EL600x, EL602x 6.2.0) and ESI files. The
+handshake, the function and the port are tested against a simulated
+terminal (component/tests/sim_el60xx.c), with libmodbus, and mb2hal in
+halrun (`scripts/serial-mb2hal-test`), talking Modbus RTU through the port
+to a simulated slave.
+
+Beckhoff's serial terminals (EL6001 RS232, EL6002 two channels, EL6021
+RS422/RS485, EL6022 two channels) move bytes in windows of the process
+data with a handshake. A serial channel does that handshake and gives the
+bytes to a serial port on the computer, so that a program such as
+`mb2hal` (Modbus RTU to a VFD) uses the terminal as it would use
+`/dev/ttyUSB0`.
+
+A channel is two PDOs, which the channel owns completely (none of their
+entries gets a pin): the output PDO is a control byte, an output
+length and the data bytes; the input PDO a status byte, an input length
+and the data bytes. On an EL6021 these are 0x1602/0x1A02 (the default: a
+16-bit control word and 22 data bytes) or 0x1604/0x1A04 (the same bytes,
+the control bits as single entries); newer revisions choose them as
+"Standard 22 Byte (MDP 600)". The larger windows of "Standard 50 Word" and
+"Standard 98 Byte" are not handled (22 data bytes at most), nor the 3 and 5
+byte "Legacy" sets.
+
+EtherCAT Setup proposes a channel for each such pair of PDOs (one on an
+EL6001/EL6021, two on an EL6002/EL6022, named `port` or `port-1`,
+`port-2`), with the port `/dev/ttyECAT<position>` (`-1`, `-2`) at 9600
+8N1: set the baud rate and frame to the device's on the window's
+*Serial ports* card (which also sets half duplex for RS485 and
+gives the lines for mb2hal's INI file).
+
+#### Pins (serial)
+
+| Pin | | |
+|---|---|---|
+| `<slave>.<name>.state` | uint out | 0 no process data, 1 writing settings, 2 init, 3 ready |
+| `<slave>.<name>.tx-bytes`, `.rx-bytes` | uint out | bytes the terminal has taken to send, and given |
+| `<slave>.<name>.parity-errors`, `.framing-errors`, `.overrun-errors` | uint out | counted from the status bits |
+| `<slave>.<name>.buffer-full` | uint out | times the terminal's receive buffer was full (SW.3; what comes then is lost) |
+| `<slave>.<name>.baud` | uint out | the baud rate the terminal has |
+| `<slave>.<name>.burst-timeouts` | uint out | with `send-continuous`: buffers the terminal did not confirm in time (0x8000:04 not taken?); sending goes on |
+| `<slave>.<name>.settings-error` | bool out | the last change of settings could not be written |
+| `<slave>.<name>.port-open` | bool out | a program has the port open |
+
+#### The port
+
+When `ecat` is loaded, each channel gets a pty, and its `port` becomes a
+symbolic link to it (`/dev/ttyECAT0 -> /dev/pts/3`; the pty belongs to the
+user LinuxCNC runs as); the link is removed when `ecat` is unloaded. A program opens
+the port as any serial port. For mb2hal:
+
+```ini
+[MB2HAL_INIT]
+...
+[TRANSACTION_00]
+LINK_TYPE=serial
+SERIAL_PORT=/dev/ttyECAT0
+SERIAL_BAUD=19200
+SERIAL_BITS=8
+SERIAL_PARITY=even
+SERIAL_STOP=1
+...
+```
+
+- The baud rate the program sets is written to the terminal before what
+  the program writes after it is sent; so are its stop bits. A rate the
+  terminal does not have is refused with a message, and the terminal
+  keeps its rate. (12000 and 14400 can only come from the *Serial ports* card: a program
+  cannot set them on a port.)
+- Parity and data bits come from the frame on the *Serial ports* card: a
+  pty does not pass them on. The terminal makes the parity on the wire
+  itself. Give the frame the device's setting (mb2hal's `SERIAL_PARITY` and `SERIAL_BITS` must
+  say the same: the HAL check warns when they differ,
+  [Checking the HAL files](#checking-the-hal-files)). Modbus RTU often uses 8E1.
+- What the terminal receives while no program has the port open is
+  dropped.
+- A path that exists and is not a link to a pty (a real `/dev/ttyS0`, a
+  file) is never replaced: `ecat` does not load. A link left by an `ecat`
+  that did not stop is replaced.
+- Modem lines (RTS, DTR, CTS) are not on the port: the EL6021 has none,
+  and the EL6001 uses RTS/CTS itself when its setting says so.
+
+#### Behaviour (serial)
+
+- At start, and when the bus comes back, the channel makes an init (the
+  terminal empties its buffers and starts the handshake from the
+  beginning).
+- Bytes are sent window by window, each when the terminal has taken the
+  one before, and never more than the terminal's send buffer (128 bytes)
+  holds: the terminal takes every window and loses what does not fit
+  (Beckhoff's manual), so the channel reckons how much the terminal still
+  has to send at the baud rate. Received bytes are taken only when there
+  is room for them on the computer's side, so none are lost there (the
+  terminal keeps them meanwhile, 864 bytes; after that it loses them).
+- 22 bytes can go each way every second cycle at most: about 11 bytes per
+  ms at a 1 ms servo period, which keeps up with 115200 baud (11.5 bytes
+  per ms at 8N1) only just. A Modbus RTU frame longer than 22 bytes then
+  goes out in windows; at 115200 baud there may be a short pause between
+  them on the wire (the terminal sends what it has as soon as it has it).
+  *Send continuous* on the *Serial ports* card avoids that: the windows fill the terminal's
+  buffer without anything going out, and when the program's bytes are all
+  in (or 128 bytes), a rising edge of control bit 3 sends them as a whole;
+  the terminal sets status bit 2 when they are out, and the channel then
+  drops bit 3. A frame of more than 128 bytes goes out in parts. At 38400
+  baud and below the terminal's buffer does not run empty within a frame
+  either way. (Tested against the simulated terminal: at 115200 baud, 40
+  Modbus write requests of 49 bytes had 39 pauses without it, none with
+  it.)
+- New settings asked for while running are written once the bytes queued
+  before them have left the terminal, followed by an init; after a power
+  cycle of the slave, the master writes the configured settings, and the
+  channel writes the ones asked for since again.
+
+### Analog inputs and outputs
+
+Analog terminals that follow ETG.5001 (Beckhoff EL3xxx inputs, EL4xxx
+outputs, and others laid out the same way) need no profile and no C code.
+EtherCAT Setup proposes them as `generic` slaves whose values are float
+pins in the terminal's unit: the value is a float pin (`value`) scaled
+from the range, and the status bits are bit pins.
+
+#### The range
+
+The value of a channel (`0x6nn0:11` for inputs, `0x7nn0:11` for outputs,
+16 bits) has its full scale `0x7FFF` at the top of the measuring range.
+The range is taken from the device's name, as the slave or its ESI file
+gives it: `+/-10V`, `±75 mV`, `0-10V`, `4..20 mA`. Then:
+
+| Range | Raw 0 | Raw 0x7FFF | `scale` (input) | `offset` (input) |
+|---|---|---|---|---|
+| ±10 V | 0 V | 10 V | 10/32767 | 0 |
+| 0..10 V | 0 V | 10 V | 10/32767 | 0 |
+| 4..20 mA | 4 mA | 20 mA | 16/32767 | 4 |
+
+An input pin is `raw * scale + offset`. An output is written as
+`(pin + offset) * scale`, so an output's `scale` is the inverse
+(32767/10 for 0..10 V) and its `offset` the negative low end (-4 for
+4..20 mA). The program writes both.
+
+A terminal whose name has no range (temperature terminals, for example,
+which report 0.1 °C per count) keeps a `sint` pin in raw counts, with a
+note. Change `hal-type` to `real` and set `scale` by hand, or leave it.
+
+#### Status and settings
+
+The status bits (`underrange`, `overrange`, `limit-1`, `limit-2`,
+`error`, ...) are bit pins under their own names. Connect `error` to
+whatever must stop when the signal is lost, such as the THC's enable.
+
+The channel settings `0x8nn0` (filter, user scaling, presentation) are
+offered as settings rows with their dictionary names. A terminal with
+user scaling enabled (`0x8nn0:01`) reports scaled raw values; the pin's
+`scale` must then be set to match.
+
+#### Not yet
+
+- Tried with unit tests only, not on a terminal.
+- Ranges come from the name. Where the name has none, a
+  [quirk file](#quirk-files) can give the value's pin its `scale` and
+  `offset` under `pins`.
+
+### Stepper and DC motor terminals
+
+Stepper terminals such as the Beckhoff EL7031, EL7041, EL7041-0052 and
+EP7041, and DC motor terminals such as the EL7342, are handled as
+ordinary `generic` slaves: no profile and no code of their own. EtherCAT
+Setup proposes a pin for each object, named after it (`enable`, `reset`,
+`reduce-torque`, `velocity`, `ready-to-enable`, `error`, ...).
+
+What is special about a product goes into a [quirk file](#quirk-files).
+The EL7041 has one, `beckhoff-el7041.yaml`, which gives:
+
+| Object | Pin | |
+|---|---|---|
+| `0x7010:01` Enable | `enable` (bit, in) | The output stage is on while true. |
+| `0x7010:02` Reset | `reset` (bit, in) | A rising edge clears an error. |
+| `0x7010:03` Reduce torque | `reduce-torque` (bit, in) | The reduced current (`0x8010:02`) while true. |
+| `0x7010:21` Velocity | `velocity` (float, in) | Velocity interface: -1..1 of the speed range. |
+| `0x6010:04` Error | `error` (bit, out) | |
+
+and HAL lines that reset an error when `enable` comes on again (below).
+For another terminal, copy that file, change `match` and the objects, and
+put it in `~/.config/ecatsetup/devices/`. Without a quirk file, the
+velocity is a `sint` pin in raw values (±32767).
+
+`nn` is the channel: the EL7041's motor is `0x7010`/`0x6010`, its
+encoder `0x7000`/`0x6000`. The encoder channel is handled by the
+[encoder function](#encoder-channels) when its counter and latch C are mapped.
+
+With the quirk file, the velocity pin has `scale: 32767`: 1.0 is the top of the speed range
+set in `0x8nn2:05` (0: 1000, 1: 2000, 2: 4000, 3: 8000, 4: 16000, 5: 32000
+full steps per second). The terminal holds the written value within
+±32767.
+
+#### Settings (stepper)
+
+The channel settings `0x8nn0` (motor: maximum and reduced current in mA,
+nominal voltage, coil resistance, full steps, encoder increments, ...)
+and `0x8nn2` (features: operation mode, speed range, feedback,
+microsteps, ...) are offered as settings with their dictionary names.
+Take the motor's values from its data sheet and the units from the
+terminal's documentation.
+
+The operation mode `0x8nn2:01` chooses the interface: the default
+(automatic) follows the process data mapped; 3 is the position interface
+(EL7031, EL7041-0052 with `0x7nn0:11`).
+
+#### A joint with the velocity interface
+
+The terminal runs at a velocity; a PID closes the position loop on the
+encoder (or on the terminal's internal microstep counter when
+`0x8nn2:08`, feedback, is off):
+
+```
+loadrt pid names=pid.x
+addf pid.x.do-pid-calcs servo-thread
+
+setp x-stm.enc.pos-scale 800          # counts per mm
+setp pid.x.Pgain 50
+setp pid.x.FF1 0.01                   # 1 / (mm/s at velocity 1.0)
+setp pid.x.maxoutput 1.0
+
+net x-pos-cmd  joint.0.motor-pos-cmd => pid.x.command
+net x-pos-fb   x-stm.enc.pos         => pid.x.feedback joint.0.motor-pos-fb
+net x-vel      pid.x.output          => x-stm.velocity
+net x-enable   joint.0.amp-enable-out => pid.x.enable x-stm.enable
+net x-fault    x-stm.error           => joint.0.amp-fault-in
+```
+
+`FF1` is the inverse of the velocity at 1.0: with a 4000 full steps/s
+range, a 200-step motor and a 5 mm lead, 1.0 is 100 mm/s, so `FF1` is
+0.01.
+
+#### A joint with the position interface
+
+The position pin is a raw `sint` in microsteps. On the *Process data*
+card, make it a float pin (HAL type `real`) with the scale in microsteps
+per mm (6400, say), and connect it:
+
+```
+net x-pos-cmd joint.0.motor-pos-cmd => x-stm.position joint.0.motor-pos-fb
+net x-enable  joint.0.amp-enable-out => x-stm.enable
+```
+
+The terminal reports no position back in this interface, so the
+command is the feedback, as with lcec's el70x1 driver.
+
+#### From lcec (stepper)
+
+Importing an lcec XML file translates the stepper drivers' `modParam`s
+into settings:
+
+| lcec type | modParams |
+|---|---|
+| `EL7041`, `EL7041-1000`, `EP7041` | `maxCurrent`, `reducedCurrent` (A, written as mA), `nominalVoltage`, `coilResistance`, `motorEMF` (×1000, as lcec wrote them), `motorFullsteps`, `encoderIncrements`, `startVelocity`, `driveOnDelay`, `driveOffDelay`, `maxSpeed` (1000..32000 → 0..5), `encoder` (0x8012:08), `microsteps` (1..64 → 0..6) |
+| `EL7031`, `EL7041-0052` | `maxCurrent`, `redCurrent`, `nomVoltage`, `coilRes`, `motorEMF` (as given), and `0x8012:01 = 3` (position interface), which the driver always set |
+
+Others, such as `kp` and `ki`, get a note. lcec's EL7041 driver had no
+`break` after `motorEMF` and the cases after it, so a `motorEMF` there was
+also written into `motorFullsteps`, `encoderIncrements` and the following
+objects; the import writes each value only into its own object. The pins
+differ from lcec's (`enable` instead of `srv-enable`, and so on): the
+HAL files must be changed.
+
+#### Resetting an error
+
+lcec's EL7041 driver pulsed `reset` when `enable` came on again after an
+error. The quirk file does the same in HAL: when the configuration is
+written into LinuxCNC, `ethercat.hal` gets, for a terminal `x-stm`,
+
+```
+loadrt and2 names=x-stm-auto-reset
+loadrt edge names=x-stm-enable-edge
+addf x-stm-enable-edge servo-thread
+addf x-stm-auto-reset servo-thread
+...
+setp x-stm-enable-edge.in-edge FALSE
+setp x-stm-enable-edge.out-width-ns 10000000
+net x-enable => x-stm-enable-edge.in
+net x-stm-enable-rise x-stm-enable-edge.out => x-stm-auto-reset.in0
+net x-stm-error x-stm.error
+net x-stm-error => x-stm-auto-reset.in1
+net x-stm-reset x-stm-auto-reset.out => x-stm.reset
+```
+
+The lines are left out, with a note, when nothing drives `enable` yet,
+when your HAL files connect `reset` themselves, or when they load `edge`
+or `and2` (HAL loads a component once).
+
+#### Not yet (stepper)
+
+- Tried with unit tests only, not on a terminal.
+- Writing a joint to a stepper terminal is not in *HAL & LinuxCNC*;
+  connect it in your HAL files as above.
+
+### Network over EoE (status)
+
+- EoE needs the master package 1.4 (uspace-v1.4) or later, which carries
+  the Ethernet frames in the cyclic frames, keeps a slave's SDO responses
+  apart from them and sets the host's address. With 1.3 and earlier the master's log
+  says "No EoE processing because of missing callbacks!", the device is
+  silent, a slave with settings may not reach OP, and for the host's address
+  `ecat` prints that this master cannot set it
+  ([development.md](development.md#eoe)).
+- Tried on one slave, an EaserCAT 3000 with SOES and lwIP, without motion
+  ([development.md](development.md#eoe)): ping, a web page and SDO reads
+  while the bus was in OP, about 0.5 Mbit/s each way at 1 ms, no change in
+  the servo thread's jitter; then in LinuxCNC with traffic while the machine
+  homed and jogged. Not tried on a bought device, nor with two EoE slaves.
+  A step-by-step guide: [A device's web page over EoE](#a-devices-web-page-over-eoe).
+
+### Modular devices
+
+Most EtherCAT I/O is modular in a way that needs nothing special: an
+EK1100 coupler with terminals is one slave per terminal on the bus, and
+each terminal is configured on its own.
+
+The harder case is one slave with modules in slots behind it, such as a
+coupler from another vendor with I/O modules, or a box with plug-in
+cards (ETG.5001 "modular device"). Its process data depends on which
+modules are in it. Support is **best effort** for now; reports from
+users with such devices will decide what comes next.
+
+What EtherCAT Setup does:
+
+- When the slave has them, it reads the modules the slave detects
+  (`0xF050`, Detected Module Ident List) and those it is configured for
+  (`0xF030`, Configured Module Ident List).
+- With an ESI file that describes its slots (`Slots` and `Modules`), the
+  modules' PDOs come from there: each module the slave detects is put in
+  the slot that takes it, and the indexes the file marks `DependOnSlot`
+  move by the slot's number (counted from 0) times the slot increment
+  (`SlotPdoIncrement` for PDOs, `SlotIndexIncrement` for entries and
+  InitCmds; a slot's own increment over the device's), `DependOnSlotGroup`
+  ones by the slot group. The modules' InitCmds are rows on the
+  *InitCmds* card as the device's own are, and where the file asks for it
+  (`DownloadModuleIdentList`) the configured list `0xF030` is written at
+  start (count 0, the idents, the count). A module that fits no
+  slot, or is not in the file, is named in the notes.
+- Without such an ESI file the process data is taken **as the slave maps
+  it now**, from its SII and CoE: a coupler that maps its modules by itself
+  works.
+- The detected modules are kept in the configuration, so that EtherCAT
+  Setup notices a change; the `ecat` component does not read them.
+- A note says when `0xF030` differs from `0xF050`: some devices refuse
+  OP until the configured list matches the modules in them. Write
+  `0xF030` with the vendor's tool, or as settings (one row per
+  subindex), and read the bus again.
+- When the modules on the bus differ from the configuration (a module added,
+  removed or swapped), *Update from bus* and the check say
+  so: propose that slave again, since its process data depends on the
+  modules.
+
+Not yet:
+
+- Tried on no device that needs slots (built and unit-tested from ESI
+  files, 2026-11-21); slot numbers counted from 0 are not confirmed.
+- The `ecat` component's start check compares slaves, not modules.
+
 ## The computer's timing
 
 The *Timing* tab checks whether the computer keeps time well enough for the
@@ -2078,7 +3339,7 @@ period, the I/O (Mesa Ethernet, EtherCAT, a parallel port) and the I/O's
 network card from it and its HAL files. Without it the rules about that card
 (its interrupt, coalescing, EEE, the LAN on the same card) cannot look at it,
 and a quiet list then says nothing about the card. The card is found from
-ethercat.yaml's `master: interface`, or for `hm2_eth` from the card whose
+the *Master* page's network card, or for `hm2_eth` from the card whose
 address range holds `board_ip`: the computer's line *The I/O's network card*
 shows which.
 
@@ -2164,7 +3425,7 @@ on its evidence: what the computer is, or what came with the late cycles.
 | Kernel | PREEMPT_RT, a virtual machine; isolated CPUs (`isolcpus`): none, one isolated but used by no real-time thread and not sharing its core (`isolcpus=1,2,3` with the threads on 3 and 1 its sibling: `isolcpus=1,3` frees CPU 2 for the rest), the `managed_irq` flag; `irqaffinity`, irqbalance; `nohz_full`, `rcu_nocbs`; memory statistics, timer migration, transparent huge pages; signals between CPUs (RES, CAL, TLB, IWI) that came with late cycles |
 | Processor | hyperthread sibling not isolated, deep idle states, frequency governor, turbo, heat throttling, battery, SMIs (as root) |
 | Devices | interrupts on the real-time CPU (USB, wireless, any other), ACPI GPE storms, Intel graphics power states, sound card and NVMe power saving, PCIe ASPM |
-| Network | the I/O card's interrupt on the real-time CPU (EtherCAT: `master: irq-cpu`; Mesa: moved at run time), coalescing (`rx-usecs`) on a Mesa card, EEE on the I/O card, the I/O card also carrying the LAN, NetworkManager on the Mesa card, Realtek r8169 with Mesa, ethtool missing |
+| Network | the I/O card's interrupt on the real-time CPU (EtherCAT: *Interrupts on CPU*; Mesa: moved at run time), coalescing (`rx-usecs`) on a Mesa card, EEE on the I/O card, the I/O card also carrying the LAN, NetworkManager on the Mesa card, Realtek r8169 with Mesa, ethtool missing |
 | LinuxCNC | too little of the period left, a HAL function taking much of it, a tight base thread, measured without load |
 
 The same from a terminal: `ecatsetup --rt-check <machine>.ini --improve`
@@ -2201,7 +3462,7 @@ The component records, with the time to the millisecond:
 | slave N online / offline / operational | |
 | DC sync check | The master's check that a slave's clock is within 10 us before SYNC0 starts. |
 | drive fault | A CiA 402 drive's fault, with its error code (`0x603F`) as text. |
-| the profile shut the drive down | The cia402 profile's `fault-reason` (watchdog, enable timeout, no valid process data, ...), see [cia402](component.md#the-cia402-profile). |
+| the profile shut the drive down | The cia402 profile's `fault-reason` (watchdog, enable timeout, no valid process data, ...), see [cia402](#cia-402-drives). |
 | stop guard | The servo thread stopped: the guard takes the slaves to PREOP, and says whether they got there (or it gave up, with the states they were left in); or the servo thread runs again. |
 | servo thread late | The guard sent a cycle for a servo thread more than a quarter period late (at most one line a second, with the number left out). |
 | SYNC0 shift | `sync0-shift-ns: auto` chose a shift, with the turn-around in cycles. |
@@ -2256,7 +3517,7 @@ usual causes, each judged against this computer:
 The likely causes come first. The judgement uses the event log of the run
 shown, the EtherCAT masters on the computer, the computer as the
 [real-time check](#the-computers-timing) reads it, the network card of
-`master.interface` and, after *Examine all*, the slaves' port error
+the configuration's network card and, after *Examine all*, the slaves' port error
 counters. It changes nothing. The same text is at the top of the
 [report](#the-report) and after `ecatsetup --events`.
 
@@ -2460,118 +3721,20 @@ A file that cannot be read is skipped, with a warning in the window and
 from `ecatsetup --check`. To share one, post it or propose it for the
 program, with where each fact comes from (a manual, a test on a machine).
 
-### Format
-
-```yaml
-name: Beckhoff EL7041
-match: {vendor: '0x00000002', product: '0x1B813052'}
-
-pins:                      # when the slave is proposed
-  '0x7010:21': {pin: velocity, hal-type: real, scale: 32767}
-  '0x6000:00': {split: [in-1, in-2, in-3, null, in-5]}   # one pin per bit
-
-settings:                  # added to the slave when it is proposed
-- {object: '0x8010:01', name: Maximal current, type: UINT, value: 1500}
-
-commands:                  # objects that are commands, not settings
-  '0x2010': Zero Position, a command
-  '0x1010:01':             # the longer form tells "Run command" what to write
-    note: Store parameters
-    value: 1702257011      # "save" as ASCII
-    type: uint32
-    confirm: Keeps every setting through a power cycle
-
-limits:                    # where the drive test finds a limit
-  following-error: {object: '0x2022:00', type: uint32}
-  travel: why the drive's own object is not used
-
-tuning:                    # settings the Response card's search shows first
-  '0x2009:00': {kind: command-filter, type: UINT, unit: us, min: 0, max: 25600, factory: 6400,
-                note: what it does, tried: what it gave on a machine}
-  '0x2023:04': {kind: feedforward, type: UINT, when: {object: '0x2011:00', values: [1]}}
-
-measure:
-  ignore: {'0x6077': why the response measurement does not record it}
-
-hal:                       # HAL lines for each matching slave
-  load: {edge: ['{name}-enable-edge']}
-  addf: ['{name}-enable-edge']
-  lines:
-  - net {signal:0x7010:01} => {name}-enable-edge.in
-
-lcec:                      # importing lcec XML files
-  types: [EL7041, EP7041]
-  modparams:
-    maxCurrent: {object: '0x8010:01', type: UINT, convert: milli}
-    maxSpeed: {object: '0x8012:05', type: UINT, values: {1000: 0, 2000: 1}}
-  settings:                # always added for these lcec types
-  - {object: '0x8012:01', type: USINT, value: 3, note: why}
-  sdo:                     # sdoConfig entries replaced
-    '0x2010:00': {replace: cia402.zero-at-start, note: why}
-```
-
-Every key but `name` is optional. A file with only `lcec` (no `match`)
-serves the import alone.
-
-| Key | |
-|---|---|
-| `match` | `vendor` and `product` of the device. |
-| `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [file format](component.md#the-configuration-file); or `split`, a list of bit pin names from bit 0 (`null` for a bit without a pin) for an object that holds several bits. Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. *Save as quirk file* keeps bit pins too. |
-| `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [file format](component.md#the-configuration-file). |
-| `commands` | Per object index: why it is a command. The test mode does not write it. |
-| `tuning` | Per object: `kind` (`command-filter`, `position-loop`, `feedforward`, `torque`, `gain-high`, `other`) and `type`, and optionally `unit`, `min`, `max`, `factory`, `note`, `tried` (what it gave on a machine), and `when` (`object` and `values`: it is used only in that mode of the drive). Shown by *Look for settings in the drive* ([Measuring a drive's response](#measuring-a-drives-response)). |
-| `measure` | `ignore`: per object index, why the response measurement does not record it (a drive's object that does not mean what the standard says). |
-| `limits` | For the drive test: `following-error`, `max-torque`, `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), or `travel` and the others as a text saying why the drive's own object is not used. |
-| `hal` | `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
-| `lcec.types` | lcec type names (`type=` in the XML) that `modparams` and `settings` apply to. |
-| `lcec.modparams` | Per lcec `modParam`: the `object` and `type` of the setting, and `convert` (`milli`: ×1000, `flag`: 0/1, else a number as it is) or `values` (a table). |
-| `lcec.settings` | Settings always added for those types (what the lcec driver always wrote). |
-| `lcec.sdo` | An lcec `sdoConfig` that ecat does differently: `replace` with `cia402.zero-at-start` (when the slave gets the cia402 profile). |
-
-#### HAL lines
-
-In `hal`, these are filled in for each slave:
-
-| | |
-|---|---|
-| `{name}` | The slave's name (its pin prefix). |
-| `{pin:0x7010:02}` | The pin of that object. It must be free: if your HAL files connect it, the lines are left out. |
-| `{signal:0x7010:01}` | The signal that object's pin is on, in your HAL files or `ethercat.hal`. For an output of the slave (an input pin in HAL, such as `enable`), something must drive it, or the lines are left out. For an input of the slave, a signal is made if there is none. |
-
-The lines are written into `ethercat.hal` under a comment naming the
-quirk file. They are left out, with a note in the plan, when an object
-has no pin in the configuration, when a placeholder cannot be filled, or
-when your HAL files load the same component (HAL loads a component only
-once: add the instance names there and connect them by hand).
-
-#### Homing
-
-```yaml
-homing:
-  methods: [17, 18, 35, 36]          # the CiA 402 homing methods (0x6098) the drive supports
-  describe:                          # the drive's own text for a method (default: the standard's)
-    36: {text: "Torque homing ...", needs: [mechanical stop], moves: true}
-  extras:                            # settings the drive needs besides 0x6098, 0x6099, 0x609A, 0x607C
-    36:
-      - {object: '0x2030:01', type: UINT, value: 70, name: Max torque output}
-```
-
-Without `methods`, EtherCAT Setup reads the drive's 0x60E3 (supported homing
-methods); if the drive has neither, every method of the standard is offered.
-The ECT60 has no 0x60E3 (read from a drive, 2026-11-10), so its file lists
-the methods from the manual. The extras are for the axis of the slave's
-first axis; for later axes their indexes move by 0x800 as the other objects do.
+The format of a quirk file is in the reference
+([Quirk files](reference.md#quirk-files)): it is still a part of the
+program under development, and may change.
 
 ### The files that come with the program
 
 - `rtelligent-ect60.yaml`: `0x2010` is a command (Zero Position); the
   drive test's following error is `0x2022`; the ECT60 ignores `0x607D` in
-  CSP; lcec's `0x2010` sdoConfig becomes `cia402.zero-at-start`; its
+  CSP; lcec's `0x2010` sdoConfig becomes *Start position*; its
   tuning settings (`0x2009` the command filter, `0x2023` servo mode 1,
   `0x2026` FOC); its `0x6077` is not recorded (it does not report torque).
 - `beckhoff-el7041.yaml`: pin names and the velocity scale; HAL lines
   that reset an error when `enable` comes on again (as lcec's driver did);
-  lcec's modParams. See [stepper terminals](component.md#stepper-and-dc-motor-terminals).
+  lcec's modParams. See [stepper terminals](#stepper-and-dc-motor-terminals).
 - `beckhoff-el70x1-position.yaml`: lcec's el70x1 modParams and the
   position interface it always set.
 - `metalmusings-easercat-7000.yaml`: the bit pins of the THC and I/O device
@@ -2581,113 +3744,16 @@ first axis; for later axes their indexes move by 0x800 as the other objects do.
 
 ## Command line
 
-Everything the window does with a file is done by the same functions from
-the command line, which suits scripts. Installed from the package the
-command is `ecatsetup`; from a checkout, `python3 -m ecatsetup`. Reading
-the bus needs a running master.
+Most of what the window does can be done from the command line too; two
+commands are worth knowing:
 
 ```
-ecatsetup --esi <ESI folder> --ini <machine>.ini --compare ethercat-conf.xml
-ecatsetup --ini <machine>.ini --write ethercat.yaml [--interface enp2s0]
-ecatsetup --esi <ESI folder> --pdo-set "3=Standard 32 Bit (MDP 511)" --write ethercat.yaml
-ecatsetup --import ethercat-conf.xml --ini <machine>.ini --write ethercat.yaml
-ecatsetup --ini <machine>.ini --update ethercat.yaml
-ecatsetup --check ethercat.yaml
-ecatsetup --diagnose
-ecatsetup --check-hal <machine>.ini
-ecatsetup --events [prev]
-ecatsetup --report --ini <machine>.ini
-ecatsetup --capture --esi <ESI folder>
-ecatsetup --response ~/.local/state/ecatsetup/responses/<file>.samples [--ini <machine>.ini]
-ecatsetup --from-capture ecat-capture-<time>.tar.gz --diagnose
-ecatsetup --rt-check <machine>.ini [--rt-seconds 900] [--rt-load stress] [--rt-twice] [--rt-root]
-ecatsetup --rt-check <machine>.ini --improve [--rt-report report.md]
-ecatsetup --rt-todo [todo.md]
-ecatsetup --from-run ~/.local/state/ecatsetup/rt-runs/<file>.json
-ecatsetup --apply ethercat.yaml --ini <machine>.ini
 ecatsetup --gui ethercat.yaml --ini <machine>.ini --esi <ESI folder>
+ecatsetup --report --ini <machine>.ini
 ```
 
-- Without options, the bus is read and the proposals are reported;
-  `--compare` compares them with an lcec XML file. With ESI files, a
-  slave gets the ESI's predefined PDO assignment that the ESI marks as
-  default (TwinCAT's "Predefined PDO Assignment"), or the one named with
-  `--pdo-set`. Unsigned 32-bit counters, latches and positions get `sint`
-  pins, since they count down past 0. Input counters of 16 and 32 bits get
-  `extend: true`, so that the pin goes on counting past the wrap of the entry
-  (64 bits); a note says so. The digital outputs (`0x60FE`) get `raw: true`.
-- `--write` writes the proposals as an ecat configuration file;
-  `--import` converts an lcec XML file; `--check` checks a file and
-  compares the bus with it.
-- `--update` brings a file up to date with the bus and keeps what is in
-  it: slaves still on the bus keep their entries (names, pins, settings,
-  mapping), slaves moved by others put in or taken out before them keep
-  theirs at the new position, new slaves get proposals, missing ones are
-  left out, and each change is reported. The old file is kept as `.bak`.
-- `--diagnose` reports, per slave, why it is not in OP (the AL status
-  code in plain words, with what usually lies behind it), its links and
-  the error counters that grow while it watches (`--seconds`, pointing at
-  a cable or connector), the slave's own diagnosis history and error
-  register, and for a CiA 402 drive its state, error code and what is
-  missing to reach "Operation enabled".
-- `--events` shows the event log, and `--report` writes one file to
-  attach when asking for help ([Event log and report](#event-log-and-report)).
-  `--capture` records the bus for a developer who does not have the
-  devices, and `--from-capture` reads the bus from such a file
-  ([A capture of the bus](#a-capture-of-the-bus)).
-- `--response` analyses a recording of the Response card again
-  ([Measuring a drive's response](#measuring-a-drives-response)).
-- `--rt-check` is the first part of the real-time check: it changes
-  nothing and needs no sudo. It lists what the computer is (kernel and
-  PREEMPT_RT, isolated CPUs, frequency governor and turbo, idle states,
-  where every interrupt goes, network cards with their coalescing, EEE and
-  ASPM, graphics driver, BIOS, virtual machine or not, the INI's threads and
-  I/O, the CPU LinuxCNC's threads run on), each fact with where it was
-  read. Then it measures how evenly the real-time threads start, every
-  cycle: with LinuxCNC running, beside it (a function of ecat's own small
-  HAL module `ecat_rtprobe` put first into each thread and taken out again at
-  the end; it only notes the time of each run, talks to nothing, and works
-  beside a configuration's own `sampler` or `timedelta`); otherwise in `halrun` with the INI's threads alone
-  (`--rt-way threads|attach|inventory` chooses). It prints how late the
-  threads started (the largest, and what 99.99 % of the cycles stay within),
-  the cycles over 20, 50 and 100 us with what the length of the run can say
-  ("none in 15 min: fewer than 12 per hour"), and the period's budget: what
-  is left of the period after the lateness and the thread's longest run, and
-  how much of that run is the I/O driver's. Beside it, counters of the
-  real-time CPU are read every 10 ms (interrupts, softirqs, idle states,
-  frequency, heat, ACPI events), and each late cycle is compared with them:
-  "11 of 12 spikes came with the SMI count growing (by chance 3 %)". With
-  `--rt-root` (sudo asks once) it also counts SMIs and, with the threads
-  only, runs `rtla timerlat` (package `rtla`), whose own analysis of the
-  first wake-up over 50 us is shown. `rtla` is never run beside LinuxCNC:
-  switching the kernel's tracing on and off at its start and end delays the
-  real-time threads, once enough for LinuxCNC's "Unexpected realtime delay". Then the **findings**: what the rule catalogue makes of the
-  inventory and the run, most to gain first, each with what was seen, why it
-  matters, what to do (the commands, or the kernel parameter), its risk and
-  cost, how to check it worked, how to undo it, where the knowledge comes
-  from, and whether we have seen it on our own computers. Nothing is changed:
-  the commands are for you to run (as root), one at a time, measuring again
-  after each. A late cycle that no rule explains is reported as such, with
-  the counter that came with it. `--rt-load stress` runs `stress-ng`
-  meanwhile; `--rt-twice` measures twice and says how much the numbers
-  move by chance, so that a later change is judged against that. Every run
-  is saved in `~/.local/state/ecatsetup/rt-runs/`; `--from-run` shows one
-  again. `--improve` goes on as the *Timing* tab does
-  ([The computer's timing](#the-computers-timing)): two runs, then the
-  run-time changes of the findings one at a time with sudo, each measured
-  again and kept or undone; `--rt-report` writes the report at the end.
-  `--rt-todo [FILE]` writes the lasting changes for you to make (kernel
-  parameters, sysctl, a start-up service, the BIOS), from what was kept and
-  found so far ([The computer's timing](#the-computers-timing), step 7).
-  The rules are data, in `ecatsetup/rtrules/*.yaml`;
-  your own go in `~/.config/ecatsetup/rtrules/` (a rule with the same `id`
-  replaces the shipped one; the format is at the top of `rtrules.py`).
-- Other options: `--mode` chooses the mode proposed for CiA 402 drives,
-  `-p` limits the proposal to some slaves, `--json` prints it as JSON,
-  `--transport` and `--interface` set the master's for `--write`.
-- `--apply` writes into a LinuxCNC configuration, and `--check-hal` checks
-  its HAL files against the file ([Writing the configuration into
-  LinuxCNC](#writing-the-configuration-into-linuxcnc)); `--net PIN=PIN`
-  connects I/O pins, `--take-over-io` reads the connections your HAL
-  files already make, `--yes` does not ask, and `--overwrite-edited`
-  replaces files edited by hand. `ecatsetup --help` lists them all.
+`--gui` opens the window on a configuration, and `--report` writes the
+file to attach when asking for help ([The report](#the-report)). Installed
+from the package the command is `ecatsetup`; from a checkout, `python3 -m
+ecatsetup`. Every option: [the reference](reference.md#command-line), or
+`ecatsetup --help`.
