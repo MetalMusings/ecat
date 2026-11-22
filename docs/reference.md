@@ -277,8 +277,8 @@ An entry with neither `pin` nor `split` is mapped but has no pin.
 | `assign-activate` | The slave's AssignActivate word, from its ESI file or SII, such as `"0x0300"`. EtherCAT Setup offers the slave's own DC modes and warns about a value the slave does not describe, or a slave whose chip cannot take SYNC0 ([Distributed clocks](ecatsetup.md#distributed-clocks)). |
 | `sync0-cycles` | SYNC0 period in servo periods. |
 | `sync0-shift-ns` | The slave's own SYNC0 shift. |
-| `sync1-cycles` | For a DC mode that uses SYNC1 (`assign-activate` with bit `0x0400`, such as `0x0700`): SYNC1 every n SYNC0 cycles. EtherCAT Setup takes it from the ESI file's mode (`CycleTimeSync1`; a negative factor there counts bus cycles). Without it SYNC1 has no cycle of its own, and a slave may refuse SAFEOP (AL `0x0030`): EtherCAT Setup warns. |
-| `sync1-shift-ns` | SYNC1 after SYNC0, in ns (less than the SYNC0 cycle); needs `sync1-cycles`. The register the master writes is (n - 1) x the SYNC0 cycle + this shift (ETG.2000). |
+| `sync1-cycles` | For a DC mode that uses SYNC1 (`assign-activate` with bit `0x0400`, such as `0x0700`): SYNC1 every n SYNC0 cycles (0 to 65535). EtherCAT Setup takes it from the ESI file's mode (`CycleTimeSync1`; a negative factor there counts bus cycles). Without it SYNC1 has no cycle of its own, and a slave may refuse SAFEOP (AL `0x0030`): EtherCAT Setup warns. |
+| `sync1-shift-ns` | SYNC1 after SYNC0, in ns (0 or more, less than the SYNC0 cycle); a value other than 0 needs `sync1-cycles`. The register the master writes is (n - 1) x the SYNC0 cycle + this shift (ETG.2000). |
 
 The **DC reference clock** is the used slave with `dc:` (an
 `assign-activate` other than `0x0000`) that comes first on the bus: ETG.1020
@@ -361,7 +361,8 @@ needs the master package 1.4 or later: see [Not yet](ecatsetup.md#network-over-e
 
 Each setting is an SDO download: `object` and either `type` and `value`
 (written as that type, little endian), or `data` (raw bytes in hex, such
-as `"a0 0f"`). `name` is for people.
+as `"a0 0f"`, at most 1024 bytes, also in `init-cmds`). `name` is for
+people.
 
 ### linuxcnc
 
