@@ -97,6 +97,32 @@ def sdos(pos):
     return run("sdos", "-p", pos)
 
 
+def pdos(pos):
+    """The slave's PDO assignment and mapping as the master read it at its scan (the
+    slave's own, as it is now: what is in its RAM): [(sm, direction, pdo index, name,
+    [(index, subindex, bits, name)])], from `ethercat pdos`. No SDO traffic."""
+    return parse_pdos(run("pdos", "-p", pos))
+
+
+def parse_pdos(text):
+    """`ethercat pdos -p N` as [(sm, "rx"/"tx", pdo index, name, [(index, sub, bits, name)])]."""
+    import re
+    out, sm = [], None
+    for line in (text or "").splitlines():
+        m = re.match(r"SM(\d+):", line)
+        if m:
+            sm = int(m.group(1))
+            continue
+        m = re.match(r"\s+(Rx|Tx)PDO 0x([0-9a-fA-F]+)\s*\"(.*)\"", line)
+        if m and sm is not None:
+            out.append((sm, m.group(1).lower(), int(m.group(2), 16), m.group(3), []))
+            continue
+        m = re.match(r"\s+PDO entry 0x([0-9a-fA-F]+):([0-9a-fA-F]+),\s*(\d+) bit,\s*\"(.*)\"", line)
+        if m and out:
+            out[-1][4].append((int(m.group(1), 16), int(m.group(2), 16), int(m.group(3)), m.group(4)))
+    return out
+
+
 def sdos_settled(pos, timeout=20.0, interval=0.3, progress=None):
     """The CoE dictionary of a slave that has one, once the master has read
     all of it. After a start the master reads the dictionaries in the

@@ -86,9 +86,14 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=
         configured = read_modules(pos, listed, 0xF030)
     p = propose.propose(info, sii, coe, device_type, modes, dev, exact, mode, pdo_set, extra_modes,
                         way, profile, modules=detected, assignment=assignment)
-    # what was read, so that the PDOs can be proposed again without the bus (assign_pdos)
+    # what was read, so that the PDOs can be proposed again without the bus (assign_pdos);
+    # "own": the slave's own PDO mapping as the master read it (no SDO traffic)
+    try:
+        own = tool.pdos(pos)
+    except tool.ToolError:
+        own = None
     p.reads = {"sii": sii, "device_type": device_type, "drive_modes": modes, "dev": dev,
-               "exact": exact, "detected": detected, "configured": configured}
+               "exact": exact, "detected": detected, "configured": configured, "own": own}
     p.dc_info.sync = dcinfo.read_sync(pos, known)
     if p.profile == 402:
         # each axis's maximum profile velocity, for checking the INI file's joints
@@ -437,6 +442,13 @@ class Session:
                                 "%s in the file): propose it again, since its process data "
                                 "depends on them" % (s["position"], s.get("name"),
                                                      _mods(have), _mods(s.get("modules"))))
+            # way A: the slave's own mapping is what the file must have (the component's start
+            # check says the same)
+            own = (getattr(b.proposal, "reads", None) or {}).get("own") if b is not None else None
+            if s.get("configure-pdos") is False and own is not None and same_kind(s, b.info):
+                text = pdoreq.own_differs(s, own)
+                if text:
+                    problems.append("slave %d (%s): %s" % (s["position"], s.get("name"), text))
         return errors, problems, notes
 
     def save(self, path=None):
@@ -555,6 +567,32 @@ class Session:
                     continue
                 if was is not None and index not in fixed:
                     pdo["entries"] = copy.deepcopy(was.get("entries") or [])
+        _take_pdos(old, new)
+        return list(p.notes)
+
+    def own_mapping(self, position):
+        """The slave's own PDO mapping as read at the scan (tool.pdos), or None."""
+        b = self.bus.get(position)
+        return (getattr(b.proposal, "reads", None) or {}).get("own") if b is not None else None
+
+    def use_own_pdos(self, position):
+        """Way A: the slave runs on its own PDO mapping (configure-pdos false); the file's
+        process data is that mapping, as read at the scan. Returns the proposal's notes."""
+        old = self.slave(position)
+        b = self.bus.get(position)
+        reads = getattr(b.proposal, "reads", None) if b is not None else None
+        if old is None or reads is None or reads.get("own") is None:
+            raise ValueError("slave %d: its own PDO mapping was not read (read the bus)" % position)
+        mode = self._slave_mode(position)
+        own = pdoreq.own_pdos(reads["own"], reads["dev"], self.dictionary(position))
+        p = propose.propose(b.info, reads["sii"], b.coe, reads["device_type"], reads["drive_modes"],
+                            reads["dev"], reads["exact"], mode, None, self._slave_modes(position, mode),
+                            None, old.get("profile"), modules=reads["detected"], own=own)
+        was = b.proposal
+        p.reads, p.dc_info.sync = reads, was.dc_info.sync
+        p.max_velocity, p.pp_limits = was.max_velocity, was.pp_limits
+        self.bus[position] = BusSlave(b.info, b.coe, p)
+        new = config.slave_from_proposal(p, name=old.get("name"))
         _take_pdos(old, new)
         return list(p.notes)
 

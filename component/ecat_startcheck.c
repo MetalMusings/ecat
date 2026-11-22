@@ -108,3 +108,58 @@ int ecat_ref_clock_choice(const int *position, const int *has_dc, int n) {
   }
   return best;
 }
+
+// "0x1600 (0x6040:00 16, 0x607A:00 32)", the PDOs of one sync manager
+static void pdo_list(char *out, int len, const ecat_pdo_t *p, int n, int sm) {
+  int used = 0, first = 1, i, j;
+
+  out[0] = 0;
+  for (i = 0; i < n && used < len - 1; i++) {
+    if (p[i].sm != sm) continue;
+    used += snprintf(out + used, len - used, "%s0x%04X (", first ? "" : ", ", p[i].index);
+    for (j = 0; j < p[i].n_entries && used < len - 1; j++)
+      used += snprintf(out + used, len - used, "%s0x%04X:%02X %d", j ? ", " : "", p[i].entries[j].index,
+          p[i].entries[j].subindex, p[i].entries[j].bits);
+    if (used < len - 1) used += snprintf(out + used, len - used, ")");
+    first = 0;
+  }
+  if (first) snprintf(out, len, "none");
+}
+
+static int same_sm(const ecat_pdo_t *want, int n_want, const ecat_pdo_t *have, int n_have, int sm) {
+  int i = 0, j = 0, k;
+
+  for (;;) {
+    while (i < n_want && want[i].sm != sm) i++;
+    while (j < n_have && have[j].sm != sm) j++;
+    if (i >= n_want || j >= n_have) return i >= n_want && j >= n_have;
+    if (want[i].index != have[j].index || want[i].n_entries != have[j].n_entries) return 0;
+    for (k = 0; k < want[i].n_entries; k++) {
+      const ecat_pdo_entry_t *a = &want[i].entries[k], *b = &have[j].entries[k];
+      if (a->index != b->index || a->bits != b->bits || (a->index != 0 && a->subindex != b->subindex)) return 0;
+    }
+    i++;
+    j++;
+  }
+}
+
+int ecat_startcheck_own_pdos(int position, const char *name, const ecat_pdo_t *want, int n_want,
+    const ecat_pdo_t *have, int n_have, ecat_report_t report, void *arg) {
+  int errors = 0, seen[256] = {0}, i;
+  char w[160], h[160];
+
+  for (i = 0; i < n_want; i++) {
+    int sm = want[i].sm;
+    if (seen[sm]) continue;
+    seen[sm] = 1;
+    if (same_sm(want, n_want, have, n_have, sm)) continue;
+    pdo_list(w, sizeof(w), want, n_want, sm);
+    pdo_list(h, sizeof(h), have, n_have, sm);
+    say(report, arg, ECAT_CHECK_ERROR,
+        "slave %d (%s) runs on its own PDO mapping (configure-pdos: false), but on SM%d it has %s "
+        "where the file has %s: run Update in EtherCAT Setup, or let ecat write the mapping",
+        position, name, sm, h, w);
+    errors++;
+  }
+  return errors;
+}

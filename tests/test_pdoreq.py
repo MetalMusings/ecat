@@ -474,6 +474,86 @@ class TestWaysFor(unittest.TestCase):
         self.assertEqual(pdoreq.ways_for(s, make(MAPPABLE, ESI_PDOS)), [])
 
 
+# `ethercat pdos -p4` on the A6 simulation, as the master read it (2026-11-22)
+PDOS_TEXT = """SM0: PhysAddr 0x1000, DefaultSize  256, ControlRegister 0x26, Enable 1
+SM1: PhysAddr 0x1400, DefaultSize  256, ControlRegister 0x22, Enable 1
+SM2: PhysAddr 0x1800, DefaultSize   12, ControlRegister 0x64, Enable 1
+  RxPDO 0x1600 ""
+    PDO entry 0x6040:00, 16 bit, ""
+    PDO entry 0x607a:00, 32 bit, ""
+    PDO entry 0x6060:00,  8 bit, ""
+SM3: PhysAddr 0x1c00, DefaultSize   28, ControlRegister 0x20, Enable 1
+  TxPDO 0x1a00 "TXPDO 1 Mapping Parameter "
+    PDO entry 0x6041:00, 16 bit, "Status Word"
+    PDO entry 0x6064:00, 32 bit, ""
+    PDO entry 0x0000:00,  8 bit, ""
+    PDO entry 0x6061:00,  8 bit, ""
+"""
+
+
+class TestOwnMapping(unittest.TestCase):
+    """Way A: the slave's own mapping (configure-pdos false), as the master read it."""
+
+    def setUp(self):
+        from ecatsetup import tool
+        self.own = tool.parse_pdos(PDOS_TEXT)
+        self.dev = make(MAPPABLE + [obj(0x6060, "R"), obj(0x6061, "T")], ESI_PDOS)
+
+    def test_parse(self):
+        self.assertEqual([(sm, d, x, n) for sm, d, x, n, _e in self.own],
+                         [(2, "rx", 0x1600, ""), (3, "tx", 0x1A00, "TXPDO 1 Mapping Parameter ")])
+        self.assertEqual(self.own[1][4], [(0x6041, 0, 16, "Status Word"), (0x6064, 0, 32, ""), (0, 0, 8, ""),
+                                          (0x6061, 0, 8, "")])
+        from ecatsetup import tool
+        self.assertEqual(tool.parse_pdos(""), [])
+
+    def test_judged_against_the_modes(self):
+        s = fslave([(0x1600, 2, [(0x6040, 16)])], TX)
+        level, text = pdoreq.own_row(s, self.dev, self.own)
+        self.assertEqual(level, "ok")
+        self.assertIn("the slave's own: 0x1600, 0x1A00; has what CSP needs", text)
+        self.assertIn("lost at power-off", text)         # not the ESI file's default
+        s["cia402"]["modes"] = ["csv"]
+        level, text = pdoreq.own_row(s, self.dev, self.own)
+        self.assertEqual(level, "warning")
+        self.assertIn("lacks 0x606C Velocity actual value, 0x60FF Target velocity", text)
+        self.assertIsNone(pdoreq.own_row(s, self.dev, None))
+        self.assertIsNone(pdoreq.own_row(s, self.dev, []))
+
+    def test_the_esi_default_is_said_so(self):
+        from ecatsetup import tool
+        own = tool.parse_pdos("SM2: x\n  RxPDO 0x1600 \"\"\n    PDO entry 0x6040:00, 16 bit, \"\"\n"
+                              "    PDO entry 0x607a:00, 32 bit, \"\"\n"
+                              "SM3: x\n  TxPDO 0x1a00 \"\"\n    PDO entry 0x6041:00, 16 bit, \"\"\n"
+                              "    PDO entry 0x6064:00, 32 bit, \"\"\n")
+        _level, text = pdoreq.own_row(fslave(), self.dev, own)
+        self.assertIn("the ESI file's default", text)
+
+    def test_a_proposal_from_it(self):
+        own = pdoreq.own_pdos(self.own, self.dev)
+        self.assertEqual([(p.index, p.sm, p.direction) for p in own], [(0x1600, 2, "rx"), (0x1A00, 3, "tx")])
+        self.assertEqual(own[1].entries[0].name, "Status Word")
+        self.assertEqual(own[0].entries[1].data_type, "DINT")       # 0x607A from the ESI file's PDOs
+        self.assertEqual(own[1].entries[2].data_type, "USINT")      # a gap: by its size
+        p = proposal(self.dev, own=own)
+        self.assertEqual(p.pdo_way, "own")
+        self.assertIsNone(p.recommendation)
+        s = config.slave_from_proposal(p, name="a6")
+        self.assertIs(s["configure-pdos"], False)
+        self.assertEqual([x["pdo"] for d in s["process-data"].values() for x in d], ["0x1600", "0x1A00"])
+        self.assertIsNone(pdoreq.own_differs(s, self.own))
+
+    def test_the_file_against_the_slave(self):
+        s = fslave([(0x1701, 2, [(0x6040, 16), (0x607A, 32)])], [(0x1A00, 3, [(0x6041, 16)])])
+        text = pdoreq.own_differs(s, self.own)
+        self.assertIn("on SM2 the slave has 0x1600 where the file has 0x1701", text)
+        s = fslave([(0x1600, 2, [(0x6040, 16), (0x607A, 32), (0x6060, 8)])],
+                   [(0x1A00, 3, [(0x6041, 16), (0x6064, 32), (0, 8), (0x6061, 8)])])
+        self.assertIsNone(pdoreq.own_differs(s, self.own))
+        s["process-data"]["outputs"][0]["entries"].pop()        # one entry less: differs
+        self.assertIn("SM2", pdoreq.own_differs(s, self.own))
+
+
 class TestSessionWays(unittest.TestCase):
     """Session.apply_pdos / change_profile: only the PDO part of the entry changes."""
 
@@ -541,6 +621,35 @@ class TestSessionWays(unittest.TestCase):
         pin = next(e for e in self.slave["process-data"]["inputs"][0]["entries"] if e["object"] == "0x60F4:00")
         self.assertEqual(pin["pin"], "my-ferror")
         self.assertEqual(self.slave["settings"][0]["value"], 3)
+
+    def test_use_the_slaves_own_mapping(self):
+        from ecatsetup import session, tool
+        self.sess.bus[1] = session.BusSlave({"position": 1, "dc": False, "vendor_id": 1, "product_code": 1,
+                                             "revision": 1},
+                                            coe.Dictionary(), proposal(self.dev))
+        own = tool.parse_pdos("SM2: x\n  RxPDO 0x1600 \"\"\n    PDO entry 0x6040:00, 16 bit, \"\"\n"
+                              "    PDO entry 0x607a:00, 32 bit, \"\"\n"
+                              "SM3: x\n  TxPDO 0x1a00 \"\"\n    PDO entry 0x6041:00, 16 bit, \"\"\n"
+                              "    PDO entry 0x6064:00, 32 bit, \"\"\n")
+        self.sess.bus[1].proposal.reads = {"sii": drive_sii(), "device_type": 0x20192, "drive_modes": 0x1AD,
+                                           "dev": self.dev, "exact": True, "detected": None,
+                                           "configured": None, "own": own}
+        from unittest import mock
+        with mock.patch.object(self.sess, "esi_device", return_value=self.dev):
+            self.assertEqual(self.sess.own_mapping(1), own)
+            self.sess.use_own_pdos(1)
+            self.assertIs(self.slave["configure-pdos"], False)
+            self.assertEqual([e["object"] for e in self.slave["process-data"]["outputs"][0]["entries"]],
+                             ["0x6040:00", "0x607A:00"])
+            self.assertEqual(self.slave["settings"][0]["value"], 3)       # the rest stays
+            self.assertFalse(any("own PDO mapping" in t for t in self.sess.check()[1]))
+            # the slave changed since: the check says so
+            self.sess.bus[1].proposal.reads["own"] = own[:1]
+            self.assertTrue(any("runs on its own PDO mapping" in t and "SM3" in t
+                                for t in self.sess.check()[1]), self.sess.check()[1])
+        self.sess.bus[1].proposal.reads["own"] = None
+        with self.assertRaises(ValueError):
+            self.sess.use_own_pdos(1)
 
     def test_no_wait_for_a_dictionary_the_slave_does_not_give(self):
         from ecatsetup import session

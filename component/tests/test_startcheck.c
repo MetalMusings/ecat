@@ -109,6 +109,37 @@ static void test_kernel_master_conf(void) {
   CHECK_EQ(ecat_kernel_master_uses("#MASTER0_DEVICE=enp1s0\n", "enp1s0", NULL, what, sizeof(what)), 0);
 }
 
+static void test_own_pdos(void) {
+  // the file has the A6's 0x1701 / 0x1B01; the slave has 0x1600 filled by a master before
+  static const ecat_pdo_entry_t e1701[] = {{0x6040, 0, 16}, {0x607A, 0, 32}, {0x60B8, 0, 16}, {0x60FE, 1, 32}};
+  static const ecat_pdo_entry_t e1b01[] = {{0x603F, 0, 16}, {0x6041, 0, 16}, {0x6064, 0, 32}};
+  static const ecat_pdo_entry_t e1600[] = {{0x6040, 0, 16}, {0x607A, 0, 32}, {0x6060, 0, 8}};
+  static const ecat_pdo_entry_t gap[] = {{0x6040, 0, 16}, {0, 0, 8}};
+  static const ecat_pdo_entry_t gap2[] = {{0x6040, 0, 16}, {0, 3, 8}};
+  ecat_pdo_t want[] = {{2, 0x1701, 4, e1701}, {3, 0x1B01, 3, e1b01}};
+  ecat_pdo_t same[] = {{2, 0x1701, 4, e1701}, {3, 0x1B01, 3, e1b01}, {4, 0x1A10, 1, e1b01}};
+  ecat_pdo_t other[] = {{2, 0x1600, 3, e1600}, {3, 0x1B01, 3, e1b01}};
+  ecat_pdo_t g1[] = {{2, 0x1600, 2, gap}}, g2[] = {{2, 0x1600, 2, gap2}};
+
+  n_said = 0;
+  CHECK_EQ(ecat_startcheck_own_pdos(4, "a6", want, 2, same, 3, collect, NULL), 0);   // SM4 only the slave's
+  CHECK_EQ(n_said, 0);
+  CHECK_EQ(ecat_startcheck_own_pdos(4, "a6", want, 2, other, 2, collect, NULL), 1);  // SM2 differs, SM3 not
+  CHECK_EQ(n_said, 1);
+  CHECK_EQ(said_level[0], ECAT_CHECK_ERROR);
+  CHECK(strstr(said[0], "slave 4 (a6) runs on its own PDO mapping (configure-pdos: false), but on SM2 it has "
+                        "0x1600 (0x6040:00 16, 0x607A:00 32, 0x6060:00 8) where the file has 0x1701 (") != NULL);
+  n_said = 0;
+  CHECK_EQ(ecat_startcheck_own_pdos(4, "a6", want, 2, other, 1, collect, NULL), 2);  // SM3 missing on the slave
+  CHECK(strstr(said[1], "on SM3 it has none") != NULL);
+  // a gap's subindex does not matter
+  CHECK_EQ(ecat_startcheck_own_pdos(4, "a6", g1, 1, g2, 1, collect, NULL), 0);
+  // the same entries in another order differ
+  ecat_pdo_entry_t swapped[4] = {e1701[1], e1701[0], e1701[2], e1701[3]};
+  ecat_pdo_t sw[] = {{2, 0x1701, 4, swapped}, {3, 0x1B01, 3, e1b01}};
+  CHECK_EQ(ecat_startcheck_own_pdos(4, "a6", want, 2, sw, 2, collect, NULL), 1);
+}
+
 static void test_ref_clock_choice(void) {
   // today's test bus: slaves 0-3 unused (not among the configured ones),
   // slave 4 with dc: is the reference clock, not the master's slave 0
@@ -133,4 +164,4 @@ static void test_ref_clock_choice(void) {
 
 RUN_TESTS("startcheck", test_startcheck_matching_bus, test_startcheck_other_slave, test_startcheck_same_vendor_other_product,
     test_startcheck_missing_slaves,
-    test_startcheck_revision_and_extra, test_kernel_master_conf, test_ref_clock_choice)
+    test_startcheck_revision_and_extra, test_kernel_master_conf, test_ref_clock_choice, test_own_pdos)

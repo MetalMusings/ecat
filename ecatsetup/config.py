@@ -256,7 +256,8 @@ def slave_from_proposal(p, name=None):
     for c in p.pdos:
         pd["outputs" if c.direction == "rx" else "inputs"].append(
             {"pdo": "0x%04X" % c.index, "sm": c.sm, "entries": [_entry(e) for e in c.entries]})
-    s["configure-pdos"] = True
+    # the slave's own mapping (way A): ecat writes none
+    s["configure-pdos"] = getattr(p, "pdo_way", "") != "own"
     s["process-data"] = {k: v for k, v in pd.items() if v}
     if p.dc_assign is not None:
         s["dc"] = {"assign-activate": "0x%04X" % p.dc_assign,

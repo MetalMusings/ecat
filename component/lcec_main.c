@@ -44,6 +44,11 @@ static void lcec_guard_event(struct lcec_master *master, int state, unsigned al_
 // checks for the kernel master.
 #pragma weak ecrt_master
 #pragma weak ecrt_master_get_slave
+// In the userspace master after 1.5 (fork: ecrt_master_get_sync_manager & co.); without
+// them a slave's own PDO mapping (configure-pdos: false) is not compared at start.
+#pragma weak ecrt_master_get_sync_manager
+#pragma weak ecrt_master_get_pdo
+#pragma weak ecrt_master_get_pdo_entry
 #include "lcec.h"
 #include "rtapi_app.h"
 //#include <linuxcnc/rtapi_mutex.h>
@@ -394,6 +399,73 @@ static void lcec_start_check_report(int level, const char *text, void *arg) {
 /// the master configures what it can, as before.
 #define LCEC_START_CHECK_LINK_MS 10000
 #define LCEC_START_CHECK_SCAN_MS 5000
+/// configure-pdos: false: the file's PDOs against the slave's own mapping, as the master read
+/// it at its scan (ecrt_master_get_sync_manager / _pdo / _pdo_entry). Returns the errors.
+#define LCEC_OWN_PDOS_MAX 64
+#define LCEC_OWN_ENTRIES_MAX 512
+static int lcec_start_check_own_pdos(lcec_master_t *master, int *stop) {
+  static ecat_pdo_t want[LCEC_OWN_PDOS_MAX], have[LCEC_OWN_PDOS_MAX];
+  static ecat_pdo_entry_t want_e[LCEC_OWN_ENTRIES_MAX], have_e[LCEC_OWN_ENTRIES_MAX];
+  lcec_slave_t *slave;
+  int errors = 0;
+
+  for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+    const ec_sync_info_t *sm;
+    ec_slave_info_t si;
+    int n_want = 0, n_have = 0, n_we = 0, n_he = 0, k;
+    unsigned s_i, p_i, e_i;
+
+    if (slave->sync_info != NULL || slave->generic_sync_managers == NULL) continue;  // ecat writes its mapping
+    if (ecrt_master_get_sync_manager == NULL || ecrt_master_get_pdo == NULL || ecrt_master_get_pdo_entry == NULL) {
+      rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX
+          "start check: slave %d (%s) runs on its own PDO mapping (configure-pdos: false), which is not "
+          "compared with the configuration: that needs a linuxcnc-ethercat-uspace after 1.5\n",
+          slave->index, slave->name);
+      continue;
+    }
+    for (sm = slave->generic_sync_managers; sm->index != 0xff && n_want < LCEC_OWN_PDOS_MAX; sm++) {
+      for (p_i = 0; p_i < sm->n_pdos && n_want < LCEC_OWN_PDOS_MAX; p_i++) {
+        const ec_pdo_info_t *p = &sm->pdos[p_i];
+        want[n_want].sm = sm->index;
+        want[n_want].index = p->index;
+        want[n_want].entries = &want_e[n_we];
+        for (k = 0; k < (int)p->n_entries && n_we < LCEC_OWN_ENTRIES_MAX; k++, n_we++) {
+          want_e[n_we].index = p->entries[k].index;
+          want_e[n_we].subindex = p->entries[k].subindex;
+          want_e[n_we].bits = p->entries[k].bit_length;
+        }
+        want[n_want].n_entries = k;
+        n_want++;
+      }
+    }
+    if (ecrt_master_get_slave(master->master, slave->index, &si) != 0) continue;  // the identity check said it
+    for (s_i = 0; s_i < si.sync_count && n_have < LCEC_OWN_PDOS_MAX; s_i++) {
+      ec_sync_info_t sync;
+      if (ecrt_master_get_sync_manager(master->master, slave->index, s_i, &sync) != 0) continue;
+      for (p_i = 0; p_i < sync.n_pdos && n_have < LCEC_OWN_PDOS_MAX; p_i++) {
+        ec_pdo_info_t pdo;
+        if (ecrt_master_get_pdo(master->master, slave->index, s_i, p_i, &pdo) != 0) continue;
+        have[n_have].sm = s_i;
+        have[n_have].index = pdo.index;
+        have[n_have].entries = &have_e[n_he];
+        for (e_i = 0; e_i < pdo.n_entries && n_he < LCEC_OWN_ENTRIES_MAX; e_i++) {
+          ec_pdo_entry_info_t ent;
+          if (ecrt_master_get_pdo_entry(master->master, slave->index, s_i, p_i, e_i, &ent) != 0) break;
+          have_e[n_he].index = ent.index;
+          have_e[n_he].subindex = ent.subindex;
+          have_e[n_he].bits = ent.bit_length;
+          n_he++;
+        }
+        have[n_have].n_entries = (int)(&have_e[n_he] - have[n_have].entries);
+        n_have++;
+      }
+    }
+    errors += ecat_startcheck_own_pdos(slave->index, slave->name, want, n_want, have, n_have,
+        lcec_start_check_report, stop);
+  }
+  return errors;
+}
+
 static int lcec_start_check(lcec_master_t *master) {
   ec_master_info_t info;
   static ecat_expect_t expect[LCEC_START_CHECK_MAX];
@@ -466,6 +538,12 @@ static int lcec_start_check(lcec_master_t *master) {
         "the bus does not match the configuration%s: run EtherCAT Setup (ecatsetup --gui) to update it%s\n",
         stop ? ", so ecat does not start" : "",
         stop ? ", or set master: start-check: false to start anyway" : "");
+    return stop ? -1 : 0;
+  }
+  if (lcec_start_check_own_pdos(master, &stop) != 0) {
+    rtapi_print_msg(stop ? RTAPI_MSG_ERR : RTAPI_MSG_WARN, LCEC_MSG_PFX
+        "a slave's own PDO mapping does not match the configuration%s\n",
+        stop ? ", so ecat does not start (or set master: start-check: false to start anyway)" : "");
     return stop ? -1 : 0;
   }
   rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "start check: the bus matches the configuration (%d slaves, %.1f s)\n",

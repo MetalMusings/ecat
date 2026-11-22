@@ -503,6 +503,90 @@ def assignment_rows(slave, esi_dev):
     return rows
 
 
+# --------------------------------------------------------------------------
+# the slave's own mapping (way A: configure-pdos false, nothing written)
+
+_TYPES = {1: "BOOL", 8: "USINT", 16: "UINT", 32: "UDINT", 64: "ULINT"}
+
+
+def own_pdos(own, esi_dev=None, dictionary=None):
+    """The slave's own mapping as the master read it (tool.pdos: [(sm, "rx"/"tx", index,
+    name, [(index, sub, bits, name)])]) as EsiPdos, the entries named and typed from the
+    ESI file's PDOs, else the dictionary, else by their size."""
+    from .esi import EsiEntry, EsiPdo
+    known = {}
+    for p in getattr(esi_dev, "pdos", None) or []:
+        for e in p.entries:
+            known.setdefault((e.index, e.subindex), e)
+    esi_pdos = {p.index: p for p in getattr(esi_dev, "pdos", None) or []}
+    out = []
+    for sm, direction, index, name, entries in own or []:
+        es = []
+        for i, sub, bits, ename in entries:
+            k = known.get((i, sub))
+            dname = dtype = None
+            if dictionary is not None and i:
+                try:
+                    dname = dictionary.name(i, sub)
+                except Exception:       # a dictionary without it
+                    dname = None
+            if k is not None and k.bitlen == bits:
+                dtype = k.data_type
+            es.append(EsiEntry(i, sub, bits, ename or (k.name if k else None) or dname or "",
+                               dtype or _TYPES.get(bits, "")))
+        e = esi_pdos.get(index)
+        out.append(EsiPdo(index, direction, sm, bool(e and e.fixed), False, name or (e.name if e else ""),
+                          es, list(e.excludes) if e else []))
+    return out
+
+
+def own_row(slave, esi_dev, own):
+    """What the slave's own mapping gives, for the PDO boxes: (level, text), or None when it
+    was not read. "default" when it is the ESI file's default assignment as the ESI has it
+    (it comes back after a power-off); otherwise it is what a master or a tool put in the
+    slave's RAM, unless stored there."""
+    if not own:
+        return None       # not read, or no PDOs (a coupler): nothing to choose
+    req, modes = slave_requirement(slave)
+    have = {(i, s) for _sm, _d, _x, _n, es in own for i, s, _b, _n2 in es if i}
+    names = ", ".join("0x%04X" % x for _sm, _d, x, _n, _es in own) or "no PDOs"
+    defaults = sorted((p.sm, p.index, tuple((e.index, e.subindex, e.bitlen) for e in p.entries))
+                      for p in getattr(esi_dev, "pdos", None) or [] if p.sm is not None)
+    mine = sorted((sm, x, tuple((i, s, b) for i, s, b, _n in es)) for sm, _d, x, _n, es in own)
+    origin = ("the ESI file's default" if esi_dev is not None and mine == defaults else
+              "as it is now: what a master or tool last wrote, lost at power-off unless stored in the slave")
+    if req is None:
+        return "info", "the slave's own: %s (%s)" % (names, origin)
+    lacks = sorted((req.rx | req.tx) - have)
+    if lacks:
+        return "warning", "the slave's own: %s; lacks %s (%s)" % (
+            names, ", ".join(object_name(i) for i, _s in lacks), origin)
+    return "ok", "the slave's own: %s; has what %s needs (%s)" % (
+        names, ", ".join(m.upper() for m in modes), origin)
+
+
+def own_differs(slave, own):
+    """A slave with configure-pdos false against its own mapping as read (tool.pdos): the
+    difference as text (per sync manager, as the component's start check), or None."""
+    def key(sm_pdos):
+        return [(x, [(i, s if i else 0, b) for i, s, b in es]) for x, es in sm_pdos]
+    mine = {}
+    for sm, _d, x, _n, es in own or []:
+        mine.setdefault(sm, []).append((x, [(i, s, b) for i, s, b, _n2 in es]))
+    file = {}
+    for direction, index, sm, entries in _file_pdos(slave):
+        file.setdefault(sm, []).append((index, [(i, s, b) for i, s, b in entries]))
+
+    def text(pdos):
+        return ", ".join("0x%04X" % x for x, _es in pdos) or "none"
+    for sm in sorted(file, key=lambda v: (v is None, v)):
+        if key(file[sm]) != key(mine.get(sm, [])):
+            return ("runs on its own PDO mapping (configure-pdos: false), but on SM%s the slave has %s "
+                    "where the file has %s: choose \"the slave's own\" again on the Process data card "
+                    "to take what it has, or let ecat write a mapping" % (sm, text(mine.get(sm, [])), text(file[sm])))
+    return None
+
+
 def assigned(esi_dev, indexes, slave=None):
     """The device's PDOs `indexes` (the user's choice) as EsiPdos with their sync
     manager, an open one filled with what the slave's profile needs (when the ESI file

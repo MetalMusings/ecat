@@ -234,6 +234,16 @@ Choosing a slave shows:
   what the PDO gives for the profile and its modes: green when it has what
   they need (an open PDO: it is filled with it), amber when it lacks
   something (*fixed; lacks 0x6060 Modes of operation*) or cannot be changed.
+  The first line of both boxes is *the slave's own*: the PDOs the slave
+  has now, as the master read them at its scan, judged the same way.
+  Choosing it takes them as they are and writes none (*Write the PDO
+  mapping to the slave* off, `configure-pdos: false`): for a slave that
+  refuses a mapping, or one set up with its maker's tool. The line says
+  whether it is the ESI file's default (it comes back after a power-off) or
+  what a master or tool last wrote, which is lost at power-off unless the
+  slave stores it. With the bus read, the check compares the file with the
+  slave's own mapping (*Bus:* when they differ), and ecat does the same at
+  start. Choosing a PDO of the device again lets ecat write the mapping.
   Unsuitable PDOs are shown, not hidden. Choosing one takes it at once (from
   what was read from the slave; the bus is not read again). An open PDO the
   file already has keeps its entries; a new one is filled with what the

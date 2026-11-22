@@ -38,6 +38,29 @@ typedef void (*ecat_report_t)(int level, const char *text, void *arg);
 int ecat_startcheck_compare(const ecat_expect_t *expect, int n_expect, const ecat_found_t *found, int n_found,
     ecat_report_t report, void *arg);
 
+/// A PDO entry and a PDO, for comparing mappings without the master's headers.
+typedef struct {
+  uint16_t index;
+  uint8_t subindex;
+  uint8_t bits;
+} ecat_pdo_entry_t;
+
+typedef struct {
+  uint8_t sm;
+  uint16_t index;
+  int n_entries;
+  const ecat_pdo_entry_t *entries;
+} ecat_pdo_t;
+
+/// A slave with configure-pdos: false runs on its own PDO mapping, which
+/// ecat does not write: compare the file's PDOs (`want`) with the slave's, as
+/// the master read them at its scan (`have`). For each sync manager of the
+/// file, the slave must have the same PDOs in the same order with the same
+/// entries (a sync manager only the slave uses does not matter). Each
+/// difference is reported as an error; returns the number of errors.
+int ecat_startcheck_own_pdos(int position, const char *name, const ecat_pdo_t *want, int n_want,
+    const ecat_pdo_t *have, int n_have, ecat_report_t report, void *arg);
+
 /// Whether a kernel master configuration (the text of /etc/ethercat.conf
 /// or /etc/sysconfig/ethercat) gives the kernel master this interface, by
 /// name or MAC address (mac may be NULL), or any interface

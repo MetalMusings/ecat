@@ -309,7 +309,7 @@ def _set_with_channel(esi_dev, chosen, sub):
 
 def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
             esi_exact=False, mode="csp", pdo_set=None, extra_modes=(), way=None, profile=None,
-            modules=None, assignment=None):
+            modules=None, assignment=None, own=None):
     """Make a Proposal for one slave.
 
     info: tool.slave_info(); sii: sii.Sii; coe: coe.Dictionary (may be empty);
@@ -320,7 +320,9 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
     choice over the one recognised. modules: the module idents the slave detects (0xF050);
     with Slots in its ESI file the modules' PDOs, InitCmds and 0xF030 come from there.
     assignment: the PDO indexes the user chose (the window's PDO assignment list), taken as
-    they are; an open one among them is filled with what the profile needs.
+    they are; an open one among them is filled with what the profile needs. own: the
+    slave's own mapping as EsiPdos (pdoreq.own_pdos), taken as it is, and written by
+    nobody (configure-pdos false).
     """
     from . import lcnc_env
     wide = lcnc_env.wide_pins()  # 64-bit integer pins (LinuxCNC 2.10)
@@ -396,14 +398,19 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         p.notes.append("no PDOs assigned by default; the mapping must be chosen")
 
     modes_text = ", ".join(m.upper() for m in [mode, *extra_modes])
-    if assignment is not None and esi_dev:
+    if own is not None:
+        chosen = list(own)
+        p.pdo_way = "own"
+        p.pdo_source = "the slave's own mapping (as the master read it; ecat writes none)"
+        p.notes.append("PDO mapping: %s: %s" % (p.pdo_source, ", ".join("0x%04X" % c.index for c in chosen)))
+    elif assignment is not None and esi_dev:
         wants = {"profile": "cia402", "cia402": {"mode": mode, "modes": list(extra_modes)}} \
             if p.profile == 402 else None
         chosen = pdoreq.assigned(esi_dev, set(assignment), wants) + (layout.pdos if layout else [])
         p.pdo_way = "chosen"
         p.pdo_source = "PDOs chosen: %s" % ", ".join("0x%04X" % c.index for c in chosen)
         p.notes.append("PDO mapping: %s" % p.pdo_source)
-    if p.profile == 402 and esi_dev and not pdo_set and assignment is None:
+    if p.profile == 402 and esi_dev and not pdo_set and assignment is None and own is None:
         # (an assignment the user asked for is kept as it is)
         # the mode set needs objects the assignment may lack: another ready way, else an own
         # mapping in the open PDOs (docs/development.md "Own PDO mapping"); recommended, and
@@ -428,7 +435,7 @@ def propose(info, sii, coe, device_type=None, drive_modes=None, esi_dev=None,
         elif plan.verdict is not None:
             p.notes += ["the PDOs cannot give %s: %s" % (mode.upper(), t) for t in plan.verdict.problems[:3]]
 
-    if p.profile == 5001 and esi_dev and not pdo_set and assignment is None:
+    if p.profile == 5001 and esi_dev and not pdo_set and assignment is None and own is None:
         # a terminal whose default assignment lacks the channel its sub-profile is for (an
         # incremental encoder's legacy layout, a serial terminal's 50-word set): the
         # predefined set that has one, recommended

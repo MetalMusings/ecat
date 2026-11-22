@@ -46,7 +46,8 @@ class FakeTool:
 
     def patches(self):
         return [mock.patch.object(tool, name, getattr(self, name))
-                for name in ("slave_positions", "slave_info", "sii", "sdos", "upload", "master_mac")] + [
+                for name in ("slave_positions", "slave_info", "sii", "sdos", "upload", "master_mac",
+                             "pdos")] + [
             mock.patch.object(tool, "sdos_settled", lambda pos, **kw: self.sdos(pos))]
 
     mac = None  # the master's MAC address: no interface found for it unless a test says so
@@ -66,6 +67,13 @@ class FakeTool:
 
     def sdos(self, pos):
         return self.sdo_text
+
+    own = {}  # position -> the slave's own mapping (tool.pdos); none unless a test gives one
+
+    def pdos(self, pos):
+        if pos not in self.own:
+            raise tool.ToolError("pdos: not in this fake bus")
+        return self.own[pos]
 
     def upload(self, pos, index, subindex, dtype):
         return {0x1000: 5001}.get(index)
@@ -1702,6 +1710,40 @@ class TestPdoEditing(WindowBase):
             self.assertFalse(page.init_button.isHidden())
             page.other_modes["csv"].setChecked(True)
             self.assertTrue(page.init_button.isHidden())
+
+    def test_the_slaves_own_mapping_is_offered(self):
+        # way A: the slave's own mapping as the master read it, first in both boxes
+        from ecatsetup import tool as tool_mod
+        own = tool_mod.parse_pdos("SM2: x\n  RxPDO 0x1600 \"\"\n    PDO entry 0x6040:00, 16 bit, \"\"\n"
+                                  "    PDO entry 0x607a:00, 32 bit, \"\"\n"
+                                  "SM3: x\n  TxPDO 0x1a00 \"\"\n    PDO entry 0x6041:00, 16 bit, \"\"\n"
+                                  "    PDO entry 0x6064:00, 32 bit, \"\"\n")
+        w, page, s = self.page([(0x1701, 2, [(0x6040, 16), (0x607A, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        with mock.patch.object(w.session, "own_mapping", return_value=own):
+            page.show_assignment(s)
+            rx, tx = page.pa_boxes["rx"], page.pa_boxes["tx"]
+            self.assertEqual((rx.itemData(0), tx.itemData(0)), ("own", "own"))
+            self.assertIn("The slave's own: 0x1600, 0x1A00; has what CSP needs", rx.itemText(0))
+            self.assertEqual(rx.currentData(), 0x1701)            # the file's, as before
+            calls = []
+            with mock.patch.object(w.session, "use_own_pdos", lambda pos: calls.append(pos) or []), \
+                    mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))):
+                rx.setCurrentIndex(0)
+                rx.activated.emit(0)
+            self.assertEqual(calls, [1])
+            # configure-pdos false: the boxes show the slave's own, and a PDO can be chosen again
+            s["configure-pdos"] = False
+            s["process-data"]["inputs"][0]["pdo"] = "0x1A10"      # the slave's own, not in the ESI file
+            page.show_assignment(s)
+            self.assertFalse(page.pa.isHidden())
+            self.assertEqual((rx.currentData(), tx.currentData()), ("own", "own"))
+            picked = []
+            with mock.patch.object(w.session, "assign_pdos", lambda pos, idx: picked.append(idx) or []), \
+                    mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda t: None))):
+                rx.setCurrentIndex(rx.findData(0x1702))
+                rx.activated.emit(rx.currentIndex())
+            self.assertEqual(picked, [[0x1702, 0x1A00]])           # the input's default with it
 
     def test_several_pdos_of_a_direction_are_kept_as_they_are(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)]), (0x1701, 2, [(0x607A, 32)])],

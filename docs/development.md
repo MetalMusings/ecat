@@ -3484,6 +3484,39 @@ is slave, profile, the profile's choices, then the PDOs they need.
 - Tests: `scripts/run-tests pdoreq pdoedit mdp prototype capture capturec
   guidance gui halcheck` (345); mutation-checked.
 
+### Way A: the slave's own mapping (built 2026-11-22)
+
+`configure-pdos: false` as a way to choose, not only a box to untick.
+
+- Read: `tool.pdos(pos)` / `tool.parse_pdos()`: `ethercat pdos -p N`, the
+  assignment and mapping the master read at its scan (no SDO traffic: 11 ms
+  against 0.3-0.4 s for reading 0x1C12/0x1C13 and 0x16xx/0x1Axx by SDO). Read
+  in `read_slave` for every slave, kept as `Proposal.reads["own"]`;
+  `Session.own_mapping`. On the A6 simulation it showed what the last test had
+  written into the slave's RAM, which is why the window says so.
+- `pdoreq.own_pdos` (EsiPdos, entries named and typed from the ESI file's
+  PDOs, else the dictionary, else by size), `own_row` (ok / lacks, and
+  whether it is the ESI default), `own_differs` (the file against it, per
+  sync manager, a gap's subindex not counted). `propose(own=)`,
+  `Proposal.pdo_way` "own", `config.slave_from_proposal` writes
+  `configure-pdos: false` for it. `Session.use_own_pdos`; `Session.check`
+  gives a *Bus:* problem when a `configure-pdos: false` file differs.
+- Window: *the slave's own* first in both PDO boxes; the boxes stay with
+  `configure-pdos: false`; from the slave's own to a device PDO the other
+  direction takes its default.
+- Component: the start check compares the file's PDOs with the slave's own
+  (`ecat_startcheck_own_pdos`, unit-tested; `lcec_start_check_own_pdos` reads
+  the master with `ecrt_master_get_sync_manager` / `_pdo` / `_pdo_entry`,
+  weak). Those were in the master's symbol list but had no code in the
+  userspace build: added in the fork (3900e761,
+  tests/test_sim_master_pdos.c), so the comparison needs a master release
+  after 1.5. With 1.5 a warning says it is not compared (tried: ecat loads,
+  OP).
+- Tried on the bus (A6 simulation): `use_own_pdos` took 0x1600/0x1A00 as the
+  slave had them, the check clean; a file with 0x1701 instead gives the Bus:
+  line; ecat in halrun reached OP on the slave's own mapping. Not tried: the
+  component's comparison on the bus (needs the fork's master installed).
+
 ### Choosing the PDOs by hand (built 2026-11-22, the user's wish)
 
 From the user's try on the A6 simulation: with homing ticked the window

@@ -541,6 +541,7 @@ class TestNoSdoInformation(unittest.TestCase):
                     "al_status_code": None}
             with mock.patch.object(tool, "slave_info", lambda pos: info), \
                     mock.patch.object(tool, "sii", lambda pos: b""), \
+                    mock.patch.object(tool, "pdos", lambda pos: []), \
                     mock.patch.object(sii_mod, "parse", lambda data: the_sii), \
                     mock.patch.object(tool, "sdos_settled", lambda pos, **kw: ""), \
                     mock.patch.object(tool, "upload", upload):

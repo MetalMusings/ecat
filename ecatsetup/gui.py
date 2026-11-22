@@ -2288,16 +2288,27 @@ class SlaveView(QWidget):
     def show_assignment(self, s):
         """The PDO choice per direction: every PDO of the device, the file's chosen."""
         dev = self.win.session.esi_device(self.position)
-        shown = dev is not None and bool(dev.pdos) and s.get("configure-pdos", True) is not False
+        own = self.win.session.own_mapping(self.position)
+        own_row = pdoreq.own_row(s, dev, own)
+        shown = (dev is not None and bool(dev.pdos)) or own_row is not None
         self.pa.setVisible(shown)
         self.pa_rows = pdoreq.assignment_rows(s, dev) if shown else []
         bus = self.win.session.bus.get(self.position) is not None
+        mine = s.get("configure-pdos", True) is False     # way A: the slave's own mapping
         for direction, box in self.pa_boxes.items():
             rows = [r for r in self.pa_rows if r.direction == direction]
-            in_file = [r for r in rows if r.in_file]
+            in_file = [r for r in rows if r.in_file] if not mine else []
             box.blockSignals(True)
             box.clear()
-            if len(in_file) != 1:
+            if own_row is not None:
+                level, text = own_row
+                box.addItem(text[0].upper() + text[1:], "own")
+                box.setItemData(0, QBrush({"ok": GREEN, "warning": AMBER}.get(level, GREY)), Qt.ForegroundRole)
+                box.setItemData(0, "Take the PDOs the slave has now and write none (configure-pdos: "
+                                "false). " + text, Qt.ToolTipRole)
+            elif mine:
+                box.addItem("The slave's own (not written; read the bus to see what it has)", None)
+            if not mine and len(in_file) != 1:
                 # several PDOs of the direction in the file (or none): kept as they are
                 box.addItem(" + ".join("0x%04X" % r.index for r in in_file) + " (as in the file)"
                             if in_file else "none", None)
@@ -2310,23 +2321,36 @@ class SlaveView(QWidget):
                     r.text, "\nIn the ESI file's default assignment" if r.default else "",
                     "\nCannot be used with " + ", ".join("0x%04X" % i for i in r.excludes)
                     if r.excludes else ""), Qt.ToolTipRole)
-            current = max(box.findData(in_file[0].index) if len(in_file) == 1 else 0, 0)
+            if mine:
+                current = 0
+                level = own_row[0] if own_row else "info"
+            else:
+                current = max(box.findData(in_file[0].index) if len(in_file) == 1 else
+                              box.findData(None), 0)
+                level = next((r.level for r in rows if len(in_file) == 1 and r is in_file[0]), "info")
             box.setCurrentIndex(current)
-            level = next((r.level for r in rows if len(in_file) == 1 and r is in_file[0]), "info")
             pal = box.palette()
             pal.setColor(QPalette.ButtonText, {"ok": GREEN, "warning": AMBER}.get(level, GREY)
                          if level != "info" else self.palette().color(QPalette.ButtonText))
             box.setPalette(pal)
-            box.setEnabled(bus and not self.win.busy and bool(rows))
+            box.setEnabled(bus and not self.win.busy and box.count() > 1)
             box.blockSignals(False)
 
     def pa_chosen(self, direction):
         """A PDO chosen for one direction: taken at once, the other direction as it is."""
         box = self.pa_boxes[direction]
         index = box.currentData()
+        s = self.win.session.slave(self.position)
         if index is None:
             return
+        if index == "own":
+            if s is not None and s.get("configure-pdos", True) is not False:
+                self.win.use_own_pdos(self.position)
+            return
         keep = [r.index for r in self.pa_rows if r.in_file and r.direction != direction]
+        if s is not None and s.get("configure-pdos", True) is False:
+            # from the slave's own to a PDO of the device: the other direction's default
+            keep = [r.index for r in self.pa_rows if r.direction != direction and r.default]
         if [r.index for r in self.pa_rows if r.in_file and r.direction == direction] == [index]:
             return
         self.win.assign_pdos(self.position, sorted(keep + [index]))
@@ -7941,6 +7965,12 @@ class MainWindow(QMainWindow):
                  lambda notes: self.check(extra=["slave %d: proposed again: %s" % (pos, n)
                                                  for n in notes] or
                                           ["slave %d: proposed again" % pos]))
+
+    def use_own_pdos(self, pos):
+        """Way A: the slave's own PDO mapping, nothing written."""
+        self.run("Taking slave %d's own PDO mapping..." % pos,
+                 lambda progress: self.session.use_own_pdos(pos),
+                 lambda notes: (self.changed(), self.check(extra=["slave %d: its own PDO mapping" % pos])))
 
     def assign_pdos(self, pos, indexes):
         """The user ticked the slave's PDOs: the slave is read and only its PDOs replaced."""
