@@ -1637,6 +1637,15 @@ class TestPdoEditing(WindowBase):
             rx.activated.emit(rx.currentIndex())
         self.assertEqual(calls, [(1, [0x1600, 0x1A00])])
 
+    def test_the_pdos_are_judged_again_when_the_modes_change(self):
+        w, page, s = self.page([(0x1701, 2, [(0x6040, 16), (0x607A, 32)])],
+                               [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])
+        rx = page.pa_boxes["rx"]
+        self.assertIn("has what CSP needs", rx.itemText(rx.findData(0x1701)))
+        page.other_modes["hm"].setChecked(True)          # homing: 0x6060 and 0x6061 needed too
+        self.assertIn("lacks 0x6060", rx.itemText(rx.findData(0x1701)))
+        self.assertIn("0x6060", page.pd_errors.text())
+
     def test_several_pdos_of_a_direction_are_kept_as_they_are(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)]), (0x1701, 2, [(0x607A, 32)])],
                                [(0x1A00, 3, [(0x6041, 16), (0x6064, 32)])])

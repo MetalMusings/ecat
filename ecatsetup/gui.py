@@ -2670,6 +2670,9 @@ class SlaveView(QWidget):
         self.enable_dc_fields()
         self.show_dc_warnings(s)
         self.show_homing(s)
+        # the mode set decides what the PDOs must give: the lines under the table, the ways
+        # and the PDO boxes are judged again
+        self.show_pd_status(s)
         self.win.changed()
 
     @staticmethod
