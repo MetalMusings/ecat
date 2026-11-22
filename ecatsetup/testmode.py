@@ -144,10 +144,15 @@ def jog_names(i):
     return "ecatjog%d" % i, "ecatsel%d" % i, "ecatnot%d" % i
 
 
+def used_slaves(cfg):
+    """The slaves of the file the component configures: an unused one has no pins."""
+    return [s for s in cfg.get("slaves") or [] if s.get("unused") is not True]
+
+
 def csp_drives(cfg):
     """Pin prefixes of the cia402 axes in CSP (a slave's name, or its
-    cia402.axes), which the drive test can move."""
-    return [a for s in cfg.get("slaves") or []
+    cia402.axes), which the drive test can move; unused slaves have none."""
+    return [a for s in used_slaves(cfg)
             if s.get("profile") == "cia402" and (s.get("cia402") or {}).get("mode") == "csp"
             for a in config.axes(s)]
 
@@ -179,7 +184,7 @@ def hal_file(cfg, cfg_path, period):
             "setp %s.maxv 0" % jog]
     # the response measurement's samplers (response.py): after pos-cmd is made
     lines += s_addf + s_nets
-    for s in cfg.get("slaves") or []:
+    for s in used_slaves(cfg):
         for a in config.axes(s):
             lines.append("setp %s.watchdog-ms %d" % (a, WATCHDOG_MS))
     lines += ["addf ecat.write-all servo-thread", "start", ""]

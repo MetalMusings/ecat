@@ -338,6 +338,16 @@ class TestTestMode(unittest.TestCase):
         # disabled until a measurement
         self.assertIn("setp sampler.0.enable 0", lines)
 
+    def test_an_unused_drive_is_not_wired(self):
+        # an unused slave gets no pins: wiring it stopped the I/O test ("Pin 'drive-0.pos-fb'
+        # does not exist", the user's A6 test 2026-11-22)
+        c = cfg()
+        c["slaves"][0]["unused"] = True
+        hal = testmode.hal_file(c, "/t/ethercat.yaml", 500000)
+        self.assertNotIn("x.", hal)
+        self.assertNotIn("limit3", hal)
+        self.assertEqual(testmode.csp_drives(c), [])
+
     def test_heartbeat(self):
         run = self.started()
         run.tick_watchdogs()
