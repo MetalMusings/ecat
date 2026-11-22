@@ -1727,7 +1727,7 @@ class TestPdoEditing(WindowBase):
             last = rx.count() - 1
             self.assertEqual((rx.itemData(last), tx.itemData(tx.count() - 1)), ("own", "own"))
             self.assertIn("Not advised: the slave's own: 0x1600, 0x1A00; has what CSP needs", rx.itemText(last))
-            self.assertEqual(rx.itemData(last, gui.Qt.ForegroundRole).color(), gui.RED)
+            self.assertEqual(rx.itemData(last, gui.Qt.ForegroundRole).color(), gui.GREY)   # unobtrusive
             self.assertIn("power goes off", rx.itemData(last, gui.Qt.ToolTipRole))
             self.assertEqual(rx.currentData(), 0x1701)            # the file's, as before
             calls = []

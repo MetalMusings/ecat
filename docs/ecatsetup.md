@@ -240,7 +240,7 @@ Choosing a slave shows:
   what the PDO gives for the profile and its modes: green when it has what
   they need (an open PDO: it is filled with it), amber when it lacks
   something (*fixed; lacks 0x6060 Modes of operation*) or cannot be changed.
-  The last line of both boxes, in red, is *Not advised: the slave's own*:
+  The last line of both boxes, in grey, is *Not advised: the slave's own*:
   the PDOs the slave has now, as the master read them at its scan, judged
   the same way. Choosing it (after a question) takes them as they are and
   writes none (*Write the PDO mapping to the slave* off). It is not advised:
