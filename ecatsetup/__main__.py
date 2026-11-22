@@ -856,6 +856,19 @@ def check_file(path, esi_paths=()):
         print("No master running: the bus was not checked")
         return 0
     problems, notes = compare_bus(cfg, positions)
+    # way A: a slave on its own mapping must have the mapping the file has (the window's
+    # check and the component's start check say the same)
+    for s in cfg.get("slaves") or []:
+        if s.get("configure-pdos") is not False or s.get("unused") or s.get("position") not in positions:
+            continue
+        try:
+            if not session.same_kind(s, tool.slave_info(s["position"])):
+                continue
+            text = pdoreq.own_differs(s, tool.pdos(s["position"]))
+        except tool.ToolError:
+            continue
+        if text:
+            problems.append("slave %d (%s): %s" % (s["position"], s.get("name"), text))
     for m in problems + notes:
         print("Bus: %s" % m)
     # DC settings against what each slave can do (warnings only)

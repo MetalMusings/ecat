@@ -553,6 +553,36 @@ class TestOwnMapping(unittest.TestCase):
         s["process-data"]["outputs"][0]["entries"].pop()        # one entry less: differs
         self.assertIn("SM2", pdoreq.own_differs(s, self.own))
 
+    def test_the_command_lines_check_compares_it_too(self):
+        import contextlib
+        import io
+        import tempfile
+        import yaml
+        from unittest import mock
+        from ecatsetup import __main__ as cli, dcinfo, tool
+
+        def entries(*objs):
+            return [{"object": "0x%04X:00" % o, "bits": b, "type": "UINT" if b == 16 else "DINT"}
+                    for o, b in objs]
+        s = {"position": 1, "name": "x", "profile": "generic", "configure-pdos": False,
+             "identity": {"vendor": "0x00000001", "product": "0x00000002"},
+             "process-data": {"outputs": [{"pdo": "0x1701", "sm": 2, "entries": entries((0x6040, 16), (0x607A, 32))}],
+                              "inputs": [{"pdo": "0x1A00", "sm": 3, "entries": entries((0x6041, 16))}]}}
+        cfg = {"ecat": 1, "master": {"interface": "x", "transport": "raw"}, "slaves": [s]}
+        self.assertEqual(config.check(cfg), [])
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
+            yaml.safe_dump(cfg, f)
+            f.flush()
+            out = io.StringIO()
+            with mock.patch.object(tool, "slave_positions", return_value=[1]), \
+                    mock.patch.object(tool, "slave_info", return_value={"vendor_id": 1, "product_code": 2}), \
+                    mock.patch.object(tool, "pdos", return_value=self.own), \
+                    mock.patch.object(cli, "compare_bus", return_value=([], [])), \
+                    mock.patch.object(dcinfo, "read", side_effect=tool.ToolError("x")), \
+                    contextlib.redirect_stdout(out):
+                code = cli.check_file(f.name)
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn("on SM2 the slave has 0x1600 where the file has 0x1701", out.getvalue())
 
 class TestSessionWays(unittest.TestCase):
     """Session.apply_pdos / change_profile: only the PDO part of the entry changes."""
