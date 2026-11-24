@@ -197,6 +197,7 @@ TOPICS = {
     "Messages from the master": ("ecatsetup.md", "step-2-why-it-is-not-in-op"),
     "Drive state (CiA 402)": ("ecatsetup.md", "cia-402-drives"),
     "I/O test": ("ecatsetup.md", "io"),
+    "Switches": ("ecatsetup.md", "switches"),
     "Inputs (from the slave)": ("ecatsetup.md", "io"),
     "Outputs (to the slave)": ("ecatsetup.md", "io"),
     "SDO (CoE object)": ("ecatsetup.md", "io"),

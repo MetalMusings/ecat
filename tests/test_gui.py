@@ -29,7 +29,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from ecatsetup import config, guidance, session, tool  # noqa: E402
+from ecatsetup import coe, config, guidance, session, tool  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
@@ -1155,6 +1155,71 @@ class TestWindow(WindowBase):
         self.assertNotIn("home-speed", s["cia402"])
         self.assertNotIn("homing", s)
         self.assertNotIn("0x6098:00", [x["object"] for x in s.get("settings") or []])
+
+    def test_homing_card_switches(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp", "modes": ["hm"]}
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
+        w.select_slave(0)
+        page = w.slave_page
+        page.home_method.setCurrentIndex(page.home_method.findData(35))
+        page.homing_edited()
+        self.assertTrue(page.home_switch_text.isHidden() and page.home_switch_look.isHidden())
+        page.home_method.setCurrentIndex(page.home_method.findData(21))
+        page.homing_edited()
+        self.assertFalse(page.home_switch_text.isHidden())
+        self.assertIn("needs the home switch", page.home_switch_text.text())
+        self.assertIn("normally open or closed", page.home_switch_text.text())
+        d = coe.Dictionary('SDO 0x2007, "Inputs Function"\n'
+                           '  0x2007:05, rwrwrw, uint16, 16 bit, "Input 5 Function"\n')
+        with mock.patch.object(w.session, "dictionary", lambda pos: d), \
+                mock.patch.object(gui.tool, "upload", lambda *a: 3):
+            page.look_for_input_settings()
+        self.assertFalse(page.home_switch_found.isHidden())
+        self.assertIn("0x2007:05", page.home_switch_found.text())
+        with mock.patch.object(w.session, "dictionary", lambda pos: coe.Dictionary()):
+            page.look_for_input_settings()
+        self.assertIn("Nothing found", page.home_switch_found.text())
+
+    def test_switch_card(self):
+        w = self.window()
+        card = w.test_page.switches
+        slave = {"name": "x", "profile": "cia402", "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
+                 "cia402": {"mode": "csp", "modes": ["hm"], }, "homing": {"method": 21},
+                 "process-data": {"inputs": [{"pdo": "0x1A00", "entries": [
+                     {"object": "0x60FD:00", "bits": 32, "type": "UDINT", "pin": "digital-inputs"}]}]}}
+        card.show_drive(slave)
+        self.assertTrue(card.missing.isHidden())
+        self.assertIn("needs the home switch", card.needs.text())
+        pins = {"digital-inputs": "0x00030000"}
+        card.update_values(lambda n: pins.get(n))
+        self.assertEqual(card.lamps["home"].property("pill"), "grey")
+        self.assertIn("IN1, IN2", card.inputs.text())
+        # the test: released (IN1 flickers on its own: left out), then pressed
+        card.start("home")
+        t = 100.0
+        for value in (0x30000, 0x20000, 0x30000):
+            card.step_test(value, t)
+            t += 0.5
+        self.assertIn("press and hold", card.step.text())
+        card.step_test(0x130004, t)
+        card.step_test(0x130004, t + 0.1)
+        self.assertEqual(card.result.text(), "")          # held 0.3 s first
+        card.step_test(0x120004, t + 0.4)                 # IN1 left out: the same
+        self.assertIn("Set up right", card.result.text())
+        self.assertIsNone(card.test)
+        # not pressed within the time: nothing reached the drive
+        card.start("home")
+        card.step_test(0x30000, 200.0)
+        card.step_test(0x30000, 201.1)
+        card.step_test(0x30000, 216.2)
+        self.assertIn("Nothing changed", card.result.text())
+        # without 0x60FD in the process data: what to do
+        card.show_drive(dict(slave, **{"process-data": {}}))
+        self.assertFalse(card.missing.isHidden())
+        self.assertIn("0x60FD", card.missing.text())
 
     def test_settings(self):
         w = self.window()

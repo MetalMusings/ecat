@@ -164,9 +164,14 @@ def _homing(data):
     """homing: methods (numbers), describe (text, needs, moves per method),
     extras (settings per method), enable-again (methods after which the
     drive follows its target only once enabled again)."""
-    if not isinstance(data, dict) or set(data) - {"methods", "describe", "extras", "enable-again"}:
-        raise QuirkError("homing takes methods, describe, extras and enable-again")
-    out = {"methods": [], "describe": {}, "extras": {}, "enable-again": []}
+    if not isinstance(data, dict) or set(data) - {"methods", "describe", "extras", "enable-again", "input-bits"}:
+        raise QuirkError("homing takes methods, describe, extras, enable-again and input-bits")
+    out = {"methods": [], "describe": {}, "extras": {}, "enable-again": [], "input-bits": {}}
+    bits = data.get("input-bits") or {}
+    if not isinstance(bits, dict):
+        raise QuirkError("homing.input-bits: input names and their bits in 0x60FD, such as IN5: 20")
+    for name, bit in bits.items():
+        out["input-bits"][str(name)] = int(bit)
     for n in data.get("methods") or []:
         out["methods"].append(int(n))
     for n in data.get("enable-again") or []:

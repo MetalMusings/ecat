@@ -1128,6 +1128,49 @@ is greyed until *The homing may move the axis*, above it, is ticked. The ECT60s
 were found on method 17 (negative limit switch): without a switch the
 axis drives into its end stop.
 
+#### Switches
+
+For a drive with `0x60FD` (Digital inputs) in its process data, the
+*Switches* card shows, live during the I/O test, what the drive sees of its
+switches: the home switch, the negative and the positive limit switch
+(`0x60FD` bits 2, 0 and 1, the same on every CiA 402 drive), and which of
+its inputs are on (bits 16 and up; named, such as IN5, where the drive's
+quirk file names them). It says which switches the homing method chosen
+needs. Nothing moves: the drive is not enabled.
+
+*Test the home switch* (and the limit switches) goes in two steps: leave
+the switch released (for a second; inputs that change on their own, such
+as an encoder's, are left out), then press and hold it. It says what it
+found:
+
+- **Set up right**: the drive sees the switch as it should.
+- **The polarity is the other way round**: on while released, off when
+  pressed: set the input normally closed instead of open, or the other way.
+- **The switch reaches the drive, but that input is not the home switch**:
+  the input has no function or another one; set it in the drive's input
+  settings (the homing card helps find them).
+- **Works as another switch** (a limit instead of home, say): the input has
+  that function.
+- **Nothing changed**: the switch does not reach the drive (wiring, the
+  inputs' supply, the wrong input).
+
+Without `0x60FD` in the process data the card says so: add it on the
+drive's page (Process data).
+
+On the drive's page, for a homing method that needs switches, the homing
+card says how a drive is told which input is which, and *Look for the
+drive's input settings* searches the drive's objects for names that set up
+inputs (input or DI functions, polarity, logic), with their values when the
+bus is read: a guess, nothing is written. Every maker does it its own way
+(the ECT60: `0x2007:03`-`06` the function of IN3 to IN6, 3 for the home
+switch, and `0x2008` a polarity bit for each input); change them under
+Settings, as the drive's manual says.
+
+Tried on the plasma cutter's X before the card existed, by hand
+(2026-11-24): `digital-inputs` 196608 released and 1245188 pressed, that
+is IN5 (bit 20) and the home switch (bit 2): set up right. The card itself
+is not yet tried on a drive.
+
 #### The plot
 
 While a drive can move, the *Move* card plots the last 10 seconds, one

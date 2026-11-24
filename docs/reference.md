@@ -910,6 +910,8 @@ homing:
   extras:                            # settings the drive needs besides 0x6098, 0x6099, 0x609A, 0x607C
     36:
       - {object: '0x2030:01', type: UINT, value: 70, name: Max torque output}
+  enable-again: [36, 37]             # methods after which the drive follows only once enabled again
+  input-bits: {IN1: 16, IN5: 20}     # names of the physical inputs in 0x60FD (bit 16 and up)
 ```
 
 Without `methods`, EtherCAT Setup reads the drive's 0x60E3 (supported homing

@@ -53,6 +53,10 @@ homing:
   # stop (a plasma cutter's X, 2026-11-24, method 36; 37 assumed alike). After
   # methods 21 and 35 it follows at once.
   enable-again: [36, 37]
+  # The physical inputs in 0x60FD (manual 2.3.23): bit 16 is IN1 ... IN1 and IN2
+  # are the encoder's A and B. Bits 0-2 are the functions (CW and CCW limit,
+  # HOME) that 0x2007 gives the inputs; 0x2008 their polarity.
+  input-bits: {IN1: 16, IN2: 17, IN3: 18, IN4: 19, IN5: 20, IN6: 21}
 
 # Tuning (the Response card, docs/ecatsetup.md "Measuring a drive's response"):
 # the settings that set how closely the drive follows pos-cmd in CSP. From the
