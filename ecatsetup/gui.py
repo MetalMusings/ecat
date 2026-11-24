@@ -1510,9 +1510,11 @@ class SlaveView(QWidget):
         self.home_hform = hform
         self.homing_card.add(self.home_text)
         self.homing_card.add(hform)
-        self.home_ini_title = QCheckBox("Show the lines for LinuxCNC's INI file")
+        self.home_ini_title = QCheckBox("Show the lines for LinuxCNC (INI and HAL)")
         self.home_ini_title.setToolTip("The [JOINT_n] lines for a joint that homes through the drive, "
-                                       "to copy into the INI file (EtherCAT Setup's Apply writes them too)")
+                                       "and the HAL lines: the index-enable net Apply writes, and the "
+                                       "guards home-max-travel and home-timeout-ms, to copy into "
+                                       "your files: Apply writes only the index-enable net")
         self.home_ini_title.toggled.connect(self.home_ini_toggled)
         self.homing_card.add(self.home_ini_title)
         self.home_ini = QPlainTextEdit()
@@ -1524,6 +1526,15 @@ class SlaveView(QWidget):
         self.home_copy.clicked.connect(lambda: QApplication.clipboard().setText(
             self.home_ini.toPlainText()))
         self.homing_card.add(self.home_copy)
+        self.home_hal = QPlainTextEdit()
+        self.home_hal.setReadOnly(True)
+        self.home_hal.setFont(mono())
+        self.home_hal.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.homing_card.add(self.home_hal)
+        self.home_hal_copy = QPushButton("Copy the HAL lines")
+        self.home_hal_copy.clicked.connect(lambda: QApplication.clipboard().setText(
+            self.home_hal.toPlainText()))
+        self.homing_card.add(self.home_hal_copy)
         lay.addWidget(self.homing_card)
 
         # serial channels (EL6001, EL6021, ...)
@@ -2246,6 +2257,11 @@ class SlaveView(QWidget):
             else "not known for this drive, every method of the standard is offered"))
         self.home_text.setText(" ".join(parts))
         lines = homing.ini_help(self.win.session.cfg, s, self.home_axis_number())
+        hal = homing.hal_help(self.win.session.cfg, s, self.home_axis_number(),
+                              self.win.session.ini_path)
+        self.home_hal.setPlainText("\n".join(t for t, _ in hal) if hal else "")
+        self.home_hal.setFixedHeight(self.home_hal.fontMetrics().lineSpacing()
+                                     * (len(hal or ()) + 2) + 16)
         self.home_ini.setPlainText("\n".join(t for t, _ in lines) if lines else "")
         self.home_ini.setFixedHeight(self.home_ini.fontMetrics().lineSpacing()
                                      * (len(lines or ()) + 2) + 16)
@@ -2274,7 +2290,7 @@ class SlaveView(QWidget):
 
     def home_ini_toggled(self, *_):
         shown = not self.home_ini_title.isHidden() and self.home_ini_title.isChecked()
-        for w in (self.home_ini, self.home_copy):
+        for w in (self.home_ini, self.home_copy, self.home_hal, self.home_hal_copy):
             w.setVisible(shown)
 
     def homing_follows_hm(self, s, had, has):

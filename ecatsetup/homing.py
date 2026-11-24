@@ -279,9 +279,83 @@ def ini_help(cfg, slave, axis=0):
     if m.moves:
         out.insert(3, ("# The axis MOVES at the drive's speeds (0x6099) and must reach its "
                        "end within home-timeout-ms (60 s). Motion does not see the move:", False))
-        out.insert(4, ("# limit it with %s.home-max-travel in HAL (see the docs)." % drive, False))
+        out.insert(4, ("# limit it with %s.home-max-travel in HAL (the HAL lines)." % drive, False))
     else:
         out.insert(3, ("# This method does not move the axis.", False))
-    out.append(("# And in HAL: net %s-index  joint.%s.index-enable <=> %s.index-enable"
-                % (drive, "N" if joint is None else joint, drive), False))
+    return out
+
+
+def hal_help(cfg, slave, axis=0, ini_path=None):
+    """The HAL lines for a joint that homes through the drive, with what each
+    is for: [(text, is_setting)]. None when no method is chosen. The
+    index-enable net is written by Apply (shown, not to copy); the guards
+    home-max-travel and home-timeout-ms for a method that moves the axis,
+    with values from the INI file's axis limits and the chosen speed where
+    those are known (docs/ecatsetup.md, "From LinuxCNC's homing to the
+    drive's", step 6)."""
+    import math
+    import os
+    from . import integrate
+    chosen = choice(slave, axis)
+    if not chosen:
+        return None
+    names = config.axes(slave)
+    drive = names[axis] if axis < len(names) else slave.get("name")
+    joint = next((j for j in ((cfg or {}).get("linuxcnc") or {}).get("joints") or []
+                  if j.get("slave") == drive), None)
+    n = "N" if joint is None else joint["joint"]
+    letter, sig = None, None
+    if ini_path and os.path.exists(ini_path):
+        try:
+            letter = next((x for j, x, _ in integrate.ini_joints(ini_path) if j == n), None)
+        except (OSError, ValueError):
+            letter = None
+        main = os.path.join(os.path.dirname(os.path.abspath(ini_path)), integrate.MAIN_FILE)
+        try:
+            for line in open(main).read().splitlines():
+                t = line.split()
+                if t[:1] == ["net"] and "%s.index-enable" % drive in t:
+                    sig = t[1]
+        except OSError:
+            pass
+    sig = sig or "%s-index-enable" % ((letter or "j%s" % n).lower())
+    out = [("# Written by Apply into ethercat.hal (nothing to do here):", False),
+           ("#   net %s joint.%s.index-enable <=> %s.index-enable" % (sig, n, drive), False)]
+    m = method(chosen["method"], slave)
+    if not m.moves:
+        out.append(("# Method %d does not move the axis: no guard is needed." % m.number, False))
+        return out
+    length = None
+    if letter and ini_path:
+        try:
+            e = integrate.read_ini(ini_path)
+            lo = float(integrate.ini_get(e, "AXIS_%s" % letter.upper(), "MIN_LIMIT"))
+            hi = float(integrate.ini_get(e, "AXIS_%s" % letter.upper(), "MAX_LIMIT"))
+            length = abs(hi - lo)
+        except (TypeError, ValueError, OSError):
+            length = None
+    out.append(("# Optional, recommended for a method that moves the axis: motion does not see", False))
+    out.append(("# the axis while the drive homes. Put these in one of your own HAL files.", False))
+    if length:
+        travel = int(math.ceil(length * 1.05 / 10.0) * 10)
+        out.append(("# The axis is %g long ([AXIS_%s] MAX_LIMIT - MIN_LIMIT), and a margin:"
+                    % (length, letter.upper()), False))
+        out.append(("setp %s.home-max-travel %d" % (drive, travel), True))
+    else:
+        out.append(("# A little more than the axis length (no INI file or axis limits to work it out from):",
+                    False))
+        out.append(("setp %s.home-max-travel <axis length + a margin>" % drive, True))
+    scale = abs(float((joint or {}).get("scale") or 0))
+    fast = abs(float(chosen.get("fast") or 0))
+    if length and scale and fast:
+        secs = length / (fast / scale)
+        ms = max(60000, int(math.ceil(2 * secs / 10.0) * 10000))
+        out.append(("# The whole axis at the homing speed takes %.0f s (%g counts/s at %g counts per unit);"
+                    % (secs, fast, scale), False))
+        out.append(("# twice that, and at least the default 60 s:", False))
+        out.append(("setp %s.home-timeout-ms %d" % (drive, ms), True))
+    else:
+        out.append(("# 60 s by default: raise it if a homing can take longer (the whole axis at the homing speed):",
+                    False))
+        out.append(("#setp %s.home-timeout-ms 60000" % drive, False))
     return out

@@ -115,6 +115,41 @@ class TestHoming(unittest.TestCase):
         homing.apply(two, 1, {"method": 36, "fast": 5000})
         self.assertEqual((two["cia402"]["home-enable-again"], two["cia402"]["home-speed"]), (True, 5000))
 
+    def test_hal_lines(self):
+        import tempfile
+        cfg = {"linuxcnc": {"joints": [{"joint": 0, "slave": "X-drive", "scale": 100.0}]}}
+        x = dict(ECT, name="X-drive", profile="cia402", cia402={"mode": "csp", "modes": ["hm"]})
+        self.assertIsNone(homing.hal_help(cfg, x))           # no method chosen
+        homing.apply(x, 0, {"method": 36, "fast": 3000})
+        with tempfile.TemporaryDirectory() as d:
+            ini = os.path.join(d, "m.ini")
+            with open(ini, "w") as f:
+                f.write("[KINS]\nJOINTS = 1\nKINEMATICS = trivkins coordinates=X\n"
+                        "[AXIS_X]\nMIN_LIMIT = 0\nMAX_LIMIT = 693\n[JOINT_0]\nTYPE = LINEAR\n")
+            lines = [t for t, _ in homing.hal_help(cfg, x, 0, ini)]
+            # 693 mm and 5 %, up to 10; the axis at 30 mm/s twice, at least 60 s
+            self.assertIn("setp X-drive.home-max-travel 730", lines)
+            self.assertIn("setp X-drive.home-timeout-ms 60000", lines)
+            self.assertIn("#   net x-index-enable joint.0.index-enable <=> X-drive.index-enable", lines)
+            # slower: the time limit grows
+            homing.apply(x, 0, {"method": 36, "fast": 500})
+            self.assertIn("setp X-drive.home-timeout-ms 280000",
+                          [t for t, _ in homing.hal_help(cfg, x, 0, ini)])
+            # the net's name as Apply wrote it
+            with open(os.path.join(d, "ethercat.hal"), "w") as f:
+                f.write("net xx-home joint.0.index-enable <=> X-drive.index-enable\n")
+            self.assertIn("#   net xx-home joint.0.index-enable <=> X-drive.index-enable",
+                          [t for t, _ in homing.hal_help(cfg, x, 0, ini)])
+        # without an INI file: what to put, not a value
+        lines = [t for t, _ in homing.hal_help(cfg, x)]
+        self.assertIn("setp X-drive.home-max-travel <axis length + a margin>", lines)
+        self.assertIn("#setp X-drive.home-timeout-ms 60000", lines)
+        # a method that does not move: only the net
+        homing.apply(x, 0, {"method": 35})
+        lines = homing.hal_help(cfg, x)
+        self.assertFalse([t for t, setting in lines if setting])
+        self.assertIn("does not move", lines[-1][0])
+
     def test_plan(self):
         p = homing.plan(OTHER, 17, {"fast": 3000, "slow": 1000, "accel": 5000, "offset": 0})
         self.assertEqual([(s["object"], s["value"]) for s in p],
@@ -190,7 +225,10 @@ class TestIniHelp(unittest.TestCase):
         self.assertIn("[JOINT_2]", text)
         self.assertIn("HOME_SEARCH_VEL = 0", text)
         self.assertIn("HOME_USE_INDEX = YES", text)
-        self.assertIn("joint.2.index-enable <=> z.index-enable", text)
+        # the net is among the HAL lines now
+        self.assertNotIn("index-enable <=>", text)
+        self.assertIn("joint.2.index-enable <=> z.index-enable",
+                      "\n".join(t for t, _ in homing.hal_help(cfg, s)))
         self.assertIn("MOVES", text)
         self.assertIn("does not move", "\n".join(
             t for t, _ in homing.ini_help(cfg, {"name": "z", "homing": {"method": 35}})))

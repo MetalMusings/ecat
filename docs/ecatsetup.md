@@ -178,8 +178,12 @@ Choosing a slave shows:
   drive**: the method (from the drive's `0x60E3`, or all of the standard's),
   speeds, acceleration and offset, each label with the object it writes
   (*SDO 0x6099:01*: a setting written at start; *PDO* when the object is in
-  the process data), and, behind *Show the lines for LinuxCNC's INI file*,
-  the INI lines LinuxCNC needs with *Copy the INI lines*. The choice goes to
+  the process data), *Enable the drive again after homing*, and, behind
+  *Show the lines for LinuxCNC (INI and HAL)*, the joint's INI lines with
+  *Copy the INI lines* and the HAL lines with *Copy the HAL lines*: the
+  `index-enable` net Apply writes, and the guards `home-max-travel` and
+  `home-timeout-ms` with values worked out from the axis limits in the INI
+  file and the homing speed. The choice goes to
   Settings. Switching modes is
   built and unit-tested but not yet tried on a drive
   ([Changing modes](#changing-modes));
@@ -2809,8 +2813,9 @@ net x-index-enable  joint.0.index-enable <=> x-drive.index-enable
 In EtherCAT Setup the homing card on the slave's page (*Homing by the
 drive*) lists the methods the drive supports, writes the choice and the
 objects it needs as settings, and shows the INI lines above for the
-joint that uses the drive, with the `index-enable` net, ready to copy.
-It does not change the INI file.
+joint that uses the drive, and the HAL lines (the `index-enable` net, and
+`home-max-travel` and `home-timeout-ms`), ready to copy. Apply writes the
+net; it does not change the INI file or write the other HAL lines.
 
 *Enable the drive again after homing* is for a drive that reports
 "Operation enabled" after homing but ignores its target until it is
@@ -2970,7 +2975,7 @@ configuration):
    X-drive.index-enable`). Nothing else should change: read the list of
    changes before writing.
 5. **Change the joint's homing in the INI file.** *Show the lines for
-   LinuxCNC's INI file* on the homing card has them, with *Copy the INI
+   LinuxCNC (INI and HAL)* on the homing card has them, with *Copy the INI
    lines*. In the joint's section, replace motion's search and latch:
 
    | Key | Before (X) | After | Why |
@@ -2991,7 +2996,8 @@ configuration):
    goes wrong (a switch not wired, a method that runs the wrong way) is
    stopped only by the drive's own protection, the time limit or the
    emergency stop. Two parameters help, in one of your own HAL files
-   (X: `custom.hal`):
+   (X: `custom.hal`); the homing card's HAL lines have them with values
+   for the axis:
 
    ```
    setp X-drive.home-max-travel 720       # axis length (693 mm) and a margin
