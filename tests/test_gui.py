@@ -1177,9 +1177,13 @@ class TestWindow(WindowBase):
                            '  0x2007:05, rwrwrw, uint16, 16 bit, "Input 5 Function"\n')
         with mock.patch.object(w.session, "dictionary", lambda pos: d), \
                 mock.patch.object(gui.tool, "upload", lambda *a: 3):
-            page.look_for_input_settings()
+            page.home_switch_look.click()
+        self.assertTrue(page.home_switch_look.isChecked())
         self.assertFalse(page.home_switch_found.isHidden())
         self.assertIn("0x2007:05", page.home_switch_found.text())
+        page.home_switch_look.click()                   # a toggle: the list goes
+        self.assertTrue(page.home_switch_found.isHidden())
+        self.assertEqual(page.home_switch_found.text(), "")
         with mock.patch.object(w.session, "dictionary", lambda pos: coe.Dictionary()):
             page.look_for_input_settings()
         self.assertIn("Nothing found", page.home_switch_found.text())
@@ -1274,27 +1278,34 @@ class TestWindow(WindowBase):
                      {"object": "0x60FD:00", "bits": 32, "type": "UDINT", "pin": "digital-inputs"}]}]}}
         card.show_drive(slave)
         self.assertTrue(card.missing.isHidden())
-        self.assertIn("needs the home switch", card.needs.text())
         pins = {"digital-inputs": "0x00030000"}
         card.update_values(lambda n: pins.get(n))
-        # a box per switch, grey when off and green when on, live; the inputs as a line
+        # a box per switch and per input, grey when off and green when on, live
         self.assertEqual(card.lamps["home"].property("box"), "off")
-        self.assertEqual(card.inputs.text(), "Inputs on: IN1 (encoder A), IN2 (encoder B)")
+        self.assertEqual([b.text() for b in card.input_boxes.values()],
+                         ["IN1 (encoder A)", "IN2 (encoder B)", "IN3", "IN4", "IN5", "IN6"])
+        self.assertEqual([card.input_boxes[b].property("box") for b in (16, 17, 20)], ["on", "on", "off"])
+        self.assertIn("needs the home switch", card.inputs.text())
         pins["digital-inputs"] = "0x00130004"           # the home switch on IN5, pressed
         card.update_values(lambda n: pins.get(n))
         self.assertEqual(card.lamps["home"].property("box"), "on")
         self.assertEqual(card.lamps["negative"].property("box"), "off")
-        self.assertIn("IN5", card.inputs.text())
-        # a drive without input names: the bits
+        self.assertEqual(card.input_boxes[20].property("box"), "on")
+        # a drive without input names: bits 16 to 23, and any other that is on
         other = dict(slave, identity={"vendor": "0x00000001", "product": "0x00000001"})
         card.show_drive(other)
         pins["digital-inputs"] = "0x01000000"
         card.update_values(lambda n: pins.get(n))
-        self.assertEqual(card.inputs.text(), "Inputs on: input bit 24")
+        self.assertEqual(sorted(card.input_boxes), list(range(16, 25)))
+        self.assertEqual(card.input_boxes[24].property("box"), "on")
+        self.assertIn("see the drive's manual", card.inputs.text())
         card.show_drive(slave)
         pins["digital-inputs"] = "0x00030000"
-        # the test: released (IN1 flickers on its own: left out), then pressed
-        card.start("home")
+        # the test, started by clicking the switch's box: released (IN1 flickers
+        # on its own: left out), then pressed
+        self.assertFalse(hasattr(card, "buttons"))
+        card.lamps["home"].clicked.emit()
+        self.assertEqual(card.test["kind"], "home")
         t = 100.0
         for value in (0x30000, 0x20000, 0x30000):
             card.step_test(value, t)

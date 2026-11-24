@@ -1523,7 +1523,9 @@ class SlaveView(QWidget):
         self.home_switch_look.setToolTip("Searches the drive's objects (its ESI file or what it "
                                          "reports) for names that set up inputs: a guess, nothing "
                                          "is written. Change them under Settings.")
-        self.home_switch_look.clicked.connect(self.look_for_input_settings)
+        # a toggle: pressed again, the list goes
+        self.home_switch_look.setCheckable(True)
+        self.home_switch_look.toggled.connect(self.input_settings_toggled)
         srow.addWidget(self.home_switch_look)
         srow.addStretch(1)
         self.homing_card.add(srow)
@@ -2288,6 +2290,9 @@ class SlaveView(QWidget):
             w.setVisible(bool(need))
         if not need or getattr(self, "home_switch_for", None) != self.position:
             self.home_switch_found.setText("")
+            self.home_switch_look.blockSignals(True)
+            self.home_switch_look.setChecked(False)
+            self.home_switch_look.blockSignals(False)
         self.home_switch_found.setVisible(bool(need) and bool(self.home_switch_found.text()))
         lines = homing.ini_help(self.win.session.cfg, s, self.home_axis_number())
         hal = homing.hal_help(self.win.session.cfg, s, self.home_axis_number(),
@@ -2409,6 +2414,13 @@ class SlaveView(QWidget):
         self.win.status("%s: %s%s" % (switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:],
                                       "on %s" % name if name else "no input",
                                       ("; " + "; ".join(notes)) if notes else ""))
+
+    def input_settings_toggled(self, on):
+        if on:
+            self.look_for_input_settings()
+        else:
+            self.home_switch_found.setText("")
+            self.home_switch_found.setVisible(False)
 
     def look_for_input_settings(self):
         """The drive's settings that look like setting up its inputs, with their
@@ -4533,6 +4545,20 @@ class RecordingPlot(QWidget):
         p.end()
 
 
+class ClickBox(QLabel):
+    """A state box (QLabel[box]) that can be clicked."""
+    clicked = pyqtSignal()
+
+    def __init__(self, text):
+        super().__init__(text)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(ev)
+
+
 class SwitchCard(Card):
     """A drive's home and limit switches as it sees them (0x60FD), live during
     the I/O test, and a test: released, then pressed, and what that says
@@ -4548,30 +4574,26 @@ class SwitchCard(Card):
         self.win = win
         self.slave = None
         self.test = None
-        # a box per switch and per input: grey when off, green when on, live
+        # a box per switch and per input: grey when off, green when on, live; a
+        # switch's box starts its test when clicked
         lamps = QHBoxLayout()
         self.lamps = {}
         for kind, _bit, text in switches.FUNCTIONS:
-            box = QLabel(text[0].upper() + text[1:])
+            box = ClickBox(text[0].upper() + text[1:])
             box.setProperty("box", "off")
             box.setAlignment(Qt.AlignCenter)
+            box.setToolTip("Click to test the %s: leave it released, then press it" % text)
+            box.clicked.connect(lambda k=kind: self.start(k))
             lamps.addWidget(box)
             self.lamps[kind] = box
         lamps.addStretch(1)
         self.add(lamps)
+        self.input_row = QHBoxLayout()
+        self.input_boxes = {}
+        self.input_row.addStretch(1)
+        self.add(self.input_row)
         self.inputs = label("", "hint", wrap=True)
         self.add(self.inputs)
-        self.needs = label("", "hint", wrap=True)
-        self.add(self.needs)
-        row = QHBoxLayout()
-        self.buttons = {}
-        for kind, _bit, text in switches.FUNCTIONS:
-            b = QPushButton("Test the %s" % text)
-            b.clicked.connect(lambda _c=False, k=kind: self.start(k))
-            row.addWidget(b)
-            self.buttons[kind] = b
-        row.addStretch(1)
-        self.add(row)
         self.step = label("", None, wrap=True)
         self.add(self.step)
         self.result = label("", None, wrap=True)
@@ -4580,19 +4602,23 @@ class SwitchCard(Card):
         self.add(self.missing)
 
     def show_drive(self, slave):
+        if slave is not self.slave:
+            # another drive: its inputs have other names
+            for box in self.input_boxes.values():
+                self.input_row.removeWidget(box)
+                box.deleteLater()
+            self.input_boxes = {}
         self.slave = slave
         pin = switches.input_pin(slave)
         has = pin is not None
-        for w in [self.inputs, self.step, self.result] + list(self.lamps.values()) + list(self.buttons.values()):
+        for w in ([self.inputs, self.step, self.result] + list(self.lamps.values())
+                  + list(self.input_boxes.values())):
             w.setVisible(has)
         self.missing.setVisible(not has)
         self.missing.setText("" if has else
                              "0x60FD (Digital inputs) is not in the drive's process data, or has no pin: "
                              "add it on the drive's page (Process data) to see its switches here.")
-        need = switches.needed(slave) if slave else []
-        self.needs.setText("The homing method chosen needs the %s." % " and the ".join(
-            switches.TEXT[k] for k in need) if need else "")
-        self.needs.setVisible(bool(need))
+        self.need = switches.needed(slave) if slave else []
         if self.test and self.test.get("slave") is not slave:
             self.test = None
             self.step.setText("")
@@ -4605,10 +4631,28 @@ class SwitchCard(Card):
             restyle(box)
 
     def show_inputs(self, value):
-        """Which of the drive's inputs are on, as a line (the boxes above are
-        what the drive makes of them)."""
-        on = switches.state(value, self.slave)["inputs"]
-        self.inputs.setText("Inputs on: %s" % (", ".join(on) or "none"))
+        """A box per physical input: those the quirk file names, else bits 16
+        to 23; an input of another bit that is on gets its box too."""
+        names = switches.input_names(self.slave)
+        bits = sorted(set(names or range(16, 24)) | {b for b in range(16, 32) if value >> b & 1})
+        if list(self.input_boxes) != bits:
+            for box in self.input_boxes.values():
+                self.input_row.removeWidget(box)
+                box.deleteLater()
+            self.input_boxes = {}
+            for i, b in enumerate(bits):
+                box = QLabel(names.get(b, "bit %d" % b))
+                box.setProperty("box", "off")
+                box.setAlignment(Qt.AlignCenter)
+                box.setToolTip("0x60FD bit %d" % b)
+                self.input_row.insertWidget(i, box)
+                self.input_boxes[b] = box
+        for b, box in self.input_boxes.items():
+            self._light(box, value >> b & 1)
+        need = getattr(self, "need", [])
+        self.inputs.setText("Click a switch above to test it.%s%s" % (
+            " The homing method chosen needs the %s." % " and the ".join(switches.TEXT[k] for k in need)
+            if need else "", "" if names else " Which input each bit is: see the drive's manual."))
 
     def start(self, kind):
         # the time starts with the first reading (step_test)
