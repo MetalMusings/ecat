@@ -538,6 +538,39 @@ class TestNets(Folder):
                       self.read("machine.hal"))
         self.assertNotIn("io.out-1", self.read("ethercat.hal"))
 
+    def test_tidied_files_keep_their_signals(self):
+        # the user deleted the lines Apply had commented out: the joint's
+        # connections are only in ethercat.hal, postgui.hal still reads
+        # x-enable; a new Apply keeps the signal names (only ddt.0.in, which was
+        # only in a deleted line, is no longer on x-pos-fb)
+        c = cfg()
+        integrate.set_joint(c, 0, "x", 100.0)
+        integrate.apply(integrate.plan(self.ini, c))
+        tidy = "".join(x for x in self.read("machine.hal").splitlines(keepends=True)
+                       if not x.startswith(integrate.COMMENT))
+        self.write("machine.hal", tidy)
+        self.assertIn("x-enable", self.read("postgui.hal"))
+        again = integrate.plan(self.ini, c)
+        self.assertEqual(again.errors, [])
+        main = next(ch.new for ch in again.changes if ch.name == integrate.MAIN_FILE)
+        for line in ("net x-pos-cmd joint.0.motor-pos-cmd => x.pos-cmd",
+                     "net x-pos-fb x.pos-fb => joint.0.motor-pos-fb",
+                     "net x-enable joint.0.amp-enable-out => x.enable",
+                     "net x-fault x.drv-fault => joint.0.amp-fault-in"):
+            self.assertIn(line + "\n", main)
+        self.assertNotIn("ecat-", main)
+        self.assertEqual([ch.name for ch in again.changes], [integrate.MAIN_FILE])
+
+    def test_an_added_line_without_its_source_stays(self):
+        added = "net home-x <= io.in-1" + integrate.ADDED + "\n"
+        # right after the commented line it replaces: the plan's own, it goes
+        self.assertEqual(integrate.original(
+            integrate.COMMENT + "net home-x <= lcec.0.io.in-1\n" + added + added),
+            "net home-x <= lcec.0.io.in-1\n")
+        # its commented line is gone: the user's line now, it stays
+        text = "# --- HOME-X ---\n" + added + added
+        self.assertEqual(integrate.original(text), text)
+
     def test_new_signal_name_in_use(self):
         self.write("machine.hal", "net x-enable joint.0.amp-enable-out => x.enable\n")
         c = cfg()

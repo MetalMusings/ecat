@@ -318,10 +318,21 @@ ADDED = "  " + COMMENT + "added"    # the end of a line an earlier plan put in
 def original(text):
     """A HAL file's text as the user wrote it: lines commented out by an
     earlier plan are back, and lines it added are gone, so that every plan
-    starts from the same text."""
-    return "".join(line[len(COMMENT):] if line.startswith(COMMENT) else line
-                   for line in text.splitlines(keepends=True)
-                   if not line.rstrip("\n").endswith(ADDED))
+    starts from the same text. A plan puts its lines right after the
+    commented-out lines they replace; an added line that no longer follows
+    one (the user removed the commented lines) is the user's now and stays,
+    or the next plan would drop it without putting anything back."""
+    out = []
+    follows_comment = False
+    for line in text.splitlines(keepends=True):
+        if line.rstrip("\n").endswith(ADDED):
+            if follows_comment:
+                continue
+            out.append(line)
+            continue
+        follows_comment = line.startswith(COMMENT)
+        out.append(line[len(COMMENT):] if follows_comment else line)
+    return "".join(out)
 
 def statements(text):
     """(first line index, last line index, tokens) of each HAL statement,
@@ -1363,7 +1374,16 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                        "with %s, what else was on its signals stays" % (
                            ", ".join(SIM_PANELS), COMMENT.strip()))
 
-    # signal names: the user's where there was one
+    # signal names: the user's where there was one, else the one ethercat.hal
+    # gave the pin before (other files may read that signal: custom_postgui.hal's
+    # "net x-enable delay-x-ferror.in" must stay on the joint's enable)
+    before = {}
+    for _, _, t in statements(original(read_text(os.path.join(d, MAIN_FILE)))
+                              if os.path.exists(os.path.join(d, MAIN_FILE)) else ""):
+        if t[0] == "net" and len(t) > 1:
+            name, pins = net_pins(t)
+            for pin in pins:
+                before[pin] = name
     letters = {j: letter for j, letter, _ in ini_joints(ini_path)}
     count = {}
     for letter in letters.values():
@@ -1395,7 +1415,7 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                 p.errors.append("%s and %s are on different signals in your HAL files (%s, %s): "
                                 "something sits between the joint and the drive; connect them "
                                 "by hand" % (jpin, dpin, a, b))
-            sig = a or b
+            sig = a or b or before.get(jpin) or before.get(dpin)
             if sig is None:
                 sig = "%s-%s" % (base, suffix)
                 if sig in used:
