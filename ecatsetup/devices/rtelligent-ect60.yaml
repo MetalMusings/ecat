@@ -57,6 +57,22 @@ homing:
   # are the encoder's A and B. Bits 0-2 are the functions (CW and CCW limit,
   # HOME) that 0x2007 gives the inputs; 0x2008 their polarity.
   input-bits: {IN1: 16, IN2: 17, IN3: 18, IN4: 19, IN5: 20, IN6: 21}
+  # How IN3-IN6 get their function and polarity (manual 2.2.7, 2.2.8; IN1 and
+  # IN2 are the encoder's). The limits as 0x60FD shows them: bit 0 "CW limit"
+  # is the negative limit switch of CiA 402, bit 1 "CCW" the positive. IN5 as
+  # the home switch, normally open, tried on a plasma cutter's X (2026-11-24).
+  inputs:
+    function:
+      objects: {IN3: '0x2007:03', IN4: '0x2007:04', IN5: '0x2007:05', IN6: '0x2007:06'}
+      type: UINT
+      codes: {home: 3, negative: 1, positive: 2, none: 0}
+      factory: {IN3: 1, IN4: 2, IN5: 3, IN6: 6}
+    polarity:
+      object: '0x2008:00'
+      type: UINT
+      bits: {IN3: 2, IN4: 3, IN5: 4, IN6: 5}
+      choices: {normally open: 1, normally closed: 0}
+      factory: 0x3F
 
 # Tuning (the Response card, docs/ecatsetup.md "Measuring a drive's response"):
 # the settings that set how closely the drive follows pos-cmd in CSP. From the

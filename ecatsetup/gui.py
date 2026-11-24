@@ -1513,6 +1513,11 @@ class SlaveView(QWidget):
         # a method that needs switches: how a drive is told which input is which
         self.home_switch_text = label("", "hint", wrap=True)
         self.homing_card.add(self.home_switch_text)
+        # the drive's quirk file says how its inputs are set up: a row per switch
+        self.home_inputs = QWidget()
+        self.home_inputs_form = QFormLayout(self.home_inputs)
+        self.home_inputs_form.setContentsMargins(0, 0, 0, 0)
+        self.homing_card.add(self.home_inputs)
         srow = QHBoxLayout()
         self.home_switch_look = QPushButton("Look for the drive's input settings")
         self.home_switch_look.setToolTip("Searches the drive's objects (its ESI file or what it "
@@ -2272,9 +2277,13 @@ class SlaveView(QWidget):
             else "not known for this drive, every method of the standard is offered"))
         self.home_text.setText(" ".join(parts))
         need = switches.needed(s, self.home_axis_number())
+        known = switches.setup(s) is not None
         self.home_switch_text.setText(
-            "Switches: this method needs the %s. %s" % (" and the ".join(switches.TEXT[k] for k in need),
-                                                        switches.GUIDE) if need else "")
+            ("Switches: this method needs the %s. Set which input is which below; the Test page's "
+             "Switches card tells whether the drive sees it." if known else
+             "Switches: this method needs the %s. " + switches.GUIDE)
+            % " and the ".join(switches.TEXT[k] for k in need) if need else "")
+        self.show_input_rows(s, need if known else [])
         for w in (self.home_switch_text, self.home_switch_look):
             w.setVisible(bool(need))
         if not need or getattr(self, "home_switch_for", None) != self.position:
@@ -2311,6 +2320,69 @@ class SlaveView(QWidget):
             self.home_hform.labelForField(box).setText("%s%s (%s)" % (text[0].upper(), text[1:], where(i, sub)))
             self.home_hform.labelForField(box).setVisible(key in used)
             box.setVisible(key in used)
+
+    def show_input_rows(self, s, kinds):
+        """A row per switch the method needs: the input that is that switch,
+        and its polarity, as the drive will have them (the file's settings,
+        else the factory's); a change is written as settings (switches.assign)."""
+        form = self.home_inputs_form
+        while form.rowCount():
+            form.removeRow(0)
+        self.home_inputs.setVisible(bool(kinds))
+        setup = switches.setup(s) if kinds else None
+        for kind in kinds:
+            name, pol = switches.current(s, kind)
+            row = QHBoxLayout()
+            box = QuietCombo()
+            box.addItem("(no input)", None)
+            for n in setup["names"]:
+                box.addItem(n, n)
+            box.setCurrentIndex(max(box.findData(name), 0))
+            row.addWidget(box)
+            pbox = None
+            if setup.get("polarity"):
+                pbox = QuietCombo()
+                if pol is None:
+                    pbox.addItem("polarity not known", None)
+                for c in setup["polarity"]["choices"]:
+                    pbox.addItem(c, c)
+                pbox.setCurrentIndex(max(pbox.findData(pol), 0))
+                row.addWidget(pbox)
+            row.addStretch(1)
+
+            def changed(*_, k=kind, b=box, pb=pbox):
+                self.input_row_changed(k, b.currentData(), pb.currentData() if pb else None)
+            box.activated.connect(changed)
+            if pbox:
+                pbox.activated.connect(changed)
+            form.addRow(switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:], row)
+
+    def input_row_changed(self, kind, name, choice):
+        s = self.win.session.slave(self.position)
+        if s is None:
+            return
+        read = None
+        if self.win.session.bus.get(self.position) is not None:
+            def read(index, sub, typ):
+                try:
+                    return tool.upload(self.position, index, sub, {"UINT": "uint16", "UDINT": "uint32",
+                                                                 "USINT": "uint8"}.get(typ, "uint16"))
+                except (tool.ToolError, ValueError):
+                    return None
+        # the rows are made again after this call: not while their box sends it
+        again = lambda: self.show_homing(self.win.session.slave(self.position))  # noqa: E731
+        try:
+            notes = switches.assign(s, kind, name, choice, read)
+        except switches.SetupError as e:
+            self.win.status("%s: %s" % (switches.TEXT[kind], e))
+            QTimer.singleShot(0, again)
+            return
+        self.show_settings(s)
+        QTimer.singleShot(0, again)
+        self.win.changed()
+        self.win.status("%s: %s%s" % (switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:],
+                                      "on %s" % name if name else "no input",
+                                      ("; " + "; ".join(notes)) if notes else ""))
 
     def look_for_input_settings(self):
         """The drive's settings that look like setting up its inputs, with their

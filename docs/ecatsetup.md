@@ -1158,9 +1158,19 @@ Without `0x60FD` in the process data the card says so: add it on the
 drive's page (Process data).
 
 On the drive's page, for a homing method that needs switches, the homing
-card says how a drive is told which input is which, and *Look for the
-drive's input settings* searches the drive's objects for names that set up
-inputs (input or DI functions, polarity, logic), with their values when the
+card has a row per switch for a drive whose quirk file says how its inputs
+are set up (the ECT60, the StepperOnline A6-EC and the GeRui EC1 series):
+which input is the switch and its polarity (*normally open* or *closed* on
+the ECT60, *active low* or *high* on the A6, *as wired* or *reversed* on the
+EC1), as the drive will have them, from the configuration's settings or the
+factory's. A change is written as settings, only for the inputs that
+change, and the input that had the function before loses it (the status
+line says so: "IN3 was the negative limit switch; it is the home switch
+now"). Where a polarity is a bit of an object whose other bits are not
+known (the EC1), the drive is read first, so the bus must be read. For other
+drives the card says how a drive is told which input is which, and *Look
+for the drive's input settings* searches the drive's objects for names that
+set up inputs (input or DI functions, polarity, logic), with their values when the
 bus is read: a guess, nothing is written. Every maker does it its own way
 (the ECT60: `0x2007:03`-`06` the function of IN3 to IN6, 3 for the home
 switch, and `0x2008` a polarity bit for each input); change them under

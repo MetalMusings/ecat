@@ -1,0 +1,28 @@
+# GeRui ("Green IOT") EC1 series, open-loop CiA 402 stepper drives
+# (EC1-510, EC1-530, EC1-570, EC1-872, EC1-57E, ECA1-86E). A quirk file: what
+# EtherCAT Setup knows about a device beyond its ESI file, SII and dictionary.
+# See docs/ecatsetup.md. From the EC1 Series manual; not tried on a drive.
+# The EC-57A-7 (product 0x69673537) has other objects and is not covered.
+name: GeRui EC1 series
+match: {vendor: '0x00000AB5', product: ['0x00000980', '0x00000990', '0x00001000', '0x00001010',
+                                         '0x00001020', '0x00001030']}
+
+commands:
+  '0x2708': Clear the fault record (write 1), a command, not a setting
+  '0x2709': Clear the current fault (write 1), a command, not a setting
+
+homing:
+  # X0-X2: function in 0x2702:01-03 (1 home, 2 positive limit, 4 negative
+  # limit), polarity in 0x2701, a bit per input (1 reverses). The manual gives
+  # no factory value for 0x2701: read the bus before changing a polarity.
+  inputs:
+    function:
+      objects: {X0: '0x2702:01', X1: '0x2702:02', X2: '0x2702:03'}
+      type: UINT
+      codes: {home: 1, positive: 2, negative: 4, none: 0}
+      factory: {X0: 4, X1: 2, X2: 1}
+    polarity:
+      object: '0x2701:00'
+      type: UINT
+      bits: {X0: 0, X1: 1, X2: 2}
+      choices: {as wired: 0, reversed: 1}

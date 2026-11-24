@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 if not os.environ.get("ECATSETUP_DEVICES"):
     os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 
-from ecatsetup import coe, homing, switches  # noqa: E402
+from ecatsetup import coe, homing, quirks, switches  # noqa: E402
 
 ECT60 = {"name": "x", "profile": "cia402", "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
          "cia402": {"mode": "csp", "modes": ["hm"]},
@@ -92,6 +92,76 @@ class TestInputSettings(unittest.TestCase):
 
     def test_nothing_without_a_dictionary(self):
         self.assertEqual(switches.input_settings(ECT60, None), [])
+
+
+def drive(vendor, product):
+    return {"name": "d", "identity": {"vendor": vendor, "product": product}}
+
+
+class TestSetup(unittest.TestCase):
+    """The three makers' ways, from their manuals (ECT60, A6, EC1)."""
+
+    def test_factory(self):
+        self.assertEqual(switches.current(drive("0x00000A88", "0x0A880002"), "home"), ("IN5", "normally open"))
+        self.assertEqual(switches.current(drive("0x00400000", "0x00000715"), "home"), ("DI3", "active low"))
+        # the EC1 family: every product of the list; its polarity has no factory value
+        for product in ("0x00000980", "0x00001030"):
+            self.assertEqual(switches.current(drive("0x00000AB5", product), "home"), ("X2", None))
+        self.assertIsNone(switches.setup(drive("0x00000AB5", "0x69673537")))   # EC-57A-7: other objects
+        self.assertEqual(switches.current(OTHER, "home"), (None, None))
+
+    def test_ect60_bit_field(self):
+        d = drive("0x00000A88", "0x0A880002")
+        notes = switches.assign(d, "home", "IN3", "normally closed")
+        objs = {x["object"]: x["value"] for x in d["settings"]}
+        # IN3 home, IN5 no longer; 0x3F with IN3's bit 2 cleared
+        self.assertEqual(objs, {"0x2007:03": 3, "0x2007:05": 0, "0x2008:00": 0x3B})
+        self.assertEqual(notes, ["IN3 was the negative limit switch; it is the home switch now",
+                                 "IN5 is no longer the home switch"])
+        self.assertEqual(switches.current(d, "home"), ("IN3", "normally closed"))
+        self.assertEqual(switches.current(d, "negative"), (None, None))
+        # back: the same settings, changed in place (IN3 keeps its polarity)
+        switches.assign(d, "home", "IN5", "normally open")
+        objs = {x["object"]: x["value"] for x in d["settings"]}
+        self.assertEqual(objs, {"0x2007:03": 0, "0x2007:05": 3, "0x2008:00": 0x3B})
+        self.assertEqual(len(d["settings"]), 3)
+
+    def test_a6_object_per_input(self):
+        d = drive("0x00400000", "0x00000715")
+        switches.assign(d, "home", "DI1", "active high")
+        self.assertEqual({x["object"]: x["value"] for x in d["settings"]},
+                         {"0x2004:01": 5, "0x2004:09": 0, "0x2004:02": 1})
+        # nothing to change: nothing written
+        d = drive("0x00400000", "0x00000715")
+        self.assertEqual(switches.assign(d, "home", "DI3", "active low"), [])
+        self.assertNotIn("settings", d)
+
+    def test_ec1_needs_the_bus_for_a_polarity(self):
+        d = drive("0x00000AB5", "0x00001000")
+        with self.assertRaisesRegex(switches.SetupError, "read the bus first"):
+            switches.assign(d, "home", "X0", "reversed")
+        self.assertNotIn("settings", d)          # nothing half done
+        switches.assign(d, "home", "X0", "reversed", read=lambda i, s, t: {0x2702: 0, 0x2701: 0}.get(i))
+        self.assertEqual({x["object"]: x["value"] for x in d["settings"]}, {"0x2702:01": 1, "0x2701:00": 1})
+        # the function alone needs no polarity
+        d = drive("0x00000AB5", "0x00001000")
+        switches.assign(d, "negative", "X1")
+        self.assertEqual({x["object"]: x["value"] for x in d["settings"]}, {"0x2702:02": 4, "0x2702:01": 0})
+
+    def test_errors(self):
+        d = drive("0x00000A88", "0x0A880002")
+        with self.assertRaises(switches.SetupError):
+            switches.assign(d, "home", "IN1")            # the encoder's
+        with self.assertRaises(switches.SetupError):
+            switches.assign(OTHER, "home", "IN5")
+        with self.assertRaises(switches.SetupError):
+            switches.assign(d, "home", "IN5", "sideways")
+        for bad in ({"function": {"objects": {"IN1": "0x2007:01"}, "codes": {"home": 3}}},
+                    {"function": {"objects": {"IN1": "0x2007:01"}, "codes": {"home": 3, "none": 0}},
+                     "polarity": {"choices": {"a": 0, "b": 1}}},
+                    {"function": {"codes": {"none": 0}}}):
+            with self.assertRaises(quirks.QuirkError):
+                quirks._inputs(bad)
 
 
 if __name__ == "__main__":

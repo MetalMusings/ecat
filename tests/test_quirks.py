@@ -53,7 +53,11 @@ class TestFiles(unittest.TestCase):
     def test_shipped_files_read(self):
         qs = quirks.load(reload=True)
         self.assertEqual(quirks.problems, [])
-        self.assertEqual(len(qs), 4)
+        self.assertEqual(len(qs), 6)
+        # a family's file matches each of its products
+        self.assertEqual(quirks.of((0xAB5, 0x980))["name"], "GeRui EC1 series")
+        self.assertEqual(quirks.of((0xAB5, 0x1030))["name"], "GeRui EC1 series")
+        self.assertEqual(quirks.of((0xAB5, 0x69673537)), {})
         ect = quirks.of((0xA88, 0xA880002))
         self.assertEqual(ect["commands"], {0x2010: "Zero Position on the ECT60, a command, not a setting"})
         self.assertEqual(ect["limits"]["following-error"], (0x2022, 0, "uint32"))

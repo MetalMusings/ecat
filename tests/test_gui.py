@@ -235,7 +235,7 @@ class TestSession(BusTest):
 
 try:
     from PyQt5.QtCore import QEvent, QUrl
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication, QFormLayout
     from ecatsetup import gui
 except ImportError:  # pragma: no cover
     gui = None
@@ -1171,7 +1171,8 @@ class TestWindow(WindowBase):
         page.homing_edited()
         self.assertFalse(page.home_switch_text.isHidden())
         self.assertIn("needs the home switch", page.home_switch_text.text())
-        self.assertIn("normally open or closed", page.home_switch_text.text())
+        # the ECT60's quirk file says how: rows below, not the general advice
+        self.assertIn("Set which input is which below", page.home_switch_text.text())
         d = coe.Dictionary('SDO 0x2007, "Inputs Function"\n'
                            '  0x2007:05, rwrwrw, uint16, 16 bit, "Input 5 Function"\n')
         with mock.patch.object(w.session, "dictionary", lambda pos: d), \
@@ -1182,6 +1183,37 @@ class TestWindow(WindowBase):
         with mock.patch.object(w.session, "dictionary", lambda pos: coe.Dictionary()):
             page.look_for_input_settings()
         self.assertIn("Nothing found", page.home_switch_found.text())
+
+    def test_homing_card_input_rows(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp", "modes": ["hm"]}
+        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
+        w.select_slave(0)
+        page = w.slave_page
+        page.home_method.setCurrentIndex(page.home_method.findData(21))
+        page.homing_edited()
+        form = page.home_inputs_form
+        self.assertFalse(page.home_inputs.isHidden())
+        self.assertEqual(form.rowCount(), 1)                 # 21 needs the home switch only
+        self.assertEqual(form.itemAt(0, QFormLayout.LabelRole).widget().text(), "Home switch")
+        # the ECT60 from the factory: IN5, normally open
+        row = form.itemAt(0, QFormLayout.FieldRole).layout()
+        box, pbox = row.itemAt(0).widget(), row.itemAt(1).widget()
+        self.assertEqual((box.currentData(), pbox.currentData()), ("IN5", "normally open"))
+        page.input_row_changed("home", "IN3", "normally closed")
+        objs = {x["object"]: x["value"] for x in s["settings"]}
+        self.assertEqual((objs["0x2007:03"], objs["0x2007:05"], objs["0x2008:00"]), (3, 0, 0x3B))
+        self.assertIn("IN3 was the negative limit switch", w.statusBar().currentMessage())
+        # a method with limits gets their rows too; a drive without data none
+        page.home_method.setCurrentIndex(page.home_method.findData(23))
+        page.homing_edited()
+        self.assertEqual(form.rowCount(), 2)
+        s["identity"] = {"vendor": "0x00000001", "product": "0x00000001"}
+        page.show_homing(s)
+        self.assertTrue(page.home_inputs.isHidden())
+        self.assertIn("normally open or closed", page.home_switch_text.text())
 
     def test_switch_card(self):
         w = self.window()

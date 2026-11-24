@@ -137,3 +137,135 @@ def input_settings(slave, dictionary):
         if _INPUT.search(full) and _ROLE.search(full):
             out.append((index, sub, name))
     return out
+
+
+# -- setting up the inputs, for a drive whose quirk file says how (homing: inputs)
+
+class SetupError(Exception):
+    pass
+
+
+def setup(slave):
+    """The quirk file's homing: inputs (names, function, polarity), or None."""
+    return (quirks.of(slave).get("homing") or {}).get("inputs")
+
+
+def _setting(slave, obj):
+    want = config.parse_obj(obj)
+    for st in (slave or {}).get("settings") or []:
+        try:
+            if config.parse_obj(st["object"]) == want:
+                return st
+        except (KeyError, ValueError):
+            continue
+    return None
+
+
+def _value(slave, obj, typ, factory, read):
+    """An object's value as the drive will have it: the file's setting, else
+    what the drive has now (read), else the factory value; None if unknown."""
+    st = _setting(slave, obj)
+    if st is not None:
+        return int(st["value"])
+    if read is not None:
+        index, sub = config.parse_obj(obj)
+        v = read(index, sub, typ)
+        if v is not None:
+            return int(v)
+    return factory
+
+
+def _put(slave, obj, typ, value, name):
+    st = _setting(slave, obj)
+    if st is not None:
+        st["value"] = value
+        return
+    slave.setdefault("settings", []).append({"object": obj, "type": typ, "value": value, "name": name})
+
+
+def current(slave, kind, read=None):
+    """(input, polarity choice) the drive will have for a switch: the input
+    whose function is that switch (None if none), and the name of its
+    polarity choice (None if unknown or there is no polarity)."""
+    s = setup(slave)
+    if not s:
+        return None, None
+    f = s["function"]
+    code = f["codes"].get(kind)
+    found = None
+    for n in s["names"]:
+        if code is not None and _value(slave, f["objects"][n], f["type"], f["factory"].get(n), read) == code:
+            found = n
+            break
+    return found, (polarity(slave, found, read) if found else None)
+
+
+def polarity(slave, name, read=None):
+    """The name of an input's polarity choice, or None."""
+    p = (setup(slave) or {}).get("polarity")
+    if not p:
+        return None
+    if "bits" in p:
+        if name not in p["bits"]:
+            return None
+        whole = _value(slave, p["object"], p["type"], p.get("factory"), read)
+        if whole is None:
+            return None
+        v = whole >> p["bits"][name] & 1
+    else:
+        if name not in p["objects"]:
+            return None
+        v = _value(slave, p["objects"][name], p["type"], p["factory"].get(name), read)
+    return next((c for c, x in p["choices"].items() if x == v), None)
+
+
+def assign(slave, kind, name, choice=None, read=None):
+    """Make input `name` the drive's switch `kind` (None: no input has it),
+    with polarity `choice` (a name of the quirk's choices; None: as it is).
+    Another input that had that function gets none (two inputs with one
+    function is an error on some drives). Written as settings of the slave,
+    only for the inputs that change; nothing is written if any of it cannot
+    be (SetupError, such as a polarity bit whose object's other bits are not
+    known: read the bus first). Returns notes on what else changed."""
+    s = setup(slave)
+    if not s:
+        raise SetupError("the drive's quirk file does not say how its inputs are set up")
+    f = s["function"]
+    code, none = f["codes"].get(kind), f["codes"]["none"]
+    if code is None:
+        raise SetupError("this drive has no function code for the %s" % TEXT[kind])
+    if name is not None and name not in s["names"]:
+        raise SetupError("%s is not an input of this drive (%s)" % (name, ", ".join(s["names"])))
+    by_code = {v: k for k, v in f["codes"].items()}
+    writes, notes = [], []
+    for n in s["names"]:
+        now = _value(slave, f["objects"][n], f["type"], f["factory"].get(n), read)
+        if n == name and now != code:
+            writes.append((f["objects"][n], f["type"], code, "%s function: %s" % (n, TEXT[kind])))
+            if now is not None and now != none:
+                notes.append("%s was %s; it is the %s now" % (
+                    n, "the " + TEXT[by_code[now]] if by_code.get(now) in TEXT else
+                    "function %d" % now, TEXT[kind]))
+        elif n != name and now == code:
+            writes.append((f["objects"][n], f["type"], none, "%s function: none" % n))
+            notes.append("%s is no longer the %s" % (n, TEXT[kind]))
+    p = s.get("polarity")
+    if name is not None and choice is not None and p:
+        if choice not in p["choices"]:
+            raise SetupError("polarity %r: one of %s" % (choice, ", ".join(p["choices"])))
+        value = p["choices"][choice]
+        if "bits" in p and name in p["bits"]:
+            whole = _value(slave, p["object"], p["type"], p.get("factory"), read)
+            if whole is None:
+                raise SetupError("the other inputs' polarity in %s is not known: read the bus first"
+                                 % p["object"])
+            bit = p["bits"][name]
+            new = (whole | 1 << bit) if value else (whole & ~(1 << bit))
+            if new != whole or _setting(slave, p["object"]) is not None:
+                writes.append((p["object"], p["type"], new, "Inputs polarity"))
+        elif "objects" in p and name in p["objects"]:
+            if _value(slave, p["objects"][name], p["type"], p["factory"].get(name), read) != value:
+                writes.append((p["objects"][name], p["type"], value, "%s polarity: %s" % (name, choice)))
+    for w in writes:
+        _put(slave, *w)
+    return notes
