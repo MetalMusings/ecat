@@ -2939,7 +2939,8 @@ choose the method on the *Homing by the drive* card.
 #### From LinuxCNC's homing to the drive's
 
 A joint that LinuxCNC homes itself (a home switch read by motion, a
-search and a latch move) can be moved over to the drive's own homing. The
+search and a latch move) can be moved over to the drive's own homing
+(how that works: [Homing by the drive](#homing-by-the-drive)). The
 steps, with what was done for a plasma cutter's X (an ECT60, torque
 homing against the X− end stop, in a copy of the machine's
 configuration):
