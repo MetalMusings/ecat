@@ -1452,9 +1452,11 @@ has it. PP was tried again from the window on X that day, steps of 1 and
   shows bit 20 (IN5) and bit 2 (HOME) when it is pressed; bits 16 and 17
   are the encoder's A and B. Methods 19, 21 and 22 home as the drive's
   manual draws them (fast and slow speed `0x6099:01`/`:02` of 3000 and
-  1000): 19 and 21 set the zero where the switch is released, 22 where it
-  is pressed; after method 21 the position was −4 counts. Method 20 was
-  not tried.
+  1000): 19 and 21 set the zero where the switch is released, 20 and 22
+  where it is pressed. Afterwards the position was −4 counts (21) and
+  +5 counts (20); after method 20 the drive was seen to go back a little
+  after stopping, as if to the home point after braking past it (not
+  recorded).
 - Z hangs in a spring suspension and moves when its drive is disabled:
   with the drive off, the axis can drift.
 - Everything the test wrote to the drives was read back and restored.
