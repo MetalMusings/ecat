@@ -3880,7 +3880,8 @@ class MoveCard(Card):
                                     "method (0x6098); releasing stops the homing")
         self.home_button.pressed.connect(self.home)
         self.home_button.released.connect(lambda: self.enable(False))
-        ml.addWidget(self.home_button)
+        # what the homing does and the user's word come before the button:
+        # the button is greyed until a homing that moves the axis is allowed
         self.home_info = label("", "hint", wrap=True)
         ml.addWidget(self.home_info)
         self.home_ok = QCheckBox("The homing may move the axis")
@@ -3889,6 +3890,7 @@ class MoveCard(Card):
                                 "emergency stop is within reach.")
         self.home_ok.toggled.connect(self.home_allowed)
         ml.addWidget(self.home_ok)
+        ml.addWidget(self.home_button)
         row = QHBoxLayout()
         self.reset = QPushButton("Reset fault")
         self.reset.pressed.connect(lambda: self.fault_reset(True))
@@ -3940,6 +3942,7 @@ class MoveCard(Card):
             self.home_ok.blockSignals(True)
             self.home_ok.setChecked(dt.home_moves_ok)
             self.home_ok.blockSignals(False)
+        self.home_gate(dt if homes else None)
         if dt is not None and dt.prepared and self.plot_for != (dt.name, dt.mode):
             self.plot_for = (dt.name, dt.mode)
             self.plot.reset(dt.mode)
@@ -4043,6 +4046,19 @@ class MoveCard(Card):
         dt = self.test()
         if dt is not None:
             dt.home_moves_ok = on
+            self.home_gate(dt)
+
+    def home_gate(self, dt):
+        """The Home button is greyed while the homing would be refused (a
+        method that moves the axis, the box not ticked), so that it is not
+        pressed in vain: a press used to enable the drive first."""
+        why = dt.home_refused() if dt is not None and dt.prepared and dt.homes else None
+        self.home_button.setEnabled(why is None)
+        self.home_button.setToolTip(
+            "Tick \"The homing may move the axis\" above first: this method moves the axis"
+            if why is not None else
+            "Hold alone: enables the drive and homes it by its own method (0x6098); "
+            "releasing stops the homing")
 
     def home_finished(self, dt, result):
         """A homing ended: the Home button says how it went, until the next one."""
@@ -4066,8 +4082,8 @@ class MoveCard(Card):
             return
         self.home_state("", "Home (hold)")
         try:
+            dt.home()   # refused before the drive is enabled
             dt.enable(True)
-            dt.home()
         except testmode.TestError as e:
             self.win.status(str(e))
 

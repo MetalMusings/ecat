@@ -328,8 +328,10 @@ class TestDriveTest(TestTestMode):
                 continue
             with self.assertRaisesRegex(testmode.TestError, "would move the axis"):
                 dt.home()
+            self.assertIn("would move the axis", dt.home_refused())
             self.assertIsNone(dt.pending)
             dt.home_moves_ok = True
+            self.assertIsNone(dt.home_refused())
             dt.home()
             self.assertEqual(dt.pending, ("home",))
             dt.restore()
@@ -465,6 +467,60 @@ class TestMoveCard(unittest.TestCase):
         self.assertFalse(shown(card.setup))
         self.assertIn("Only cia402 drives", card.unsupported.text())
         w.test = None
+
+
+@unittest.skipIf(gui is None, "no PyQt5")
+class TestHomeGate(unittest.TestCase):
+    """The Home button is greyed until a homing that moves the axis is
+    allowed, and a refused press never enables the drive."""
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_greyed_until_ticked_and_never_enabled_in_vain(self):
+        w = gui.MainWindow(session.Session())
+        self.addCleanup(w.close)
+        card = w.test_page.move
+
+        class Fake:
+            name = "x"
+            prepared = homes = True
+            homing_method = 21
+            home_moves_ok = False
+            pending = None
+
+            def __init__(self):
+                self.enabled = []
+
+            def home_refused(self):
+                return None if self.home_moves_ok else "would move the axis"
+
+            def home(self):
+                if self.home_refused():
+                    raise testmode.TestError(self.home_refused())
+                self.pending = ("home",)
+
+            def enable(self, on):
+                self.enabled.append(on)
+        dt = Fake()
+        card.test = lambda: dt
+        card.home_gate(dt)
+        self.assertFalse(card.home_button.isEnabled())
+        self.assertIn("Tick", card.home_button.toolTip())
+        card.home()                       # a press that gets through anyway
+        self.assertEqual(dt.enabled, [])  # the drive was not enabled
+        card.home_allowed(True)
+        self.assertTrue(dt.home_moves_ok)
+        self.assertTrue(card.home_button.isEnabled())
+        card.home()
+        self.assertEqual((dt.enabled, dt.pending), ([True], ("home",)))
+        card.home_allowed(False)
+        self.assertFalse(card.home_button.isEnabled())
+        dt.homing_method, dt.home_moves_ok = 35, True   # a method that stays
+        card.home_gate(dt)
+        self.assertTrue(card.home_button.isEnabled())
+        card.home_gate(None)              # no drive prepared: nothing to refuse
+        self.assertTrue(card.home_button.isEnabled())
 
 
 class TestHalScale(unittest.TestCase):

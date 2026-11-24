@@ -1116,7 +1116,7 @@ before it writes limits with a scale of 1.
 (`0x6098`) when the limits are written, and says what it does. Only
 method 35 (the current position) leaves the axis where it is; any other
 drives it to a limit switch, an index pulse or a stop, and *Home (hold)*
-is refused until *The homing may move the axis* is ticked. The ECT60s
+is greyed until *The homing may move the axis*, above it, is ticked. The ECT60s
 were found on method 17 (negative limit switch): without a switch the
 axis drives into its end stop.
 

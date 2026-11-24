@@ -412,17 +412,23 @@ class DriveTest:
             raise testmode.TestError("%s is not in PV" % self.name)
         self.pending = ("run", sign * abs(self.settings["max-velocity"]))
 
+    def home_refused(self):
+        """Why a homing cannot start now, or None when it can."""
+        if not self.prepared:
+            return "prepare the drive first"
+        if not self.homes:
+            return "%s has no hm in its modes" % self.name
+        if self.homing_method not in HOMING_STAYS and not self.home_moves_ok:
+            return ("homing here would move the axis: %s. Tick \"The homing may move the axis\" "
+                    "when it is free to move and the emergency stop is within reach."
+                    % homing_text(self.homing_method))
+        return None
+
     def home(self):
         """Home by the drive's method, once it is enabled (tick)."""
-        if not self.prepared:
-            raise testmode.TestError("prepare the drive first")
-        if not self.homes:
-            raise testmode.TestError("%s has no hm in its modes" % self.name)
-        if self.homing_method not in HOMING_STAYS and not self.home_moves_ok:
-            raise testmode.TestError(
-                "homing here would move the axis: %s. Tick \"The homing may move the axis\" "
-                "when it is free to move and the emergency stop is within reach."
-                % homing_text(self.homing_method))
+        why = self.home_refused()
+        if why is not None:
+            raise testmode.TestError(why)
         self.pending = ("home",)
 
     def tick(self, enabled):
