@@ -1397,9 +1397,8 @@ class SlaveView(QWidget):
                              "A slave with a network address (EoE) is used.")
         self.used.toggled.connect(self.general_edited)
         op.add(self.used)
-        self.configure_pdos = QCheckBox("Write the PDO mapping to the slave (configure-pdos)")
-        self.configure_pdos.toggled.connect(self.general_edited)
-        op.add(self.configure_pdos)
+        # configure-pdos is chosen in the Process data card's PDO boxes: the slave's own
+        # mapping (way A, not advised) is their last choice, with why and a question
         over = QHBoxLayout()
         self.again = QPushButton("Start over from the bus...")
         self.again.setToolTip("Read the slave and replace its whole entry (process data, pins, DC, "
@@ -1811,7 +1810,7 @@ class SlaveView(QWidget):
             text.setText(t)
         self.esi_button.setVisible(bool(p) and not p.esi_path)
 
-        editable = (self.cia402, self.pdo_set, self.used, self.configure_pdos, self.dc_mode, self.pd, self.st,
+        editable = (self.cia402, self.pdo_set, self.used, self.dc_mode, self.pd, self.st,
                     self.pd_add_object, self.pd_remove, self.pd_add_pdo, self.pd_add_missing)
         for w in editable:
             w.setEnabled(s is not None)
@@ -1842,7 +1841,6 @@ class SlaveView(QWidget):
             self.zero_at_start.setChecked(bool(c.get("zero-at-start")))
 
         self.used.setChecked(s.get("unused") is not True)
-        self.configure_pdos.setChecked(bool(s.get("configure-pdos", True)))
         self.pdo_set.clear()
         self.pdo_set.addItem("PDO assignment: the ESI file's default" if p and p.pdo_sets
                              else "PDO assignment: the slave's own", None)
@@ -2955,7 +2953,6 @@ class SlaveView(QWidget):
                 c["zero-at-start"] = True
             else:
                 c.pop("zero-at-start", None)
-        s["configure-pdos"] = self.configure_pdos.isChecked()
         if self.used.isChecked():
             s.pop("unused", None)
         else:

@@ -1977,6 +1977,18 @@ class TestPdoEditing(WindowBase):
             page.add_pd_missing()
         self.assertIn("not written to this slave", warn.call_args[0][2])
 
+    def test_configure_pdos_only_in_the_pdo_boxes(self):
+        # no box of its own: editing the slave's other fields keeps what the PDO
+        # boxes chose (the user, 2026-11-24: one place for it)
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
+        self.assertFalse(hasattr(page, "configure_pdos"))
+        s["configure-pdos"] = False
+        page.general_edited()
+        self.assertIs(s["configure-pdos"], False)
+        s.pop("configure-pdos")
+        page.general_edited()
+        self.assertNotIn("configure-pdos", s)
+
 
 class TestCards(unittest.TestCase):
     """Where a proposal came from, and the synchronisation card."""

@@ -153,7 +153,7 @@ Choosing a slave shows:
   configuration says), the PDO assignment (for a device whose ESI file has predefined
   assignments, the box shows the one the file uses; choosing another proposes
   the slave again with it, after asking; the box is hidden for a device
-  without them), *Write the PDO mapping to the slave*, the Sync
+  without them), the Sync
   choice (free run, one of the slave's DC modes, or DC mode with user settings; see
   [Distributed clocks](#distributed-clocks)) with SYNC0's cycle and shift (and,
   for a mode that uses SYNC1, a row with SYNC1 every n SYNC0 cycles and its
@@ -249,7 +249,7 @@ Choosing a slave shows:
   The last line of both boxes, in grey, is *Not advised: the slave's own*:
   the PDOs the slave has now, as the master read them at its scan, judged
   the same way. Choosing it (after a question) takes them as they are and
-  writes none (*Write the PDO mapping to the slave* off). It is not advised:
+  writes none (`configure-pdos: false`). It is not advised:
   a slave's own mapping is what a master or a tool last wrote into it, and
   many slaves keep that only until the power goes off; the configuration
   then no longer matches and LinuxCNC does not start. Use it only for a
@@ -267,8 +267,10 @@ Choosing a slave shows:
   profile needs. Pins of objects that stay keep their names, and the rest of
   the slave's entry stays. Where the file has several PDOs of a direction,
   the box says so ("0x1A00 + 0x1A01 (as in the file)"); *Add PDO...* adds
-  one more. The boxes are not shown when *Write the PDO mapping to the
-  slave* is off.
+  one more. While the slave's own mapping is used, both boxes show it
+  first, as what the file has; choosing a PDO goes back to writing one.
+  This is the only place to choose it (there is no separate box for
+  `configure-pdos`).
   Under the table, lines say what the mapping lacks for the drive's
   modes (red: *cannot run as CiA 402 in CSP: 0x607A Target position
   missing*; grey: the mode objects 0x6060/0x6061 are not mapped, which is
@@ -2132,8 +2134,8 @@ the servo thread. What that means:
   `state-*` pins still tell the states of the whole bus), so a slave that
   only sits on the bus does not keep it false, nor stop a drive.
 - At load the component compares the bus with the configuration: vendor
-  and product of each slave, and, for a slave whose *Write the PDO mapping
-  to the slave* box is off, the slave's own PDO mapping. When they differ
+  and product of each slave, and, for a slave that uses its own PDO
+  mapping (*Not advised: the slave's own* in the PDO boxes), that mapping. When they differ
   it does not start, with one line per slave in LinuxCNC's log (for
   example "slave 2 is EL2008 ...; the configuration expects EL1008 there"):
   read the bus again and use *Update from bus*. A different revision is
