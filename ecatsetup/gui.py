@@ -3916,9 +3916,13 @@ LIVE_VALUES = [("pos-fb", "Position feedback"), ("drv-actual-position", "Positio
 
 
 class PinTable(QTableWidget):
-    """Pins of a running test, with a setter for those that may be set."""
+    """Pins of a running test, with a setter for those that may be set. The
+    Object column (the pin's object in the process data, halpins.sources) is
+    shown when the user asks for it (settings: pin-objects); the pin's
+    tooltip has the object, its name and the PDO always."""
 
-    COLUMNS = ["Pin", "Type", "Value", "Set"]
+    COLUMNS = ["Pin", "Object", "Type", "Value", "Set"]
+    VALUE = 3
 
     def __init__(self, win):
         super().__init__(0, len(self.COLUMNS))
@@ -3931,8 +3935,21 @@ class PinTable(QTableWidget):
         self.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.rows = {}
+        self.show_objects(PinTable.objects_wanted())
 
-    def fill(self, pins, prefix, run):
+    @staticmethod
+    def objects_wanted():
+        try:
+            return bool(settings.load().get("pin-objects"))
+        except Exception:   # a settings file that cannot be read: the default
+            return False
+
+    def show_objects(self, on):
+        self.setColumnHidden(1, not on)
+
+    def fill(self, pins, prefix, run, sources=None, names=None):
+        """sources: {pin: halpins source}; names(index, subindex) -> the
+        object's name (from the dictionary), for the tooltip."""
         self.setRowCount(0)
         self.rows = {}
         for name in sorted(pins):
@@ -3941,10 +3958,22 @@ class PinTable(QTableWidget):
             self.insertRow(r)
             self.rows[name] = r
             short = name[len(prefix):] if name.startswith(prefix) else name   # an axis's pin
-            for c, v in enumerate((short, pin.type, pin.value)):
-                self.setItem(r, c, item(v, font=mono() if c == 2 else None))
+            src = (sources or {}).get(name)
+            obj = halpins.source_text(src) if src else ""
+            for c, v in enumerate((short, obj, pin.type, pin.value)):
+                it = item(v, font=mono() if c in (1, self.VALUE) else None)
+                if c == 1:
+                    it.setForeground(QBrush(GREY))
+                self.setItem(r, c, it)
+            if src:
+                index, sub, bit, pdo = src
+                what = names(index, sub) if names else ""
+                tip = "%s%s%s" % (obj, "  %s" % what if what else "",
+                                  "\nin PDO 0x%04X" % pdo if pdo is not None else "")
+                for c in (0, 1):
+                    self.item(r, c).setToolTip(tip)
             if run.writable(pin):
-                self.setCellWidget(r, 3, self._setter(pin))
+                self.setCellWidget(r, 4, self._setter(pin))
         fit_table(self)
 
     def _setter(self, pin):
@@ -3961,7 +3990,7 @@ class PinTable(QTableWidget):
     def update_values(self, pins):
         for name, r in self.rows.items():
             if name in pins:
-                it = self.item(r, 2)
+                it = self.item(r, self.VALUE)
                 if it.text() != pins[name].value:
                     it.setText(pins[name].value)
 
@@ -5641,6 +5670,16 @@ class TestPage(QWidget):
         self.all_pins = PinTable(win)
         self.all_card.add(self.all_pins)
         lay.addWidget(self.all_card)
+        # one choice for the three tables: the Object column, kept in settings
+        self.objects_boxes = []
+        for card in (self.outputs_card, self.inputs_card, self.all_card):
+            box = QCheckBox("Object numbers")
+            box.setToolTip("Show the object each pin is in the process data (0x60FD:00, "
+                           "0x6041:00 bit 2 ...); the pin's tooltip has it always")
+            box.setChecked(PinTable.objects_wanted())
+            box.toggled.connect(self.objects_toggled)
+            card.head.addWidget(box)
+            self.objects_boxes.append(box)
 
         # SDOs
         sdo = self.sdo_card = Card("SDO (CoE object)", "Read and write whenever a master runs: "
@@ -5695,6 +5734,29 @@ class TestPage(QWidget):
             " &nbsp; ".join(lim.text for lim in dt.limits) +
             "<br>heartbeat %d ms: the drive is disabled if this program stops answering. %s"
             % (testmode.WATCHDOG_MS, " ".join(n[:1].upper() + n[1:] + "." for n in dt.notes)))
+
+    def _pin_sources(self):
+        """(sources, names) for the pin tables: each pin's object, and the
+        object's name from the slave's dictionary."""
+        sources = halpins.sources(self.win.session.cfg)
+        pos = self.position
+        d = self.win.session.dictionary(pos) if isinstance(pos, int) and pos >= 0 else None
+        return sources, ((lambda i, sub: d.name(i, sub)) if d else None)
+
+    def objects_toggled(self, on):
+        for box in self.objects_boxes:
+            if box.isChecked() != on:
+                box.blockSignals(True)
+                box.setChecked(on)
+                box.blockSignals(False)
+        for t in (self.outputs, self.inputs, self.all_pins):
+            t.show_objects(on)
+        try:
+            data = settings.load()
+            data["pin-objects"] = bool(on)
+            settings.save(data)
+        except Exception as e:    # not kept: still shown in this window
+            self.win.status("The choice is not kept: %s" % e)
 
     def _prefix(self):
         pos = self.position
@@ -5783,10 +5845,11 @@ class TestPage(QWidget):
             win.status(str(e))
             return
         if is402:
-            self.all_pins.fill(pins, prefix, run)
+            self.all_pins.fill(pins, prefix, run, *self._pin_sources())
         else:
-            self.outputs.fill({n: p for n, p in pins.items() if p.dir == "IN"}, prefix, run)
-            self.inputs.fill({n: p for n, p in pins.items() if p.dir != "IN"}, prefix, run)
+            src = self._pin_sources()
+            self.outputs.fill({n: p for n, p in pins.items() if p.dir == "IN"}, prefix, run, *src)
+            self.inputs.fill({n: p for n, p in pins.items() if p.dir != "IN"}, prefix, run, *src)
         self.shown_for = (pos, prefix, frozenset(pins))
         self.update_values(pins)
 

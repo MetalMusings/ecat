@@ -1215,6 +1215,42 @@ class TestWindow(WindowBase):
         self.assertTrue(page.home_inputs.isHidden())
         self.assertIn("normally open or closed", page.home_switch_text.text())
 
+    def test_pin_table_objects(self):
+        import tempfile
+        from ecatsetup import testmode
+        w = self.window()
+
+        class Run:
+            def writable(self, pin):
+                return pin.dir == "IN"
+        pins = {"x.digital-inputs": testmode.Pin("x.digital-inputs", "uint", "OUT", "0x00130004"),
+                "x.enable": testmode.Pin("x.enable", "bool", "IN", "FALSE")}
+        src = {"x.digital-inputs": (0x60FD, 0, None, 0x1A00)}
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, {"ECATSETUP_SETTINGS": os.path.join(d, "s.yaml")}):
+            t = gui.PinTable(w)
+            self.assertTrue(t.isColumnHidden(1))                 # off unless asked for
+            t.fill(pins, "x.", Run(), src, lambda i, s: "Digital inputs")
+            r = t.rows["x.digital-inputs"]
+            self.assertEqual(t.item(r, 1).text(), "0x60FD:00")
+            self.assertIn("0x60FD:00  Digital inputs", t.item(r, 0).toolTip())
+            self.assertIn("PDO 0x1A00", t.item(r, 0).toolTip())
+            self.assertEqual(t.item(t.rows["x.enable"], 1).text(), "")
+            self.assertIsNotNone(t.cellWidget(t.rows["x.enable"], 4))      # the setter
+            pins["x.digital-inputs"].value = "0x00030000"
+            t.update_values(pins)
+            self.assertEqual(t.item(r, t.VALUE).text(), "0x00030000")
+            # one box for the three tables, kept in settings
+            page = w.test_page
+            page.objects_boxes[0].setChecked(True)
+            self.assertTrue(all(b.isChecked() for b in page.objects_boxes))
+            self.assertFalse(page.all_pins.isColumnHidden(1) or page.inputs.isColumnHidden(1))
+            self.assertTrue(gui.PinTable.objects_wanted())
+            self.assertFalse(gui.PinTable(w).isColumnHidden(1))
+            page.objects_boxes[2].setChecked(False)
+            self.assertTrue(page.outputs.isColumnHidden(1))
+            self.assertFalse(gui.PinTable.objects_wanted())
+
     def test_switch_card(self):
         w = self.window()
         card = w.test_page.switches

@@ -175,6 +175,68 @@ def pins(cfg):
     return out
 
 
+# the cia402 profile's pins with one source object (and bit), as ecat_cia402.c
+# reads or writes them; an axis's objects are at index + axis * AXIS_OFFSET
+CIA402_SOURCES = {
+    "pos-fb": (0x6064, None), "pos-actual": (0x6064, None), "drv-actual-position": (0x6064, None),
+    "pos-cmd": (0x607A, None), "drv-target-position": (0x607A, None),
+    "velocity-fb": (0x606C, None), "drv-actual-velocity": (0x606C, None),
+    "velocity-cmd": (0x60FF, None), "drv-target-velocity": (0x60FF, None),
+    "statusword": (0x6041, None), "controlword": (0x6040, None),
+    "opmode": (0x6060, None), "opmode-display": (0x6061, None), "error-code": (0x603F, None),
+    "pp-velocity": (0x6081, None), "velocity-ff": (0x60B1, None), "torque-ff": (0x60B2, None),
+    "stat-switchon-ready": (0x6041, 0), "stat-switched-on": (0x6041, 1), "stat-op-enabled": (0x6041, 2),
+    "stat-fault": (0x6041, 3), "stat-voltage-enabled": (0x6041, 4), "stat-quick-stop": (0x6041, 5),
+    "stat-switchon-disabled": (0x6041, 6), "stat-warning": (0x6041, 7), "stat-remote": (0x6041, 9),
+    "stat-target-reached": (0x6041, 10),
+}
+
+
+def sources(cfg):
+    """{pin: (index, subindex, bit or None, PDO index or None)}: the object a
+    pin is: a process data entry's pin, a bit of a split entry, or a cia402
+    pin with one source object that is in the process data. Pins with no
+    single object (fault-reason, home-travel ...) are not in it."""
+    out = {}
+    for s in (cfg or {}).get("slaves") or []:
+        name = s.get("name")
+        if not name or s.get("unused") is True:
+            continue
+        where = {}
+        for kind in ("outputs", "inputs"):
+            for pdo in (s.get("process-data") or {}).get(kind) or []:
+                try:
+                    pdo_index = int(str(pdo.get("pdo")), 16)
+                except ValueError:
+                    pdo_index = None
+                for e in pdo.get("entries") or []:
+                    try:
+                        index, sub = config.parse_obj(e.get("object"))
+                    except ValueError:
+                        continue
+                    where[(index, sub)] = pdo_index
+                    if e.get("pin"):
+                        out["%s.%s" % (name, e["pin"])] = (index, sub, None, pdo_index)
+                    one = len(e.get("split") or []) == 1 and int(e.get("bits") or 0) <= 1
+                    for bit, p in enumerate(e.get("split") or []):
+                        if p:
+                            # a one-bit entry is its own object, not a bit of one
+                            out["%s.%s" % (name, p)] = (index, sub, None if one else bit, pdo_index)
+        if s.get("profile") == "cia402":
+            for n, axis in enumerate(config.axes(s)):
+                off = n * config.AXIS_OFFSET
+                for pin, (index, bit) in CIA402_SOURCES.items():
+                    if (index + off, 0) in where:
+                        out["%s.%s" % (axis, pin)] = (index + off, 0, bit, where[(index + off, 0)])
+    return out
+
+
+def source_text(src):
+    """"0x60FD:00", "0x6041:00 bit 2"."""
+    index, sub, bit, _pdo = src
+    return "0x%04X:%02X%s" % (index, sub, "" if bit is None else " bit %d" % bit)
+
+
 def parameters(cfg):
     """{name: (HAL type, default)} of the parameters of the slaves, their axes
     and encoder channels that the configuration can set (`linuxcnc.params`):

@@ -392,7 +392,13 @@ the bus; stop the kernel master first, or the two share the NIC
   interrupts are, and what was measured on the drives; *Remember this period for
   the drives...* keeps what a good (or refused) run shows
   ([details](#synchronisation-in-the-test-mode));
-- **Outputs** and **Inputs**, live, and **All pins**. Outputs are set
+- **Outputs** and **Inputs**, live, and **All pins**. A pin's tooltip
+  names the object it is in the process data (`0x60FD:00`, `0x6041:00 bit
+  2`, with its name and PDO); *Object numbers* in the tables' heads shows
+  them as a column (kept for next time). A drive's pins with one source
+  object (`pos-fb` from `0x6064`, `stat-op-enabled` from bit 2 of `0x6041`)
+  have it too; pins the profile works out (`fault-reason`) have none.
+  Outputs are set
   here and go back to 0 when the test stops;
 - **SDO**: read and write a CoE object while a master runs;
 - for a drive: the **CiA 402 state chain**, live values, the status word,

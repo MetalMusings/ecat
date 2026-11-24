@@ -271,6 +271,38 @@ class TestCommand(Folder):
         self.assertIn("1 error", out[-1])
 
 
+class TestPinSources(unittest.TestCase):
+    def test_objects_of_pins(self):
+        c = {"slaves": [
+            {"name": "io", "profile": "generic", "process-data": {"inputs": [{"pdo": "0x1A00", "entries": [
+                {"object": "0x6000:00", "bits": 32, "type": "UDINT", "split": ["in-1", None, "in-3"]},
+                {"object": "0x6010:00", "bits": 8, "type": "USINT", "split": ["flag"]},
+                {"object": "0x6020:01", "bits": 16, "type": "UINT", "pin": "word", "hal-type": "uint"}]}]}},
+            {"name": "x", "profile": "cia402", "cia402": {"mode": "csp"}, "process-data": {
+                "outputs": [{"pdo": "0x1600", "entries": [{"object": "0x6040:00", "use": "profile"},
+                                                         {"object": "0x607A:00", "use": "profile"}]}],
+                "inputs": [{"pdo": "0x1A00", "entries": [{"object": "0x6041:00", "use": "profile"},
+                                                        {"object": "0x6064:00", "use": "profile"}]}]}},
+            {"name": "gone", "unused": True}]}
+        src = halpins.sources(c)
+        t = {k: halpins.source_text(v) for k, v in src.items()}
+        self.assertEqual(t["io.in-1"], "0x6000:00 bit 0")
+        self.assertEqual(t["io.in-3"], "0x6000:00 bit 2")
+        self.assertEqual(t["io.flag"], "0x6010:00 bit 0")   # a bit of an 8-bit entry
+        self.assertEqual(t["io.word"], "0x6020:01")
+        self.assertEqual(src["io.word"][3], 0x1A00)
+        # the profile's pins with one source, where the object is mapped
+        self.assertEqual((t["x.pos-fb"], t["x.pos-cmd"], t["x.stat-op-enabled"]),
+                         ("0x6064:00", "0x607A:00", "0x6041:00 bit 2"))
+        self.assertEqual(src["x.pos-cmd"][3], 0x1600)
+        self.assertNotIn("x.velocity-fb", src)       # 0x606C not mapped
+        self.assertNotIn("x.fault-reason", src)      # no single object
+        # a second axis's objects are 0x800 on
+        c["slaves"][1]["cia402"]["axes"] = ["a", "b"]
+        c["slaves"][1]["process-data"]["inputs"][0]["entries"].append({"object": "0x6864:00", "use": "profile"})
+        self.assertEqual(halpins.source_text(halpins.sources(c)["b.pos-fb"]), "0x6864:00")
+
+
 if __name__ == "__main__":
     unittest.main()
 
