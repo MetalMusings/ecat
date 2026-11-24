@@ -2897,6 +2897,82 @@ were delivered with `0x6098` = 17 (negative limit switch): a drive that
 is homed without a switch drives into its end stop. Use method 35, or
 choose the method on the *Homing by the drive* card.
 
+#### From LinuxCNC's homing to the drive's
+
+A joint that LinuxCNC homes itself (a home switch read by motion, a
+search and a latch move) can be moved over to the drive's own homing. The
+steps, with what was done for a plasma cutter's X (an ECT60, torque
+homing against the X− end stop, in a copy of the machine's
+configuration):
+
+1. **Keep a way back.** Copy the configuration folder and work in the
+   copy; the original is the way back. (X: `QtPlasma` copied to
+   `QtPlasma-torquehome`.)
+2. **Choose the method on the drive's page.** On the slave's page, under
+   *CiA 402 modes*, tick *Homing by the drive's own method*; the mode
+   objects `0x6060` and `0x6061` must be in the process data. On the
+   *Homing by the drive* card choose the method and the speeds. What the
+   drive needs besides (its quirk file's extras) comes along as settings.
+   (X: method 36, fast 3000 and slow 1000 pulses/s, acceleration 20000
+   pulses/s², and the ECT60's `0x2030:01`–`:06` and `0x2022`, see
+   [Homing by the drive](#homing-by-the-drive).) Save.
+3. **Try it in the test first** ([PP, PV and homing](#pp-pv-and-homing)):
+   on the *Test* page, *Move* card, write the limits, tick *The homing may
+   move the axis* and hold *Home (hold)*, away from the stop at first,
+   with the emergency stop within reach. A switch on the drive's input
+   can be checked before, in the I/O test (for the ECT60, `0x60FD` bit 2
+   is HOME).
+4. **Write it into LinuxCNC** (*HAL & LinuxCNC* page, *Apply*). It adds
+   one line to `ethercat.hal`, the `index-enable` handshake between the
+   joint and the drive (`net x-index-enable joint.0.index-enable <=>
+   X-drive.index-enable`). Nothing else should change: read the list of
+   changes before writing.
+5. **Change the joint's homing in the INI file.** *Show the lines for
+   LinuxCNC's INI file* on the homing card has them, with *Copy the INI
+   lines*. In the joint's section, replace motion's search and latch:
+
+   | Key | Before (X) | After | Why |
+   |---|---|---|---|
+   | `HOME_SEARCH_VEL` | −60 | 0 | motion does not search; it waits for the drive |
+   | `HOME_LATCH_VEL` | −1 | 1 | the slow move motion makes while it waits; not the axis |
+   | `HOME_USE_INDEX` | (missing) | YES | motion homes on the index handshake, which is the drive |
+   | `HOME_OFFSET` | −1 | the machine coordinate of the drive's home point | see step 7 |
+   | `HOME` | 0 | where the joint goes after homing | |
+
+   `HOME_SEQUENCE` stays. Watch the key names: X's section had `USE_INDEX`,
+   which LinuxCNC does not read. The home switch's net (`joint.0.home-sw-in`)
+   can stay; motion does not use it without a search.
+6. **Guard the move in HAL.** Motion does not see the axis while the drive
+   homes ([What motion sees while the drive homes](#what-motion-sees-while-the-drive-homes)).
+   In one of your own HAL files (X: `custom.hal`):
+
+   ```
+   setp X-drive.home-max-travel 720       # axis length (693 mm) and a margin
+   setp X-drive.home-timeout-ms 120000    # the whole axis at the homing speed, and more
+   ```
+
+   Then look at the *HAL check* card on the *HAL & LinuxCNC* page (or run
+   `ecatsetup --check-hal`): the HAL files must match the configuration.
+7. **Find `HOME_OFFSET`.** It is the machine coordinate where the drive's
+   position is 0 after homing: for torque homing, the end stop. To keep
+   the old coordinates (and so the soft limits and saved offsets), home
+   once with a first guess (X: −3), then jog to a place whose old
+   coordinate you know, such as where the old home switch trips (X: −1),
+   and read the coordinate there. The right value is the guess plus the
+   difference: `HOME_OFFSET = guess + (old coordinate − coordinate read)`.
+   With `HOME` at or above `MIN_LIMIT`, the joint moves off the stop after
+   homing.
+8. **Home in LinuxCNC,** with the emergency stop within reach. The joint
+   shows motion's slow move, not the axis; `X-drive.pos-actual` and
+   `X-drive.home-travel` (halshow) show the axis. After homing, check that
+   the coordinates are right before running a program.
+
+On the ECT60 torque homing needs `0x2022` (the drive's following-error
+window) at 100000 so that the drive does not fault while it presses
+against the stop. It is a setting, so it also holds in normal running:
+the drive no longer faults on a following error, and LinuxCNC's `FERROR`
+is the only check left.
+
 #### From lcec and the cia402 component
 
 The *From lcec* card ([From an lcec configuration](#from-an-lcec-configuration))
