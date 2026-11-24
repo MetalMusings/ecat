@@ -852,13 +852,16 @@ class MasterView(QWidget):
                             "cycle: leave them not bound, off the real-time CPU. master: cpu")
         self.cpu.valueChanged.connect(self.edited)
         form.addRow("Master's own threads", self.cpu)
-        hint = QHBoxLayout()
+        # the text and the button on rows of their own: side by side the text
+        # did not wrap and pushed the button out of the window
         self.cpu_hint = label("", "hint", wrap=True)
-        hint.addWidget(self.cpu_hint, 1)
+        form.addRow("", self.cpu_hint)
+        use = QHBoxLayout()
         self.cpu_use = QPushButton("Use the recommendation")
         self.cpu_use.clicked.connect(self.use_cpu_advice)
-        hint.addWidget(self.cpu_use)
-        form.addRow("", hint)
+        use.addWidget(self.cpu_use)
+        use.addStretch(1)
+        form.addRow("", use)
         self.fill_cpus()
         card.add(form)
         lay.addWidget(card)
@@ -2395,21 +2398,26 @@ class SlaveView(QWidget):
                 return None
         return read
 
+    def _homing_again(self):
+        s = self.win.session.slave(self.position)
+        if s is not None:
+            self.show_homing(s)
+
     def input_row_changed(self, kind, name, choice):
         s = self.win.session.slave(self.position)
         if s is None:
             return
         read = self._drive_read()
-        # the rows are made again after this call: not while their box sends it
-        again = lambda: self.show_homing(self.win.session.slave(self.position))  # noqa: E731
+        # the rows are made again after this call, not while their box sends it;
+        # a bound method of this page: not called once the page is gone
         try:
             notes = switches.assign(s, kind, name, choice, read)
         except switches.SetupError as e:
             self.win.status("%s: %s" % (switches.TEXT[kind], e))
-            QTimer.singleShot(0, again)
+            QTimer.singleShot(0, self._homing_again)
             return
         self.show_settings(s)
-        QTimer.singleShot(0, again)
+        QTimer.singleShot(0, self._homing_again)
         self.win.changed()
         self.win.status("%s: %s%s" % (switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:],
                                       "on %s" % name if name else "no input",

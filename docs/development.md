@@ -2521,6 +2521,7 @@ sends a capture or report (way 1 below), or the device comes here.
 | The Response card's *Look for settings* / *Try it* on another drive than the ECT60 | the ECT60 (filter, Kp, Ki) at the machine; dictionary search unit-tested | any other CiA 402 drive, ideally a real servo (A6: the quirk file's `tuning:` is not filled in) |
 | `cia402.axes`: several axes in one slave | unit tests, objects 0x800 apart | a two-axis drive (ECT60x2, ECR60x2) or an EL72xx with channels |
 | Serial channels (`serial:`, EL6021 / EL6022) on a Beckhoff terminal | the EL6021 protocol emulated by the EaserCAT 3000 over a real wire, 2400-115200 baud, mb2hal | an EL6021 or EL6022 (and, for RS-485, a Modbus device on it) |
+| Home and limit switch inputs set from the homing card (quirk `homing: inputs`) on the A6-EC and the GeRui EC1 | the ECT60 (IN5, normally open) at the plasma cutter; A6 and EC1 data from their manuals, unit-tested | an A6-EC and an EC1 drive with a switch on an input |
 | EoE on a bought device, and two EoE slaves on one bus | one EaserCAT 3000 with our own SOES/lwIP firmware, in LinuxCNC | a device with a web page over EoE (a drive, an IO-Link master, a gateway), and a second EoE slave |
 | Analog terminals (EL3xxx, EL4xxx) | the proposal (scaling from the range in the name, status bits) | an analog input and an output terminal |
 | Stepper and DC motor terminals (EL7041, EL70x1, EL7342) | a quirk file for the EL7041; `generic` slaves | an EL7041 (or EL70x1 / EL7342) with a motor |

@@ -17,9 +17,9 @@ class EditError(ValueError):
 
 def _writable(slave):
     if slave.get("configure-pdos", True) is False:
-        raise EditError("the PDOs are not written to this slave (Write the PDO mapping to the slave is "
-                        "off): the slave's own mapping is used, so a change here does nothing on the "
-                        "slave. Turn it on to change the mapping")
+        raise EditError("the PDOs are not written to this slave: its own mapping is used (chosen in "
+                        "the PDO boxes), so a change here does nothing on the slave. Choose a PDO in "
+                        "the PDO boxes to write the mapping again")
 
 
 def _pdos(slave, direction):
