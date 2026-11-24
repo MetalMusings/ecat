@@ -1443,6 +1443,18 @@ has it. PP was tried again from the window on X that day, steps of 1 and
   larger `0x2022` it ends: the drive sets "homing attained" and zeroes
   the position at the stop, twice in a row
   ([cia402](#homing-by-the-drive)).
+- **Homing to a switch** (2026-11-24, from a window started with no
+  file and no ESI file, X only): a plain switch on IN5 of the 8-pole I/O
+  connector (+24 V of a separate supply to its 24V pole, the switch from
+  IN5 to that supply's 0 V; the ECT60's inputs take sinking signals
+  only). IN5 is HOME from the factory (`0x2007:05` = 3) and a normally
+  open switch needed no change of `0x2008`: `digital-inputs` (`0x60FD`)
+  shows bit 20 (IN5) and bit 2 (HOME) when it is pressed; bits 16 and 17
+  are the encoder's A and B. Methods 19, 21 and 22 home as the drive's
+  manual draws them (fast and slow speed `0x6099:01`/`:02` of 3000 and
+  1000): 19 and 21 set the zero where the switch is released, 22 where it
+  is pressed; after method 21 the position was −4 counts. Method 20 was
+  not tried.
 - Z hangs in a spring suspension and moves when its drive is disabled:
   with the drive off, the axis can drift.
 - Everything the test wrote to the drives was read back and restored.
