@@ -1206,6 +1206,20 @@ class TestWindow(WindowBase):
         objs = {x["object"]: x["value"] for x in s["settings"]}
         self.assertEqual((objs["0x2007:03"], objs["0x2007:05"], objs["0x2008:00"]), (3, 0, 0x3B))
         self.assertIn("IN3 was the negative limit switch", w.statusBar().currentMessage())
+        # the drive has another choice now (a test wrote one that was not saved):
+        # said, with a button that writes the configuration's choice
+        s["settings"] = [x for x in s["settings"] if not x["object"].startswith(("0x2007", "0x2008"))]
+        drive = {(0x2007, 3): 1, (0x2007, 4): 3, (0x2007, 5): 0, (0x2007, 6): 6, (0x2008, 0): 0x3F}
+        w.session.bus[0] = w.session.bus.get(0) or object()
+        with mock.patch.object(gui.tool, "upload", lambda pos, i, sub, t: drive.get((i, sub))):
+            page.show_homing(s)
+            self.assertEqual(form.rowCount(), 2)
+            warn = form.itemAt(1, QFormLayout.FieldRole).layout()
+            self.assertIn("The drive has IN4 (normally open) now", warn.itemAt(0).widget().text())
+            self.assertIn("the configuration IN5 (normally open)", warn.itemAt(0).widget().text())
+            warn.itemAt(1).widget().click()
+        objs = {x["object"]: x["value"] for x in s["settings"]}
+        self.assertEqual((objs["0x2007:04"], objs["0x2007:05"]), (0, 3))
         # a method with limits gets their rows too; a drive without data none
         page.home_method.setCurrentIndex(page.home_method.findData(23))
         page.homing_edited()
@@ -1263,24 +1277,20 @@ class TestWindow(WindowBase):
         self.assertIn("needs the home switch", card.needs.text())
         pins = {"digital-inputs": "0x00030000"}
         card.update_values(lambda n: pins.get(n))
-        # a box per switch and per input, grey when off and green when on, live
+        # a box per switch, grey when off and green when on, live; the inputs as a line
         self.assertEqual(card.lamps["home"].property("box"), "off")
-        self.assertEqual([b.text() for b in card.input_boxes.values()],
-                         ["IN1 (encoder A)", "IN2 (encoder B)", "IN3", "IN4", "IN5", "IN6"])
-        self.assertEqual([card.input_boxes[b].property("box") for b in (16, 17, 20)], ["on", "on", "off"])
+        self.assertEqual(card.inputs.text(), "Inputs on: IN1 (encoder A), IN2 (encoder B)")
         pins["digital-inputs"] = "0x00130004"           # the home switch on IN5, pressed
         card.update_values(lambda n: pins.get(n))
         self.assertEqual(card.lamps["home"].property("box"), "on")
         self.assertEqual(card.lamps["negative"].property("box"), "off")
-        self.assertEqual(card.input_boxes[20].property("box"), "on")
-        # a drive without input names: bits 16 to 23, and any other that is on
+        self.assertIn("IN5", card.inputs.text())
+        # a drive without input names: the bits
         other = dict(slave, identity={"vendor": "0x00000001", "product": "0x00000001"})
         card.show_drive(other)
         pins["digital-inputs"] = "0x01000000"
         card.update_values(lambda n: pins.get(n))
-        self.assertEqual(sorted(card.input_boxes), list(range(16, 25)))
-        self.assertEqual(card.input_boxes[24].property("box"), "on")
-        self.assertIn("manual says which input", card.inputs.text())
+        self.assertEqual(card.inputs.text(), "Inputs on: input bit 24")
         card.show_drive(slave)
         pins["digital-inputs"] = "0x00030000"
         # the test: released (IN1 flickers on its own: left out), then pressed

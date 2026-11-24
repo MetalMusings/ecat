@@ -186,8 +186,8 @@ TOPICS = {
     "Settings": ("ecatsetup.md", "bus"),
     "Distributed clocks": ("ecatsetup.md", "distributed-clocks"),
     "Synchronisation": ("ecatsetup.md", "synchronisation-in-the-test-mode"),
-    # the step-by-step guide; it points back to "Homing by the drive"
-    "Homing by the drive": ("ecatsetup.md", "from-linuxcncs-homing-to-the-drives"),
+    # how it works; it points to the step-by-step guide early on
+    "Homing by the drive": ("ecatsetup.md", "homing-by-the-drive"),
     "Network (EoE)": ("ecatsetup.md", "a-devices-web-page-over-eoe"),
     "Serial ports": ("ecatsetup.md", "a-modbus-vfd-on-a-serial-terminal-el6021"),
     "Written at start by the device's description (InitCmds)": ("ecatsetup.md", "bus"),

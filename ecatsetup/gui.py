@@ -2330,8 +2330,12 @@ class SlaveView(QWidget):
             form.removeRow(0)
         self.home_inputs.setVisible(bool(kinds))
         setup = switches.setup(s) if kinds else None
+        read = self._drive_read() if kinds else None
         for kind in kinds:
             name, pol = switches.current(s, kind)
+            # what the drive has now can differ: a test wrote another choice that
+            # was not saved, and the drive keeps it until it is switched off
+            now = switches.current(s, kind, read) if read else (name, pol)
             row = QHBoxLayout()
             box = QuietCombo()
             box.addItem("(no input)", None)
@@ -2356,19 +2360,41 @@ class SlaveView(QWidget):
             if pbox:
                 pbox.activated.connect(changed)
             form.addRow(switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:], row)
+            if now != (name, pol) and (now[0] is not None or name is not None):
+                warn = QHBoxLayout()
+                text = label("The drive has %s now (from a test, until it is switched off; or set "
+                             "by another tool), the configuration %s." % (
+                                 self._input_text(*now), self._input_text(name, pol)), "warnText", wrap=True)
+                warn.addWidget(text, 1)
+                fix = QPushButton("Write %s as settings" % (name or "no input"))
+                fix.setToolTip("So that the drive gets the configuration's choice at every start, "
+                               "whatever it has now")
+                fix.clicked.connect(lambda _c=False, k=kind, n=name, p=pol: self.input_row_changed(k, n, p))
+                warn.addWidget(fix)
+                form.addRow("", warn)
+
+    @staticmethod
+    def _input_text(name, pol):
+        return "%s%s" % (name or "no input", " (%s)" % pol if name and pol else "")
+
+    def _drive_read(self):
+        """read(index, sub, type) of the drive, when the bus was read; else None."""
+        if self.win.session.bus.get(self.position) is None:
+            return None
+
+        def read(index, sub, typ):
+            try:
+                return tool.upload(self.position, index, sub, {"UINT": "uint16", "UDINT": "uint32",
+                                                             "USINT": "uint8"}.get(typ, "uint16"))
+            except (tool.ToolError, ValueError):
+                return None
+        return read
 
     def input_row_changed(self, kind, name, choice):
         s = self.win.session.slave(self.position)
         if s is None:
             return
-        read = None
-        if self.win.session.bus.get(self.position) is not None:
-            def read(index, sub, typ):
-                try:
-                    return tool.upload(self.position, index, sub, {"UINT": "uint16", "UDINT": "uint32",
-                                                                 "USINT": "uint8"}.get(typ, "uint16"))
-                except (tool.ToolError, ValueError):
-                    return None
+        read = self._drive_read()
         # the rows are made again after this call: not while their box sends it
         again = lambda: self.show_homing(self.win.session.slave(self.position))  # noqa: E731
         try:
@@ -4533,10 +4559,6 @@ class SwitchCard(Card):
             self.lamps[kind] = box
         lamps.addStretch(1)
         self.add(lamps)
-        self.input_row = QHBoxLayout()
-        self.input_boxes = {}
-        self.input_row.addStretch(1)
-        self.add(self.input_row)
         self.inputs = label("", "hint", wrap=True)
         self.add(self.inputs)
         self.needs = label("", "hint", wrap=True)
@@ -4558,17 +4580,10 @@ class SwitchCard(Card):
         self.add(self.missing)
 
     def show_drive(self, slave):
-        if slave is not self.slave:
-            # another drive: its inputs have other names
-            for box in self.input_boxes.values():
-                self.input_row.removeWidget(box)
-                box.deleteLater()
-            self.input_boxes = {}
         self.slave = slave
         pin = switches.input_pin(slave)
         has = pin is not None
-        for w in ([self.inputs, self.step, self.result] + list(self.lamps.values()) + list(self.buttons.values())
-                  + list(self.input_boxes.values())):
+        for w in [self.inputs, self.step, self.result] + list(self.lamps.values()) + list(self.buttons.values()):
             w.setVisible(has)
         self.missing.setVisible(not has)
         self.missing.setText("" if has else
@@ -4590,26 +4605,10 @@ class SwitchCard(Card):
             restyle(box)
 
     def show_inputs(self, value):
-        """A box per physical input: those the quirk file names, else bits 16
-        to 23; an input of another bit that is on gets its box too."""
-        names = switches.input_names(self.slave)
-        bits = sorted(set(names or range(16, 24)) | {b for b in range(16, 32) if value >> b & 1})
-        if list(self.input_boxes) != bits:
-            for box in self.input_boxes.values():
-                self.input_row.removeWidget(box)
-                box.deleteLater()
-            self.input_boxes = {}
-            for i, b in enumerate(bits):
-                box = QLabel(names.get(b, "bit %d" % b))
-                box.setProperty("box", "off")
-                box.setAlignment(Qt.AlignCenter)
-                box.setToolTip("0x60FD bit %d" % b)
-                self.input_row.insertWidget(i, box)
-                self.input_boxes[b] = box
-        for b, box in self.input_boxes.items():
-            self._light(box, value >> b & 1)
-        self.inputs.setText("The drive's inputs (0x60FD bits 16 and up)%s." % (
-            "" if names else ": the drive's manual says which input each bit is"))
+        """Which of the drive's inputs are on, as a line (the boxes above are
+        what the drive makes of them)."""
+        on = switches.state(value, self.slave)["inputs"]
+        self.inputs.setText("Inputs on: %s" % (", ".join(on) or "none"))
 
     def start(self, kind):
         # the time starts with the first reading (step_test)

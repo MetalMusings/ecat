@@ -1140,10 +1140,10 @@ For a drive with `0x60FD` (Digital inputs) in its process data, the
 *Switches* card shows, live during the I/O test, what the drive sees of its
 switches, as a box each that is grey when off and green when on: the home
 switch, the negative and the positive limit switch (`0x60FD` bits 2, 0 and
-1, the same on every CiA 402 drive), and a row of the drive's inputs (bits
-16 and up; named, such as IN5, where the drive's quirk file names them,
-else bits 16 to 23 and any other that is on). On the ECT60, IN1 and IN2 are
-the encoder's A and B, and are on or off as the motor stands. It says which switches the homing method chosen
+1, the same on every CiA 402 drive), and, as a line, which of the drive's
+inputs are on (bits 16 and up; named, such as IN5, where the drive's quirk
+file names them). On the ECT60, IN1 and IN2 are the encoder's A and B, and
+are on or off as the motor stands. It says which switches the homing method chosen
 needs. Nothing moves: the drive is not enabled.
 
 *Test the home switch* (and the limit switches) goes in two steps: leave
@@ -1175,7 +1175,13 @@ factory's. A change is written as settings, only for the inputs that
 change, and the input that had the function before loses it (the status
 line says so: "IN3 was the negative limit switch; it is the home switch
 now"). Where a polarity is a bit of an object whose other bits are not
-known (the EC1), the drive is read first, so the bus must be read. For other
+known (the EC1), the drive is read first, so the bus must be read. With
+the bus read, a row also says when the drive has another choice now than
+the configuration gives: a test writes the configuration's settings into
+the drive, also a choice that was not saved, and the drive keeps it until
+it is switched off (or another tool set it). *Write ... as settings* then
+writes the configuration's choice, so that the drive gets it at every
+start. For other
 drives the card says how a drive is told which input is which, and *Look
 for the drive's input settings* searches the drive's objects for names that
 set up inputs (input or DI functions, polarity, logic), with their values when the
@@ -2756,6 +2762,9 @@ with the Response card at 100 and 1000 counts/mm, and in LinuxCNC 2.10),
 not yet on a real drive with these objects (the ECT60 has neither).
 
 #### Homing by the drive
+
+To move a joint from LinuxCNC's own homing to the drive's, step by step,
+see [From LinuxCNC's homing to the drive's](#from-linuxcncs-homing-to-the-drives).
 
 With *Homing: Homing by the drive's own method* ticked (and the mode
 objects `0x6060` and `0x6061` in the process data), the drive can home by its own method (CiA 402 mode 6), like
