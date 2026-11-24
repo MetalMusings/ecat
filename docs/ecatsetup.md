@@ -2984,16 +2984,30 @@ configuration):
    `HOME_SEQUENCE` stays. Watch the key names: X's section had `USE_INDEX`,
    which LinuxCNC does not read. The home switch's net (`joint.0.home-sw-in`)
    can stay; motion does not use it without a search.
-6. **Guard the move in HAL.** Motion does not see the axis while the drive
-   homes ([What motion sees while the drive homes](#what-motion-sees-while-the-drive-homes)).
-   In one of your own HAL files (X: `custom.hal`):
+6. **Guard the move in HAL (optional, recommended for a method that moves
+   the axis).** Motion does not see the axis while the drive homes
+   ([What motion sees while the drive homes](#what-motion-sees-while-the-drive-homes)):
+   its following-error check and soft limits do not apply, so a homing that
+   goes wrong (a switch not wired, a method that runs the wrong way) is
+   stopped only by the drive's own protection, the time limit or the
+   emergency stop. Two parameters help, in one of your own HAL files
+   (X: `custom.hal`):
 
    ```
    setp X-drive.home-max-travel 720       # axis length (693 mm) and a margin
    setp X-drive.home-timeout-ms 120000    # the whole axis at the homing speed, and more
    ```
 
-   Then look at the *HAL check* card on the *HAL & LinuxCNC* page (or run
+   - `home-max-travel` (0, off, by default) shuts the drive down when it has
+     covered more than this while homing. Set it a little above the axis
+     length.
+   - `home-timeout-ms` is 60000 (60 s) by default. Raise it only when a
+     homing can take longer: the whole axis at the homing speed, and slower
+     near the end (X: 693 mm at 30 mm/s, slower near the torque limit, is
+     close to a minute).
+
+   A method that does not move the axis (35) needs neither. With them set,
+   look at the *HAL check* card on the *HAL & LinuxCNC* page (or run
    `ecatsetup --check-hal`): the HAL files must match the configuration.
 7. **Find `HOME_OFFSET`.** It is the machine coordinate where the drive's
    position is 0 after homing: for torque homing, the end stop. To keep
