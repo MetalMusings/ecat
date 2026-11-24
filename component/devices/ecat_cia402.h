@@ -38,6 +38,15 @@
 #define ECAT_MP_CIA402_FF_VELOCITY 0x4024
 #define ECAT_MP_CIA402_FF_TORQUE 0x4025
 #define ECAT_MP_CIA402_FF_TORQUE_MAX 0x4026
+/// modParam id for cia402.home-enable-again (value 1): after homing, the
+/// drive is taken down to "Switched on" and enabled again before it follows
+/// pos-cmd. For a drive that ignores its target after (some kinds of)
+/// homing until it is enabled again (an ECT60 after torque homing).
+#define ECAT_MP_CIA402_HOME_ENABLE_AGAIN 0x4027
+/// modParam id for cia402.home-speed (value: u32, counts/s): the fastest
+/// the drive moves while homing. A larger step of its position in one
+/// cycle is the drive setting its position, not travel (home-travel).
+#define ECAT_MP_CIA402_HOME_SPEED 0x4028
 /// The torque offset's limit without cia402.feedforward.torque-max, %.
 #define ECAT_CIA402_FF_TORQUE_MAX_DEFAULT 30.0
 #define ECAT_CIA402_AXIS_OFFSET 0x800

@@ -59,6 +59,62 @@ class TestHoming(unittest.TestCase):
         self.assertIn("Torque homing", homing.method(36, ECT).text)
         self.assertIn("Manufacturer", homing.method(36, OTHER).text)
 
+    def test_enable_again_from_the_quirk_file(self):
+        # the ECT60 follows its target after torque homing only once enabled again
+        self.assertTrue(homing.enable_again(36, ECT) and homing.enable_again(37, ECT))
+        self.assertFalse(homing.enable_again(21, ECT) or homing.enable_again(35, ECT))
+        self.assertFalse(homing.enable_again(36, OTHER))
+        with self.assertRaisesRegex(quirks.QuirkError, "enable-again"):
+            quirks._homing({"enable-agian": [36]})
+
+    def test_apply_tells_the_profile(self):
+        s = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"]})
+        homing.apply(s, 0, {"method": 36, "fast": 3000, "slow": 1000})
+        self.assertEqual((s["cia402"]["home-enable-again"], s["cia402"]["home-speed"]), (True, 3000))
+        homing.apply(s, 0, {"method": 21, "fast": 2000, "slow": 4000})
+        self.assertNotIn("home-enable-again", s["cia402"])
+        self.assertEqual(s["cia402"]["home-speed"], 4000)
+        # the user's word for the drive wins over its quirk file
+        homing.apply(s, 0, {"method": 21, "fast": 2000, "enable-again": True})
+        self.assertTrue(s["cia402"]["home-enable-again"])
+        homing.apply(s, 0, {"method": 35})
+        self.assertEqual(s["cia402"]["home-speed"], 1)       # it does not move
+        homing.apply(s, 0, None)
+        self.assertEqual(s["cia402"], {"mode": "csp", "modes": ["hm"]})
+        # several axes: either needs it, the faster one counts
+        two = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"], "axes": ["a", "b"]})
+        homing.apply(two, 0, {"method": 21, "fast": 1000})
+        homing.apply(two, 1, {"method": 36, "fast": 5000})
+        self.assertEqual((two["cia402"]["home-enable-again"], two["cia402"]["home-speed"]), (True, 5000))
+
+    def test_enable_again_from_the_quirk_file(self):
+        # the ECT60 follows its target after torque homing only once enabled again
+        self.assertTrue(homing.enable_again(36, ECT) and homing.enable_again(37, ECT))
+        self.assertFalse(homing.enable_again(21, ECT) or homing.enable_again(35, ECT))
+        self.assertFalse(homing.enable_again(36, OTHER))
+        with self.assertRaisesRegex(quirks.QuirkError, "enable-again"):
+            quirks._homing({"enable-agian": [36]})
+
+    def test_apply_tells_the_profile(self):
+        s = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"]})
+        homing.apply(s, 0, {"method": 36, "fast": 3000, "slow": 1000})
+        self.assertEqual((s["cia402"]["home-enable-again"], s["cia402"]["home-speed"]), (True, 3000))
+        homing.apply(s, 0, {"method": 21, "fast": 2000, "slow": 4000})
+        self.assertNotIn("home-enable-again", s["cia402"])
+        self.assertEqual(s["cia402"]["home-speed"], 4000)
+        # the user's word for the drive wins over its quirk file
+        homing.apply(s, 0, {"method": 21, "fast": 2000, "enable-again": True})
+        self.assertTrue(s["cia402"]["home-enable-again"])
+        homing.apply(s, 0, {"method": 35})
+        self.assertEqual(s["cia402"]["home-speed"], 1)       # it does not move
+        homing.apply(s, 0, None)
+        self.assertEqual(s["cia402"], {"mode": "csp", "modes": ["hm"]})
+        # several axes: either needs it, the faster one counts
+        two = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"], "axes": ["a", "b"]})
+        homing.apply(two, 0, {"method": 21, "fast": 1000})
+        homing.apply(two, 1, {"method": 36, "fast": 5000})
+        self.assertEqual((two["cia402"]["home-enable-again"], two["cia402"]["home-speed"]), (True, 5000))
+
     def test_plan(self):
         p = homing.plan(OTHER, 17, {"fast": 3000, "slow": 1000, "accel": 5000, "offset": 0})
         self.assertEqual([(s["object"], s["value"]) for s in p],

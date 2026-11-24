@@ -32,6 +32,7 @@ Safety, in layers:
 
 import json
 import os
+import time
 from dataclasses import asdict, dataclass
 
 from . import config, homing, testmode, tool
@@ -71,6 +72,9 @@ def testable(slave):
 # Homing methods (0x6098) that leave the axis where it is; every other method
 # drives it to a switch, a stop or an index pulse.
 HOMING_STAYS = (35,)
+
+# machine units the target moves after a homing, to see that the drive follows
+FOLLOW_STEP = 0.5
 
 
 def homing_text(method):
@@ -251,6 +255,7 @@ class DriveTest:
         self.home_moves_ok = False  # the user accepts a homing that moves the axis
         self.target = None
         self.pending = None     # ("move", target), ("run", velocity) or ("home",)
+        self.check = None       # after a homing: does the drive follow? (follow_step)
         self.prepared = False
 
     @property
@@ -374,6 +379,7 @@ class DriveTest:
         else:
             self.pending = None
             self.homing = False
+            self.check = None
             if self.mode == "pv":
                 values["%s.velocity-cmd" % self.name] = "0"
             if self.mode == "pp":
@@ -468,6 +474,68 @@ class DriveTest:
         if result:
             self.homing = False
         return result
+
+    def start_follow_check(self):
+        """After a homing in CSP, before the drive is disabled: does it
+        follow its target? Some drives ignore it after (some kinds of)
+        homing until they are enabled again (an ECT60 after torque homing).
+        The test's travel moves with the new coordinates (the same place),
+        the limit3 is brought to where the drive stands (the profile holds
+        the drive until its command is there, so this does not move it),
+        then the target is moved FOLLOW_STEP one way and, if the drive did
+        not get there (it may stand against a stop), the other way.
+        follow_step() gives the answer. False when there is nothing to
+        check (not CSP)."""
+        if self.mode != "csp" or not self.limit3:
+            return False
+        s = self.settings
+        travel = abs(s["travel"])
+        pos = float(self.pin("pos-fb"))
+        self.start = self.target = pos
+        huge = repr(1e12)
+        self.run.setp_many({"%s.maxv" % self.limit3: huge, "%s.maxa" % self.limit3: huge,
+                            "%s.min" % self.limit3: repr(pos - travel),
+                            "%s.max" % self.limit3: repr(pos + travel),
+                            "%s.in1" % self.sel: repr(pos)})
+        self.check = {"stage": "align", "t": time.monotonic(), "pos": pos,
+                      "step": min(FOLLOW_STEP, travel / 4) or FOLLOW_STEP}
+        return True
+
+    def follow_step(self):
+        """Called while the check runs: None until it is done, then
+        "follows" or "does not follow"."""
+        c = self.check
+        if c is None:
+            return None
+        s = self.settings
+        now = time.monotonic()
+        if c["stage"] == "align":
+            out = self.run.pins("%s.out" % self.limit3).get("%s.out" % self.limit3)
+            there = out is not None and abs(float(out.value) - c["pos"]) <= c["step"] * 0.01
+            if not there and now - c["t"] < 0.5:
+                return None
+            self.run.setp_many({"%s.maxv" % self.limit3: repr(float(abs(s["max-velocity"]))),
+                                "%s.maxa" % self.limit3: repr(float(abs(s["max-acceleration"])))})
+            c.update(stage="+", t=now, goal=c["pos"] + c["step"])
+            self.target = c["goal"]
+            self.run.setp_many({"%s.in1" % self.sel: repr(c["goal"])})
+            return None
+        fb = float(self.pin("pos-fb"))
+        if abs(fb - c["goal"]) <= c["step"] * 0.25:
+            self.check = None
+            return "follows"
+        v, a = abs(s["max-velocity"]) or 1.0, abs(s["max-acceleration"]) or 1.0
+        if now - c["t"] < 1.0 + c["step"] / v + 2 * v / a:
+            return None
+        if c["stage"] == "+":
+            c.update(stage="-", t=now, goal=c["pos"] - c["step"])
+            self.target = c["goal"]
+            self.run.setp_many({"%s.in1" % self.sel: repr(c["goal"])})
+            return None
+        self.check = None
+        self.target = fb
+        self.run.setp_many({"%s.in1" % self.sel: repr(fb)})
+        return "does not follow"
 
     def fault_reset(self, on):
         self.run.setp_many({"%s.fault-reset" % self.name: "TRUE" if on else "FALSE"})

@@ -204,6 +204,7 @@ enum {
   HS_TO_HM,    // 0x6060 = 6 written, waiting for 0x6061 to follow
   HS_HOMING,   // started (control word bit 4), waiting for the result
   HS_BACK,     // back to the cyclic mode, waiting for 0x6061 to follow
+  HS_AGAIN,    // home-enable-again: down to "Switched on", then enabled again
 };
 
 #define MODE_CHANGE_NS 1000000000LL  // a mode change must be done within this
@@ -330,6 +331,9 @@ typedef struct {
   int hs_index;         // started by index-enable
   int hs_cycles;        // cycles in HS_STOP
   int32_t hs_last;      // the drive's position last cycle, counts (home-travel)
+  int enable_again;     // cia402.home-enable-again
+  int again_down;       // HS_AGAIN: still going down to "Switched on"
+  double home_speed;    // cia402.home-speed, counts/s; 0: not known
   int index_old, home_old;
   long long stop_ns;    // PV, PP: time halting before switching off
   int stop_cycles;      // PV, PP: cycles halting
@@ -619,7 +623,8 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   lcec_slave_modparam_t *p;
   cia402_dev_t *dev;
   const char *names[ECAT_CIA402_MAX_AXES];
-  int err, a, n = 0, mode = MODE_CSP, zero = 0;
+  int err, a, n = 0, mode = MODE_CSP, zero = 0, again = 0;
+  double home_speed = 0.0;
   unsigned int others = 0;
   double ff_v = 0.0, ff_t = 0.0, ff_tmax = ECAT_CIA402_FF_TORQUE_MAX_DEFAULT;
 
@@ -629,6 +634,8 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
     if (p->id == ECAT_MP_CIA402_MODES) others = p->value.u32;
     if (p->id == ECAT_MP_CIA402_MODE) mode = p->value.u32;
     if (p->id == ECAT_MP_CIA402_ZERO_AT_START) zero = p->value.u32 != 0;
+    if (p->id == ECAT_MP_CIA402_HOME_ENABLE_AGAIN) again = p->value.u32 != 0;
+    if (p->id == ECAT_MP_CIA402_HOME_SPEED) home_speed = p->value.u32;
     if (p->id == ECAT_MP_CIA402_FF_VELOCITY) ff_v = p->value.flt;
     if (p->id == ECAT_MP_CIA402_FF_TORQUE) ff_t = p->value.flt;
     if (p->id == ECAT_MP_CIA402_FF_TORQUE_MAX) ff_tmax = p->value.flt;
@@ -650,6 +657,8 @@ int ecat_cia402_init(int comp_id, lcec_slave_t *slave) {
   for (a = 0; a < n; a++) {
     cia402_t *d = LCEC_HAL_ALLOCATE(cia402_t);
     d->zero_at_start = zero;
+    d->enable_again = again;
+    d->home_speed = home_speed;
     d->axis = a;
     d->ff_v0 = ff_v;
     d->ff_t0 = ff_t;
@@ -781,18 +790,33 @@ static void block(cia402_t *d, int why) {
 }
 
 /// Homing: the distance the drive covers (home-travel), and the limit on
-/// it (home-max-travel). Both ways count. A step of more than half the
-/// limit in one cycle is the drive setting its position at home, not a
-/// move, and is left out. Returns 1 when the limit is passed.
-static int homing_travel(cia402_t *d) {
+/// it (home-max-travel). Both ways count. A step the drive cannot have
+/// moved in one cycle is it setting its position at home, not a move, and
+/// is left out: with home-speed, a step of more than twice what that speed
+/// covers in a cycle (and 2 counts); without it, a step of more than half
+/// the limit. Returns 1 when the limit is passed.
+static int homing_travel(cia402_t *d, long period) {
   int32_t now = hal_get_sint(d->drv_actual_position);
   double max = d->home_max_travel ? hal_get_real(d->home_max_travel) : 0;
-  double step = fabs((double)(int32_t)((uint32_t)now - (uint32_t)d->hs_last)) / fabs(scale_or_one(hal_get_real(d->pos_scale)));
+  double counts = fabs((double)(int32_t)((uint32_t)now - (uint32_t)d->hs_last));
+  double step = counts / fabs(scale_or_one(hal_get_real(d->pos_scale)));
 
   d->hs_last = now;
-  if (max > 0 && step > max / 2) return 0;
+  if (d->home_speed > 0 ? counts > 2.0 * d->home_speed * (double)period * 1e-9 + 2.0 : (max > 0 && step > max / 2)) return 0;
   hal_set_real(d->home_travel, hal_get_real(d->home_travel) + step);
   return max > 0 && hal_get_real(d->home_travel) > max;
+}
+
+/// Homing has ended, in the mode it began in: index-enable is cleared and
+/// the drive follows its command again, from its new position.
+static void homing_done(cia402_t *d) {
+  d->hs = HS_IDLE;
+  if (d->hs_index) hal_set_bool(d->index_enable, 0);
+  d->index_old = 0;
+  // the drive's position is the homed one now
+  d->zero = 0;
+  // the position has changed: CSP must not jump to an old command
+  if (d->active == MODE_CSP) d->sync = 1;
 }
 
 /// Homing: start, follow and end it; called while the drive may run.
@@ -805,14 +829,14 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
 
   d->index_old = index;
   d->home_old = home;
-  if (!run || d->state != ST_OPERATION_ENABLED) {
+  if (!run || (d->state != ST_OPERATION_ENABLED && !(d->hs == HS_AGAIN && d->state == ST_SWITCHED_ON))) {
     // disabled or shut down: homing is abandoned, the mode goes back
     d->hs = HS_IDLE;
     hal_set_bool(d->stat_homing, 0);
     return 0;
   }
   d->hs_ns += period;
-  if ((d->hs == HS_TO_HM || d->hs == HS_HOMING || d->hs == HS_BACK) && homing_travel(d)) {
+  if ((d->hs == HS_TO_HM || d->hs == HS_HOMING || d->hs == HS_BACK) && homing_travel(d, period)) {
     hal_set_bool(d->home_error, 1);
     block(d, WHY_HOMING_TRAVEL);
   }
@@ -885,15 +909,26 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       break;
     case HS_BACK:
       if (hal_get_sint(d->opmode_display) == d->active) {
-        d->hs = HS_IDLE;
-        if (d->hs_index) hal_set_bool(d->index_enable, 0);
-        d->index_old = 0;
-        // the drive's position is the homed one now
-        d->zero = 0;
-        // the position has changed: CSP must not jump to an old command
-        if (d->active == MODE_CSP) d->sync = 1;
+        if (d->enable_again) {
+          // the drive is to be enabled again before it follows: down to
+          // "Switched on" (axis_write's control word), then up
+          d->hs = HS_AGAIN;
+          d->hs_ns = 0;
+          d->again_down = 1;
+        } else {
+          homing_done(d);
+        }
       } else if (d->hs_ns > MODE_CHANGE_NS) {
         block(d, WHY_WRONG_MODE);
+      }
+      break;
+    case HS_AGAIN:
+      if (d->again_down && d->state == ST_SWITCHED_ON) {
+        d->again_down = 0;  // the control word enables it again
+      } else if (!d->again_down && d->state == ST_OPERATION_ENABLED) {
+        homing_done(d);
+      } else if (d->hs_ns > MODE_CHANGE_NS) {
+        block(d, WHY_ENABLE_TIMEOUT);
       }
       break;
   }
@@ -1110,9 +1145,9 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
       block(d, WHY_BAD_COMMAND);
     } else if (faulted && d->reset_ns <= 0) {
       block(d, WHY_DRIVE_FAULT);
-    } else if (d->was_enabled && d->state != ST_OPERATION_ENABLED) {
+    } else if (d->was_enabled && d->state != ST_OPERATION_ENABLED && d->hs != HS_AGAIN) {
       block(d, faulted ? WHY_DRIVE_FAULT : WHY_LEFT_ENABLED);
-    } else if (d->state != ST_OPERATION_ENABLED) {
+    } else if (d->state != ST_OPERATION_ENABLED && d->hs != HS_AGAIN) {
       d->enable_ns += period;
       if (hal_get_uint(d->enable_timeout_ms) != 0 && d->enable_ns > (long long)hal_get_uint(d->enable_timeout_ms) * 1000000LL) {
         block(d, mode_ok ? WHY_ENABLE_TIMEOUT : WHY_WRONG_MODE);
@@ -1171,7 +1206,9 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
       cw = (run && mode_ok) ? CW_ENABLE_OPERATION : run ? CW_SWITCH_ON : CW_SHUTDOWN;
       break;
     case ST_OPERATION_ENABLED:
-      cw = run ? (CW_ENABLE_OPERATION | hbits | pbits | mbits) : halt ? (CW_ENABLE_OPERATION | CW_HALT) : CW_SHUTDOWN;
+      // home-enable-again: "Disable operation", down to "Switched on"
+      cw = (run && d->hs == HS_AGAIN && d->again_down) ? CW_SWITCH_ON
+           : run ? (CW_ENABLE_OPERATION | hbits | pbits | mbits) : halt ? (CW_ENABLE_OPERATION | CW_HALT) : CW_SHUTDOWN;
       break;
     default:
       cw = CW_DISABLE_VOLTAGE;

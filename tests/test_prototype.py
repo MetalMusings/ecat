@@ -379,6 +379,18 @@ class TestPropose(unittest.TestCase):
                             for e in config.check(drive({"mode": "csp", "modes": ["pp"]}))))
         self.assertTrue(any("must be a list" in e for e in config.check(drive({"mode": "csp", "modes": "hm"}))))
         self.assertEqual(config.check(drive({"mode": "csp", "zero-at-start": True})), [])
+        self.assertEqual(config.check(drive({"mode": "csp", "home-enable-again": True, "home-speed": 3000})), [])
+        self.assertTrue(any("home-enable-again must be true or false" in e
+                            for e in config.check(drive({"mode": "csp", "home-enable-again": 1}))))
+        for bad in (0, -1, 2.5, True, "fast"):
+            self.assertTrue(any("home-speed is the fastest homing speed" in e
+                                for e in config.check(drive({"mode": "csp", "home-speed": bad}))), bad)
+        self.assertEqual(config.check(drive({"mode": "csp", "home-enable-again": True, "home-speed": 3000})), [])
+        self.assertTrue(any("home-enable-again must be true or false" in e
+                            for e in config.check(drive({"mode": "csp", "home-enable-again": 1}))))
+        for bad in (0, -1, 2.5, True, "fast"):
+            self.assertTrue(any("home-speed is the fastest homing speed" in e
+                                for e in config.check(drive({"mode": "csp", "home-speed": bad}))), bad)
         self.assertTrue(any("zero-at-start must be true or false" in e
                             for e in config.check(drive({"mode": "csp", "zero-at-start": "yes"}))))
         # PV needs the velocity objects, not the position ones

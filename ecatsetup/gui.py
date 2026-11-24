@@ -1412,6 +1412,15 @@ class SlaveView(QWidget):
         self.home_method = QuietCombo()
         self.home_method.activated.connect(self.homing_edited)
         hform.addRow("Method", self.home_method)
+        self.home_again = QCheckBox("Enable the drive again after homing")
+        self.home_again.setToolTip(
+            "Some drives ignore their target after homing (by some methods) until they are "
+            "enabled again, and go on pressing where homing ended: then the profile takes the "
+            "drive down to \"Switched on\" and up again before it follows. Set from the drive's "
+            "quirk file when a method is chosen; the Move card's homing test tells whether a "
+            "drive needs it.")
+        self.home_again.toggled.connect(self.homing_edited)
+        hform.addRow("", self.home_again)
         self.home_text = label("", "hint", wrap=True)
         self.home_fields = {}
         for key, _i, _s, _t, text in homing.PARAMS:
@@ -2138,6 +2147,9 @@ class SlaveView(QWidget):
         self.home_method.setCurrentIndex(max(i, 0))
         for key, box in self.home_fields.items():
             box.setValue(int((chosen or {}).get(key, self.HOME_DEFAULTS[key]) or 0))
+        self.home_again.setChecked(bool(chosen) and bool(chosen.get(
+            "enable-again", homing.enable_again(chosen["method"], s))))
+        self.home_again.setVisible(bool(chosen))
         self.loading = False
         self.home_support = (nums, where)
         self.show_homing_text(s, chosen, nums, where)
@@ -2196,11 +2208,20 @@ class SlaveView(QWidget):
             return
         axis = self.home_axis_number()
         number = self.home_method.currentData()
+        before = homing.choice(s, axis)
+        if number != (before or {}).get("method"):
+            # another method: whether the drive needs enabling again after it
+            # comes from its quirk file (the box can be changed after)
+            self.loading = True
+            self.home_again.setChecked(number is not None and homing.enable_again(number, s))
+            self.loading = False
+        self.home_again.setVisible(number is not None)
         chosen = None
         if number is not None:
             chosen = {"method": number}
             for key in homing.parameters(number, s):
                 chosen[key] = self.home_fields[key].value()
+            chosen["enable-again"] = self.home_again.isChecked()
         homing.apply(s, axis, chosen)
         self.show_settings(s)
         self.show_homing_text(s, chosen, *self.home_support)
@@ -4060,14 +4081,27 @@ class MoveCard(Card):
             "Hold alone: enables the drive and homes it by its own method (0x6098); "
             "releasing stops the homing")
 
-    def home_finished(self, dt, result):
-        """A homing ended: the Home button says how it went, until the next one."""
+    def home_finished(self, dt, result, follows=None):
+        """A homing ended: the Home button says how it went, until the next
+        one. follows: whether the drive followed its target afterwards (None:
+        not checked)."""
         ok = result == "homed"
+        if ok and follows is False:
+            if self.test() is dt:
+                self.home_state("home-failed", "⚠ Homed, but the drive did not follow")
+            self.win.status(
+                "%s: homed, but afterwards the drive did not follow its target (moved %g both "
+                "ways): it may need enabling again after this homing method. Tick \"Enable the "
+                "drive again after homing\" on its page (Homing by the drive), save, and home "
+                "again." % (dt.name, drivetest.FOLLOW_STEP))
+            return
         if self.test() is dt:
             self.home_state("home-ok" if ok else "home-failed",
                             "✓ Homed: position is 0" if ok else "✕ Homing failed")
         self.win.status("%s: homing %s%s" % (dt.name, "done" if ok else "failed",
-                        "; the position is the homed one and the drive is disabled" if ok else
+                        ("; the drive follows its target, the position is the homed one and "
+                         "the drive is disabled" if follows else
+                         "; the position is the homed one and the drive is disabled") if ok else
                         " (the drive reported an error)"))
 
     def home_state(self, name, text):
@@ -8454,9 +8488,20 @@ class MainWindow(QMainWindow):
             if dt.homing:
                 try:
                     result = dt.home_result()
-                    if result:
+                    # homed in CSP: first see that the drive follows its target
+                    if result == "homed" and dt.start_follow_check():
+                        self.status("%s: homed; checking that the drive follows its target..." % dt.name)
+                    elif result:
                         dt.enable(False)
                         self.test_page.move.home_finished(dt, result)
+                except testmode.TestError as e:
+                    self.status(str(e))
+            elif getattr(dt, "check", None) is not None:
+                try:
+                    follows = dt.follow_step()
+                    if follows:
+                        dt.enable(False)
+                        self.test_page.move.home_finished(dt, "homed", follows == "follows")
                 except testmode.TestError as e:
                     self.status(str(e))
             if dt.pending is not None:

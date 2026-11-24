@@ -1248,6 +1248,32 @@ static void slave(ctx_t *c, buf_t *b, yaml_node_t *s) {
         if (keys[k].id == ECAT_MP_CIA402_FF_TORQUE) c->ff_torque = 1;
       }
     }
+    if (get_bool(c, get(c, s, "cia402"), "home-enable-again", 0)) {
+      if ((mp = append(b, sizeof(*mp))) == NULL) {
+        error(c, "out of memory");
+        return;
+      }
+      mp->confType = lcecConfTypeModParam;
+      mp->id = ECAT_MP_CIA402_HOME_ENABLE_AGAIN;
+      copy_str(mp->name, "cia402.home-enable-again");
+      mp->value.u32 = 1;
+      ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount++;
+    }
+    if (get(c, get(c, s, "cia402"), "home-speed") != NULL) {
+      long long v = get_int(c, get(c, s, "cia402"), "home-speed", 0);
+      if (v <= 0 || v > 0x7FFFFFFF) {
+        error(c, "cia402.home-speed: the fastest homing speed, counts/s, 1 or more");
+      } else if ((mp = append(b, sizeof(*mp))) == NULL) {
+        error(c, "out of memory");
+        return;
+      } else {
+        mp->confType = lcecConfTypeModParam;
+        mp->id = ECAT_MP_CIA402_HOME_SPEED;
+        copy_str(mp->name, "cia402.home-speed");
+        mp->value.u32 = (uint32_t)v;
+        ((LCEC_CONF_SLAVE_T *)(b->data + off))->modParamCount++;
+      }
+    }
     if (get_bool(c, get(c, s, "cia402"), "zero-at-start", 0)) {
       if ((mp = append(b, sizeof(*mp))) == NULL) {
         error(c, "out of memory");

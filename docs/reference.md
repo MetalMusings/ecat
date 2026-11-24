@@ -234,6 +234,8 @@ file each stopped the load with their own line.
 | `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01` and `0x607D:02`, and `0x607F:00` where the drive has it). |
 | `modules` | For a modular device: the module idents it detected (`0xF050`) when it was read, to notice a change ([modular devices](ecatsetup.md#modular-devices)). The component does not read it. |
 | `cia402.axes` | For `cia402`: a drive with several axes in one slave (such as a two-axis ECT60x2): a list of 1 to 4 names, the axes' pin prefixes. Axis n uses the CiA 402 objects at index + n × 0x800 (`0x6040`, `0x6840`, `0x7040`, `0x7840`); see [cia402](ecatsetup.md#several-axes). Without it, the drive has one axis named after the slave. |
+| `cia402.home-enable-again` | For `cia402` with `hm`: `true` takes the drive down to "Switched on" and enables it again after homing, before it follows its command, for a drive that ignores its target after homing until enabled again (the ECT60 after torque homing). Written by the homing card. Default `false`. |
+| `cia402.home-speed` | For `cia402` with `hm`: the fastest the drive moves while homing, counts/s (1 for a method that does not move). A larger step of the drive's position in one cycle is it setting its position, not travel (`home-travel`, `home-max-travel`). Written by the homing card; without it, a step of more than half of `home-max-travel` counts as such. |
 | `cia402.zero-at-start` | For `cia402`: `true` makes positions count from where the drive stands when the bus first reaches OP, for drives that keep their position from an earlier run (see [cia402](ecatsetup.md#zero-at-start)). Default `false`. |
 | `cia402.feedforward` | For `cia402` in CSP: `velocity` (the share of the command's velocity fed forward, 1.0 for all), `torque` (% of rated torque per machine unit/s² of acceleration), `torque-max` (the torque offset's limit, %, default 30); written to `0x60B1` and `0x60B2`, which must be `use: profile` in the outputs (see [cia402](ecatsetup.md#feedforward-in-csp)). |
 | `cia402.modes` | For `cia402`: other modes the drive may change to: `hm` for homing by the drive's own method, and `csp`, `csv`, `pv`, `pp` to choose with the `opmode-cmd` pin. It needs `0x6060` and `0x6061`, and each mode's objects, in the process data. |
@@ -576,7 +578,7 @@ Joints connect to an axis like to a drive (`linuxcnc.joints: [{joint: 0, slave: 
 
 #### Homing
 
-With `modes: [hm]` (and `0x6060` and `0x6061` as `use: profile` entries) the drive homes by its own method; the method, speeds, acceleration and home offset are its objects `0x6098`, `0x6099`, `0x609A` and `0x607C`, in `settings`. `homing:` keeps the window's choice (see [slaves](#slaves)).
+With `modes: [hm]` (and `0x6060` and `0x6061` as `use: profile` entries) the drive homes by its own method; the method, speeds, acceleration and home offset are its objects `0x6098`, `0x6099`, `0x609A` and `0x607C`, in `settings`. `homing:` keeps the window's choice (see [slaves](#slaves)), with `enable-again` the box *Enable the drive again after homing*; from it the homing card writes `cia402.home-enable-again` and `cia402.home-speed` (the profile reads those, not `homing:`).
 
 #### From lcec and the cia402 component
 

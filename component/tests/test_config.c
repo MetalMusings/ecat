@@ -855,6 +855,21 @@ static void test_cia402_zero_at_start(void) {
   CHECK_FAILS(CIA402("csp, zero-at-start: 1", CSP_OUT, CSP_IN), "zero-at-start: \"1\" is not true or false");
 }
 
+static void test_cia402_homing_options(void) {
+  CHECK_EQ(load(CIA402("csp, modes: [hm], home-enable-again: true, home-speed: 3000", CSP_OUT, CSP_IN)), 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 4);
+  CHECK_EQ(MODPARAM(2)->id, ECAT_MP_CIA402_HOME_ENABLE_AGAIN);
+  CHECK_EQ(MODPARAM(2)->value.u32, 1);
+  CHECK_EQ(MODPARAM(3)->id, ECAT_MP_CIA402_HOME_SPEED);
+  CHECK_EQ(MODPARAM(3)->value.u32, 3000);
+  // false or left out: no record
+  CHECK_EQ(load(CIA402("csp, modes: [hm], home-enable-again: false", CSP_OUT, CSP_IN)), 0);
+  CHECK_EQ(SLAVE(0)->modParamCount, 2);
+  CHECK_FAILS(CIA402("csp, home-enable-again: 1", CSP_OUT, CSP_IN), "home-enable-again: \"1\" is not true or false");
+  CHECK_FAILS(CIA402("csp, home-speed: 0", CSP_OUT, CSP_IN), "cia402.home-speed: the fastest homing speed");
+  CHECK_FAILS(CIA402("csp, home-speed: -5", CSP_OUT, CSP_IN), "cia402.home-speed: the fastest homing speed");
+}
+
 static void test_cia402_feedforward(void) {
 #define FF_OUT CSP_OUT P("0x60B1:00", 32, "DINT") P("0x60B2:00", 16, "INT")
   CHECK_EQ(load(CIA402("csp, feedforward: {velocity: 0.9, torque: 0.012, torque-max: 50}", FF_OUT, CSP_IN)), 0);
@@ -1137,7 +1152,7 @@ static void test_unused(void) {
   CHECK_FAILS("ecat: 1\nslaves:\n- position: 0\n  name: a\n  profile: generic\n  unused: true\n  eoe: {ip: 10.0.0.2/24}\n", "unused: true and eoe");
 }
 
-RUN_TESTS("config", test_cia402_feedforward, test_cia402_zero_at_start, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
+RUN_TESTS("config", test_cia402_feedforward, test_cia402_zero_at_start, test_cia402_homing_options, test_dc_auto_shift, test_io_slaves, test_sync_managers_in_order_of_first_use, test_sync_manager_for_outputs_and_inputs,
     test_hal_type_spellings, test_extend, test_raw, test_hal_types, test_entry_errors, test_split, test_invert, test_file_errors, test_slave_errors, test_dc, test_eoe, test_settings,
     test_cia402_csp, test_cia402_axes, test_cia402_csv, test_cia402_errors, test_cia402_pp, test_cia402_mode_setting, test_sync1, test_state_timeouts, test_init_cmds, test_cia402_modes, test_encoder, test_encoder_channels, test_encoder_errors,
     test_too_many_encoders, test_serial, test_serial_errors, test_unused, test_master_cpus)

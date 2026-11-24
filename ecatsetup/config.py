@@ -738,6 +738,13 @@ def check(cfg, series=None):
                     % (where, m, ", ".join(sorted(CIA402_OTHER_MODES))))
         if profile == "cia402" and not isinstance((s.get("cia402") or {}).get("zero-at-start", False), bool):
             err("%s: cia402 zero-at-start must be true or false" % where)
+        if profile == "cia402" and not isinstance((s.get("cia402") or {}).get("home-enable-again", False), bool):
+            err("%s: cia402 home-enable-again must be true or false" % where)
+        if profile == "cia402" and "home-speed" in (s.get("cia402") or {}):
+            v = s["cia402"]["home-speed"]
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 < v <= 0x7FFFFFFF:
+                err("%s: cia402 home-speed is the fastest homing speed in counts/s, a whole number of "
+                    "1 or more" % where)
         # several axes: axis n has the objects at index + n * 0x800
         n_axes = 1
         if profile == "cia402" and "axes" in (s.get("cia402") or {}):

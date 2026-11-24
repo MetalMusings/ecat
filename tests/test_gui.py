@@ -1118,8 +1118,24 @@ class TestWindow(WindowBase):
         page.home_method.setCurrentIndex(page.home_method.findData(36))
         page.homing_edited()
         self.assertIn("0x2030:01", [x["object"] for x in s["settings"]])
+        # the ECT60 follows its target after torque homing only when enabled
+        # again (its quirk file); the profile is told, and how fast it homes
+        self.assertTrue(page.home_again.isChecked() and not page.home_again.isHidden())
+        self.assertEqual((s["cia402"].get("home-enable-again"), s["cia402"].get("home-speed")),
+                         (True, 4000))
+        page.home_again.setChecked(False)                 # the user's word wins
+        self.assertNotIn("home-enable-again", s["cia402"])
+        self.assertFalse(s["homing"]["enable-again"])
+        page.show_homing(s)
+        self.assertFalse(page.home_again.isChecked())
+        page.home_method.setCurrentIndex(page.home_method.findData(35))
+        page.homing_edited()
+        self.assertFalse(page.home_again.isChecked())
+        self.assertEqual(s["cia402"].get("home-speed"), 1)   # does not move: any step is a set
         page.home_method.setCurrentIndex(0)
         page.homing_edited()
+        self.assertTrue(page.home_again.isHidden())
+        self.assertNotIn("home-speed", s["cia402"])
         self.assertNotIn("homing", s)
         self.assertNotIn("0x6098:00", [x["object"] for x in s.get("settings") or []])
 

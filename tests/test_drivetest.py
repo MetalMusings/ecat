@@ -388,6 +388,55 @@ class TestDriveTest(TestTestMode):
         dt.enable(False)
         self.assertFalse(dt.homing)
 
+    def test_follow_check_after_homing(self):
+        run = self.started()
+        self.drive.sdos[(0x6098, 0)] = 36
+        self.add_fake_pin("ecatjog0.out", "real", "OUT", "50")
+        clock = [100.0]
+        p = mock.patch.object(drivetest.time, "monotonic", lambda: clock[0])
+        p.start()
+        self.addCleanup(p.stop)
+        for follows in (True, False):
+            dt = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]}),
+                                     self.coe(), {"scale": 100.0})
+            dt.prepare()
+            dt.enable(True)
+            # homed: the drive's position is 0 now, far from the old travel
+            self.set_fake_pin("x.pos-fb", "0")
+            self.assertTrue(dt.start_follow_check())
+            log = self.setp_log()
+            # the travel moves with the new coordinates; the limit3 jumps to
+            # where the drive stands (the profile holds it until it is there)
+            for line in ("ecatjog0.min -20.0", "ecatjog0.max 20.0", "ecatsel0.in1 0.0",
+                         "ecatjog0.maxv 1000000000000.0"):
+                self.assertIn(line, log)
+            self.assertIsNone(dt.follow_step())      # the limit3 is not there yet
+            self.set_fake_pin("ecatjog0.out", "0")
+            self.assertIsNone(dt.follow_step())
+            log = self.setp_log()
+            self.assertEqual(log[-1], "ecatsel0.in1 0.5")
+            self.assertIn("ecatjog0.maxv 5.0", log[-3:])   # the test's limits again
+            if follows:
+                self.set_fake_pin("x.pos-fb", "0.49")
+                self.assertEqual(dt.follow_step(), "follows")
+                self.assertIsNone(dt.check)
+                continue
+            clock[0] += 0.5
+            self.assertIsNone(dt.follow_step())      # still waiting
+            clock[0] += 5
+            self.assertIsNone(dt.follow_step())      # the other way (a stop that way?)
+            self.assertEqual(self.setp_log()[-1], "ecatsel0.in1 -0.5")
+            clock[0] += 5
+            self.assertEqual(dt.follow_step(), "does not follow")
+            self.assertEqual(self.setp_log()[-1], "ecatsel0.in1 0.0")   # nothing pending
+            # releasing the button ends a check
+            dt.start_follow_check()
+            dt.enable(False)
+            self.assertIsNone(dt.check)
+        # not in CSP: nothing to check
+        dt.mode = "pp"
+        self.assertFalse(dt.start_follow_check())
+
     def test_home(self):
         run = self.started()
         self.drive.sdos[(0x6098, 0)] = 35

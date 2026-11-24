@@ -509,11 +509,29 @@ static void test_csv(void) {
 // A drive that homes: it follows 0x6060 one cycle later, homes for
 // hm.cycles cycles after a rising edge of control word bit 4 in mode 6,
 // and then has its position at hm.home.
+// With hm.states the drive also follows the control word between
+// "Switched on" and "Operation enabled" (hm.sw), a cycle later.
 static struct {
-  int cycles, left, active, done, error, stuck_mode, stale;
+  int cycles, left, active, done, error, stuck_mode, stale, states;
   int32_t home;
-  unsigned cw_old;
+  unsigned cw_old, sw;
 } hm;
+
+// A homing drive with modparams of its own besides the modes:
+// home-enable-again (again), home-speed (speed, counts/s; 0 for none).
+static lcec_slave_t *homing_drive_with(int again, unsigned speed) {
+  lcec_slave_modparam_t mp[4] = {{.id = ECAT_MP_CIA402_MODES}, {.id = -1}, {.id = -1}, {.id = -1}};
+  int n = 1;
+  mp[0].value.u32 = 1u << 6;
+  if (again) mp[n++] = (lcec_slave_modparam_t){.id = ECAT_MP_CIA402_HOME_ENABLE_AGAIN, .value.u32 = 1};
+  if (speed) mp[n++] = (lcec_slave_modparam_t){.id = ECAT_MP_CIA402_HOME_SPEED, .value.u32 = speed};
+  S = fake_slave("x", csp_entries, mp);
+  CHECK_EQ(ecat_cia402_init(0, S), 0);
+  fake_set(S, 0x6061, 0, 8);
+  memset(&hm, 0, sizeof(hm));
+  hm.cycles = 30;
+  return S;
+}
 
 static lcec_slave_t *homing_drive(void) {
   lcec_slave_modparam_t mp[2] = {{.id = ECAT_MP_CIA402_MODES}, {.id = -1}};
@@ -529,8 +547,10 @@ static lcec_slave_t *homing_drive(void) {
 /// One cycle of an enabled drive; the control word.
 static unsigned hm_cycle(void) {
   int display = (int8_t)fake_get(S, 0x6061, 0);
-  unsigned sw = SW_ENABLED, cw;
-  if (display == 6) {
+  unsigned base = hm.states && hm.sw ? hm.sw : SW_ENABLED, sw = base, cw;
+  if (base != SW_ENABLED) {
+    // "Switched on": no mode bits
+  } else if (display == 6) {
     if (hm.error) sw |= 0x2000;
     else if (hm.active) sw |= 0;
     else if (hm.done || hm.stale) sw |= 0x1400;  // attained, reached
@@ -552,6 +572,10 @@ static unsigned hm_cycle(void) {
     fake_set(S, 0x6064, 0, (uint32_t)hm.home);
   }
   hm.cw_old = cw;
+  if (hm.states) {
+    if (base == SW_ENABLED && (cw & 0x0F) == 0x07) hm.sw = SW_SWITCHED_ON;
+    else if (base == SW_SWITCHED_ON && (cw & 0x0F) == 0x0F) hm.sw = SW_ENABLED;
+  }
   return cw;
 }
 
@@ -822,6 +846,102 @@ static void test_homing_not_while_disabled(void) {
   for (i = 0; i < 5; i++) hm_cycle();
   CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
   CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+}
+
+// home-enable-again: after homing the drive goes down to "Switched on" and
+// is enabled again before index-enable is cleared and it follows pos-cmd
+// (an ECT60 ignores its target after torque homing until enabled again).
+static void test_homing_enable_again(void) {
+  int i, down = 0, up = 0;
+  homing_drive_with(1, 0);
+  hm.states = 1;
+  hm.home = 0;
+  PIN_FLOAT("x.pos-scale") = 100;
+  fake_set(S, 0x6064, 0, 12345);
+  PIN_FLOAT("x.pos-cmd") = 123.45;
+  hm_enable();
+  PIN_BIT("x.index-enable") = 1;
+  for (i = 0; i < 80 && PIN_BIT("x.index-enable"); i++) {
+    unsigned cw;
+    PIN_FLOAT("x.pos-cmd") += 0.01;
+    cw = hm_cycle();
+    if ((cw & 0x0F) == 0x07) {
+      down++;
+      CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+      CHECK_EQ(PIN_BIT("x.index-enable"), 1);  // motion still waits
+      CHECK_NEAR(PIN_FLOAT("x.pos-fb"), PIN_FLOAT("x.pos-cmd"), 0);
+      CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+    }
+    if (down && hm.sw == SW_SWITCHED_ON) up = 1;
+    // never a target from motion while not done: the drive's position,
+    // before or after it set it at home
+    if (PIN_BIT("x.index-enable")) {
+      int32_t t = (int32_t)fake_get(S, 0x607A, 0);
+      CHECK(t == 12345 || t == 0);
+    }
+  }
+  CHECK(down >= 1);
+  CHECK(up);
+  CHECK_EQ(PIN_BIT("x.index-enable"), 0);
+  CHECK_EQ(hm.sw, SW_ENABLED);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 0);
+  // then it follows motion from its new position
+  PIN_FLOAT("x.pos-cmd") = 0.02;
+  hm_cycle();
+  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0, 0);
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 2);
+  PIN_FLOAT("x.pos-cmd") = 0.05;
+  hm_cycle();
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 5);
+  CHECK_EQ(fake_get(S, 0x6040, 0) & 0x0F, 0x0F);
+}
+
+// without the setting the drive is never taken down after homing
+static void test_homing_without_enable_again(void) {
+  int i;
+  homing_drive_with(0, 0);
+  hm.states = 1;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 80; i++) CHECK(((hm_cycle() & 0x0F) != 0x07));
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+}
+
+// a drive that does not go down to "Switched on" is shut down after 1 s
+static void test_homing_enable_again_timeout(void) {
+  int i;
+  homing_drive_with(1, 0);  // hm.states 0: it stays "Operation enabled"
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 60; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 1);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  for (i = 0; i < 1000; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 3);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+}
+
+// home-speed: a step faster than the homing speed is the drive setting its
+// position, also when it is less than half of home-max-travel
+static void test_homing_speed_tells_a_set_position(void) {
+  int i, with;
+  for (with = 0; with < 2; with++) {
+    homing_drive_with(0, with ? 5000 : 0);  // 5 counts a cycle; 12 is the limit
+    hm.home = 1000000 + 30 * 5 + 300;        // a jump of 300 counts at the end
+    PIN_FLOAT("x.pos-scale") = 10;
+    fake_set(S, 0x6064, 0, 1000000);
+    hm_enable();
+    PIN_FLOAT("x.home-max-travel") = 1000;   // half: 500 units, 5000 counts
+    PIN_BIT("x.home") = 1;
+    for (i = 0; i < 60 && !PIN_BIT("x.stat-homed"); i++) hm_cycle_moving();
+    CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+    // 30 steps of 5 counts: 15 units; the 300-count jump is 30 more without it
+    CHECK_NEAR(PIN_FLOAT("x.home-travel"), with ? 15 : 45, 0.6);
+  }
 }
 
 static void test_homing_with_stale_result_bits(void) {
@@ -2459,7 +2579,8 @@ RUN_TESTS("cia402", test_ff_pins_only_with_the_objects, test_ff_velocity, test_f
     test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_travel_and_actual_position,
     test_homing_travel_limit, test_homing_travel_both_ways, test_homing_error, test_homing_timeout,
     test_homing_abandoned_by_motion, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
-    test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_pv_pins, test_pv_needs_target_velocity,
+    test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_homing_enable_again,
+    test_homing_without_enable_again, test_homing_enable_again_timeout, test_homing_speed_tells_a_set_position, test_pv_pins, test_pv_needs_target_velocity,
     test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,
     test_pv_stop_timeout, test_pv_standstill_switches_off_after_the_status_answers, test_pv_halts_on_a_fault,
     test_pv_not_at_speed_in_another_mode, test_pp_pins, test_pp_needs_positions, test_pp_immediate, test_pp_set_point_given_again, test_pp_moves_only_on_start,

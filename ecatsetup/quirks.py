@@ -162,12 +162,15 @@ def parse(data, path="<quirk>"):
 
 def _homing(data):
     """homing: methods (numbers), describe (text, needs, moves per method),
-    extras (settings per method)."""
-    if not isinstance(data, dict) or set(data) - {"methods", "describe", "extras"}:
-        raise QuirkError("homing takes methods, describe and extras")
-    out = {"methods": [], "describe": {}, "extras": {}}
+    extras (settings per method), enable-again (methods after which the
+    drive follows its target only once enabled again)."""
+    if not isinstance(data, dict) or set(data) - {"methods", "describe", "extras", "enable-again"}:
+        raise QuirkError("homing takes methods, describe, extras and enable-again")
+    out = {"methods": [], "describe": {}, "extras": {}, "enable-again": []}
     for n in data.get("methods") or []:
         out["methods"].append(int(n))
+    for n in data.get("enable-again") or []:
+        out["enable-again"].append(int(n))
     for n, v in (data.get("describe") or {}).items():
         if not isinstance(v, dict):
             raise QuirkError("homing.describe.%s needs text (and needs, moves)" % n)

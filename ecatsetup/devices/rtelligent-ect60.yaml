@@ -48,6 +48,11 @@ homing:
       - {object: '0x2030:06', type: UINT, value: 100, name: 'Speed loop I'}
       - {object: '0x2022:00', type: UDINT, value: 100000, name: 'Following-error window'}
     37: *torque
+  # After torque homing the ECT60 reports "Operation enabled" but ignores its
+  # target (0x607A) until it is enabled again; it goes on pressing against the
+  # stop (a plasma cutter's X, 2026-11-24, method 36; 37 assumed alike). After
+  # methods 21 and 35 it follows at once.
+  enable-again: [36, 37]
 
 # Tuning (the Response card, docs/ecatsetup.md "Measuring a drive's response"):
 # the settings that set how closely the drive follows pos-cmd in CSP. From the

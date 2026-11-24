@@ -179,6 +179,38 @@ def _norm(text):
     return (int(index, 16), int(sub or "0", 16))
 
 
+def enable_again(number, slave=None):
+    """Whether the drive must be enabled again after homing by this method
+    before it follows its target (its quirk file's `homing: enable-again`,
+    a list of methods)."""
+    return number in (((quirks.of(slave).get("homing") or {}).get("enable-again")) or [])
+
+
+def _cia402_keys(slave):
+    """The profile's homing keys from the slave's choices (one per axis):
+    home-enable-again if a chosen method needs it, and home-speed, the
+    fastest homing speed (1 for methods that do not move), so that the
+    profile tells the drive setting its position from travel."""
+    n = max(len(config.axes(slave)), 1)
+    chosen = [c for c in (choice(slave, a) for a in range(n)) if c]
+    c402 = slave.setdefault("cia402", {})
+    again = any(c.get("enable-again", enable_again(c["method"], slave)) for c in chosen)
+    if again:
+        c402["home-enable-again"] = True
+    else:
+        c402.pop("home-enable-again", None)
+    speeds = []
+    for c in chosen:
+        if not method(c["method"], slave).moves:
+            speeds.append(1)
+        else:
+            speeds += [abs(int(c[k])) for k in ("fast", "slow") if c.get(k)]
+    if chosen and speeds and all(speeds):
+        c402["home-speed"] = max(speeds)
+    else:
+        c402.pop("home-speed", None)
+
+
 def apply(slave, axis, chosen):
     """Make the choice (or None for no choice) the slave's homing: the `homing`
     block, and its settings in `settings` (those of an earlier choice go). Other
@@ -213,6 +245,8 @@ def apply(slave, axis, chosen):
             slave["homing"] = h
         else:
             slave.pop("homing", None)
+    if slave.get("profile") == "cia402" or "cia402" in slave:
+        _cia402_keys(slave)
 
 
 def ini_help(cfg, slave, axis=0):

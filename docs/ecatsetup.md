@@ -2727,7 +2727,10 @@ enabled", and only by a new rising edge. The profile then:
    from an earlier homing gets 20 ms to clear them;
 4. clears bit 4, writes the mode in use, holds the target at the
    actual position, and waits for the drive to report the mode;
-5. clears `index-enable` and sets `stat-homed`.
+5. with *Enable the drive again after homing* (below), takes the drive
+   down to "Switched on" and enables it again (within 1 s, or it is shut
+   down with `fault-reason` 3), still holding the target;
+6. clears `index-enable` and sets `stat-homed`.
 
 After homing the drive goes on in its mode from the new position: CSP
 follows `pos-cmd` again only once it is within 10 counts of the drive's
@@ -2806,6 +2809,24 @@ drive*) lists the methods the drive supports, writes the choice and the
 objects it needs as settings, and shows the INI lines above for the
 joint that uses the drive, with the `index-enable` net, ready to copy.
 It does not change the INI file.
+
+*Enable the drive again after homing* is for a drive that reports
+"Operation enabled" after homing but ignores its target until it is
+enabled again: it stays where homing ended (pressing against the stop,
+after torque homing) while motion believes the joint has gone to `HOME`,
+and motion sees nothing wrong as long as the difference is within
+`FERROR`. The box is set from the drive's quirk file when a method is
+chosen (the ECT60: methods 36 and 37) and can be changed. The homing test
+on the *Move* card finds such a drive: after homing it moves the target
+0.5 mm one way and, if the drive does not get there (a stop that way),
+the other way, and says *Homed, but the drive did not follow* when it
+gets to neither. Leave the box off where it is not needed: taking a
+drive down can set its brake or give it a jolt.
+
+The card also tells the profile the fastest homing speed, so that
+`home-travel` leaves out the step where the drive sets its position at
+home (with method 35, the whole distance from its old zero to the new
+one).
 
 A homing error (status word bit 13), a timeout or more than
 `home-max-travel` shuts the drive down,
@@ -2890,6 +2911,24 @@ commanded speed, stops softly at the end stop with 70 to 80 % torque,
 and the drive never sets "homing attained" (status word bit 12), so the
 homing does not end. Method 36 is not usable on the ECT60 as it is.
 
+**After torque homing the ECT60 follows its target only once enabled
+again** (2026-11-24, in LinuxCNC 2.10 on a copy of the plasma cutter's
+configuration, X, method 36 with the settings above, `HOME_OFFSET` −3,
+`HOME` 0). Homing ended as it should: "homing attained", back in CSP,
+`index-enable` cleared, motion homed. Motion then moved the joint to
+`HOME`, and the profile wrote the target 300 counts (3 mm) off the stop,
+but for 8 s the drive stayed at −1 count, pressing against the stop with
+its current (a hum), while its status word said "Operation enabled" and
+"target reached". Motion saw nothing (3 mm is within `FERROR` 10). With the
+machine switched off the axis sprang back 0.74 mm (the stop and the
+mechanics had been pressed together); switched on again the drive followed
+every jog. After method 35 and method 21 (a switch on IN5) the drive
+followed at once (`HOME` 5 mm from `HOME_OFFSET`). Hence *Enable the drive
+again after homing* (in the ECT60's quirk file for 36 and 37; 37 assumed
+alike). The ECT60 has no general torque check besides torque homing's own
+(`0x2030`): out of homing, pressing against something ends in the
+following-error alarm 0x8611 (`0x2022`).
+
 PP and PV were tried on the same machine on 2026-11-10: PV runs as
 expected on X, Y and Z; PP works with the set-point given again as above
 ([test mode](#pp-pv-and-homing-at-the-machine)). The ECT60s
@@ -2966,6 +3005,12 @@ configuration):
    shows motion's slow move, not the axis; `X-drive.pos-actual` and
    `X-drive.home-travel` (halshow) show the axis. After homing, check that
    the coordinates are right before running a program.
+
+On the ECT60 torque homing also needs *Enable the drive again after
+homing*: without it the drive goes on pressing against the stop and does
+not follow motion's move to `HOME` (the homing card ticks it for methods
+36 and 37). The homing test on the *Move* card shows whether a drive
+needs it.
 
 On the ECT60 torque homing needs `0x2022` (the drive's following-error
 window) at 100000 so that the drive does not fault while it presses
