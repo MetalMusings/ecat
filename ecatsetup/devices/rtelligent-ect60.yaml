@@ -56,7 +56,7 @@ homing:
   # The physical inputs in 0x60FD (manual 2.3.23): bit 16 is IN1 ... IN1 and IN2
   # are the encoder's A and B. Bits 0-2 are the functions (CW and CCW limit,
   # HOME) that 0x2007 gives the inputs; 0x2008 their polarity.
-  input-bits: {IN1: 16, IN2: 17, IN3: 18, IN4: 19, IN5: 20, IN6: 21}
+  input-bits: {IN1 (encoder A): 16, IN2 (encoder B): 17, IN3: 18, IN4: 19, IN5: 20, IN6: 21}
   # How IN3-IN6 get their function and polarity (manual 2.2.7, 2.2.8; IN1 and
   # IN2 are the encoder's). The limits as 0x60FD shows them: bit 0 "CW limit"
   # is the negative limit switch of CiA 402, bit 1 "CCW" the positive. IN5 as

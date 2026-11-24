@@ -1132,10 +1132,12 @@ axis drives into its end stop.
 
 For a drive with `0x60FD` (Digital inputs) in its process data, the
 *Switches* card shows, live during the I/O test, what the drive sees of its
-switches: the home switch, the negative and the positive limit switch
-(`0x60FD` bits 2, 0 and 1, the same on every CiA 402 drive), and which of
-its inputs are on (bits 16 and up; named, such as IN5, where the drive's
-quirk file names them). It says which switches the homing method chosen
+switches, as a box each that is grey when off and green when on: the home
+switch, the negative and the positive limit switch (`0x60FD` bits 2, 0 and
+1, the same on every CiA 402 drive), and a row of the drive's inputs (bits
+16 and up; named, such as IN5, where the drive's quirk file names them,
+else bits 16 to 23 and any other that is on). On the ECT60, IN1 and IN2 are
+the encoder's A and B, and are on or off as the motor stands. It says which switches the homing method chosen
 needs. Nothing moves: the drive is not enabled.
 
 *Test the home switch* (and the limit switches) goes in two steps: leave

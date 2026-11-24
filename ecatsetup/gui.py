@@ -4493,14 +4493,21 @@ class SwitchCard(Card):
         self.win = win
         self.slave = None
         self.test = None
+        # a box per switch and per input: grey when off, green when on, live
         lamps = QHBoxLayout()
         self.lamps = {}
         for kind, _bit, text in switches.FUNCTIONS:
-            chip = pill(text, "grey")
-            lamps.addWidget(chip)
-            self.lamps[kind] = chip
+            box = QLabel(text[0].upper() + text[1:])
+            box.setProperty("box", "off")
+            box.setAlignment(Qt.AlignCenter)
+            lamps.addWidget(box)
+            self.lamps[kind] = box
         lamps.addStretch(1)
         self.add(lamps)
+        self.input_row = QHBoxLayout()
+        self.input_boxes = {}
+        self.input_row.addStretch(1)
+        self.add(self.input_row)
         self.inputs = label("", "hint", wrap=True)
         self.add(self.inputs)
         self.needs = label("", "hint", wrap=True)
@@ -4522,10 +4529,17 @@ class SwitchCard(Card):
         self.add(self.missing)
 
     def show_drive(self, slave):
+        if slave is not self.slave:
+            # another drive: its inputs have other names
+            for box in self.input_boxes.values():
+                self.input_row.removeWidget(box)
+                box.deleteLater()
+            self.input_boxes = {}
         self.slave = slave
         pin = switches.input_pin(slave)
         has = pin is not None
-        for w in [self.inputs, self.step, self.result] + list(self.lamps.values()) + list(self.buttons.values()):
+        for w in ([self.inputs, self.step, self.result] + list(self.lamps.values()) + list(self.buttons.values())
+                  + list(self.input_boxes.values())):
             w.setVisible(has)
         self.missing.setVisible(not has)
         self.missing.setText("" if has else
@@ -4538,6 +4552,35 @@ class SwitchCard(Card):
         if self.test and self.test.get("slave") is not slave:
             self.test = None
             self.step.setText("")
+
+    @staticmethod
+    def _light(box, on):
+        want = "on" if on else "off"
+        if box.property("box") != want:
+            box.setProperty("box", want)
+            restyle(box)
+
+    def show_inputs(self, value):
+        """A box per physical input: those the quirk file names, else bits 16
+        to 23; an input of another bit that is on gets its box too."""
+        names = switches.input_names(self.slave)
+        bits = sorted(set(names or range(16, 24)) | {b for b in range(16, 32) if value >> b & 1})
+        if list(self.input_boxes) != bits:
+            for box in self.input_boxes.values():
+                self.input_row.removeWidget(box)
+                box.deleteLater()
+            self.input_boxes = {}
+            for i, b in enumerate(bits):
+                box = QLabel(names.get(b, "bit %d" % b))
+                box.setProperty("box", "off")
+                box.setAlignment(Qt.AlignCenter)
+                box.setToolTip("0x60FD bit %d" % b)
+                self.input_row.insertWidget(i, box)
+                self.input_boxes[b] = box
+        for b, box in self.input_boxes.items():
+            self._light(box, value >> b & 1)
+        self.inputs.setText("The drive's inputs (0x60FD bits 16 and up)%s." % (
+            "" if names else ": the drive's manual says which input each bit is"))
 
     def start(self, kind):
         # the time starts with the first reading (step_test)
@@ -4558,9 +4601,9 @@ class SwitchCard(Card):
         if value is None:
             return
         st = switches.state(value, self.slave)
-        for kind, chip in self.lamps.items():
-            set_pill(chip, switches.TEXT[kind], ("amber" if kind != "home" else "green") if st[kind] else "grey")
-        self.inputs.setText("Inputs on: %s" % (", ".join(st["inputs"]) or "none"))
+        for kind, box in self.lamps.items():
+            self._light(box, st[kind])
+        self.show_inputs(value)
         if self.test:
             self.step_test(value)
 

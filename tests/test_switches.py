@@ -55,7 +55,7 @@ class TestRead(unittest.TestCase):
         st = switches.state(1245188, ECT60)
         self.assertEqual((st["home"], st["negative"], st["positive"]), (True, False, False))
         # named by the ECT60's quirk file; a drive without one gets the bits
-        self.assertEqual(st["inputs"], ["IN1", "IN2", "IN5"])
+        self.assertEqual(st["inputs"], ["IN1 (encoder A)", "IN2 (encoder B)", "IN5"])
         self.assertEqual(switches.state(1245188, OTHER)["inputs"],
                          ["input bit 16", "input bit 17", "input bit 20"])
 
