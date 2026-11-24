@@ -114,10 +114,12 @@ to propose from.
 The **Master** page (on the right) holds the network interface, the
 transport, the servo period (taken from the INI file once you have chosen
 one; without an INI file, or one without `SERVO_PERIOD`, typed in, 1 ms
-until then: enough to try slaves on their own with the I/O test), **Interrupts on CPU** and **Master threads on CPU**
-(`irq-cpu` and `cpu`: pin the network card's interrupts, and the master's own threads, to a CPU; the line
-under them names the CPUs isolated for real time on this computer; "not pinned" leaves them where the
-system put them) and **Distributed clocks**: whether to use them, *Who sets the time*
+until then: enough to try slaves on their own with the I/O test), **Network card's interrupts** and **Master's own threads**
+(`irq-cpu` and `cpu`: pin the network card's interrupts, and the master's own threads, to a CPU; "not pinned"
+leaves them where the system put them). The line under them gives the recommendation for this computer,
+with *Use the recommendation*: the interrupts on the CPU isolated for real time (`isolcpus=`, where the
+servo thread runs; marked "recommended" in the list), the master's own threads not bound (they do no
+work in the servo cycle); without an isolated CPU, neither pinned and **Distributed clocks**: whether to use them, *Who sets the time*
 (the slaves follow the servo thread, or the servo thread follows the
 reference clock, which is recommended; the fields of the other choice are
 greyed out), how often the reference clock is synchronised (choosing "the
@@ -833,7 +835,7 @@ the master's pins (`ecat.0.*`):
   the old fixed margins of 50 us);
 - **where the network card's interrupts are**, against the CPU that is isolated
   for real time (`isolcpus=`): on the other CPUs the arrival of a frame waits
-  behind the GUI and other work (*Interrupts on CPU* on the *Master* page pins them);
+  behind the GUI and other work (*Network card's interrupts* on the *Master* page pins them);
 - what was **measured on the kinds of drive** that run with SYNC0 here at this
   servo period (below).
 
@@ -2196,7 +2198,7 @@ What to expect from it:
   period is at or below a period the device refused. Find yours by trying, and
   keep it with *Remember this period* ([Measured SYNC0 cycles](#measured-sync0-cycles)).
 - **Pin the network card's interrupts** on the CPU of the servo thread:
-  *Interrupts on CPU* 3 on the *Master* page for `isolcpus=3`. By default they are
+  *Network card's interrupts* CPU 3 on the *Master* page for `isolcpus=3`. By default they are
   handled on the CPUs that also run the GUI, the mouse and the graphics, and a
   frame's arrival can wait behind them: a cycle is then lost now and then at
   250 us and shorter. The *Synchronisation* card says where they are. The
@@ -3610,7 +3612,7 @@ on its evidence: what the computer is, or what came with the late cycles.
 | Kernel | PREEMPT_RT, a virtual machine; isolated CPUs (`isolcpus`): none, one isolated but used by no real-time thread and not sharing its core (`isolcpus=1,2,3` with the threads on 3 and 1 its sibling: `isolcpus=1,3` frees CPU 2 for the rest), the `managed_irq` flag; `irqaffinity`, irqbalance; `nohz_full`, `rcu_nocbs`; memory statistics, timer migration, transparent huge pages; signals between CPUs (RES, CAL, TLB, IWI) that came with late cycles |
 | Processor | hyperthread sibling not isolated, deep idle states, frequency governor, turbo, heat throttling, battery, SMIs (as root) |
 | Devices | interrupts on the real-time CPU (USB, wireless, any other), ACPI GPE storms, Intel graphics power states, sound card and NVMe power saving, PCIe ASPM |
-| Network | the I/O card's interrupt on the real-time CPU (EtherCAT: *Interrupts on CPU*; Mesa: moved at run time), coalescing (`rx-usecs`) on a Mesa card, EEE on the I/O card, the I/O card also carrying the LAN, NetworkManager on the Mesa card, Realtek r8169 with Mesa, ethtool missing |
+| Network | the I/O card's interrupt on the real-time CPU (EtherCAT: *Network card's interrupts*; Mesa: moved at run time), coalescing (`rx-usecs`) on a Mesa card, EEE on the I/O card, the I/O card also carrying the LAN, NetworkManager on the Mesa card, Realtek r8169 with Mesa, ethtool missing |
 | LinuxCNC | too little of the period left, a HAL function taking much of it, a tight base thread, measured without load |
 
 The same from a terminal: `ecatsetup --rt-check <machine>.ini --improve`

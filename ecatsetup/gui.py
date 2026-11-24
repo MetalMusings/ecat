@@ -421,6 +421,40 @@ class QuietCombo(QComboBox):
         ev.ignore()
 
 
+class CpuBox(QuietCombo):
+    """A CPU, or none (-1), as a choice: value() and setValue() as a spin box.
+    fill() lists the computer's CPUs with a note for some of them; a value
+    from a file that is not among them is kept and shown as such."""
+
+    valueChanged = pyqtSignal(int)
+
+    def __init__(self, none_text):
+        super().__init__()
+        self.none_text = none_text
+        self.currentIndexChanged.connect(lambda _i: self.valueChanged.emit(self.value()))
+
+    def fill(self, cpus, notes=None):
+        keep = self.value()
+        self.blockSignals(True)
+        self.clear()
+        self.addItem(self.none_text, -1)
+        for c in cpus:
+            self.addItem("CPU %d%s" % (c, (notes or {}).get(c, "")), c)
+        self.blockSignals(False)
+        self.setValue(keep)
+
+    def value(self):
+        v = self.currentData()
+        return -1 if v is None else int(v)
+
+    def setValue(self, v):
+        i = self.findData(int(v))
+        if i < 0:
+            self.addItem("CPU %d (not on this computer)" % v, int(v))
+            i = self.count() - 1
+        self.setCurrentIndex(i)
+
+
 def label(text="", name=None, wrap=False):
     lab = QLabel(text)
     if name:
@@ -806,22 +840,25 @@ class MasterView(QWidget):
         choose.clicked.connect(win.choose_ini)
         ini.addWidget(choose)
         form.addRow("Servo period", ini)
-        self.irq_cpu = QSpinBox()
-        self.irq_cpu.setRange(-1, 1023)
-        self.irq_cpu.setSpecialValueText("not pinned")
+        self.irq_cpu = CpuBox("Not pinned")
         self.irq_cpu.setToolTip("Pin the network card's interrupts to this CPU when the master "
-                                "starts: the servo thread's (isolcpus). Needs the privilege "
-                                "rtapi_app has. master: irq-cpu")
+                                "starts: the servo thread's, the one isolated for real time "
+                                "(isolcpus). Needs the privilege rtapi_app has. master: irq-cpu")
         self.irq_cpu.valueChanged.connect(self.edited)
-        form.addRow("Interrupts on CPU", self.irq_cpu)
-        self.cpu = QSpinBox()
-        self.cpu.setRange(-1, 1023)
-        self.cpu.setSpecialValueText("not bound")
-        self.cpu.setToolTip("The CPU for the master's own threads. master: cpu")
+        form.addRow("Network card's interrupts", self.irq_cpu)
+        self.cpu = CpuBox("Not bound (recommended)")
+        self.cpu.setToolTip("The CPU for the master's own threads. They do no work in the servo "
+                            "cycle: leave them not bound, off the real-time CPU. master: cpu")
         self.cpu.valueChanged.connect(self.edited)
-        form.addRow("Master threads on CPU", self.cpu)
+        form.addRow("Master's own threads", self.cpu)
+        hint = QHBoxLayout()
         self.cpu_hint = label("", "hint", wrap=True)
-        form.addRow("", self.cpu_hint)
+        hint.addWidget(self.cpu_hint, 1)
+        self.cpu_use = QPushButton("Use the recommendation")
+        self.cpu_use.clicked.connect(self.use_cpu_advice)
+        hint.addWidget(self.cpu_use)
+        form.addRow("", hint)
+        self.fill_cpus()
         card.add(form)
         lay.addWidget(card)
 
@@ -920,7 +957,7 @@ class MasterView(QWidget):
             "typed in: no SERVO_PERIOD in %s" % s.ini_path)
         self.irq_cpu.setValue(int(m.get("irq-cpu", -1)))
         self.cpu.setValue(int(m.get("cpu", -1)))
-        self.cpu_hint.setText(self.cpu_text())
+        self.show_cpu_advice()
         dc = m.get("dc")
         self.dc_on.setChecked(dc is not None)
         dc = dc or {}
@@ -935,19 +972,58 @@ class MasterView(QWidget):
         self.loading = False
 
     @staticmethod
-    def cpu_text(sys="/sys"):
-        """The isolated CPUs, as advice for the two CPU fields."""
+    def isolated_cpus(sys="/sys"):
         try:
             with open(os.path.join(sys, "devices", "system", "cpu", "isolated")) as f:
-                isolated = _cpu_set(f.read())
+                return _cpu_set(f.read())
         except (OSError, ValueError):
-            isolated = set()
+            return set()
+
+    @staticmethod
+    def all_cpus(sys="/sys"):
+        try:
+            with open(os.path.join(sys, "devices", "system", "cpu", "possible")) as f:
+                return sorted(_cpu_set(f.read()))
+        except (OSError, ValueError):
+            return list(range(os.cpu_count() or 1))
+
+    @staticmethod
+    def cpu_advice(isolated):
+        """The recommended (irq-cpu, cpu): the interrupts on the isolated CPU
+        (the servo thread's), the master's threads not bound; no pinning
+        without an isolated CPU."""
+        return (min(isolated) if isolated else -1, -1)
+
+    @classmethod
+    def cpu_text(cls, sys="/sys"):
+        """The recommendation for the two CPU fields, from the isolated CPUs."""
+        isolated = cls.isolated_cpus(sys)
         if not isolated:
-            return ("No CPU is isolated for real time on this computer (isolcpus): pinning "
-                    "the interrupts helps most on the servo thread's own CPU.")
-        return ("CPU %s isolated for real time: give the interrupts the servo thread's CPU "
-                "(a lost cycle at 250 us and shorter was seen with them elsewhere)."
-                % _cpu_text(isolated))
+            return ("Recommended: not pinned, not bound. No CPU is isolated for real time on "
+                    "this computer (isolcpus=); with one, the interrupts belong there (the "
+                    "Timing tab helps isolate one).")
+        irq = cls.cpu_advice(isolated)[0]
+        return ("Recommended: the interrupts on CPU %d, isolated for real time (isolcpus=%s), "
+                "where the servo thread runs, so that a frame's arrival does not wait behind "
+                "the GUI (lost cycles at 250 us and shorter were seen without it); the master's "
+                "own threads not bound: they do no work in the servo cycle."
+                % (irq, _cpu_text(isolated)))
+
+    def fill_cpus(self, sys="/sys"):
+        isolated = self.isolated_cpus(sys)
+        cpus = self.all_cpus(sys)
+        self.irq_cpu.fill(cpus, {c: " (isolated for real time: recommended)" for c in isolated})
+        self.cpu.fill(cpus, {c: " (isolated: keep it for the servo thread)" for c in isolated})
+
+    def show_cpu_advice(self, sys="/sys"):
+        self.cpu_hint.setText(self.cpu_text(sys))
+        advice = self.cpu_advice(self.isolated_cpus(sys))
+        self.cpu_use.setVisible((self.irq_cpu.value(), self.cpu.value()) != advice)
+
+    def use_cpu_advice(self):
+        irq, cpu = self.cpu_advice(self.isolated_cpus())
+        self.irq_cpu.setValue(irq)
+        self.cpu.setValue(cpu)
 
     def period_edited(self, value):
         s = self.win.session
@@ -971,6 +1047,7 @@ class MasterView(QWidget):
                 m[key] = box.value()
             else:
                 m.pop(key, None)
+        self.show_cpu_advice()
         if self.dc_on.isChecked():
             dc = m.setdefault("dc", {})
             if dc.get("servo-thread-follows-ref-clock", True) and not self.follows and \
@@ -2200,6 +2277,34 @@ class SlaveView(QWidget):
         for w in (self.home_ini, self.home_copy):
             w.setVisible(shown)
 
+    def homing_follows_hm(self, s, had, has):
+        """Homing by the drive's own method ticked off: the homing choice and
+        the settings it wrote go too (they are written to the drive at every
+        start, and some, such as the ECT60's 0x2022 for torque homing, are
+        not meant for other use), kept to come back if it is ticked again in
+        this window."""
+        n = max(len(config.axes(s)), 1)
+        stash = getattr(self, "homing_stash", None)
+        if stash is None:
+            stash = self.homing_stash = {}
+        if had and not has:
+            chosen = [homing.choice(s, a) for a in range(n)]
+            if any(chosen):
+                stash[self.position] = chosen
+                for a in range(n):
+                    homing.apply(s, a, None)
+                self.show_settings(s)
+                self.win.status("Homing by the drive is off: the homing choice (method %s) and its "
+                                "settings are taken out; they come back if it is ticked again"
+                                % ", ".join(str(ch["method"]) for ch in chosen if ch))
+        elif has and not had and stash.get(self.position) and not any(
+                homing.choice(s, a) for a in range(n)):
+            for a, ch in enumerate(stash.pop(self.position)):
+                if ch and a < n:
+                    homing.apply(s, a, ch)
+            self.show_settings(s)
+            self.win.status("Homing by the drive is on again, with the choice it had")
+
     def homing_edited(self, *_):
         if self.loading:
             return
@@ -2821,6 +2926,7 @@ class SlaveView(QWidget):
             c = s.setdefault("cia402", {})
             c["mode"] = self.mode.currentData()
             config.sync_mode_setting(s)
+            had_hm = "hm" in (c.get("modes") or [])
             others = [m for m, cb in self.other_modes.items() if cb.isChecked() and m != c["mode"]]
             self.show_mode_choices(s)
             self.show_opmode_hint({"mode": c["mode"], "modes": others})
@@ -2828,6 +2934,7 @@ class SlaveView(QWidget):
                 c["modes"] = others
             else:
                 c.pop("modes", None)
+            self.homing_follows_hm(s, had_hm, "hm" in others)
             if self.zero_at_start.isChecked():
                 c["zero-at-start"] = True
             else:

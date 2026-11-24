@@ -1132,6 +1132,19 @@ class TestWindow(WindowBase):
         page.homing_edited()
         self.assertFalse(page.home_again.isChecked())
         self.assertEqual(s["cia402"].get("home-speed"), 1)   # does not move: any step is a set
+        # ticking homing off takes the choice and its settings out (0x2022 for torque
+        # homing would stay a setting otherwise) and hides the card; on again: back
+        page.home_method.setCurrentIndex(page.home_method.findData(36))
+        page.homing_edited()
+        page.other_modes["hm"].setChecked(False)
+        self.assertTrue(page.homing_card.isHidden())
+        self.assertNotIn("homing", s)
+        self.assertNotIn("0x2022:00", [x["object"] for x in s.get("settings") or []])
+        self.assertNotIn("home-enable-again", s["cia402"])
+        page.other_modes["hm"].setChecked(True)
+        self.assertFalse(page.homing_card.isHidden())
+        self.assertEqual(s["homing"]["method"], 36)
+        self.assertIn("0x2022:00", [x["object"] for x in s["settings"]])
         page.home_method.setCurrentIndex(0)
         page.homing_edited()
         self.assertTrue(page.home_again.isHidden())
@@ -1329,13 +1342,38 @@ class TestWindow(WindowBase):
         w.session.cfg["master"]["irq-cpu"] = 1
         m.show_config()
         self.assertEqual(m.irq_cpu.value(), 1)
-        # the advice follows the isolated CPUs
+        # a value that is not a CPU of this computer is kept
+        w.session.cfg["master"]["irq-cpu"] = 77
+        m.show_config()
+        self.assertEqual(m.irq_cpu.value(), 77)
+        self.assertIn("not on this computer", m.irq_cpu.currentText())
+        # the recommendation follows the isolated CPUs
         with tempfile.TemporaryDirectory() as d:
-            os.makedirs(os.path.join(d, "devices", "system", "cpu"))
-            self.assertIn("No CPU is isolated", m.cpu_text(d))
-            with open(os.path.join(d, "devices", "system", "cpu", "isolated"), "w") as f:
+            cpu = os.path.join(d, "devices", "system", "cpu")
+            os.makedirs(cpu)
+            with open(os.path.join(cpu, "possible"), "w") as f:
+                f.write("0-3\n")
+            self.assertIn("Recommended: not pinned, not bound", m.cpu_text(d))
+            self.assertEqual(m.cpu_advice(set()), (-1, -1))
+            with open(os.path.join(cpu, "isolated"), "w") as f:
                 f.write("3\n")
-            self.assertIn("CPU 3 isolated", m.cpu_text(d))
+            self.assertIn("the interrupts on CPU 3", m.cpu_text(d))
+            self.assertIn("threads not bound", m.cpu_text(d))
+            self.assertEqual(m.cpu_advice({3}), (3, -1))
+            m.fill_cpus(d)
+            self.assertEqual(m.irq_cpu.count(), 1 + 4 + 1)     # none, 0-3, and the kept 77
+            self.assertIn("recommended", m.irq_cpu.itemText(m.irq_cpu.findData(3)))
+            self.assertNotIn("recommended", m.irq_cpu.itemText(m.irq_cpu.findData(2)))
+            self.assertIn("recommended", m.cpu.itemText(m.cpu.findData(-1)))
+            m.show_cpu_advice(d)
+            self.assertFalse(m.cpu_use.isHidden())
+            # the button takes the recommendation (here: the real /sys's)
+            m.isolated_cpus = lambda sys="/sys": {3}
+            m.use_cpu_advice()
+            self.assertEqual((w.session.cfg["master"].get("irq-cpu"), w.session.cfg["master"].get("cpu")),
+                             (3, None))
+            m.show_cpu_advice(d)
+            self.assertTrue(m.cpu_use.isHidden())
 
     def test_sync0_cycle_and_measured_lines(self):
         w = self.window()
