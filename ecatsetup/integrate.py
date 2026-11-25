@@ -43,6 +43,31 @@ CONNECTIONS = [
 ]
 HOMING = ("index-enable", "index-enable", "<=>", "index-enable")
 
+# Homing through the homing module cia402_homecomp (a test, beside
+# index-enable; linuxcnc.joints[].homing: homecomp): the module sits
+# between the joint and the drive. As (joint pin, other pin, arrow,
+# suffix) like CONNECTIONS, "J." a pin of the joint, "D." one of the
+# drive. A row whose first pin is already on a signal of this joint
+# adds the other pin to that signal (the module reads the command too).
+HOMECOMP = "cia402_homecomp"
+HOMECOMP_CONNECTIONS = [
+    ("J.motor-pos-cmd", "D.pos-cmd", "=>", "pos-cmd"),
+    ("J.motor-pos-cmd", "J.cia-pos-cmd", "=>", "pos-cmd"),
+    ("J.motor-pos-fb", "J.cia-pos-fb-out", "<=", "pos-fb"),
+    ("J.cia-pos-fb-in", "D.pos-fb", "<=", "pos-actual"),
+    ("J.cia-velocity-fb-in", "D.velocity-fb", "<=", "vel-actual"),
+    ("J.amp-enable-out", "J.cia-enable-in", "=>", "enable"),
+    ("J.cia-enable-out", "D.enable", "=>", "drive-enable"),
+    ("J.amp-fault-in", "D.drv-fault", "<=", "amp-fault"),
+    ("J.cia-stat-fault", "D.drv-fault", "<=", "amp-fault"),
+    ("J.cia-home", "D.home", "=>", "home"),
+    ("J.cia-stat-homed", "D.stat-homed", "<=", "homed"),
+    ("J.cia-stat-homing", "D.stat-homing", "<=", "homing"),
+    ("J.cia-stat-homing-error", "D.home-error", "<=", "home-error"),
+    ("J.cia-stat-op-enabled", "D.stat-op-enabled", "<=", "op-enabled"),
+    ("J.cia-opmode-display", "D.opmode-display", "<=", "opmode"),
+]
+
 
 # -- the INI file
 
@@ -217,12 +242,14 @@ def basic_sim_file(ini_path):
     return path if os.path.exists(path) else None
 
 
-def ini_texts(ini_path, yaml_name, replace=None):
+def ini_texts(ini_path, yaml_name, replace=None, homemod=None):
     """{file: new text} of the INI file and the files it includes, with
     [ETHERCAT]CONFIG and the two HALFILEs; replace: {HALFILE value: new
     value} (a file copied into the folder). The HALFILEs go into the first
     [HAL] section, in the file that holds it (an #INCLUDEd one too), since
-    LinuxCNC reads only that one; a new [ETHERCAT] goes just before it."""
+    LinuxCNC reads only that one; a new [ETHERCAT] goes just before it.
+    homemod: [EMCMOT]HOMEMOD is set to it; without it a HOMEMOD of
+    cia402_homecomp (which only ecatsetup puts there) is taken out."""
     nl = "\n"
     tagged = [list(x) for x in ini_lines(ini_path)]   # [file, line]
     for x in tagged:
@@ -261,6 +288,23 @@ def ini_texts(ini_path, yaml_name, replace=None):
     tagged.insert(last, [hal_file, "HALFILE = %s%s" % (MAIN_FILE, nl)])
     tagged.insert(first, [hal_file, "HALFILE = %s%s" % (LOAD_FILE, nl)])
 
+    # [EMCMOT]HOMEMOD: the homing module, cia402_homecomp's only
+    secs = _sections([x[1] for x in tagged])
+    tagged = [x for x, (sec, _) in zip(tagged, secs)
+              if not (sec == "EMCMOT" and key_of(x[1]) == "HOMEMOD" and not homemod
+                      and x[1].split("=", 1)[1].split("#")[0].strip() == HOMECOMP)]
+    if homemod:
+        emc = in_first("EMCMOT")
+        line = "HOMEMOD = %s%s" % (homemod, nl)
+        keys = [i for i in emc if key_of(tagged[i][1]) == "HOMEMOD"]
+        if keys:
+            tagged[keys[0]][1] = line
+        elif emc:
+            tagged.insert(emc[0] + 1, [tagged[emc[0]][0], line])
+        else:
+            at = in_first("HAL")[0]
+            tagged[at:at] = [[hal_file, "[EMCMOT]" + nl], [hal_file, line], [hal_file, nl]]
+
     # [ETHERCAT]CONFIG, in the first [ETHERCAT], or a new one before [HAL]
     eth = in_first("ETHERCAT")
     cfg_line = "CONFIG = %s%s" % (yaml_name, nl)
@@ -279,9 +323,9 @@ def ini_texts(ini_path, yaml_name, replace=None):
     return out
 
 
-def ini_text(ini_path, yaml_name, replace=None):
+def ini_text(ini_path, yaml_name, replace=None, homemod=None):
     """The main INI file's new text (see ini_texts)."""
-    return ini_texts(ini_path, yaml_name, replace).get(ini_path, "")
+    return ini_texts(ini_path, yaml_name, replace, homemod).get(ini_path, "")
 
 
 # -- the user's HAL files
@@ -439,7 +483,12 @@ def joint_checks(ini_path, cfg, max_counts=None):
             if ini_get(e, sec, key) is None:
                 out.append("[%s]%s is not set: LinuxCNC's default is used; set it for the "
                            "machine (in machine units)" % (sec, key))
-        if "hm" in (((drives(cfg).get(j.get("slave")) or {}).get("cia402") or {}).get("modes") or []):
+        if homes_by_drive(cfg, j.get("slave")) and j.get("homing") == "homecomp":
+            use = str(resolve(ini_get(e, sec, "HOME_USE_INDEX", "NO"), e) or "NO").strip().upper()
+            if use in ("YES", "TRUE", "1"):
+                out.append("[%s]HOME_USE_INDEX is YES: the joint homes through cia402_homecomp, "
+                           "which does not use the index; set it to NO" % sec)
+        elif homes_by_drive(cfg, j.get("slave")):
             use = str(resolve(ini_get(e, sec, "HOME_USE_INDEX", "NO"), e) or "NO").strip().upper()
             if use not in ("YES", "TRUE", "1"):
                 out.append("[%s]HOME_USE_INDEX is not YES: %s homes the joint through its "
@@ -508,12 +557,40 @@ def joints(cfg):
     return ((cfg or {}).get("linuxcnc") or {}).get("joints") or []
 
 
+def joint_homing(cfg, joint):
+    """How a joint homes by its drive: "homecomp" (the homing module
+    cia402_homecomp) or "index" (index-enable, the default)."""
+    for j in joints(cfg):
+        if j.get("joint") == joint:
+            return "homecomp" if j.get("homing") == "homecomp" else "index"
+    return "index"
+
+
+def set_joint_homing(cfg, joint, way):
+    """Home a joint through index-enable ("index") or cia402_homecomp ("homecomp")."""
+    for j in joints(cfg):
+        if j.get("joint") == joint:
+            if way == "homecomp":
+                j["homing"] = "homecomp"
+            else:
+                j.pop("homing", None)
+
+
+def uses_homecomp(cfg):
+    """Whether a joint of the configuration homes through cia402_homecomp."""
+    return any(j.get("homing") == "homecomp" for j in joints(cfg))
+
+
 def set_joint(cfg, joint, slave=None, scale=None):
-    """Connect a joint to a drive, or (slave None) to nothing."""
+    """Connect a joint to a drive, or (slave None) to nothing. The joint's
+    homing choice stays while it keeps its drive."""
     lc = cfg.setdefault("linuxcnc", {})
+    old = {j.get("joint"): j for j in lc.get("joints") or []}.get(joint) or {}
     js = [j for j in lc.get("joints") or [] if j.get("joint") != joint]
     if slave:
         js.append({"joint": joint, "slave": slave, "scale": float(scale or 1.0)})
+        if old.get("slave") == slave and old.get("homing"):
+            js[-1]["homing"] = old["homing"]
     js.sort(key=lambda j: j["joint"])
     if js:
         lc["joints"] = js
@@ -1010,17 +1087,30 @@ def feedforward_velo(cfg, name):
     return isinstance(ff, dict) and bool(ff.get("velocity"))
 
 
+def homes_by_drive(cfg, name):
+    """Whether drive `name` may home by its own method (cia402.modes has hm)."""
+    return "hm" in (((drives(cfg).get(name) or {}).get("cia402") or {}).get("modes") or [])
+
+
 def _managed(cfg):
-    """[(joint, letter, drive name, scale, [(joint pin, drive pin, arrow, suffix)])]."""
+    """[(joint, drive name, scale, [(joint pin, drive pin, arrow, suffix)])].
+    With cia402_homecomp the second pin may be one of the module's joint pins."""
     out = []
-    ds = drives(cfg)
     for j in joints(cfg):
         name = j.get("slave")
+        n = j["joint"]
+        if homes_by_drive(cfg, name) and j.get("homing") == "homecomp":
+            def full(x):
+                return ("joint.%d." % n if x[0] == "J" else name + ".") + x[2:]
+            out.append((n, name, j.get("scale", 1.0),
+                        [(full(a), full(b), arrow, suffix)
+                         for a, b, arrow, suffix in HOMECOMP_CONNECTIONS]))
+            continue
         conns = list(CONNECTIONS)
-        if "hm" in (((ds.get(name) or {}).get("cia402") or {}).get("modes") or []):
+        if homes_by_drive(cfg, name):
             conns.append(HOMING)
-        out.append((j["joint"], name, j.get("scale", 1.0),
-                    [("joint.%d.%s" % (j["joint"], a), "%s.%s" % (name, b), arrow, suffix)
+        out.append((n, name, j.get("scale", 1.0),
+                    [("joint.%d.%s" % (n, a), "%s.%s" % (name, b), arrow, suffix)
                      for a, b, arrow, suffix in conns]))
     return out
 
@@ -1094,6 +1184,15 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         if j.get("slave") in seen:
             p.errors.append("%s is connected to two joints" % j.get("slave"))
         seen.add(j.get("slave"))
+    if uses_homecomp(cfg):
+        from . import lcnc_env
+        if not lcnc_env.has_module(HOMECOMP):
+            p.warnings.append(
+                "a joint homes through %s, but LinuxCNC has no such module (%s): LinuxCNC will "
+                "not start until it is installed. Choose index-enable on the homing card, or "
+                "install the module" % (HOMECOMP, lcnc_env.module_dir()))
+        p.notes.append("homing through %s is a test: the module comes from linuxcnc-ethercat "
+                       "and is not released yet; [EMCMOT]HOMEMOD is set" % HOMECOMP)
     managed = _managed(cfg)
     managed_pins = {pin for _, _, _, conns in managed for c in conns for pin in c[:2]}
     io = [n for n in nets(cfg) if isinstance(n, dict) and len(n.get("pins") or []) >= 2]
@@ -1401,7 +1500,14 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
         if feedforward_velo(cfg, name):
             # 0x60B1 is in the drive's velocity unit, counts/s like pos-scale's counts
             body.append("setp %s.velo-scale %r" % (name, float(scale)))
+        this = {}            # pin -> its signal in this joint's lines
         for jpin, dpin, arrow, suffix in conns:
+            if jpin in this or dpin in this:
+                # one more pin on a signal of this joint (cia402_homecomp's)
+                sig = this.get(jpin) or this.get(dpin)
+                body.append("net %s %s" % (sig, dpin if jpin in this else jpin))
+                this[jpin] = this[dpin] = sig
+                continue
             a, b = sig_of_pin.get(jpin), sig_of_pin.get(dpin)
             cmd_sig = sig_of_pin.get("joint.%d.motor-pos-cmd" % n)
             if suffix == "pos-fb" and a is not None and a == cmd_sig:
@@ -1416,18 +1522,26 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                                 "something sits between the joint and the drive; connect them "
                                 "by hand" % (jpin, dpin, a, b))
             sig = a or b or before.get(jpin) or before.get(dpin)
+            if sig is not None and sig in this.values():
+                # with the module between them, the joint's old signal
+                # (motor-pos-fb, amp-enable-out) is not the drive's any more
+                sig = None
             if sig is None:
                 sig = "%s-%s" % (base, suffix)
                 if sig in used:
                     sig = "ecat-" + sig
             used.add(sig)
             driven.add(sig)
+            this[jpin] = this[dpin] = sig
             if arrow == "<=":
                 body.append("net %s %s => %s" % (sig, dpin, jpin))
             elif arrow == "<=>":
                 body.append("net %s %s <=> %s" % (sig, jpin, dpin))
             else:
                 body.append("net %s %s => %s" % (sig, jpin, dpin))
+        if any(c[1] == "joint.%d.cia-pos-fb-out" % n for c in conns):
+            body.append("setp joint.%d.request-custom-homing 1" % n)
+            body.append("setp %s.home-hold 1" % name)
         body.append("")
     prm = params(cfg)
     if prm:
@@ -1556,7 +1670,8 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
             p.edited.append(fname)
         if old != text:
             p.changes.append(FileChange(path, "change" if old else "new", old, text, what))
-    for path, new_ini in ini_texts(ini_path, yaml_name, ini_replace).items():
+    homemod = HOMECOMP if uses_homecomp(cfg) else None
+    for path, new_ini in ini_texts(ini_path, yaml_name, ini_replace, homemod).items():
         old_ini = read_text(path)
         if new_ini != old_ini:
             p.changes.append(FileChange(path, "change", old_ini, new_ini,

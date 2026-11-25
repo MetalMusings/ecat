@@ -3022,6 +3022,51 @@ were delivered with `0x6098` = 17 (negative limit switch): a drive that
 is homed without a switch drives into its end stop. Use method 35, or
 choose the method on the *Homing by the drive* card.
 
+#### Homing with cia402_homecomp (test)
+
+Starting the drive's homing through `index-enable` works with every
+LinuxCNC, but motion believes it is looking for an index while the drive
+homes. `cia402_homecomp` is a LinuxCNC homing module (`[EMCMOT]HOMEMOD`)
+from [linuxcnc-ethercat](https://github.com/linuxcnc-ethercat/cia402_homecomp)
+that hands a joint's homing to the drive instead: LinuxCNC knows the
+drive is homing, a failure ends in LinuxCNC's own homing abort, and
+`HOME_OFFSET` is the machine coordinate of the point where the drive
+homed. ecat offers it beside `index-enable`, as a test: the module is
+not released yet, and it must be built for the exact LinuxCNC that runs
+(it includes LinuxCNC's `homing.c`). EtherCAT Setup does not build or
+install it.
+
+When LinuxCNC has the module (`cia402_homecomp.so` among its realtime
+modules), the homing card has a row *Started by* for a drive that is a
+joint: *LinuxCNC's index-enable (standard)* or *The homing module
+cia402_homecomp (test)*. With the module chosen, Apply:
+
+- sets `[EMCMOT]HOMEMOD = cia402_homecomp` in the INI file (and takes it
+  out again when no joint uses the module);
+- puts the module between the joint and the drive in `ethercat.hal`: the
+  joint's command goes to the drive and to the module, the drive's
+  position to the module, and the module's feedback to the joint (it
+  shows the command while the drive homes, as `index-enable` homing
+  does); the enable through the module; the drive's status (`drv-fault`,
+  `stat-homed`, `stat-homing`, `home-error`, `stat-op-enabled`,
+  `opmode-display`) to the module, and its `home` request to the drive;
+- sets `joint.N.request-custom-homing` and the drive's `home-hold`, so
+  that the drive homes only while the module asks for it.
+
+The joint's INI lines differ from `index-enable` homing (the card shows
+them): `HOME_SEARCH_VEL = 0`, `HOME_LATCH_VEL = 0`, `HOME_USE_INDEX = NO`,
+and `HOME_FINAL_VEL` for the move to `HOME`. The module has its own time
+limit, `joint.N.cia-timeout-ms` (30 s by default); the card's HAL lines
+set it with `home-timeout-ms`. `home-max-travel` guards the drive as
+before. A homing error, `home-timeout-ms` or `home-max-travel` shuts the
+drive down as before (the profile's rule): LinuxCNC sees the amplifier
+fault and the module ends its homing; switch the machine on again before
+the next try. When the module gives up by itself (its own time limit, or
+homing aborted in LinuxCNC), it drops `home` and the drive stops homing
+and goes back to its mode without a fault.
+
+Not tried on a machine yet.
+
 #### From LinuxCNC's homing to the drive's
 
 A joint that LinuxCNC homes itself (a home switch read by motion, a

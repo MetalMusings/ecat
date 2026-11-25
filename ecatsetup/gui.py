@@ -1501,6 +1501,16 @@ class SlaveView(QWidget):
             "drive needs it.")
         self.home_again.toggled.connect(self.homing_edited)
         hform.addRow("", self.home_again)
+        self.home_way = QuietCombo()
+        self.home_way.addItem("LinuxCNC's index-enable (standard)", "index")
+        self.home_way.addItem("The homing module cia402_homecomp (test)", "homecomp")
+        self.home_way.setToolTip(
+            "How LinuxCNC starts the drive's homing for this joint. index-enable works with "
+            "every LinuxCNC: motion waits for the drive as for an index pulse. cia402_homecomp "
+            "is a homing module from linuxcnc-ethercat ([EMCMOT]HOMEMOD), not released yet: "
+            "offered only when LinuxCNC has it. Apply writes the nets and the INI line.")
+        self.home_way.activated.connect(self.home_way_edited)
+        hform.addRow("Started by", self.home_way)
         self.home_text = label("", "hint", wrap=True)
         self.home_fields = {}
         for key, _i, _s, _t, text in homing.PARAMS:
@@ -2263,6 +2273,7 @@ class SlaveView(QWidget):
         self.home_again.setChecked(bool(chosen) and bool(chosen.get(
             "enable-again", homing.enable_again(chosen["method"], s))))
         self.home_again.setVisible(bool(chosen))
+        self.show_home_way(s, chosen)
         self.loading = False
         self.home_support = (nums, where)
         self.show_homing_text(s, chosen, nums, where)
@@ -2486,6 +2497,36 @@ class SlaveView(QWidget):
                     homing.apply(s, a, ch)
             self.show_settings(s)
             self.win.status("Homing by the drive is on again, with the choice it had")
+
+    def home_joint(self, s):
+        """The joint number the homing card's axis is connected to, or None."""
+        names = config.axes(s)
+        axis = self.home_axis_number()
+        drive = names[axis] if axis < len(names) else (s or {}).get("name")
+        return next((j.get("joint") for j in integrate.joints(self.win.session.cfg)
+                     if j.get("slave") == drive), None)
+
+    def show_home_way(self, s, chosen):
+        """The "Started by" row: for a joint, when LinuxCNC has cia402_homecomp
+        or the joint already uses it."""
+        joint = self.home_joint(s)
+        way = integrate.joint_homing(self.win.session.cfg, joint) if joint is not None else "index"
+        shown = bool(chosen) and joint is not None and (
+            way == "homecomp" or lcnc_env.has_module(integrate.HOMECOMP))
+        self.home_way.setCurrentIndex(max(self.home_way.findData(way), 0))
+        self.home_way.setVisible(shown)
+        self.home_hform.labelForField(self.home_way).setVisible(shown)
+
+    def home_way_edited(self, *_):
+        if self.loading:
+            return
+        s = self.win.session.slave(self.position)
+        joint = self.home_joint(s)
+        if s is None or joint is None:
+            return
+        integrate.set_joint_homing(self.win.session.cfg, joint, self.home_way.currentData())
+        self.show_homing_text(s, homing.choice(s, self.home_axis_number()), *self.home_support)
+        self.win.changed()
 
     def homing_edited(self, *_):
         if self.loading:

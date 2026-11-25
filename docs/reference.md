@@ -389,7 +389,7 @@ linuxcnc:
 
 | Key | Meaning |
 |---|---|
-| `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0). Each joint and each slave once. |
+| `joints` | A list of `joint` (the joint's number), `slave` (the name of a `cia402` slave in mode `csp`) and `scale` (its `pos-scale`, counts per machine unit, not 0); optionally `homing: homecomp` for a drive with `hm` in its modes: the joint homes through the homing module cia402_homecomp, a test ([Homing with cia402_homecomp](ecatsetup.md#homing-with-cia402_homecomp-test)); left out, through `index-enable`. Each joint and each slave once. |
 | `check-hal-at-start` | `true`: `ethercat-load.hal` runs the HAL check (`ecatsetup --check-hal`) when LinuxCNC starts ([writing into LinuxCNC](ecatsetup.md#checking-the-hal-files)). |
 | `params` | A list of `pin` (a parameter of a slave, of one of its axes or encoder channels, such as `Encoder.enc.pos-scale`) and `value` (a number; `true` or `false` for a bool parameter; a whole number, not negative for a `uint`), each parameter once. Written as `setp` lines in `ethercat.hal`. Not the master's parameters, and not the `pos-scale` of a drive a joint sets. |
 | `old-pins` | For a configuration moved from lcec ([from an lcec configuration](ecatsetup.md#from-an-lcec-configuration)): a list of `old` (a pin the HAL files use, of lcec or of the cia402 component) and `new` (the pin or parameter of this configuration that takes its place; left out: the pin is taken out of its lines), each old pin once. |

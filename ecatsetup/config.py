@@ -1164,6 +1164,14 @@ def check_joints(cfg):
         scale = j.get("scale", 1.0)
         if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale == 0:
             errors.append("%s: scale must be a number other than 0" % where)
+        if "homing" in j:
+            hm = {a for sl in cfg.get("slaves") or [] if "hm" in ((sl.get("cia402") or {}).get("modes") or [])
+                  for a in axes(sl)}
+            if j["homing"] != "homecomp":
+                errors.append("%s: homing must be homecomp (left out: index-enable)" % where)
+            elif j.get("slave") not in hm:
+                errors.append("%s: homing homecomp needs a drive that homes by itself "
+                              "(cia402.modes with hm)" % where)
     return errors
 
 

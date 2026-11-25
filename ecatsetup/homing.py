@@ -262,6 +262,29 @@ def ini_help(cfg, slave, axis=0):
     joint = next((j["joint"] for j in ((cfg or {}).get("linuxcnc") or {}).get("joints") or []
                   if j.get("slave") == drive), None)
     m = method(chosen["method"], slave)
+    if _homecomp(cfg, joint):
+        out = [("[EMCMOT]", True),
+               ("# Written by Apply: the homing module that hands homing to the drive (a test).", False),
+               ("HOMEMOD = cia402_homecomp", True),
+               ("[JOINT_%s]" % joint, True),
+               ("# The drive homes by method %d (%s), started by cia402_homecomp." % (m.number, m.text),
+                False),
+               ("# Motion does not search: no search, latch or index.", False),
+               ("HOME_SEARCH_VEL = 0", True),
+               ("HOME_LATCH_VEL = 0", True),
+               ("HOME_USE_INDEX = NO", True),
+               ("# HOME_OFFSET is the machine coordinate of the point where the drive homed (its", False),
+               ("# position there is its home offset 0x607C, or 0). HOME is where the joint goes", False),
+               ("# after homing, at HOME_FINAL_VEL.", False),
+               ("HOME_OFFSET = 0", True),
+               ("HOME = 0", True),
+               ("HOME_FINAL_VEL = 10", True),
+               ("# Joints with the same number home together, lower numbers first.", False),
+               ("HOME_SEQUENCE = 0", True)]
+        if m.moves:
+            out.insert(6, ("# The axis MOVES at the drive's speeds (0x6099); motion does not see the "
+                           "move (the HAL lines limit it).", False))
+        return out
     out = [("[JOINT_%s]" % ("N" if joint is None else joint), True),
            ("# The drive homes by method %d (%s)." % (m.number, m.text), False),
            ("# Motion does not search itself: it only waits for the drive, as for an index pulse.",
@@ -283,6 +306,12 @@ def ini_help(cfg, slave, axis=0):
     else:
         out.insert(3, ("# This method does not move the axis.", False))
     return out
+
+
+def _homecomp(cfg, joint):
+    """Whether the joint (number or None) homes through cia402_homecomp."""
+    from . import integrate
+    return joint is not None and integrate.joint_homing(cfg, joint) == "homecomp"
 
 
 def hal_help(cfg, slave, axis=0, ini_path=None):
@@ -312,15 +341,24 @@ def hal_help(cfg, slave, axis=0, ini_path=None):
             letter = None
         main = os.path.join(os.path.dirname(os.path.abspath(ini_path)), integrate.MAIN_FILE)
         try:
-            for line in open(main).read().splitlines():
+            with open(main) as f:
+                text = f.read()
+            for line in text.splitlines():
                 t = line.split()
                 if t[:1] == ["net"] and "%s.index-enable" % drive in t:
                     sig = t[1]
         except OSError:
             pass
     sig = sig or "%s-index-enable" % ((letter or "j%s" % n).lower())
-    out = [("# Written by Apply into ethercat.hal (nothing to do here):", False),
-           ("#   net %s joint.%s.index-enable <=> %s.index-enable" % (sig, n, drive), False)]
+    comp = _homecomp(cfg, n if joint else None)
+    if comp:
+        out = [("# Written by Apply into ethercat.hal (nothing to do here): the nets between", False),
+               ("# joint.%s, cia402_homecomp's joint.%s.cia-* pins and %s, and" % (n, n, drive), False),
+               ("#   setp joint.%s.request-custom-homing 1" % n, False),
+               ("#   setp %s.home-hold 1" % drive, False)]
+    else:
+        out = [("# Written by Apply into ethercat.hal (nothing to do here):", False),
+               ("#   net %s joint.%s.index-enable <=> %s.index-enable" % (sig, n, drive), False)]
     m = method(chosen["method"], slave)
     if not m.moves:
         out.append(("# Method %d does not move the axis: no guard is needed." % m.number, False))
@@ -354,8 +392,14 @@ def hal_help(cfg, slave, axis=0, ini_path=None):
                     % (secs, fast, scale), False))
         out.append(("# twice that, and at least the default 60 s:", False))
         out.append(("setp %s.home-timeout-ms %d" % (drive, ms), True))
+        if comp:
+            out.append(("# cia402_homecomp's own limit (30 s by default), the same:", False))
+            out.append(("setp joint.%s.cia-timeout-ms %d" % (n, ms), True))
     else:
         out.append(("# 60 s by default: raise it if a homing can take longer (the whole axis at the homing speed):",
                     False))
         out.append(("#setp %s.home-timeout-ms 60000" % drive, False))
+        if comp:
+            out.append(("# cia402_homecomp's own limit is 30 s by default:", False))
+            out.append(("#setp joint.%s.cia-timeout-ms 60000" % n, False))
     return out

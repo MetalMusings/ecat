@@ -1156,6 +1156,40 @@ class TestWindow(WindowBase):
         self.assertNotIn("homing", s)
         self.assertNotIn("0x6098:00", [x["object"] for x in s.get("settings") or []])
 
+    def test_homing_card_started_by(self):
+        # the joint's choice between index-enable and cia402_homecomp: only for a
+        # joint, and only when LinuxCNC has the module (or the joint uses it)
+        from ecatsetup import integrate
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"] = "cia402"
+        s["cia402"] = {"mode": "csp", "modes": ["hm"]}
+        s["homing"] = {"method": 35}
+        w.select_slave(0)
+        page = w.slave_page
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, {"ECATSETUP_MODULE_DIR": d}):
+            page.show_homing(s)
+            self.assertTrue(page.home_way.isHidden())         # not a joint
+            integrate.set_joint(w.session.cfg, 0, s["name"], 100.0)
+            page.show_homing(s)
+            self.assertTrue(page.home_way.isHidden())         # no module
+            open(os.path.join(d, "cia402_homecomp.so"), "w").close()
+            page.show_homing(s)
+            self.assertFalse(page.home_way.isHidden())
+            self.assertEqual(page.home_way.currentData(), "index")
+            page.home_way.setCurrentIndex(page.home_way.findData("homecomp"))
+            page.home_way_edited()
+            self.assertEqual(integrate.joint_homing(w.session.cfg, 0), "homecomp")
+            self.assertIn("HOMEMOD = cia402_homecomp", page.home_ini.toPlainText())
+            self.assertIn("request-custom-homing", page.home_hal.toPlainText())
+            os.remove(os.path.join(d, "cia402_homecomp.so"))
+            page.show_homing(s)
+            self.assertFalse(page.home_way.isHidden())        # in use: still shown
+            page.home_way.setCurrentIndex(page.home_way.findData("index"))
+            page.home_way_edited()
+            self.assertEqual(integrate.joint_homing(w.session.cfg, 0), "index")
+
     def test_homing_card_switches(self):
         w = self.window()
         s = w.session.slave(0)

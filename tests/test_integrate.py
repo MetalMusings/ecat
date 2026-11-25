@@ -908,6 +908,99 @@ class TestHomingIni(Folder):
         self.assertEqual(len(integrate.joint_checks(self.ini, c)), 1)
 
 
+class TestHomecomp(Folder):
+    """Homing through cia402_homecomp, chosen per joint beside index-enable."""
+
+    def homecomp_cfg(self):
+        c = cfg()
+        c["slaves"][0]["cia402"]["modes"] = ["hm"]
+        integrate.set_joint(c, 0, "x", 100.0)
+        integrate.set_joint_homing(c, 0, "homecomp")
+        return c
+
+    def test_choice_kept_and_checked(self):
+        c = self.homecomp_cfg()
+        self.assertEqual(integrate.joint_homing(c, 0), "homecomp")
+        self.assertTrue(integrate.uses_homecomp(c))
+        self.assertEqual([e for e in config.check(c) if "linuxcnc.joints" in e], [])
+        integrate.set_joint(c, 0, "x", 50.0)          # a new scale keeps it
+        self.assertEqual(integrate.joint_homing(c, 0), "homecomp")
+        integrate.set_joint(c, 0, "y", 50.0)          # another drive does not
+        self.assertEqual(integrate.joint_homing(c, 0), "index")
+        c = self.homecomp_cfg()
+        c["slaves"][0]["cia402"]["modes"] = []
+        self.assertTrue(any("needs a drive that homes" in e for e in config.check(c)))
+        c["linuxcnc"]["joints"][0]["homing"] = "index"
+        self.assertTrue(any("homing must be homecomp" in e for e in config.check(c)))
+        integrate.set_joint_homing(c, 0, "index")
+        self.assertNotIn("homing", c["linuxcnc"]["joints"][0])
+
+    def test_apply_writes_the_module_between_joint_and_drive(self):
+        c = self.homecomp_cfg()
+        with mock.patch.dict(os.environ, {"ECATSETUP_MODULE_DIR": self.lib.name}):
+            open(os.path.join(self.lib.name, "cia402_homecomp.so"), "w").close()
+            p = integrate.plan(self.ini, c)
+        self.assertEqual(p.errors, [])
+        self.assertEqual(p.warnings, [])
+        integrate.apply(p)
+        main = self.read("ethercat.hal")
+        # the user's signal names are kept where the pins stay together
+        for line in ("net x-pos-cmd joint.0.motor-pos-cmd => x.pos-cmd",
+                     "net x-pos-cmd joint.0.cia-pos-cmd",
+                     "net x-pos-fb joint.0.cia-pos-fb-out => joint.0.motor-pos-fb",
+                     "net x-pos-actual x.pos-fb => joint.0.cia-pos-fb-in",
+                     "net x-enable joint.0.amp-enable-out => joint.0.cia-enable-in",
+                     "net x-drive-enable joint.0.cia-enable-out => x.enable",
+                     "net x-fault x.drv-fault => joint.0.amp-fault-in",
+                     "net x-fault joint.0.cia-stat-fault",
+                     "net x-home joint.0.cia-home => x.home",
+                     "net x-homed x.stat-homed => joint.0.cia-stat-homed",
+                     "net x-home-error x.home-error => joint.0.cia-stat-homing-error",
+                     "net x-opmode x.opmode-display => joint.0.cia-opmode-display",
+                     "setp joint.0.request-custom-homing 1",
+                     "setp x.home-hold 1"):
+            self.assertIn(line + "\n", main)
+        self.assertNotIn("index-enable", main)
+        ini = self.read("machine.ini")
+        self.assertIn("[EMCMOT]\nHOMEMOD = cia402_homecomp\n", ini)
+        # every pin on one signal only
+        nets = {}
+        for line in main.splitlines():
+            t = line.split()
+            if t[:1] == ["net"]:
+                for pin in t[2:]:
+                    if pin not in ("=>", "<=", "<=>"):
+                        self.assertNotIn(pin, nets, line)
+                        nets[pin] = t[1]
+        # back to index-enable: the module's lines and HOMEMOD go
+        integrate.set_joint_homing(c, 0, "index")
+        integrate.apply(integrate.plan(self.ini, c))
+        self.assertNotIn("cia-", self.read("ethercat.hal"))
+        self.assertIn("index-enable", self.read("ethercat.hal"))
+        self.assertNotIn("HOMEMOD", self.read("machine.ini"))
+
+    def test_missing_module_is_a_warning(self):
+        c = self.homecomp_cfg()
+        with mock.patch.dict(os.environ, {"ECATSETUP_MODULE_DIR": self.lib.name}):
+            p = integrate.plan(self.ini, c)
+        self.assertTrue(any("no such module" in w for w in p.warnings), p.warnings)
+
+    def test_user_homemod_left_alone(self):
+        self.write("machine.ini", INI.replace("[EMCMOT]\n", "[EMCMOT]\nHOMEMOD = myhoming\n"))
+        c = cfg()
+        integrate.set_joint(c, 0, "x", 100.0)
+        integrate.apply(integrate.plan(self.ini, c))
+        self.assertIn("HOMEMOD = myhoming", self.read("machine.ini"))
+
+    def test_home_use_index_note(self):
+        c = self.homecomp_cfg()
+        base = INI + "FERROR = 1\nMIN_FERROR = 1\n"
+        self.write("machine.ini", base)
+        self.assertEqual(integrate.joint_checks(self.ini, c), [])
+        self.write("machine.ini", base + "HOME_USE_INDEX = YES\n")
+        self.assertIn("set it to NO", integrate.joint_checks(self.ini, c)[0])
+
+
 class TestKnownPins(unittest.TestCase):
     def test_orient_fault_is_a_sint_input(self):
         self.assertEqual(integrate.known_pin("spindle.0.orient-fault"), ("sint", "in"))

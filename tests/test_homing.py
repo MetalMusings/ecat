@@ -144,6 +144,20 @@ class TestHoming(unittest.TestCase):
         lines = [t for t, _ in homing.hal_help(cfg, x)]
         self.assertIn("setp X-drive.home-max-travel <axis length + a margin>", lines)
         self.assertIn("#setp X-drive.home-timeout-ms 60000", lines)
+        # through cia402_homecomp: its lines, and its own time limit too
+        cfg["linuxcnc"]["joints"][0]["homing"] = "homecomp"
+        homing.apply(x, 0, {"method": 36, "fast": 3000})
+        lines = [t for t, _ in homing.hal_help(cfg, x)]
+        self.assertIn("#   setp joint.0.request-custom-homing 1", lines)
+        self.assertIn("#   setp X-drive.home-hold 1", lines)
+        self.assertIn("#setp joint.0.cia-timeout-ms 60000", lines)
+        self.assertFalse([t for t in lines if "index-enable" in t])
+        ini = [t for t, _ in homing.ini_help(cfg, x)]
+        self.assertIn("HOMEMOD = cia402_homecomp", ini)
+        self.assertIn("HOME_USE_INDEX = NO", ini)
+        self.assertIn("HOME_LATCH_VEL = 0", ini)
+        del cfg["linuxcnc"]["joints"][0]["homing"]
+        self.assertIn("HOME_USE_INDEX = YES", [t for t, _ in homing.ini_help(cfg, x)])
         # a method that does not move: only the net
         homing.apply(x, 0, {"method": 35})
         lines = homing.hal_help(cfg, x)

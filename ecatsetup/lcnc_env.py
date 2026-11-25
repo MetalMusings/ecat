@@ -70,6 +70,19 @@ def hallib():
     return "/usr/share/linuxcnc/hallib"
 
 
+def module_dir():
+    """The folder of LinuxCNC's realtime modules (ECATSETUP_MODULE_DIR for tests)."""
+    if os.environ.get("ECATSETUP_MODULE_DIR"):
+        return os.environ["ECATSETUP_MODULE_DIR"]
+    root = tree()
+    return os.path.join(root, "rtlib") if root else "/usr/lib/linuxcnc/modules"
+
+
+def has_module(name):
+    """Whether LinuxCNC has the realtime module `name` (such as a homing module)."""
+    return os.path.isfile(os.path.join(module_dir(), name + ".so"))
+
+
 def describe():
     root = tree()
     v = version()
