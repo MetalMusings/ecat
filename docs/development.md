@@ -3853,6 +3853,9 @@ copy ~/linuxcnc/configs/QtPlasma-homecomp:
   397/397, 398/398, 396/396 counts. The ECT60 needs a while after
   "Operation enabled" before it follows; a move in that time is lost.
   The end stop is springy; the home point repeated within 0.02 mm.
+- The same method 36 through `index-enable` (copy QtPlasma-torquehome,
+  no homecomp) with the 200 ms hold: two homings, target and position
+  300/300 both times, following error 0, no fault.
 
 What homecomp could do for any drive layer (proposals for its authors):
 wait until the drive is back in its cyclic mode and enabled before the
