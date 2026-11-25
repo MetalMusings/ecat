@@ -556,6 +556,13 @@ def inventory(roots=None, ini=None):
                 aspm[k] = v == "1"
         nic["aspm"] = aspm
         nic["irqs"] = [x["irq"] for x in irqs if x["irq"].isdigit() and name in x["name"]]
+        # frames the card dropped since the computer started (no ethtool needed)
+        drops = {}
+        for k in ("rx_dropped", "rx_missed_errors", "rx_fifo_errors", "rx_over_errors"):
+            v = r.s("class", "net", name, "statistics", k)
+            if v is not None and v.strip().isdigit():
+                drops[k] = int(v.strip())
+        nic["rx_drops"] = drops
         coal = r.run(["ethtool", "-c", name])
         if coal:
             m = re.search(r"^rx-usecs:\s*(\S+)", coal, re.M)

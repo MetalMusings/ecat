@@ -5,11 +5,12 @@
 
 - id: frames-lost
   title: Frames were lost or came back too late
-  when: "log and (wc_zero > 0 or lost > 0)"
+  when: "log and (wc_zero > 0 or lost > 0 or frames_lost > 0)"
   evidence: >
     working counter zero {wc_zero} times while running; the master: {skipped} skipped,
     {unmatched} unmatched, {timed_out} timed-out datagrams; drives shut down for
-    invalid process data: {drives_shut}
+    invalid process data: {drives_shut}; frames lost (sent, never came back):
+    {frames_lost}
   meaning: >
     In those cycles the frame with the process data did not come back before the
     next one was sent, so no data was exchanged with the slaves. ecat then shuts
@@ -18,6 +19,50 @@
     unmatched datagrams mean a frame came back late, not that it was broken: this
     is mostly timing, or a second user of the network card, and seldom the cable.
   causes:
+    - id: late-not-lost
+      title: The frames came back late; none was lost
+      likely: "frame_stats and frames_lost == 0 and (lost > 0 or wc_zero > 0)"
+      ruled-out: "frame_stats and frames_lost > 0 and lost == 0"
+      evidence: >
+        the master counted every frame back ({frames_lost} lost), but {unmatched}
+        unmatched and {skipped} skipped datagrams: they came back after the next
+        cycle had started
+      check: >
+        The Timing tab: Measure (with load). Late frames come from this computer: the
+        servo thread, or the network card's interrupt and its coalescing.
+      fix: >
+        Not the cable. Work through the Timing tab's findings; the causes below about
+        the computer and the card are the usual ones.
+      look: timing
+      tests:
+        likely: {frame_stats: true, frames_lost: 0, lost: 7, wc_zero: 2}
+        ruled-out: {frame_stats: true, frames_lost: 5, lost: 0, wc_zero: 3}
+        not checked: {frame_stats: false, frames_lost: 0, lost: 7, wc_zero: 2}
+
+    - id: dropped-in-computer
+      title: Frames were lost in this computer, not on the cable
+      likely: "frame_stats and frames_lost > 0 and not port_errors_run and nic_dropped > 0"
+      possible: "frame_stats and frames_lost > 0 and not port_errors_run"
+      ruled-out: "frame_stats and (frames_lost == 0 or port_errors_run)"
+      evidence: >
+        {frames_lost} frames never came back, and no slave counted an error on a port
+        during the run; the card {nic_name} has dropped received frames since the
+        computer started: {nic_dropped_text}
+      check: >
+        ip -s link show {nic_name}; ethtool -S {nic_name} (rx_missed, rx_no_buffer,
+        rx_dropped); the Timing tab
+      fix: >
+        A frame the slaves answered was dropped by the card or the system: the card's
+        receive queue was full (a late interrupt, coalescing, a busy CPU), or another
+        program takes the card. Put the card's interrupt on the real-time CPU, turn
+        coalescing off (ethtool -C {nic_name} rx-usecs 0), give it its own card.
+      look: timing
+      tests:
+        likely: {frame_stats: true, frames_lost: 4, port_errors_run: [], nic_dropped: 12}
+        possible: {frame_stats: true, frames_lost: 4, port_errors_run: [], nic_dropped: 0}
+        ruled-out: {frame_stats: true, frames_lost: 4, port_errors_run: [{slave: 1, port: 0, counts: {phy: 3}}]}
+        not checked: {frame_stats: false, frames_lost: 0}
+
     - id: kernel-master
       title: The IgH kernel master is loaded beside the userspace master
       likely: "kernel_master"
@@ -54,7 +99,8 @@
       likely: "late > 0 or turnaround_3 > 0"
       evidence: >
         ecat recorded {late} late servo cycles and {turnaround_3} times a turn-around
-        of 3 cycles
+        of 3 cycles; {faults_after_late} of the {faults} faults (working counter,
+        lost frames) came within 2 s after a late cycle
       check: >
         The Timing tab: Measure (with load) shows how late the servo thread runs on
         this computer, and what delays it.
@@ -159,8 +205,8 @@
 
     - id: cable
       title: A cable, a connector or a slave's power
-      likely: "port_errors or link_down > 0 or offline > 0"
-      ruled-out: "ports_read and not port_errors and link_down == 0 and offline == 0"
+      likely: "port_errors_run or port_errors or link_down > 0 or offline > 0"
+      ruled-out: "((ports_read and not port_errors) or (frame_stats and frames_lost == 0)) and not port_errors_run and link_down == 0 and offline == 0"
       evidence: "{cable_text}"
       check: >
         Troubleshoot: Examine all reads every slave's port error counters (rx and

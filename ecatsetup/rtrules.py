@@ -506,7 +506,8 @@ def evidence(inv, run=None):
                      "eee_on": bool(x.get("eee")) and str(x.get("eee")).startswith("enabled"),
                      "aspm_on": any((x.get("aspm") or {}).values()),
                      "default_route": x["name"] == d.get("default_route"),
-                     "up": x.get("operstate") == "up"})
+                     "up": x.get("operstate") == "up",
+                     "rx_drops": dict(x.get("rx_drops") or {})})
     ctx["nics"] = nics
     return ctx
 

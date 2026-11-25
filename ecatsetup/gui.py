@@ -3596,6 +3596,24 @@ class StepCard(Card):
         self.set_tone({"red": "red", "grey": "grey"}.get(kind))
 
 
+def free_master_line(status, stats, free_texts):
+    """What the event log says about a free master (ec_master) that runs:
+    status (MasterLog.status()), its frame counts (tool.frame_stats()) and
+    its messages. ec_master runs without real-time priority by default, so
+    late datagrams there say little about LinuxCNC's timing."""
+    if not status:
+        return ""
+    parts = [status]
+    if stats:
+        parts.append("it has lost %d of %d frames since it started%s" % (
+            stats.get("lost", 0), stats["tx"],
+            ", %d in the last second" % stats["loss_rate"] if stats.get("loss_rate") else ""))
+    if any(t.source and ("UNMATCHED" in t.text or "TIMED OUT" in t.text) for t in free_texts):
+        parts.append("its late datagrams (unmatched, timed out) come from a master without real-time "
+                     "priority: they say little about LinuxCNC's timing; the I/O test is what tells")
+    return "; ".join(parts)
+
+
 class Sparkline(QWidget):
     """A small curve of values over time (the long-term monitoring)."""
 
@@ -3838,7 +3856,9 @@ class TroubleshootPage(QWidget):
         refreshes the master's messages about the chosen slave."""
         path = self.events_run.currentData()
         free = self.win.master_log.texts() if path == events.PATH else []
-        free_status = self.win.master_log.status() if path == events.PATH else ""
+        free_status = free_master_line(
+            self.win.master_log.status(), tool.frame_stats() if self.win.master_log.pid else None,
+            free) if path == events.PATH else ""
         self.fill_master_says()
         try:
             log = events.read(path)

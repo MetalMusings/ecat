@@ -104,6 +104,60 @@ class TestFromLog(unittest.TestCase):
         self.assertEqual({v for k, v in states.items() if k != "late-thread"}, {"not checked"})
 
 
+class TestLostOrLate(unittest.TestCase):
+    """The long-term monitoring tells a frame lost from one that came back late,
+    and where it was lost."""
+
+    def judge(self, evs, texts=(), drops=None):
+        inv = rtcheck.Inventory()
+        inv.add("nics", "Network cards", "...", "x", data=[
+            {"name": "enp2s0", "driver": "igc", "operstate": "up", "aspm": {}, "rx_drops": drops or {}}])
+        ctx = explain.context(log(evs, texts), inv=inv, interface="enp2s0")
+        f = next(x for x in explain.findings(ctx) if x.id == "frames-lost")
+        return ctx, {c["id"]: c for c in f.causes}
+
+    MON = [ev(7, events.MON_START, a=1)]
+
+    def test_late_not_lost(self):
+        """Working counter zero and unmatched datagrams, but every frame came back:
+        late, not lost; the cable is ruled out, and the fault right after a late
+        servo cycle is counted."""
+        evs = START + self.MON + [ev(8, events.LATE, a=900), ev(9, events.WC, a=0, b=2),
+                                  ev(10, events.WC, a=2, b=0)]
+        ctx, c = self.judge(evs, ["EtherCAT WARNING 0: 3 datagrams UNMATCHED!"])
+        self.assertEqual((ctx["frame_stats"], ctx["frames_lost"]), (True, 0))
+        self.assertEqual(c["late-not-lost"]["state"], "likely")
+        self.assertEqual(c["cable"]["state"], "ruled out")
+        self.assertEqual(c["dropped-in-computer"]["state"], "ruled out")
+        self.assertEqual((ctx["faults"], ctx["faults_after_late"]), (1, 1))
+        self.assertIn("1 of the 1 faults", c["late-thread"]["evidence"])
+
+    def test_lost_at_a_port(self):
+        evs = START + self.MON + [ev(8, events.MON_ONSET, a=events.MON_FRAMES_LOST << 8, b=2),
+                                  ev(9, events.MON_ONSET, 2, a=(2 << 8) | 1, b=5)]
+        ctx, c = self.judge(evs)
+        self.assertEqual(ctx["frames_lost"], 2)
+        self.assertEqual(c["cable"]["state"], "likely")
+        self.assertIn("during the run: slave 2 port 1: phy +5", c["cable"]["evidence"])
+        self.assertEqual(c["dropped-in-computer"]["state"], "ruled out")
+        self.assertEqual(c["late-not-lost"]["state"], "ruled out")
+
+    def test_lost_in_the_computer(self):
+        evs = START + self.MON + [ev(8, events.MON_ONSET, a=events.MON_FRAMES_LOST << 8, b=2)]
+        ctx, c = self.judge(evs, drops={"rx_missed_errors": 7, "rx_dropped": 0})
+        self.assertEqual(c["dropped-in-computer"]["state"], "likely")
+        self.assertIn("rx_missed_errors 7", c["dropped-in-computer"]["evidence"])
+        _, c = self.judge(evs)
+        self.assertEqual(c["dropped-in-computer"]["state"], "possible")
+
+    def test_an_older_master_says_nothing_about_lost_frames(self):
+        evs = START + [ev(7, events.MON_START, a=0), ev(8, events.WC, a=0, b=2)]
+        ctx, c = self.judge(evs)
+        self.assertFalse(ctx["frame_stats"])
+        self.assertEqual(c["late-not-lost"]["state"], "not checked")
+        self.assertEqual(c["dropped-in-computer"]["state"], "not checked")
+
+
 class TestJudged(unittest.TestCase):
     """The whole chain on one computer: a kernel master loaded, a Realtek card
     with EEE, the slaves examined with clean counters."""
@@ -134,7 +188,7 @@ class TestJudged(unittest.TestCase):
             "kernel-master": "likely", "kernel-master-at-boot": "not checked", "late-thread": "not checked",
             "not-preempt-rt": "ruled out", "no-isolated-cpu": "ruled out", "nic-eee": "likely",
             "nic-carries-lan": "ruled out", "nic-irq-cpu": "not checked", "nic-realtek": "possible",
-            "cable": "ruled out"})
+            "cable": "ruled out", "late-not-lost": "not checked", "dropped-in-computer": "not checked"})
         kernel = next(c for c in f.causes if c["id"] == "kernel-master")
         self.assertEqual(kernel["evidence"], "modules ec_master, ec_r8169; ethercat.service is active")
         eee = next(c for c in f.causes if c["id"] == "nic-eee")

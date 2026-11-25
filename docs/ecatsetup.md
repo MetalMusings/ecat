@@ -3980,6 +3980,26 @@ carrying the LAN, the card's interrupt not on the real-time CPU (while
 LinuxCNC runs), a Realtek card (`r8169`), and a cable or a slave's power
 (link down, slaves offline, port error counters).
 
+With the long-term monitoring (and the userspace master 1.7, which counts
+the frames that never came back) it tells **lost** from **late**:
+
+| What the log shows | What it means | Judged |
+|---|---|---|
+| Working counter zero, unmatched or skipped datagrams, but no frame lost | The frames came back after the next cycle had started | *The frames came back late; none was lost* likely: timing (this computer, the card's interrupt). The cable is ruled out. |
+| Frames lost, and a slave's port counters grew during the run | Lost on the wire at that port | *A cable, a connector or a slave's power* likely, with the port and when it began |
+| Frames lost, no port counter grew | Lost in this computer | *Frames were lost in this computer* possible; likely when the card has dropped received frames (`rx_dropped`, `rx_missed_errors`, ... in `/sys/class/net/<card>/statistics`) |
+
+The *servo thread late* cause also says how many of the faults (working
+counter, lost frames) came within 2 s after a late servo cycle. A run of an
+ecat or a master without these counters leaves the first two causes *not
+checked*.
+
+The free master (`ec_master`, reading the bus without LinuxCNC) runs without
+real-time priority: the event log's line on it gives its lost frames
+(`ethercat-uspace master`), and says that its unmatched or timed-out
+datagrams say little about LinuxCNC's timing: the I/O test, with ecat in
+the servo thread, is what tells.
+
 The problems are data, `ecatsetup/explain/*.yaml` (the format is at the top
 of `ecatsetup/explain.py`), with the real-time check's safe expressions.
 A file of your own in `~/.config/ecatsetup/explain/` replaces a shipped

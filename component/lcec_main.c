@@ -1176,6 +1176,11 @@ static void ecat_monitor(lcec_master_t *master) {
   if (!master->mon_started) {
     master->mon_started = 1;
     ecat_mon_master_init(&master->mon, now);
+#ifdef EC_HAVE_FRAME_STATS
+    ecat_events_add(master->events, ECAT_EV_MON_START, -1, 1, 0);
+#else
+    ecat_events_add(master->events, ECAT_EV_MON_START, -1, 0, 0);
+#endif
     for (slave = master->first_slave; slave != NULL; slave = slave->next) {
       int dc = slave->dc_conf != NULL && slave->dc_conf->assignActivate != 0 && slave->index != master->ref_clock_index;
       ecat_mon_slave_init(&slave->mon, slave->index, dc, now);

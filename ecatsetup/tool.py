@@ -49,6 +49,24 @@ def master_mac():
     return m.group(1).lower() if m else None
 
 
+def frame_stats():
+    """The master's frame counts as `ethercat master` shows them (all devices):
+    {"tx": frames sent, "rx": received, "lost": lost, "loss_rate": lost per
+    second over the last second}, or None when it cannot be read."""
+    try:
+        text = run("master")
+    except ToolError:
+        return None
+    common = text.split("Common:", 1)[-1]
+    out = {}
+    for key, rx in (("tx", r"Tx frames:\s+(\d+)"), ("rx", r"Rx frames:\s+(\d+)"),
+                    ("lost", r"Lost frames:\s+(\d+)"), ("loss_rate", r"Loss rate \[1/s\]:\s+(\d+)")):
+        m = re.search(rx, common)
+        if m:
+            out[key] = int(m.group(1))
+    return out if "tx" in out else None
+
+
 def dc_clock(text):
     """What a slave's EtherCAT chip can do for distributed clocks, from
     "slaves -v": "64" or "32" (a system time: it can be synchronised),

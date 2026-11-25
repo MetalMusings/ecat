@@ -1811,6 +1811,7 @@ class TestWindow(WindowBase):
 
         def __init__(self, texts=(), status="", note=""):
             self.items, self.line, self.note = list(texts), status, note
+            self.pid = None         # no free master: its frame counts are not read
 
         def poll(self):
             pass
@@ -1955,6 +1956,18 @@ class TestMonitorRows(unittest.TestCase):
         self.assertEqual(gui.monitor_rows(self.CFG, {"ecat.0.frames-lost": "0"}, {}),
                          [(True, "0 frames lost since the bus started (sent, never came back)")])
         self.assertFalse(gui.monitor_rows(self.CFG, {"ecat.0.frames-lost": "3"}, {})[0][0])
+
+
+@unittest.skipIf(gui is None, "PyQt5 is not installed")
+class TestFreeMasterLine(unittest.TestCase):
+    def test_line(self):
+        from ecatsetup import events
+        self.assertEqual(gui.free_master_line("", {"tx": 5}, []), "")
+        st = "the free master (ec_master, pid 7) runs; its messages come from the system journal"
+        line = gui.free_master_line(st, {"tx": 1000, "rx": 997, "lost": 3, "loss_rate": 1}, [])
+        self.assertEqual(line, st + "; it has lost 3 of 1000 frames since it started, 1 in the last second")
+        late = [events.Text(0, 0, 4, "EtherCAT WARNING 0: 2 datagrams UNMATCHED!", "free master")]
+        self.assertIn("without real-time priority", gui.free_master_line(st, None, late))
 
 
 class TestPdoEditing(WindowBase):

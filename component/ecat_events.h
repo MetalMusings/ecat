@@ -54,6 +54,7 @@ enum {
   ECAT_EV_MON_ONSET = 52,   // a counter grew after being quiet; a: code, b: growth
   ECAT_EV_MON_SUM = 53,     // a counter's growth in the period; a: code, b: growth
   ECAT_EV_MON_WC = 54,      // master: cycles in the period with the working counter a: zero, b: incomplete
+  ECAT_EV_MON_START = 55,   // the monitoring started (after activation); a: bit 0 the master's frame statistics are read
 };
 
 typedef struct {

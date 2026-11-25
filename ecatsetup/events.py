@@ -37,7 +37,8 @@ SLAVE_AL, SLAVE_ONLINE, SLAVE_OP, DC_SYNC = 20, 21, 22, 23
 DRIVE_FAULT, DRIVE_BLOCK, DRIVE_CLEAR = 30, 31, 32
 GUARD, LATE, SHIFT = 40, 41, 42
 # long-term monitoring (component/ecat_monitor_core.h): a code is kind << 8 | port
-MON_DC, MON_DC_OVER, MON_ONSET, MON_SUM, MON_WC = 50, 51, 52, 53, 54
+MON_DC, MON_DC_OVER, MON_ONSET, MON_SUM, MON_WC, MON_START = 50, 51, 52, 53, 54, 55
+MON_FRAMES_LOST = 10        # the kind of the master's lost frames (slave -1)
 MON_PERIOD_S = 600          # ECAT_MON_PERIOD_S: the summaries' period
 MON_DC_LIMIT_NS = 1000      # ECAT_MON_DC_LIMIT_NS
 # kind: (what, severity when it grows)
@@ -334,6 +335,10 @@ def text(e, names=None):
         if t == MON_ONSET:
             return sev, "%s: %s began to grow (+%d)" % (who, what, e.b)
         return sev, "%s: %s: +%d in %d min" % (who, what, e.b, MON_PERIOD_S // 60)
+    if t == MON_START:
+        return "info", "long-term monitoring started%s" % (
+            ", with the master's frame statistics" if e.a & 1 else
+            " (this master has no frame statistics: lost frames are not counted)")
     if t == MON_WC:
         return "warn", "working counter not complete in %d cycles in %d min (%d zero, %d incomplete): " \
                        "frames lost or late" % (e.a + e.b, MON_PERIOD_S // 60, e.a, e.b)
@@ -354,6 +359,27 @@ class SlaveHistory:
     dc_over: list       # [(time, |difference| ns)]: beyond the limit
     counters: dict      # what -> total growth recorded (sums, and onsets after the last sum)
     onsets: list        # [(time, what, growth)]
+
+
+def counter_totals(log):
+    """{(slave, code): growth recorded in a run}: the periods' sums, and the
+    onsets after the last sum (a sum includes the onsets of its period)."""
+    total, pending = {}, {}
+    for e in log.events:
+        if e.type == MON_SUM:
+            total[(e.slave, e.a)] = total.get((e.slave, e.a), 0) + e.b
+            pending[(e.slave, e.a)] = 0
+        elif e.type == MON_ONSET:
+            pending[(e.slave, e.a)] = pending.get((e.slave, e.a), 0) + e.b
+    for k, n in pending.items():
+        if n:
+            total[k] = total.get(k, 0) + n
+    return total
+
+
+def frame_stats(log):
+    """Whether the run counted the master's lost frames (MON_START bit 0)."""
+    return any(e.type == MON_START and e.a & 1 for e in log.events)
 
 
 def history(log):

@@ -157,6 +157,26 @@ def from_log(log, names=None):
         "messages": texts is not None and log.texts is not None,
     }
     ctx["lost"] = ctx["skipped"] + ctx["unmatched"] + ctx["timed_out"]
+    # long-term monitoring: frames really lost (the master's tx - rx), the port
+    # errors counted during the run, and how many of the faults came right
+    # after a late servo cycle
+    totals = events.counter_totals(log)
+    ctx["frame_stats"] = events.frame_stats(log)
+    ctx["frames_lost"] = totals.get((-1, events.MON_FRAMES_LOST << 8), 0)
+    run_errs = {}
+    for (slave, code), n in totals.items():
+        kind, port = code >> 8, code & 0xFF
+        if slave >= 0 and kind in (1, 2, 3) and n:
+            run_errs.setdefault((slave, port), {})[("rx", "phy", "lost")[kind - 1]] = n
+    ctx["port_errors_run"] = [{"slave": s, "port": p, "counts": c} for (s, p), c in sorted(run_errs.items())]
+    ctx["port_errors_run_text"] = "; ".join("slave %d port %d: %s" % (
+        e["slave"], e["port"], ", ".join("%s +%d" % kv for kv in sorted(e["counts"].items())))
+        for e in ctx["port_errors_run"])
+    lates = [e.time for e in evs if e.type == events.LATE]
+    faults = [e.time for e in running if e.type == events.WC and e.a in (0, 1)] + \
+        [e.time for e in evs if e.type == events.MON_ONSET and e.slave < 0]
+    ctx["faults"] = len(faults)
+    ctx["faults_after_late"] = sum(1 for t in faults if any(0 <= t - x <= 2.0 for x in lates))
     return ctx
 
 
@@ -190,6 +210,9 @@ def from_computer(inv, interface=None):
     ctx["nic_name"] = want
     ctx["nic_irq_on_rt"] = any(x["on_rt"] for x in ctx.get("irqs") or [] if x.get("nic") == want) \
         if nic else None
+    drops = {k: v for k, v in ((nic or {}).get("rx_drops") or {}).items() if v}
+    ctx["nic_dropped"] = sum(drops.values())
+    ctx["nic_dropped_text"] = ", ".join("%s %d" % kv for kv in sorted(drops.items()))
     return ctx
 
 
@@ -217,7 +240,8 @@ def context(log=None, names=None, masters=None, inv=None, interface=None, report
     ctx.update(from_reports(reports))
     ctx.update(from_log(log, names))
     # the cable cause's evidence: only the parts that say something
-    parts = [("error counters: " + ctx["port_errors_text"]) if ctx.get("port_errors_text") else "",
+    parts = [("during the run: " + ctx["port_errors_run_text"]) if ctx.get("port_errors_run_text") else "",
+             ("error counters: " + ctx["port_errors_text"]) if ctx.get("port_errors_text") else "",
              "link down %d times" % ctx["link_down"] if ctx.get("link_down") else "",
              "slaves offline %d times while running" % ctx["offline"] if ctx.get("offline") else ""]
     ctx["cable_text"] = "; ".join(p for p in parts if p)
