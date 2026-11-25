@@ -88,8 +88,10 @@ void ecat_mon_sync(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, int
   counter(log, s, now_ns, kind, 0, value);
 }
 
-void ecat_mon_dc(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, uint32_t raw) {
+void ecat_mon_dc(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, uint32_t raw, int op) {
   uint32_t mag = raw & 0x7FFFFFFFu;
+
+  if (!op) return;
 
   s->dc_diff = (raw & 0x80000000u) ? -(int32_t)mag : (int32_t)mag;
   s->dc_samples++;

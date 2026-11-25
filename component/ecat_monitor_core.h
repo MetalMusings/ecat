@@ -102,7 +102,9 @@ void ecat_mon_errors(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, c
 /// 0x0440-0x0443 as read (4 bytes); the process data watchdog counts only in OP.
 void ecat_mon_watchdogs(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, const uint8_t *r, int op);
 /// 0x092C as read (sign and magnitude: bit 31 set when the local copy is behind).
-void ecat_mon_dc(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, uint32_t raw);
+/// Counted only in OP: before that the master is still bringing the clocks
+/// together (milliseconds apart right after activation).
+void ecat_mon_dc(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, uint32_t raw, int op);
 /// 0x1C32:0B (kind ECAT_MON_SM_MISSED) or :0C (ECAT_MON_TOO_SMALL), 16 bits.
 void ecat_mon_sync(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now_ns, int kind, uint16_t value);
 /// End a period that is over: the summaries. Call it now and then (once a second).

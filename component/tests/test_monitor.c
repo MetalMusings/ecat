@@ -101,19 +101,22 @@ static void test_monitor_dc(void) {
 
   ecat_events_init(&L, NULL);
   ecat_mon_slave_init(&s, 2, 1, t);
-  ecat_mon_dc(&L, &s, t, 7);
+  ecat_mon_dc(&L, &s, t - S, 0x80000000u | 5392068, 0);  // before OP: the clocks still coming together
+  CHECK_EQ((int)L.next, 0);
+  CHECK_EQ((int)s.dc_max_all, 0);
+  ecat_mon_dc(&L, &s, t, 7, 1);
   CHECK_EQ(s.dc_diff, 7);
-  ecat_mon_dc(&L, &s, t + S, 0x80000000u | 12);    // bit 31: the local copy is behind
+  ecat_mon_dc(&L, &s, t + S, 0x80000000u | 12, 1);    // bit 31: the local copy is behind
   CHECK_EQ(s.dc_diff, -12);
   CHECK_EQ((int)s.dc_max, 12);
   CHECK_EQ((int)L.next, 0);
-  ecat_mon_dc(&L, &s, t + 2 * S, 0x80000000u | 5000);   // beyond the limit: at once
+  ecat_mon_dc(&L, &s, t + 2 * S, 0x80000000u | 5000, 1);   // beyond the limit: at once
   CHECK_EQ((int)L.next, 1);
   CHECK_EQ(last(0)->type, ECAT_EV_MON_DC_OVER);
   CHECK_EQ((int)last(0)->a, 5000);
-  ecat_mon_dc(&L, &s, t + 3 * S, 6000);                 // within a minute: not again
+  ecat_mon_dc(&L, &s, t + 3 * S, 6000, 1);                 // within a minute: not again
   CHECK_EQ((int)L.next, 1);
-  ecat_mon_dc(&L, &s, t + 2 * S + ECAT_MON_DC_OVER_EVERY_S * S, 3000);
+  ecat_mon_dc(&L, &s, t + 2 * S + ECAT_MON_DC_OVER_EVERY_S * S, 3000, 1);
   CHECK_EQ((int)L.next, 2);
   ecat_mon_slave_period(&L, &s, t + ECAT_MON_PERIOD_S * S);
   CHECK_EQ((int)L.next, 3);

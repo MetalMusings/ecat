@@ -1131,7 +1131,8 @@ static void ecat_monitor_slave(lcec_master_t *master, lcec_slave_t *slave, uint6
       case 3:  // the system time difference
         st = ecrt_reg_request_state(reg);
         if (st == EC_REQUEST_BUSY) return;
-        if (st == EC_REQUEST_SUCCESS) ecat_mon_dc(master->events, &slave->mon, now, EC_READ_U32(ecrt_reg_request_data(reg)));
+        if (st == EC_REQUEST_SUCCESS)
+          ecat_mon_dc(master->events, &slave->mon, now, EC_READ_U32(ecrt_reg_request_data(reg)), slave->state.operational);
         slave->mon_step = 4;
         continue;
       case 4:  // every tenth round: the SDOs
