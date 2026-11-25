@@ -3798,3 +3798,67 @@ documents do not teach it, and the documents are reachable from the window.
   overrides.
 - Not yet: links from the text into the window ("Open the Response card"); `?`
   buttons on cards whose title is not a topic.
+
+## Homing through cia402_homecomp (test, 2026-11-25)
+
+A reviewer from linuxcnc-ethercat pointed to
+[cia402_homecomp](https://github.com/linuxcnc-ethercat/cia402_homecomp), a
+LinuxCNC homing module (`[EMCMOT]HOMEMOD`) that hands a joint's homing to
+the drive, instead of ecat's `index-enable` handshake. It is not released
+(no tags, not in their apt repository) and must be built for the exact
+LinuxCNC that runs, since it includes LinuxCNC's `homing.c`. ecat offers it
+beside `index-enable`, only when LinuxCNC already has the module
+(docs/ecatsetup.md "Homing with cia402_homecomp (test)"); EtherCAT Setup
+never builds it. For the test it was built here from their commit b13bf72
+against the pinned 2.10 tree, without their build script (which also
+builds lcec's `cia402.so`): `lcec_hal_compat.h` from linuxcnc-ethercat and
+a `homing_config.h` naming 2.10's `homing.c`. The module is unchanged.
+
+The profile's side of the contract (homecomp reads `stat-op-enabled`,
+`opmode-display`, `stat-homing`, `stat-homed`, a homing error and a fault,
+and drives `home`):
+
+- `home-hold`: `home` is a level request; dropping it stops the homing
+  (bit 4 low) and the drive goes back to its mode, as motion's clearing of
+  `index-enable` does;
+- `stat-homed` only when the drive follows again (back in its mode,
+  enabled again where needed), since homecomp starts LinuxCNC's final move
+  on it;
+- with `home-hold` a homing error, `home-timeout-ms` or `home-max-travel`
+  only stops the homing and sets `home-error` (the user's decision);
+  through `index-enable` the drive is still shut down, since motion learns
+  of a failure only by the fault.
+
+Tried in LinuxCNC 2.10 on the plasma cutter's X (ECT60), with the user,
+copy ~/linuxcnc/configs/QtPlasma-homecomp:
+
+- Method 21 (home switch on IN5): the switch was not seen at first, since
+  the drive's RAM had IN4 as the home switch from an earlier test
+  (0x2007:04 = 3, 0x2007:05 = 0; written back to the factory values).
+  Machine off during the homing: the drive went back to CSP without a
+  fault and LinuxCNC's position followed the drive's. Then: switch found
+  (47 mm to it, 6 mm back), LinuxCNC held its command while the drive
+  homed, the final move went to `HOME` 5, following error 0.01 mm,
+  motor offset 0 (`HOME_OFFSET` is the point where the drive homed).
+- Method 36 (torque against the X- end stop) with *Enable the drive again
+  after homing*: no humming at the stop any more (the problem of
+  2026-11-24), but X then stood 27 and 47 counts (0.27, 0.47 mm) from its
+  target, both signs, with the drive's own 0x60F4 at 1 or 2 counts: the
+  ECT60 counted from its own point. The offset stayed through jogging;
+  machine off and on removed it only by LinuxCNC taking the drive's
+  position over. Going down to "Ready to switch on" instead of "Switched
+  on", with 100 ms there, did not help (47 counts). Holding the drive
+  200 ms after it is enabled again, before homing is done and the final
+  move starts (`home-again-ms`), did: three homings, target and position
+  397/397, 398/398, 396/396 counts. The ECT60 needs a while after
+  "Operation enabled" before it follows; a move in that time is lost.
+  The end stop is springy; the home point repeated within 0.02 mm.
+
+What homecomp could do for any drive layer (proposals for its authors):
+wait until the drive is back in its cyclic mode and enabled before the
+final move; a documented pin contract; a build without the
+linuxcnc-ethercat source; a guard against a different `motmod` than the
+one it was built for; packages per LinuxCNC version, including Debian's
+2.9.4. Drive-specific steps such as enabling the ECT60 again belong in the
+drive layer (homecomp's README: the drive component alone owns the
+control word).
