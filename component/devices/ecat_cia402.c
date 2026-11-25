@@ -294,6 +294,7 @@ typedef struct {
   hal_sint_t mode;  // read only: 8 CSP, 9 CSV
   hal_uint_t home_timeout_ms;
   hal_real_t home_max_travel;  // 0: no limit
+  hal_bool_t home_hold;  // homing by `home` runs only while it stays true (a homing module's request)
   hal_uint_t stop_timeout_ms;
   hal_uint_t pp_timeout_ms;
   hal_bool_t pp_immediate;   // PP: "change set immediately" (bit 5) with every set-point; the ECT60 acknowledges and then does not move with it
@@ -329,6 +330,7 @@ typedef struct {
   long long hs_ns;      // time in this homing step
   int hs_seen;          // the drive was seen homing (not yet attained and reached)
   int hs_index;         // started by index-enable
+  int hs_ok;            // the drive reported homing attained (stat-homed once it follows again)
   int hs_cycles;        // cycles in HS_STOP
   int32_t hs_last;      // the drive's position last cycle, counts (home-travel)
   int enable_again;     // cia402.home-enable-again
@@ -412,6 +414,7 @@ static const lcec_pindesc_t homing_pins[] = {
 static const lcec_paramdesc_t homing_params[] = {
     {HAL_UINT, HAL_RW, offsetof(cia402_t, home_timeout_ms), "%s.home-timeout-ms"},
     {HAL_REAL, HAL_RW, offsetof(cia402_t, home_max_travel), "%s.home-max-travel"},
+    {HAL_BOOL, HAL_RW, offsetof(cia402_t, home_hold), "%s.home-hold"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -808,9 +811,13 @@ static int homing_travel(cia402_t *d, long period) {
 }
 
 /// Homing has ended, in the mode it began in: index-enable is cleared and
-/// the drive follows its command again, from its new position.
+/// the drive follows its command again, from its new position. stat-homed
+/// comes now, not at "homing attained": a homing module (HOMEMOD) starts
+/// its final move on it, and the drive must follow by then.
 static void homing_done(cia402_t *d) {
   d->hs = HS_IDLE;
+  if (d->hs_ok) hal_set_bool(d->stat_homed, 1);
+  d->hs_ok = 0;
   if (d->hs_index) hal_set_bool(d->index_enable, 0);
   d->index_old = 0;
   // the drive's position is the homed one now
@@ -826,12 +833,14 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
   int index_edge = index && !d->index_old;
   int home_edge = home && !d->home_old;
   uint16_t bits = 0;
+  int gave_up;
 
   d->index_old = index;
   d->home_old = home;
   if (!run || (d->state != ST_OPERATION_ENABLED && !(d->hs == HS_AGAIN && d->state == ST_SWITCHED_ON))) {
     // disabled or shut down: homing is abandoned, the mode goes back
     d->hs = HS_IDLE;
+    d->hs_ok = 0;
     hal_set_bool(d->stat_homing, 0);
     return 0;
   }
@@ -840,6 +849,9 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
     hal_set_bool(d->home_error, 1);
     block(d, WHY_HOMING_TRAVEL);
   }
+  // the starter gave up: motion cleared index-enable, or with home-hold
+  // a homing module dropped home (it aborted)
+  gave_up = d->hs_index ? !index : (opt_bool(d->home_hold) && !home);
   if (!d->blocked) switch (d->hs) {
     case HS_IDLE:
       if (index_edge || home_edge) {
@@ -848,6 +860,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
         d->hs_ns = 0;
         d->hs_cycles = 0;
         d->hs_index = index_edge;
+        d->hs_ok = 0;
         hal_set_bool(d->stat_homed, 0);
         hal_set_bool(d->home_error, 0);
         hal_set_real(d->home_travel, 0);
@@ -859,8 +872,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       // the status word answers the halt only after STATUS_CYCLES
       d->hs_cycles++;
       bits = CW_HALT;
-      if (d->hs_index && !index) {
-        d->hs = HS_IDLE;  // motion gave up; the mode was not changed
+      if (gave_up) {
+        d->hs = HS_IDLE;  // the starter gave up; the mode was not changed
         bits = 0;
       } else if (d->hs_cycles > STATUS_CYCLES && standing_still(d)) {
         d->hs = HS_TO_HM;
@@ -871,8 +884,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       }
       break;
     case HS_TO_HM:
-      if (d->hs_index && !index) {
-        d->hs = HS_BACK;  // motion gave up
+      if (gave_up) {
+        d->hs = HS_BACK;  // the starter gave up
         d->hs_ns = 0;
       } else if (hal_get_sint(d->opmode_display) == MODE_HOMING) {
         d->hs = HS_HOMING;
@@ -885,8 +898,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       break;
     case HS_HOMING:
       bits = CW_HOMING_START;
-      if (d->hs_index && !index) {
-        d->hs = HS_BACK;  // motion gave up; bit 4 low interrupts homing
+      if (gave_up) {
+        d->hs = HS_BACK;  // the starter gave up; bit 4 low interrupts homing
         d->hs_ns = 0;
         bits = 0;
       } else if (sw & SW_HOMING_ERROR) {
@@ -901,7 +914,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       } else if (d->hs_seen || d->hs_ns >= HOMING_SETTLE_NS) {
         // attained and reached: a drive that keeps these bits from an
         // earlier homing gets HOMING_SETTLE_NS to clear them
-        hal_set_bool(d->stat_homed, 1);
+        d->hs_ok = 1;
         d->hs = HS_BACK;
         d->hs_ns = 0;
         bits = 0;
@@ -935,6 +948,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
   if (d->blocked) {
     // shut down by homing: the mode goes back in this cycle
     d->hs = HS_IDLE;
+    d->hs_ok = 0;
     bits = 0;
   }
   hal_set_bool(d->stat_homing, d->hs != HS_IDLE);

@@ -782,6 +782,68 @@ static void test_homing_abandoned_by_motion(void) {
   CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
 }
 
+// home-hold (a homing module's request, such as cia402_homecomp): homing
+// runs while home stays true; stat-homed comes only once the drive is back
+// in its mode, and homing is seen (stat-homing) without stat-homed first.
+static void test_homing_module_request(void) {
+  int i, fresh = 0, homed_in_hm = 0;
+  homing_drive();
+  PIN_BIT("x.home-hold") = 1;
+  hm.home = 777;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 80 && !PIN_BIT("x.stat-homed"); i++) {
+    hm_cycle();
+    if (PIN_S32("x.opmode-display") == 6) {
+      if (PIN_BIT("x.stat-homing") && !PIN_BIT("x.stat-homed")) fresh = 1;
+      if (PIN_BIT("x.stat-homed")) homed_in_hm = 1;
+    }
+  }
+  CHECK(fresh);
+  CHECK(!homed_in_hm);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_S32("x.opmode-display"), 8);
+  // the module drops its request: nothing more happens
+  PIN_BIT("x.home") = 0;
+  for (i = 0; i < 5; i++) CHECK_EQ(hm_cycle() & 0x10, 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+}
+
+// home-hold: the module aborts (drops home) while the drive homes
+static void test_homing_module_abort(void) {
+  int i;
+  homing_drive();
+  PIN_BIT("x.home-hold") = 1;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 5; i++) hm_cycle();
+  CHECK(hm.active);
+  PIN_BIT("x.home") = 0;
+  CHECK_EQ(hm_cycle() & 0x10, 0);  // bit 4 low: the drive stops homing
+  CHECK(!hm.active);
+  for (i = 0; i < 3; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 0);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+}
+
+// without home-hold a pulse on home is enough (an M-code, ladder)
+static void test_homing_pulse_without_hold(void) {
+  int i;
+  homing_drive();
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  hm_cycle();
+  PIN_BIT("x.home") = 0;
+  for (i = 0; i < 80 && !PIN_BIT("x.stat-homed"); i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK(hm.done);
+}
+
 static void test_homing_mode_not_taken(void) {
   int i;
   homing_drive();
@@ -816,7 +878,8 @@ static void test_homing_slow_way_back(void) {
   for (i = 0; i < 110; i++) hm_cycle();
   CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
   CHECK_EQ(PIN_S32("x.fault-reason"), 6);
-  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);  // the drive did home
+  // the drive did home, but never followed again: not homed
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 0);
 }
 
 static void test_homing_stopped_by_disable(void) {
@@ -867,7 +930,7 @@ static void test_homing_enable_again(void) {
     cw = hm_cycle();
     if ((cw & 0x0F) == 0x07) {
       down++;
-      CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+      CHECK_EQ(PIN_BIT("x.stat-homed"), 0);  // not before it follows
       CHECK_EQ(PIN_BIT("x.index-enable"), 1);  // motion still waits
       CHECK_NEAR(PIN_FLOAT("x.pos-fb"), PIN_FLOAT("x.pos-cmd"), 0);
       CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
@@ -883,6 +946,7 @@ static void test_homing_enable_again(void) {
   CHECK(down >= 1);
   CHECK(up);
   CHECK_EQ(PIN_BIT("x.index-enable"), 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
   CHECK_EQ(hm.sw, SW_ENABLED);
   CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
   CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
@@ -2578,7 +2642,7 @@ RUN_TESTS("cia402", test_ff_pins_only_with_the_objects, test_ff_velocity, test_f
     test_command_not_a_number, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
     test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_travel_and_actual_position,
     test_homing_travel_limit, test_homing_travel_both_ways, test_homing_error, test_homing_timeout,
-    test_homing_abandoned_by_motion, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
+    test_homing_abandoned_by_motion, test_homing_module_request, test_homing_module_abort, test_homing_pulse_without_hold, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
     test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_homing_enable_again,
     test_homing_without_enable_again, test_homing_enable_again_timeout, test_homing_speed_tells_a_set_position, test_pv_pins, test_pv_needs_target_velocity,
     test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,

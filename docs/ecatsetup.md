@@ -2781,7 +2781,7 @@ Extra pins and parameter:
 | `index-enable` | bool | io | Connect `joint.N.index-enable`. A rising edge starts homing; it is cleared when the drive has homed. |
 | `home` | bool | in | A rising edge starts homing: for a drive that is not a joint (from an M-code, ladder or a tool changer), or for tests without motion. |
 | `stat-homing` | bool | out | Homing is in progress. |
-| `stat-homed` | bool | out | The drive has homed; until homing starts again. |
+| `stat-homed` | bool | out | The drive has homed and follows its command again; until homing starts again. |
 | `home-error` | bool | out | The last homing failed, timed out or went beyond `home-max-travel`. |
 | `pos-actual` | real | out | The drive's position, as `pos-fb` but also while `pos-fb` follows `pos-cmd` during homing: what the axis really does. |
 | `home-travel` | real | out | The distance the drive has covered in this homing, both ways counted, in machine units; 0 when the next homing starts. |
@@ -2790,6 +2790,7 @@ Extra pins and parameter:
 |---|---|---|
 | `home-timeout-ms` | 60000 | Time allowed for homing; 0 for no limit. |
 | `home-max-travel` | 0 | The longest distance the drive may cover while homing, both ways counted, in machine units; 0 for no limit. |
+| `home-hold` | false | Homing started by `home` runs only while `home` stays true; dropping it stops homing and the drive goes back to its mode. For a homing module that holds its request (`cia402_homecomp`, [below](#homing-with-cia402_homecomp-test)). False: a rising edge is enough. |
 
 Homing is started only while the drive is enabled, in "Operation
 enabled", and only by a new rising edge. The profile then:
@@ -2808,7 +2809,13 @@ enabled", and only by a new rising edge. The profile then:
 5. with *Enable the drive again after homing* (below), takes the drive
    down to "Switched on" and enables it again (within 1 s, or it is shut
    down with `fault-reason` 3), still holding the target;
-6. clears `index-enable` and sets `stat-homed`.
+6. clears `index-enable` and sets `stat-homed`: only now, when the drive
+   follows its command again.
+
+If the one who started homing gives up (motion clears `index-enable`,
+or, with `home-hold`, `home` drops) the profile clears bit 4, which
+stops the drive's homing, and goes back to the mode as in step 4;
+`stat-homed` stays false.
 
 After homing the drive goes on in its mode from the new position: CSP
 follows `pos-cmd` again only once it is within 10 counts of the drive's
