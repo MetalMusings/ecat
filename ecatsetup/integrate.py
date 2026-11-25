@@ -1250,6 +1250,24 @@ def plan(ini_path, cfg, yaml_name="ethercat.yaml", max_counts=None):
                            % os.path.basename(path))
     hal_files = [f for f in files if f.endswith(".hal") and os.path.exists(f)]
     tcl_files = [f for f in files if is_tcl(f) and os.path.exists(f)]
+    # cia402_homecomp's pins exist only for a joint that homes through it: a
+    # line of the user's that uses them for another joint stops LinuxCNC
+    # (such as a cia-timeout-ms left after switching back to index-enable)
+    comp_joints = {j.get("joint") for j in joints(cfg) if j.get("homing") == "homecomp"}
+    for f in hal_files:
+        try:
+            text = read_text(f)
+        except OSError:
+            continue
+        for no, line in enumerate(text.splitlines(), 1):
+            code = line.split("#", 1)[0]
+            for m in re.finditer(r"\bjoint\.(\d+)\.(cia-[\w-]+|request-custom-homing|is-custom-homing)\b", code):
+                if int(m.group(1)) not in comp_joints:
+                    p.warnings.append(
+                        "%s line %d uses %s, a pin of %s, but joint %s does not home through it: "
+                        "LinuxCNC will not start with that line; take it out (or choose %s on "
+                        "the homing card)" % (os.path.basename(f), no, m.group(0), HOMECOMP,
+                                              m.group(1), HOMECOMP))
     for f in files:
         if (f.endswith(".hal") or is_tcl(f)) and not os.path.exists(f):
             p.errors.append("%s is in the INI file but does not exist" % os.path.basename(f))

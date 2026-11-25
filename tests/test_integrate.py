@@ -985,6 +985,17 @@ class TestHomecomp(Folder):
             p = integrate.plan(self.ini, c)
         self.assertTrue(any("no such module" in w for w in p.warnings), p.warnings)
 
+    def test_module_lines_left_after_switching_back(self):
+        c = self.homecomp_cfg()
+        self.write("machine.hal", MACHINE + "setp joint.0.cia-timeout-ms 120000  # mine\n")
+        with mock.patch.dict(os.environ, {"ECATSETUP_MODULE_DIR": self.lib.name}):
+            open(os.path.join(self.lib.name, "cia402_homecomp.so"), "w").close()
+            self.assertEqual(integrate.plan(self.ini, c).warnings, [])
+            integrate.set_joint_homing(c, 0, "index")
+            w = integrate.plan(self.ini, c).warnings
+        self.assertEqual(len(w), 1)
+        self.assertIn("machine.hal line 16 uses joint.0.cia-timeout-ms", w[0])
+
     def test_user_homemod_left_alone(self):
         self.write("machine.ini", INI.replace("[EMCMOT]\n", "[EMCMOT]\nHOMEMOD = myhoming\n"))
         c = cfg()

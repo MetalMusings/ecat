@@ -3038,8 +3038,8 @@ homes. `cia402_homecomp` is a LinuxCNC homing module (`[EMCMOT]HOMEMOD`)
 from [linuxcnc-ethercat](https://github.com/linuxcnc-ethercat/cia402_homecomp)
 that hands a joint's homing to the drive instead: LinuxCNC knows the
 drive is homing, a failure ends in LinuxCNC's own homing abort, and
-`HOME_OFFSET` is the machine coordinate of the point where the drive
-homed. ecat offers it beside `index-enable`, as a test: the module is
+`HOME_OFFSET` is the machine coordinate of where the drive stands when
+it reports homing done. ecat offers it beside `index-enable`, as a test: the module is
 not released yet, and it must be built for the exact LinuxCNC that runs
 (it includes LinuxCNC's `homing.c`). EtherCAT Setup does not build or
 install it.
@@ -3072,6 +3072,25 @@ mode, still enabled, `home-error` tells the module, and the module ends
 LinuxCNC's homing; the joint can be jogged or homed again at once. When
 the module gives up by itself (its own time limit, or homing aborted in
 LinuxCNC), it drops `home` and the drive stops homing the same way.
+
+Switching between the two, on the homing card and then Apply, changes
+`ethercat.hal` and `HOMEMOD` both ways. What Apply leaves to you:
+
+- the joint's INI lines (the card shows them): `HOME_USE_INDEX = NO` and
+  `HOME_LATCH_VEL = 0` for the module, `YES` and a small latch velocity
+  for `index-enable` (Apply warns about `HOME_USE_INDEX`);
+- `HOME_OFFSET`: through `index-enable` it is the machine coordinate where
+  the drive's position is 0, through the module where the drive stands
+  when it reports homing done. They differ where the drive does not stand
+  at its position 0 then: on a plasma cutter's ECT60, torque homing
+  against a springy stop, by about 1 mm (with the same `HOME_OFFSET` the
+  drive ended at 300 counts through `index-enable`, at 397 through the
+  module). Measure it again after a switch; with a home switch the
+  difference is small or none;
+- lines of your own for the module, such as `setp
+  joint.N.cia-timeout-ms`: its pins exist only while the joint homes
+  through it, and LinuxCNC does not start with such a line after
+  switching back. Apply warns about them.
 
 The Test page's *Home (hold)* on the Move card homes the drive the same
 way for such a joint (`home-hold` set): the drive's method, the mode
