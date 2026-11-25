@@ -229,7 +229,7 @@ def restore_pending():
 class DriveTest:
     """One drive, prepared for moving: limits written, HAL set up."""
 
-    def __init__(self, run, slave, coe=None, settings=None, axis=0):
+    def __init__(self, run, slave, coe=None, settings=None, axis=0, home_hold=False):
         if not testable(slave):
             raise testmode.TestError("%s cannot be moved in the test: only cia402 drives in "
                                      "CSP, PP or PV, or with hm in their modes" % slave["name"])
@@ -243,6 +243,9 @@ class DriveTest:
         self.position = slave["position"]
         self.mode = mode_of(slave)
         self.homes = can_home(slave)
+        # homing as through cia402_homecomp in LinuxCNC: home held while the
+        # button is, a failure only stops the homing (the profile's home-hold)
+        self.home_hold = bool(home_hold) and self.homes
         if self.mode == "csp":
             self.limit3, self.sel, _ = testmode.jog_names(run.drives.index(self.name))
         else:
@@ -317,6 +320,7 @@ class DriveTest:
             first["%s.pp-start" % self.name] = "FALSE"
         if self.homes:
             first["%s.home" % self.name] = "FALSE"
+            first["%s.home-hold" % self.name] = "TRUE" if self.home_hold else "FALSE"
         self.run.setp_many(first)
         counts = int(self.pin("drv-actual-position"))
         self.limits, self.notes = plan_limits(self.slave, self._has, s["scale"], counts, s,

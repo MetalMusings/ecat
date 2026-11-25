@@ -454,6 +454,12 @@ class TestDriveTest(TestTestMode):
         no_hm.prepare()
         with self.assertRaises(testmode.TestError):
             no_hm.home()
+        self.assertIn("x.home-hold FALSE", self.setp_log())
+        # a joint through cia402_homecomp: homes as there, home held
+        held = drivetest.DriveTest(run, dict(ECT60, cia402={"mode": "csp", "modes": ["hm"]}),
+                                   self.coe(), {"scale": 100.0}, home_hold=True)
+        held.prepare()
+        self.assertIn("x.home-hold TRUE", self.setp_log())
 
 
 try:

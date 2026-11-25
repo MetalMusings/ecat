@@ -3073,6 +3073,13 @@ LinuxCNC's homing; the joint can be jogged or homed again at once. When
 the module gives up by itself (its own time limit, or homing aborted in
 LinuxCNC), it drops `home` and the drive stops homing the same way.
 
+The Test page's *Home (hold)* on the Move card homes the drive the same
+way for such a joint (`home-hold` set): the drive's method, the mode
+changes, enabling it again and `stat-homed` are tried there, a failure
+only stops the homing. The module's own part (LinuxCNC's homing state,
+its abort, the final move to `HOME`) is tried only in LinuxCNC: the test
+runs no motion.
+
 Not tried on a machine yet.
 
 #### From LinuxCNC's homing to the drive's

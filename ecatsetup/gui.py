@@ -4367,8 +4367,15 @@ class MoveCard(Card):
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         b = self.win.session.bus.get(s["position"])
+        axis = max(self.axis.currentIndex(), 0)
+        names = config.axes(s)
+        drive = names[axis] if axis < len(names) else s.get("name")
+        joint = next((j.get("joint") for j in integrate.joints(self.win.session.cfg)
+                      if j.get("slave") == drive), None)
+        # a joint that homes through cia402_homecomp: the test homes as it would
+        hold = joint is not None and integrate.joint_homing(self.win.session.cfg, joint) == "homecomp"
         dt = drivetest.DriveTest(run, s, b.coe if b else None, self.settings(),
-                                 axis=max(self.axis.currentIndex(), 0))
+                                 axis=axis, home_hold=hold)
         try:
             dt.prepare()
         except (testmode.TestError, tool.ToolError) as e:
