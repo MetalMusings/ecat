@@ -40,7 +40,7 @@ from PyQt5.QtWidgets import (
 
 from . import (config, dcinfo, helpdocs, diagnose, drivetest, esi, events, explain, fromlcec, guidance, halcheck, halpins, pdoedit, pdoreq,
                homing,
-               integrate, lcnc_env, masterstart, measured,
+               integrate, lcnc_env, masterlog, masterstart, measured,
                netif, pindocs, propose, quirks, response, settings, switches, symptoms, tasks, testmode, tool,
                tuning,
                update, wiring)
@@ -3702,7 +3702,8 @@ class TroubleshootPage(QWidget):
         body.addWidget(self.history)
         self.master_says = Card("Messages from the master", "Oldest first: what the master said "
                                 "about this slave while ecat ran (the I/O test or LinuxCNC), "
-                                "from the event log.")
+                                "from the event log, and while the free master ran (reading "
+                                "the bus, SDOs), from the system journal.")
         self.master_table = table(["Time", "Message"], 1)
         self.master_says.add(self.master_table)
         self.master_none = self.master_says.add(label("", "hint", wrap=True))
@@ -3777,28 +3778,40 @@ class TroubleshootPage(QWidget):
         super().hideEvent(ev)
 
     def show_events(self):
-        """Fill the event log card, newest first."""
+        """Fill the event log card, newest first: the recorder's run, and with
+        the latest run the free master's messages of this session too. Also
+        refreshes the master's messages about the chosen slave."""
         path = self.events_run.currentData()
+        free = self.win.master_log.texts() if path == events.PATH else []
+        free_status = self.win.master_log.status() if path == events.PATH else ""
+        self.fill_master_says()
         try:
             log = events.read(path)
         except events.EventsError as e:
-            self.events_info.setText(str(e))
-            self.events_table.setRowCount(0)
-            fit_table(self.events_table, minimum=1)
-            return
+            if not free:
+                self.events_info.setText("; ".join(x for x in (str(e), free_status) if x))
+                self.events_table.setRowCount(0)
+                fit_table(self.events_table, minimum=1)
+                return
+            # only the free master's messages: ecat has not run
+            log, info, recorded = events.Log(path, 0.0, 0, 0, "", 0, [], []), str(e), False
+        else:
+            recorded = True
+            info = "ecat %s since %s, %s%s%s" % (
+                "runs" if log.running else "ran", events.stamp(log.start), log.config or "?",
+                "; %d older events were overwritten" % log.lost if log.lost > 0 else "",
+                "" if log.texts is not None else "; this ecat is older and does not record the "
+                "master's messages")
         names = events.names_of(self.win.session.cfg)
+        if recorded:
+            self.show_meaning(log, names, path)
         shown = log.events
-        said = events.folded(log.texts or [])
+        said = events.folded(sorted((log.texts or []) + free, key=lambda x: x.time))
         pos = self.win.current if isinstance(self.win.current, int) else None
-        self.show_meaning(log, names, path)
         if self.events_slave.isChecked() and pos is not None:
             shown = [e for e in shown if e.slave in (-1, pos)]
             said = [(x, n) for x, n in said if x.slave in (None, pos)]
-        self.events_info.setText("ecat %s since %s, %s%s%s" % (
-            "runs" if log.running else "ran", events.stamp(log.start), log.config or "?",
-            "; %d older events were overwritten" % log.lost if log.lost > 0 else "",
-            "" if log.texts is not None else "; this ecat is older and does not record the "
-            "master's messages"))
+        self.events_info.setText("; ".join(x for x in (info, free_status) if x))
         rows = list(reversed(events.merged(log, shown, said)[-200:]))
         t = self.events_table
         t.setRowCount(len(rows))
@@ -3970,23 +3983,40 @@ class TroubleshootPage(QWidget):
                                   "The slave keeps no diagnosis history (0x10F3).")
         self.history_none.setVisible(not r.history)
 
-        # the master's messages about it
+        self.fill_master_says()
+
+    def fill_master_says(self):
+        """The master's messages about the chosen slave: from the recorder (the
+        latest run of ecat that has any) and from the free master of this
+        session, in time order."""
+        pos = self.win.current
+        if not isinstance(pos, int) or pos < 0:
+            return
         path, said = events.slave_messages(pos)
+        free = events.folded([t for t in self.win.master_log.texts() if t.slave == pos])
+        rows = sorted(said + free, key=lambda x: x[0].time)[-30:]
         self.master_table.setRowCount(0)
-        for t, n in said[-30:]:
+        for t, n in rows:
             row = self.master_table.rowCount()
             self.master_table.insertRow(row)
             colour = {"error": RED, "warn": AMBER}.get(t.severity)
             self.master_table.setItem(row, 0, item(events.stamp(t.time), font=mono()))
-            self.master_table.setItem(row, 1, item(t.text + (" (%d times)" % n if n > 1 else ""),
+            self.master_table.setItem(row, 1, item(("%s: " % t.source if t.source else "") + t.text +
+                                                   (" (%d times)" % n if n > 1 else ""),
                                                    colour=colour, font=mono()))
         fit_table(self.master_table)
-        self.master_table.setVisible(bool(said))
-        self.master_none.setText(
-            ("From the run before (%s)." % path if path and path.endswith(".prev") else "")
-            if said else "The master said nothing about this slave in the last two runs of ecat "
-            "(its messages are recorded by ecat 0.16 and later).")
-        self.master_none.setVisible(not said or bool(path and path.endswith(".prev")))
+        self.master_table.setVisible(bool(rows))
+        notes = []
+        if said and path and path.endswith(".prev"):
+            notes.append("From the run before (%s)." % path)
+        if not rows:
+            notes.append("The master said nothing about this slave in the last two runs of ecat "
+                         "(its messages are recorded by ecat 0.16 and later), nor while the free "
+                         "master ran with this window open.")
+        if self.win.master_log.note:
+            notes.append("The %s." % self.win.master_log.note)
+        self.master_none.setText(" ".join(notes))
+        self.master_none.setVisible(bool(notes))
 
 
 # -- the Test page
@@ -8151,6 +8181,18 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.hal_page, "HAL && LinuxCNC")
         self.tabs.addTab(self.timing_page, "Timing")
         self.tabs.addTab(self.help_page, "Help")
+        # The master's messages: the free master's from the system journal
+        # (masterlog.py), and a mark on the Slave status tab for errors and
+        # warnings that came while another tab was shown.
+        self.master_log = masterlog.MasterLog()
+        self.news_seen = time.time()
+        self.news_mark = None
+        self.news_timer = QTimer(self)
+        self.news_timer.setInterval(2000)
+        self.news_timer.timeout.connect(self.check_news)
+        self.news_timer.start()
+        self.tabs.currentChanged.connect(
+            lambda _: self.seen_news() if self.tabs.currentWidget() is self.trouble_page else None)
         QShortcut(QKeySequence(Qt.Key_F1), self, self.f1)
         QShortcut(QKeySequence(Qt.Key_Escape), self.help_page, self.help_back)
         self.tabs.currentChanged.connect(lambda _: self.show_current())
@@ -9245,10 +9287,61 @@ class MainWindow(QMainWindow):
         self.refresh(keep_page=True)
         self.bus_page.master.show_config()
 
+    def news(self):
+        """(errors, warnings) among the recorder's events and the master's
+        messages (the recorder's and the free master's) since the Slave status
+        tab was last shown."""
+        found = []
+        try:
+            log = events.read(events.PATH)
+        except events.EventsError:
+            log = None
+        if log is not None:
+            notes = events.annotate(log.events, events.names_of(self.session.cfg))
+            found += [(e.time, notes[e.index][0]) for e in log.events]
+            found += [(t.time, t.severity) for t, _ in events.folded(log.texts or [])]
+        found += [(t.time, t.severity) for t, _ in events.folded(self.master_log.texts())]
+        new = [sev for when, sev in found if when > self.news_seen]
+        return new.count("error"), new.count("warn")
+
+    def check_news(self):
+        """Every 2 s: follow the free master, and mark the Slave status tab."""
+        self.master_log.poll()
+        if self.tabs.currentWidget() is self.trouble_page:
+            self.seen_news()
+        else:
+            self.show_news(*self.news())
+
+    def seen_news(self):
+        self.news_seen = time.time()
+        self.show_news(0, 0)
+
+    def show_news(self, errors, warnings):
+        """A red (errors) or amber (warnings only) dot on the Slave status tab."""
+        i = self.tabs.indexOf(self.trouble_page)
+        bar = self.tabs.bar
+        if not errors and not warnings:
+            if self.news_mark is not None:
+                bar.setTabButton(i, QTabBar.RightSide, None)
+                self.news_mark = None
+            bar.setTabToolTip(i, "")
+            return
+        if self.news_mark is None:
+            self.news_mark = QLabel("●")
+            bar.setTabButton(i, QTabBar.RightSide, self.news_mark)
+        self.news_mark.setStyleSheet("color: %s; font-size: 14px;" % (RED if errors else AMBER).name())
+        parts = (["%d error%s" % (errors, "s" if errors != 1 else "")] if errors else []) + \
+                (["%d warning%s" % (warnings, "s" if warnings != 1 else "")] if warnings else [])
+        tip = "New since you last looked: %s from the master or the event log" % " and ".join(parts)
+        bar.setTabToolTip(i, tip)
+        self.news_mark.setToolTip(tip)
+
     def closeEvent(self, event):
         if self.busy or not self.ask_save():
             event.ignore()
             return
+        self.news_timer.stop()
+        self.master_log.close()
         tp = self.timing_page
         if tp.worker is not None:
             # a measurement runs: stop it, so that halrun and the HAL lines it added go

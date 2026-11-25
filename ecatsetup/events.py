@@ -76,6 +76,7 @@ class Text:
     time: float         # seconds since the epoch
     level: int          # syslog level: 3 error, 4 warning, 6 info
     text: str
+    source: str = ""    # "" from the recorder (ecat), else e.g. "free master" (masterlog.py)
 
     @property
     def slave(self):
@@ -157,10 +158,49 @@ def _texts(data, at, path):
     return out, nxt
 
 
-def folded(texts):
-    """[(Text, times)]: a message repeated right after itself is shown once."""
+# The master reads a slave's object dictionary entry by entry, every subindex up to
+# the highest. An object with gaps in its subindexes (allowed; 0x1C32/0x1C33 of
+# ETG.1020 have them) gives two warnings per gap: these are folded into one line.
+_SDO_INFO_GAP = re.compile(r"EtherCAT WARNING (\d+-(?:[A-Za-z]+-)?\d+): SDO information error "
+                           r"response while fetching SDO entry (0x[0-9A-Fa-f]{4}):[0-9A-Fa-f]{2}!$")
+_SUBINDEX_ABORT = "SDO abort message 0x06090011:"
+
+
+def _gaps_folded(texts):
+    """texts with each run of "subindex does not exist" warnings of one slave
+    as a single info line."""
     out = []
-    for t in texts:
+    i = 0
+    while i < len(texts):
+        m = _SDO_INFO_GAP.match(texts[i].text)
+        if m is None:
+            out.append(texts[i])
+            i += 1
+            continue
+        tag, objects, n, first = m.group(1), [], 0, texts[i]
+        while i < len(texts):
+            m = _SDO_INFO_GAP.match(texts[i].text)
+            if m is None or m.group(1) != tag:
+                break
+            n += 1
+            if m.group(2).upper() not in objects:
+                objects.append(m.group(2).upper())
+            i += 1
+            if i < len(texts) and texts[i].text.startswith("EtherCAT WARNING %s: %s" % (tag, _SUBINDEX_ABORT)):
+                i += 1
+        out.append(Text(first.index, first.time, 6, "EtherCAT %s: object dictionary: %d subindex%s "
+                        "of %s do%s not exist (gaps in the numbering, which is allowed; the master "
+                        "asks for every subindex up to the highest)" % (
+                            tag, n, "es" if n != 1 else "", ", ".join(o.replace("0X", "0x") for o in objects),
+                            "" if n != 1 else "es"), first.source))
+    return out
+
+
+def folded(texts):
+    """[(Text, times)]: a message repeated right after itself is shown once, and
+    the warnings about gaps in an object's subindexes as one line."""
+    out = []
+    for t in _gaps_folded(list(texts)):
         if out and out[-1][0].text == t.text and out[-1][0].level == t.level:
             out[-1][1] += 1
         else:
@@ -170,7 +210,7 @@ def folded(texts):
 
 def text_line(t, times=1):
     """A master's message as shown: the text, and how often it came."""
-    return "master: %s%s" % (t.text, " (%d times)" % times if times > 1 else "")
+    return "%s: %s%s" % (t.source or "master", t.text, " (%d times)" % times if times > 1 else "")
 
 
 def slave_texts(log, position):

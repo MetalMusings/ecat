@@ -194,6 +194,32 @@ class TestMasterMessages(unittest.TestCase):
         self.assertEqual([n for _, n in f], [2, 1, 1])
         self.assertEqual(events.text_line(*f[0]), "master: %s (2 times)" % DC_ERR)
 
+    def test_gaps_in_subindexes_are_one_info_line(self):
+        """The master asks for every subindex up to the highest: an object with
+        gaps (0x1C32/0x1C33) gives two warnings per gap; they become one line
+        per slave, as information, and other messages stay as they are."""
+        T = events.Text
+        gap = "EtherCAT WARNING 0-4: SDO information error response while fetching SDO entry %s!"
+        abort = 'EtherCAT WARNING 0-4: SDO abort message 0x06090011: "Subindex does not exist".'
+        texts = [T(0, 1, 4, gap % "0x1C32:07"), T(1, 1, 4, abort), T(2, 1, 4, gap % "0x1C32:08"),
+                 T(3, 1, 4, abort), T(4, 2, 4, gap % "0x1C33:07"), T(5, 2, 4, abort),
+                 T(6, 3, 4, gap.replace("0-4", "0-2") % "0x1C32:07"),
+                 T(7, 3, 4, abort.replace("0-4", "0-2")), T(8, 4, 3, "EtherCAT ERROR 0-4: x")]
+        f = events.folded(texts)
+        self.assertEqual(len(f), 3)
+        self.assertEqual([(t.slave, t.severity) for t, _ in f], [(4, "info"), (2, "info"), (4, "error")])
+        self.assertIn("3 subindexes of 0x1C32, 0x1C33 do not exist", f[0][0].text)
+        self.assertIn("1 subindex of 0x1C32 does not exist", f[1][0].text)
+        # a warning of another kind is not folded
+        other = [T(0, 1, 4, "EtherCAT WARNING 0-4: Slave seems not to support distributed clocks!")]
+        self.assertEqual([t.text for t, _ in events.folded(other)], [other[0].text])
+
+    def test_text_line_names_the_source(self):
+        T = events.Text
+        self.assertEqual(events.text_line(T(0, 0, 4, "EtherCAT 0-1: x")), "master: EtherCAT 0-1: x")
+        self.assertEqual(events.text_line(T(0, 0, 4, "EtherCAT 0-1: x", "free master"), 2),
+                         "free master: EtherCAT 0-1: x (2 times)")
+
     def test_version_1_has_none(self):
         write_log(self.path, [(0, events.START, -1, 4, 0)], version=1)
         log = events.read(self.path)

@@ -361,9 +361,25 @@ still there, so the diagnosis says to write the counter (0x0300 for rx and phy
 errors, 0x0310 for lost links) or power the slave off, and run it again.
 **Messages from the master**: what the master said about this slave while
 `ecat` ran (the I/O test or LinuxCNC), such as "Slave seems not to support
-distributed clocks!", and the **Event log**: what the `ecat` component recorded
-while LinuxCNC ran ([event log](#event-log-and-report)), optionally only for this
-slave and the master.
+distributed clocks!", and while the free master ran (reading the bus, SDOs,
+the SII; marked "free master:"), and the **Event log**: what the `ecat`
+component recorded while LinuxCNC ran ([event log](#event-log-and-report)),
+optionally only for this slave and the master. Both are refreshed every 2 s
+while the page is shown.
+
+When the master reports an error or a warning while another tab is shown,
+the *Slave status* tab gets a dot: red for an error, amber for warnings only;
+its tooltip says how many. Showing the tab clears it.
+
+The free master (`ec_master`, started with `ethercat-uspace start`) logs to
+the system journal, not to the event log. While the window is open it
+follows the journal of each free master that runs (one `journalctl` for each,
+up to level info) and keeps those messages until it closes. `ec_master` runs as
+root: a user in the group `systemd-journal` (or `adm`) reads its entries
+directly; otherwise the window uses `sudo -n journalctl` when sudo needs no
+password, as it does to start the master. Without either, the page says so:
+`sudo usermod -aG systemd-journal $USER` and logging in again makes them
+visible.
 
 A slave that stopped short of OP with the master's error flag but no AL
 status code is shown as "The master stopped bringing the slave up": the
@@ -3831,7 +3847,7 @@ The component records, with the time to the millisecond:
 | stop guard | The servo thread stopped: the guard takes the slaves to PREOP, and says whether they got there (or it gave up, with the states they were left in); or the servo thread runs again. |
 | servo thread late | The guard sent a cycle for a servo thread more than a quarter period late (at most one line a second, with the number left out). |
 | SYNC0 shift | `sync0-shift-ns: auto` chose a shift, with the turn-around in cycles. |
-| master: ... | The master's own messages (its log, up to level info), such as "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!" or an SDO abort while it configures a slave. Shown between the events at their time; one repeated right after itself is shown once, with the count. |
+| master: ... | The master's own messages (its log, up to level info), such as "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!" or an SDO abort while it configures a slave. Shown between the events at their time; one repeated right after itself is shown once, with the count. The master reads a slave's object dictionary up to each object's highest subindex, so an object with gaps in its subindexes (allowed; `0x1C32`/`0x1C33` have them) gives two warnings per gap: they are shown as one information line, "object dictionary: N subindexes of ... do not exist". |
 
 Slave states are read once a second, as for the component's state pins;
 the working counter, drive faults and the guard every cycle.
@@ -3856,9 +3872,10 @@ number that respond is still reported offline.
 
 To see it:
 
-- in the window: the *Troubleshoot* page, *Event log*, newest first,
+- in the window: the *Slave status* page, *Event log*, newest first,
   refreshed every 2 s; *This run* or *The run before*, and *Only this
-  slave*;
+  slave*. *This run* also has the free master's messages of the window's
+  session ("free master: ...", see [Slave status](#slave-status));
 - on the command line: `ecatsetup --events` (this or the last run),
   `ecatsetup --events prev`; `ecatsetup --diagnose` shows each slave's
   messages from the master (from the latest run that has any) and ends with

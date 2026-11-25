@@ -241,6 +241,10 @@ except ImportError:  # pragma: no cover
     gui = None
 
 
+RED_NAME = gui.RED.name() if gui is not None else ""
+AMBER_NAME = gui.AMBER.name() if gui is not None else ""
+
+
 @unittest.skipIf(gui is None, "PyQt5 is not installed")
 class WindowBase(BusTest):
     """A window against the fake bus; the tests are in the classes that use it."""
@@ -250,6 +254,11 @@ class WindowBase(BusTest):
         cls.app = QApplication.instance() or QApplication([])
 
     def window(self):
+        # never follow a real free master's journal from a test
+        from ecatsetup import masterlog
+        p = mock.patch.object(masterlog, "free_master_pid", lambda proc="/proc": None)
+        p.start()
+        self.addCleanup(p.stop)
         s = session.Session()
         s.read_bus()
         s.new()
@@ -1783,6 +1792,88 @@ class TestWindow(WindowBase):
             self.assertFalse(page.meaning_timing.isHidden())
             page.meaning_timing.click()
             self.assertIs(w.tabs.currentWidget(), w.timing_page)
+
+    class FakeMasterLog:
+        """The free master's messages without a journal."""
+
+        def __init__(self, texts=(), status="", note=""):
+            self.items, self.line, self.note = list(texts), status, note
+
+        def poll(self):
+            pass
+
+        def texts(self):
+            return list(self.items)
+
+        def status(self):
+            return self.line
+
+        def close(self):
+            pass
+
+    def test_free_master_messages_on_slave_status(self):
+        """The free master's messages (from the journal) are in the event log
+        and, for the chosen slave, under Messages from the master, marked as
+        the free master's; a journal that cannot be read is explained."""
+        from ecatsetup import diagnose, events
+        T = events.Text
+        now = time.time()
+        free = [T(0, now, 3, "EtherCAT ERROR 0-0: Failed to set SAFEOP state.", "free master"),
+                T(1, now, 6, "EtherCAT 0-1: other slave", "free master")]
+        d = tempfile.mkdtemp()
+        with mock.patch.object(events, "PATH", os.path.join(d, "none")):
+            w = self.window()
+            w.master_log = self.FakeMasterLog(free, "the free master (ec_master, pid 7) runs; its "
+                                              "messages come from the system journal")
+            w.select_slave(0)
+            w.reports[0] = diagnose.Report(0, "io", True, 2, True, 0)
+            w.tabs.setCurrentWidget(w.trouble_page)
+            w.show_current()
+            page = w.trouble_page
+            page.show_events()
+            self.assertIn("pid 7", page.events_info.text())
+            rows = [page.events_table.item(r, 2).text() for r in range(page.events_table.rowCount())]
+            self.assertIn("free master: EtherCAT ERROR 0-0: Failed to set SAFEOP state.", rows)
+            self.assertEqual(page.events_table.item(rows.index(
+                "free master: EtherCAT ERROR 0-0: Failed to set SAFEOP state."), 1).text(), "ERROR")
+            said = [page.master_table.item(r, 1).text() for r in range(page.master_table.rowCount())]
+            self.assertEqual(said, ["free master: EtherCAT ERROR 0-0: Failed to set SAFEOP state."])
+            # the journal cannot be read: said under the card
+            w.master_log = self.FakeMasterLog(note="free master's messages are in the system journal, "
+                                                   "which this user cannot read")
+            page.show_events()
+            self.assertIn("cannot read", page.master_none.text())
+            self.assertFalse(page.master_none.isHidden())
+
+    def test_slave_status_tab_marks_new_errors(self):
+        """Errors or warnings that come while another tab is shown put a red or
+        amber dot on the Slave status tab; showing that tab clears it."""
+        from ecatsetup import events
+        T = events.Text
+        d = tempfile.mkdtemp()
+        with mock.patch.object(events, "PATH", os.path.join(d, "none")):
+            w = self.window()
+            w.tabs.setCurrentWidget(w.test_page)
+            i = w.tabs.indexOf(w.trouble_page)
+            w.news_seen -= 60       # the window has been open for a minute
+            w.master_log = self.FakeMasterLog([T(0, w.news_seen - 10, 3, "EtherCAT ERROR 0-0: old")])
+            w.check_news()
+            self.assertIsNone(w.news_mark)          # from before: not new
+            w.master_log.items.append(T(1, time.time() - 1, 4, "EtherCAT WARNING 0-0: w"))
+            w.check_news()
+            self.assertIsNotNone(w.news_mark)
+            self.assertIn(AMBER_NAME, w.news_mark.styleSheet())
+            self.assertIn("1 warning", w.tabs.bar.tabToolTip(i))
+            w.master_log.items.append(T(2, time.time() - 1, 3, "EtherCAT ERROR 0-0: e"))
+            w.check_news()
+            self.assertIn(RED_NAME, w.news_mark.styleSheet())
+            self.assertIn("1 error and 1 warning", w.tabs.bar.tabToolTip(i))
+            w.tabs.setCurrentWidget(w.trouble_page)
+            self.assertIsNone(w.news_mark)
+            self.assertIsNone(w.tabs.bar.tabButton(i, gui.QTabBar.RightSide))
+            w.tabs.setCurrentWidget(w.test_page)
+            w.check_news()
+            self.assertIsNone(w.news_mark)          # seen
 
     def test_test_page_without_a_test(self):
         w = self.window()
