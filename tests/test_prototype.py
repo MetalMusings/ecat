@@ -1381,8 +1381,12 @@ class TestUpdate(unittest.TestCase):
 class FakeBus:
     """Registers and SDOs of one slave, as the ethercat tool would give them."""
 
-    def __init__(self, regs, sdos, later=None, slave_line="0  0:0  OP  +  Some Drive"):
+    # 0x0110 in the tests: bit 0 PDI operational and bit 1 PDI watchdog reloaded
+    # (0x03) as on a working slave, and bits 4.. the links
+
+    def __init__(self, regs, sdos, later=None, slave_line="0  0:0  OP  +  Some Drive", later_sdos=None):
         self.regs, self.sdos, self.later, self.reads = regs, sdos, later or {}, 0
+        self.later_sdos = later_sdos or {}
         self.slave_line = slave_line
         self.verbose = "State: PREOP\nFlag: E\nMailboxes:\n  Supported protocols: CoE, FoE\n"
         self.listing = ""       # the slave's `ethercat sdos` output
@@ -1403,14 +1407,17 @@ class FakeBus:
             if address == 0x0300:
                 self.reads += 1
             regs = dict(self.regs)
-            if address == 0x0300 and self.reads > 1:
+            if self.reads > 1:          # after the watch: what changed meanwhile
                 regs.update(self.later)
             return " ".join("0x%02x" % regs.get(address + i, 0) for i in range(length))
         raise AssertionError(args)
 
     def upload(self, pos, index, subindex, dtype):
         self.asked.append((index, "upload"))
-        return self.sdos.get(index)
+        sdos = dict(self.sdos)
+        if self.reads > 1:
+            sdos.update(self.later_sdos)
+        return sdos.get((index, subindex), sdos.get(index))
 
 
 class TestDiagnose(unittest.TestCase):
@@ -1426,7 +1433,7 @@ class TestDiagnose(unittest.TestCase):
 
     def test_a_slave_without_coe_is_not_asked(self):
         # an EL2008 has no mailbox: each request would be "Slave does not support CoE!"
-        bus = FakeBus({0x0130: 0x08, 0x0110: 0x10}, {})
+        bus = FakeBus({0x0130: 0x08, 0x0110: 0x13}, {})
         bus.verbose = "State: OP\nFlag: +\nDL information:\n  Distributed clocks: yes, delay " \
             "measurement only\nGeneral:\n"
         self.run_diagnose(bus)
@@ -1438,7 +1445,7 @@ class TestDiagnose(unittest.TestCase):
                                           "distributed clocks!"), 1),
                 (events.Text(1, 1.7e9, 3, "EtherCAT ERROR 0-0: Failed to set DC cycle times: "
                                           "No response."), 3)]
-        regs = {0x0130: 0x02, 0x0110: 0x10}
+        regs = {0x0130: 0x02, 0x0110: 0x13}
         _, text = self.run_diagnose(FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO"), said)
         self.assertIn("Messages from the master:", text)
         self.assertIn("Slave seems not to support distributed clocks!", text)
@@ -1447,7 +1454,7 @@ class TestDiagnose(unittest.TestCase):
 
     def test_state_error_cable_and_drive_fault(self):
         regs = {0x0130: 0x14, 0x0134: 0x1D,          # SAFEOP + error, invalid output configuration
-                0x0110: 0x30, 0x0303: 3}             # link on ports 0 and 1; port 1 phy errors
+                0x0110: 0x33, 0x0303: 3}             # link on ports 0 and 1; port 1 phy errors
         later = {0x0303: 9}                          # ... which grow
         sdos = {0x1000: 0x00020192, 0x6041: 0x0218, 0x603F: 0x7305, 0x6061: 8, 0x6060: 8}
         found, text = self.run_diagnose(FakeBus(regs, sdos, later))
@@ -1459,7 +1466,7 @@ class TestDiagnose(unittest.TestCase):
         self.assertEqual(found, 4)  # state, cable, error code, fault
 
     def test_healthy_slave(self):
-        regs = {0x0130: 0x08, 0x0110: 0x10, 0x0301: 255}   # OP; old saturated phy count
+        regs = {0x0130: 0x08, 0x0110: 0x13, 0x0301: 255}   # OP; old saturated phy count
         found, text = self.run_diagnose(FakeBus(regs, {}))
         self.assertEqual(found, 0)
         self.assertIn("phy 255+", text)
@@ -1469,14 +1476,14 @@ class TestDiagnose(unittest.TestCase):
 
     def test_objects_the_slave_does_not_list_are_not_asked_for(self):
         # the master logs an abort for each: only ask for what the dictionary has
-        regs = {0x0130: 0x08, 0x0110: 0x10}
+        regs = {0x0130: 0x08, 0x0110: 0x13}
         bus = FakeBus(regs, {0x1001: 0})
         bus.listing = 'SDO 0x1000, "Device Type"\n  0x1000:00, r-r-r-, uint32, 32 bit, "Device Type"\n'
         self.run_diagnose(bus)
         self.assertEqual(bus.asked, [(0x1000, "upload")])
 
     def test_listed_objects_are_asked_for(self):
-        regs = {0x0130: 0x08, 0x0110: 0x10}
+        regs = {0x0130: 0x08, 0x0110: 0x13}
         bus = FakeBus(regs, {0x1001: 0})
         bus.listing = "".join('SDO 0x%04x, "x"\n  0x%04x:00, r-r-r-, uint32, 32 bit, "x"\n' % (i, i)
                               for i in (0x1000, 0x1001, 0x10F3))
@@ -1485,25 +1492,93 @@ class TestDiagnose(unittest.TestCase):
                                              (0x10F3, "diag")])
 
     def test_an_empty_listing_asks_as_before(self):
-        bus = FakeBus({0x0130: 0x08, 0x0110: 0x10}, {})
+        bus = FakeBus({0x0130: 0x08, 0x0110: 0x13}, {})
         self.run_diagnose(bus)
         self.assertEqual(sorted(bus.asked), [(0x1000, "upload"), (0x1001, "upload"),
                                              (0x10F3, "diag")])
 
     def test_a_count_that_is_not_at_its_limit_has_no_note(self):
-        regs = {0x0130: 0x08, 0x0110: 0x10, 0x0301: 254}
+        regs = {0x0130: 0x08, 0x0110: 0x13, 0x0301: 254}
         found, text = self.run_diagnose(FakeBus(regs, {}))
         self.assertEqual(found, 0)
         self.assertNotIn("at its limit", text)
 
     def test_error_acknowledged_by_the_master(self):
-        regs = {0x0130: 0x02, 0x0110: 0x10}                # PREOP, no error flag, no code
+        regs = {0x0130: 0x02, 0x0110: 0x13}                # PREOP, no error flag, no code
         found, text = self.run_diagnose(FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO"))
         self.assertEqual(found, 1)
         self.assertIn("the master's messages say which", text)
 
+    PDI_WATCHDOG_100MS = {0x0400: 0xC2, 0x0401: 0x09, 0x0410: 0xE8, 0x0411: 0x03}   # 2498 -> 100 us units
+
+    def test_the_slaves_processor_stopped(self):
+        """The chip answers but the processor behind it stopped: the PDI
+        watchdog expired (0x0110 bit 1), and grows (0x0443); PDI errors grow."""
+        regs = {0x0130: 0x08, 0x0110: 0x11, 0x0443: 5, 0x030D: 1, **self.PDI_WATCHDOG_100MS}
+        found, text = self.run_diagnose(FakeBus(regs, {}, later={0x0443: 9, 0x030D: 3}))
+        self.assertIn("The slave's processor (behind the PDI):", text)
+        self.assertIn("has stopped talking to its EtherCAT chip (PDI watchdog of 100 ms expired", text)
+        self.assertIn("the PDI watchdog expired 4 times", text)
+        self.assertIn("(PDI, such as SPI) grew by 2", text)
+        self.assertEqual(found, 3)
+
+    def test_pdi_not_operational(self):
+        found, text = self.run_diagnose(FakeBus({0x0130: 0x01, 0x0110: 0x10}, {}))
+        self.assertIn("is not running (PDI not operational, 0x0110)", text)
+
+    def test_old_counts_and_a_watchdog_that_is_off_are_no_problem(self):
+        # watchdog off (0x0410 = 0): bit 1 says nothing; old counts are notes
+        regs = {0x0130: 0x08, 0x0110: 0x11, 0x0443: 2, 0x030D: 7}
+        found, text = self.run_diagnose(FakeBus(regs, {}))
+        self.assertEqual(found, 0)
+        self.assertNotIn("stopped talking", text)
+        self.assertIn("Note: the PDI watchdog expired 2 times since power-on", text)
+        self.assertIn("Note: 7 PDI errors since power-on", text)
+
+    def test_process_data_watchdog_only_counts_in_op(self):
+        regs = {0x0110: 0x13, 0x0420: 0xE8, 0x0421: 0x03, 0x0400: 0xC2, 0x0401: 0x09, 0x0442: 1}
+        found, text = self.run_diagnose(FakeBus({**regs, 0x0130: 0x08}, {}, later={0x0442: 4}))
+        self.assertIn("process data watchdog (100 ms) expired 3 times", text)
+        found, text = self.run_diagnose(FakeBus({**regs, 0x0130: 0x04}, {}, later={0x0442: 4}))
+        self.assertNotIn("process data watchdog", text)
+
+    def sync_bus(self, values, later):
+        regs = {0x0130: 0x08, 0x0110: 0x13}
+        bus = FakeBus(regs, {(0x1C32, k): v for k, v in values.items()},
+                      later_sdos={(0x1C32, k): v for k, v in later.items()})
+        bus.listing = 'SDO 0x1c32, "SM output parameter"\n' + "".join(
+            '  0x1c32:%02x, r-r-r-, uint16, 16 bit, "x"\n' % k for k in values)
+        return bus
+
+    def test_synchronisation_of_the_slave(self):
+        """0x1C32 (ETG.1020): the mode and times, and the counters that grow
+        while watched; objects not listed are not asked for (no 0x1C33 here)."""
+        bus = self.sync_bus({1: 2, 2: 1000000, 6: 663000, 0x0B: 5, 0x0C: 0, 0x20: 0}, {0x0B: 8})
+        found, text = self.run_diagnose(bus)
+        self.assertIn("Sync (0x1C32, outputs): DC SYNC0, cycle 1 ms, its own work 663 us", text)
+        self.assertIn("-> 3 cycles without new process data", text)
+        self.assertNotIn("0x1C33", text)
+        self.assertNotIn((0x1C33, "upload"), bus.asked)
+        self.assertEqual(found, 1)
+
+    def test_a_shortest_cycle_the_slave_cannot_mean(self):
+        # the ECT60 reports 0x1C32:05 = 0xE8480000 (3.9 s) while it runs at 1 ms
+        bus = self.sync_bus({1: 2, 2: 1000000, 5: 0xE8480000, 6: 1}, {})
+        found, text = self.run_diagnose(bus)
+        self.assertIn("its own work 1 ns, shortest cycle 3897.03 ms (as reported; it runs at a "
+                      "shorter one)", text)
+        self.assertEqual(found, 0)
+
+    def test_a_cycle_too_short_for_the_slave(self):
+        bus = self.sync_bus({1: 2, 2: 250000, 6: 663000, 0x0C: 10, 0x20: 1}, {0x0C: 12})
+        found, text = self.run_diagnose(bus)
+        self.assertIn("2 cycles were too short for the slave", text)
+        self.assertIn("the slave needs 663 us but the cycle is 250 us", text)
+        self.assertIn("reports a synchronisation error (0x1C32:20)", text)
+        self.assertEqual(found, 3)
+
     def test_error_code_kept_by_the_master(self):
-        regs = {0x0130: 0x02, 0x0110: 0x10}
+        regs = {0x0130: 0x02, 0x0110: 0x13}
         bus = FakeBus(regs, {}, slave_line="0  0:0  PREOP  E  Some IO")
         bus.verbose = "State: PREOP\nFlag: E\nLast AL status code: 0x001d\n"
         found, text = self.run_diagnose(bus)

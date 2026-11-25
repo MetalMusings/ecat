@@ -355,7 +355,9 @@ the other tabs with the slave chosen.
 Diagnosis of the slaves on the bus: *Examine again* / *Examine all*. For
 the chosen slave the page shows a series of steps (each ok, warning or
 failed), what the slave says (AL state and status code), the cable and
-link (port error counters), the slave's own message history (0x10F3), and
+link (port error counters), the slave's own processor (whether it runs
+behind the EtherCAT chip, and its synchronisation; see
+[step 3](#step-3-cable-and-connectors)), the slave's own message history (0x10F3), and
 A port counter that has reached 255 is marked: it cannot show whether the fault is
 still there, so the diagnosis says to write the counter (0x0300 for rx and phy
 errors, 0x0310 for lost links) or power the slave off, and run it again.
@@ -907,9 +909,11 @@ point 4, which is a deliberate act:
 2. **Why is it not in OP?** *Examine* on the *Slave status* page (or
    `ecatsetup --diagnose`): the slave's AL state and status code in plain
    words, and the master's own messages about it.
-3. **Is the cable or the connector at fault?** The port error counters,
-   watched while you look, and the lost links, which point at the cable
-   between two slaves.
+3. **Is the cable or the connector at fault, or the slave's own
+   processor?** The port error counters, watched while you look, the lost
+   links, which point at the cable between two slaves, and the PDI
+   watchdog and errors, which say whether the processor behind the
+   EtherCAT chip still runs.
 4. **Does it do what it should in OP?** The I/O test: inputs live,
    outputs set by hand, SDOs read, a drive's CiA 402 state chain, and
    the synchronisation card.
@@ -972,6 +976,20 @@ explains the fault.
    off and on, and examine it again.
 4. Faults that come and go show in the event log as a slave going offline,
    the working counter incomplete, or a link down, with the time.
+5. **The slave's own processor.** The EtherCAT chip answers the master by
+   itself; the processor behind it (its firmware) talks to the chip over
+   the PDI (SPI or a parallel bus). A slave whose firmware hangs or
+   crashed still answers, shows its last AL state and no cable error, but
+   no longer takes or gives process data, or answers mailbox requests
+   (SDOs time out). The card *The slave's own processor* tells: the PDI
+   not running (0x0110 bit 0: the EEPROM or its PDI settings, or firmware
+   that never started), the PDI watchdog expired (0x0110 bit 1: the
+   firmware stopped; only when the slave has the watchdog on, 0x0410),
+   how often it expired (0x0443) and how many errors the PDI had (0x030D),
+   since power-on and while watched; in OP also the process data watchdog
+   (0x0442: the outputs did not come in time). Counts since power-on
+   include restarts and firmware updates; counts that grow while watched
+   are the fault.
 
 ### Step 4: in OP, with the I/O test
 
@@ -988,7 +1006,15 @@ explains the fault.
    user at the machine ([moving a drive](#moving-a-drive)).
 5. **Synchronisation**: all slaves in OP, DC in use, whether the master's
    DC sync check failed, the turn-around (2 cycles is the aim), and how
-   much the frame's send time varies.
+   much the frame's send time varies. The slave's own view, where it has
+   the ETG.1020 objects 0x1C32 (outputs) and 0x1C33 (inputs), is on the
+   *Slave status* page after *Examine*: its sync mode and cycle, the time
+   its own work takes (`:06`) and the shortest cycle it states (`:05`), and
+   while watched the cycles without new process data (`:0B`, the frame
+   came after the slave's cycle started), the cycles too short for it
+   (`:0C`) and its sync error (`:20`). Only the entries the slave lists are
+   read. Some report values they cannot mean (the Rtelligent ECT60: a
+   shortest cycle of 3.9 s while it runs at 1 ms); such a value is marked.
 6. A slave that works in the test but not in LinuxCNC: compare the HAL
    files with the configuration (the *HAL check* card on the *HAL &
    LinuxCNC* page, or `ecatsetup --check-hal machine.ini`).

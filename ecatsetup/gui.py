@@ -3658,9 +3658,10 @@ class TroubleshootPage(QWidget):
         self.waiting = Card("Not examined yet")
         self.waiting.add(label("Examining only reads: the slave's state (INIT, PREOP, SAFEOP, OP) "
                                "and AL status code, the error counters per port while they are "
-                               "watched for 2 s, the slave's own diagnosis history, and for a "
-                               "CiA 402 drive its state and error code. Press Examine again or "
-                               "Examine all.", "hint", wrap=True))
+                               "watched for 2 s, whether its own processor runs (PDI watchdog "
+                               "and errors) and its synchronisation (0x1C32/0x1C33), the slave's "
+                               "own diagnosis history, and for a CiA 402 drive its state and "
+                               "error code. Press Examine again or Examine all.", "hint", wrap=True))
         lay.addWidget(self.waiting)
 
         self.body = QWidget()
@@ -3693,6 +3694,14 @@ class TroubleshootPage(QWidget):
         self.cable.lay.addStretch(1)
         two.addWidget(self.cable, 2)
         body.addLayout(two)
+        self.cpu = Card("The slave's own processor",
+                        "Whether the processor behind the EtherCAT chip (the PDI) runs, and how "
+                        "its cycle fits (0x1C32/0x1C33). The chip answers the master even when the "
+                        "processor has stopped, so a slave can look fine on the bus while its "
+                        "program hangs.")
+        self.cpu_text = self.cpu.add(label(wrap=True))
+        self.cpu_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        body.addWidget(self.cpu)
 
         self.history = Card("Messages from the slave (0x10F3)", "Newest first, from the slave's "
                                                                 "diagnosis history.")
@@ -3971,6 +3980,8 @@ class TroubleshootPage(QWidget):
                  if full else ""))
             self.cable.set_tone(None)
 
+        self.show_processor(r)
+
         # history
         self.history_table.setRowCount(0)
         for line in reversed(r.history):
@@ -3984,6 +3995,26 @@ class TroubleshootPage(QWidget):
         self.history_none.setVisible(not r.history)
 
         self.fill_master_says()
+
+    def show_processor(self, r):
+        """The slave's processor (PDI, watchdogs) and its synchronisation."""
+        p = r.processor
+        n, findings = diagnose.processor_findings(p, r.state, r.seconds)
+        facts, sync = [], []
+        if p is not None and p.operational:
+            facts.append("PDI running")
+        if p is not None and p.pdi_ms:
+            facts.append("PDI watchdog %g ms, %s" % (p.pdi_ms, "reloaded" if p.watchdog_ok else "expired"))
+        elif p is not None and p.pdi_ms == 0:
+            facts.append("PDI watchdog off: the chip cannot tell whether the processor runs")
+        for s in r.sync:
+            k, lines = diagnose.sync_findings(s, r.state, r.seconds)
+            n += k
+            sync += lines
+        lines = (["; ".join(facts) + "."] if facts else []) + findings + sync
+        self.cpu.setVisible(bool(lines))
+        self.cpu_text.setText("\n".join(x[3:] if x.startswith("-> ") else x for x in lines))
+        self.cpu.set_tone("red" if n else None)
 
     def fill_master_says(self):
         """The master's messages about the chosen slave: from the recorder (the

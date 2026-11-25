@@ -1759,6 +1759,19 @@ class TestWindow(WindowBase):
         self.assertEqual(page.ports.item(0, 3).text(), "9  (+6)")
         self.assertIn("grew on port 0", page.cable_verdict.text())
         self.assertIn("no diagnosis history", page.history_none.text())
+        self.assertTrue(page.cpu.isHidden())        # nothing read about the processor
+        # the processor stopped, and the slave's cycle does not fit
+        r = w.reports[0]
+        r.processor = diagnose.Processor(operational=True, watchdog_ok=False, pdi_ms=100.0, pdi_expired=3)
+        r.sync = [diagnose.SyncInfo(0x1C32, {"type": 2, "cycle_ns": 1000000, "calc_copy_ns": 663000},
+                                    missed_delta=2)]
+        w.show_current()
+        text = page.cpu_text.text()
+        self.assertFalse(page.cpu.isHidden())
+        self.assertIn("PDI running; PDI watchdog 100 ms, expired.", text)
+        self.assertIn("the slave's processor has stopped talking to its EtherCAT chip", text)
+        self.assertIn("Sync (0x1C32, outputs): DC SYNC0, cycle 1 ms, its own work 663 us", text)
+        self.assertIn("2 cycles without new process data", text)
 
     def test_what_the_event_log_means(self):
         """Frames lost while running: the event log card says what it means and
