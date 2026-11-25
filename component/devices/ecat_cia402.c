@@ -208,7 +208,6 @@ enum {
 };
 
 #define MODE_CHANGE_NS 1000000000LL  // a mode change must be done within this
-#define AGAIN_SETTLE_NS 100000000LL  // home-enable-again: time in "Ready to switch on" before up again
 #define HOMING_SETTLE_NS 20000000LL  // see the homing result no earlier, unless homing was seen
 #define SW_TARGET_REACHED 0x0400
 #define SW_HOMING_ATTAINED 0x1000
@@ -295,7 +294,8 @@ typedef struct {
   hal_sint_t mode;  // read only: 8 CSP, 9 CSV
   hal_uint_t home_timeout_ms;
   hal_real_t home_max_travel;  // 0: no limit
-  hal_bool_t home_hold;  // homing by `home` runs only while it stays true (a homing module's request)
+  hal_bool_t home_hold;
+  hal_uint_t home_again_ms;  // home-enable-again: time enabled again, target held, before homing is done  // homing by `home` runs only while it stays true (a homing module's request)
   hal_uint_t stop_timeout_ms;
   hal_uint_t pp_timeout_ms;
   hal_bool_t pp_immediate;   // PP: "change set immediately" (bit 5) with every set-point; the ECT60 acknowledges and then does not move with it
@@ -336,7 +336,7 @@ typedef struct {
   int32_t hs_last;      // the drive's position last cycle, counts (home-travel)
   int enable_again;     // cia402.home-enable-again
   int again_down;       // HS_AGAIN: still going down to "Ready to switch on", or waiting there
-  int again_ready;      // HS_AGAIN: "Ready to switch on" reached, settling
+  int again_ready;      // HS_AGAIN: enabled again, holding for home-again-ms
   double home_speed;    // cia402.home-speed, counts/s; 0: not known
   int index_old, home_old;
   long long stop_ns;    // PV, PP: time halting before switching off
@@ -417,6 +417,7 @@ static const lcec_paramdesc_t homing_params[] = {
     {HAL_UINT, HAL_RW, offsetof(cia402_t, home_timeout_ms), "%s.home-timeout-ms"},
     {HAL_REAL, HAL_RW, offsetof(cia402_t, home_max_travel), "%s.home-max-travel"},
     {HAL_BOOL, HAL_RW, offsetof(cia402_t, home_hold), "%s.home-hold"},
+    {HAL_UINT, HAL_RW, offsetof(cia402_t, home_again_ms), "%s.home-again-ms"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -610,6 +611,7 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
   d->active = mode;
   // (some of them exist only for the modes that need them)
   if (d->home_timeout_ms) hal_set_uint(d->home_timeout_ms, 60000);
+  if (d->home_again_ms) hal_set_uint(d->home_again_ms, 200);
   if (d->stop_timeout_ms) hal_set_uint(d->stop_timeout_ms, 10000);
   if (d->pp_timeout_ms) hal_set_uint(d->pp_timeout_ms, 60000);
   hal_set_real(d->pos_scale, 1.0);
@@ -942,8 +944,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       if (hal_get_sint(d->opmode_display) == d->active) {
         if (d->enable_again) {
           // the drive is to be enabled again before it follows: down to
-          // "Ready to switch on" (axis_write's control word), a pause with
-          // the target at the actual position, then up
+          // "Ready to switch on" (axis_write's control word), up again,
+          // and home-again-ms enabled with the target held
           d->hs = HS_AGAIN;
           d->hs_ns = 0;
           d->again_down = 1;
@@ -956,22 +958,22 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       }
       break;
     case HS_AGAIN:
-      // An ECT60 taken only to "Switched on" kept an offset between its
-      // target and where it counts from (27 counts after torque homing
-      // against a springy stop, 2026-11-25); machine off ("Ready to switch
-      // on") clears it. AGAIN_SETTLE_NS there lets a springy stop settle
-      // while the target follows the actual position.
+      // Down to "Ready to switch on" (as machine off), up again, then
+      // enabled with the target held for home-again-ms before homing is
+      // done: an ECT60 enabled again after torque homing kept an offset of
+      // 27 and 47 counts between its target and where it stood when the
+      // final move followed at once (2026-11-25).
       if (d->again_down && d->state == ST_READY_TO_SWITCH_ON) {
+        d->again_down = 0;  // the control word enables it again
+        d->hs_ns = 0;
+      } else if (!d->again_down && d->state == ST_OPERATION_ENABLED) {
         if (!d->again_ready) {
           d->again_ready = 1;
           d->hs_ns = 0;
-        } else if (d->hs_ns >= AGAIN_SETTLE_NS) {
-          d->again_down = 0;  // the control word enables it again
+        } else if (d->hs_ns >= (long long)opt_uint(d->home_again_ms) * 1000000LL) {
           d->again_ready = 0;
-          d->hs_ns = 0;
+          homing_done(d);
         }
-      } else if (!d->again_down && d->state == ST_OPERATION_ENABLED) {
-        homing_done(d);
       } else if (d->hs_ns > MODE_CHANGE_NS) {
         block(d, WHY_ENABLE_TIMEOUT);
       }

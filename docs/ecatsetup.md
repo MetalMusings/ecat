@@ -2791,6 +2791,7 @@ Extra pins and parameter:
 | `home-timeout-ms` | 60000 | Time allowed for homing; 0 for no limit. |
 | `home-max-travel` | 0 | The longest distance the drive may cover while homing, both ways counted, in machine units; 0 for no limit. |
 | `home-hold` | false | Homing started by `home` runs only while `home` stays true; dropping it stops homing and the drive goes back to its mode. For a homing module that holds its request (`cia402_homecomp`, [below](#homing-with-cia402_homecomp-test)). False: a rising edge is enough. |
+| `home-again-ms` | 200 | With *Enable the drive again after homing*: how long the drive is held where it stands after it is enabled again, before homing is done and it follows `pos-cmd`. |
 
 Homing is started only while the drive is enabled, in "Operation
 enabled", and only by a new rising edge. The profile then:
@@ -2807,12 +2808,12 @@ enabled", and only by a new rising edge. The profile then:
 4. clears bit 4, writes the mode in use, holds the target at the
    actual position, and waits for the drive to report the mode;
 5. with *Enable the drive again after homing* (below), takes the drive
-   down to "Ready to switch on" (as machine off does), waits 100 ms there
-   with the target at the drive's actual position (a springy stop may
-   push the axis back meanwhile), and enables it again (each step within
-   1 s, or it is shut down with `fault-reason` 3). An ECT60 taken down
-   only to "Switched on" kept an offset of 0.27 mm between its target and
-   where it stood after torque homing against a springy stop;
+   down to "Ready to switch on" (as machine off does; the target follows
+   the drive's actual position meanwhile), enables it again (each step
+   within 1 s, or it is shut down with `fault-reason` 3), and holds the
+   target there for `home-again-ms` (200 ms) before it goes on. An ECT60
+   whose final move came at once after it was enabled again kept an
+   offset of 0.27 and 0.47 mm between its target and where it stood;
 6. clears `index-enable` and sets `stat-homed`: only now, when the drive
    follows its command again.
 

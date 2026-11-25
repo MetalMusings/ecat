@@ -54,7 +54,7 @@ CIA402_HOMING = [
     ("index-enable", "bool", "io"), ("home", "bool", "in"), ("stat-homing", "bool", "out"),
     ("stat-homed", "bool", "out"), ("home-error", "bool", "out"), ("pos-actual", "real", "out"),
     ("home-travel", "real", "out"), ("home-timeout-ms", "uint", "rw"), ("home-max-travel", "real", "rw"),
-    ("home-hold", "bool", "rw"),
+    ("home-hold", "bool", "rw"), ("home-again-ms", "uint", "rw"),
 ]
 CIA402_PV = [("at-speed", "bool", "out"), ("zero-speed", "bool", "out")]
 CIA402_PP = [
@@ -91,7 +91,7 @@ DEFAULTS = {
     "pos-scale": 1.0, "velo-scale": 1.0, "auto-fault-reset": True,
     "enable-timeout-ms": 2000, "watchdog-ms": 0, "stop-timeout-ms": 10000,
     "pp-timeout-ms": 60000, "pp-immediate": False, "home-timeout-ms": 60000, "home-max-travel": 0.0,
-    "home-hold": False,
+    "home-hold": False, "home-again-ms": 200,
     "velocity-window-ms": 10,
     "ff-torque-max": 30.0,
 }
