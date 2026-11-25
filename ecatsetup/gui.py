@@ -5594,6 +5594,12 @@ def monitor_rows(cfg, pins, seen):
         bad = None
     if bad:
         rows.append((False, "%d cycles in OP with the working counter not complete: frames lost or late" % bad))
+    try:
+        lost = int(pins.get("ecat.0.frames-lost"), 0)
+    except (TypeError, ValueError):
+        lost = None     # a master before 1.7 has no frame statistics
+    if lost is not None:
+        rows.append((lost == 0, "%d frames lost since the bus started (sent, never came back)" % lost))
     return rows
 
 

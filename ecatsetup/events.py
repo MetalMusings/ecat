@@ -51,6 +51,7 @@ MON_KINDS = {
     7: ("PDI watchdog expired: the slave's processor stopped answering (0x0443)", "error"),
     8: ("SM events missed: a frame came after the slave's cycle started (0x1C32:0B)", "warn"),
     9: ("cycles too short for the slave (0x1C32:0C)", "warn"),
+    10: ("frames lost (sent by the master, never came back)", "warn"),
 }
 
 # how serious an event is, for the window: "info", "warn" or "error"

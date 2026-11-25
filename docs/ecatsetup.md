@@ -2289,10 +2289,13 @@ the servo thread. What that means:
   minutes the growth of each counter that grew and each DC slave's
   largest difference, at once a DC difference beyond 1 us (at most once a
   minute per slave), and every 10 minutes the cycles in OP whose working
-  counter was not complete. Pins: `<slave>.dc-diff-ns` (the last
+  counter was not complete. With the userspace master 1.7 or later it also
+  reads the master's own frame counts once a second: the frames sent that
+  never came back are recorded the same way (an onset, and their number
+  every 10 minutes). Pins: `<slave>.dc-diff-ns` (the last
   difference), `<slave>.dc-diff-max-ns` (the largest since loading),
-  `<slave>.error-count` (all monitored counters' growth since loading) and
-  `ecat.0.wc-bad-cycles`. The *Synchronisation* card (test and *Watch
+  `<slave>.error-count` (all monitored counters' growth since loading),
+  `ecat.0.wc-bad-cycles` and (master 1.7) `ecat.0.frames-lost`. The *Synchronisation* card (test and *Watch
   LinuxCNC*) and the *Long-term* card on the *Slave status* page show them.
 - `ecat.take-down` does the same on request while the thread runs, and
   `ecat-take-down` sets it and waits for PREOP; it is no longer needed in
@@ -3904,6 +3907,7 @@ The component records, with the time to the millisecond:
 | DC clock at most N ns off, DC clock N ns off | Long-term monitoring of a DC slave: every 10 minutes its largest system time difference to the reference clock, and at once a difference beyond 1 us. |
 | ... began to grow, ...: +N in 10 min | Long-term monitoring: a port's rx, phy or lost-link counter, the PDI or processing error counter, a watchdog counter, or `0x1C32:0B`/`:0C`, when it begins to grow after a quiet minute, and its growth every 10 minutes. |
 | working counter not complete in N cycles | Long-term monitoring: the cycles in OP in the last 10 minutes whose working counter was zero or incomplete (frames lost or late). |
+| master: frames lost ... | Long-term monitoring (master 1.7): frames the master sent that never came back, when they begin and their number every 10 minutes. A frame that comes back but not every slave processed shows as an incomplete working counter instead. |
 | master: ... | The master's own messages (its log, up to level info), such as "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!" or an SDO abort while it configures a slave. Shown between the events at their time; one repeated right after itself is shown once, with the count. The master reads a slave's object dictionary up to each object's highest subindex, so an object with gaps in its subindexes (allowed; `0x1C32`/`0x1C33` have them) gives two warnings per gap: they are shown as one information line, "object dictionary: N subindexes of ... do not exist". |
 
 Slave states are read once a second, as for the component's state pins;

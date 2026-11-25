@@ -20,6 +20,7 @@ MASTER = [
     ("dc-phased", "bool", "out"), ("send-offset", "sint", "out"), ("shift-time", "uint", "out"),
     ("turnaround-cycles", "sint", "out"), ("guard-state", "sint", "out"),
     ("guard-cycles", "uint", "out"), ("wc-bad-cycles", "uint", "out"),
+    ("frames-lost", "uint", "out"),
     ("pll-step", "uint", "rw"), ("pll-max-err", "uint", "rw"), ("dc-phase-max-err", "uint", "rw"),
     ("send-offset-max", "sint", "rw"), ("auto-shift-margin", "uint", "rw"),
     ("auto-shift-input-margin", "uint", "rw"),

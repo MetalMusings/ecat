@@ -11,8 +11,9 @@
 //  - the watchdog counters (0x0442 process data, 0x0443 PDI);
 //  - the slave's own synchronisation counters (ETG.1020 0x1C32:0B SM events
 //    missed, 0x1C32:0C cycle time too small);
-//  - the cycles whose working counter was not complete (the frames the
-//    application lost).
+//  - the cycles whose working counter was not complete, and the frames the
+//    master lost (sent, never came back: ecrt_master_frame_stats(), master
+//    1.7).
 //
 //  This file is the logic only: it takes the values read and the time, and
 //  writes events. Reading them (register and SDO requests) is in
@@ -29,7 +30,8 @@
 //    |difference| and the number of samples;
 //  - ECAT_EV_MON_DC_OVER when the difference is beyond the limit, at most
 //    once a minute per slave;
-//  - ECAT_EV_MON_WC (master) every period with lost cycles.
+//  - ECAT_EV_MON_WC (master) every period with lost cycles;
+//  - for the master (slave -1), ECAT_MON_FRAMES_LOST as ONSET and SUM.
 //
 
 #ifndef _ECAT_MONITOR_CORE_H_
@@ -55,6 +57,7 @@ enum {
   ECAT_MON_PDI_WATCHDOG = 7, // 0x0443: PDI watchdog expired (the processor stopped answering)
   ECAT_MON_SM_MISSED = 8,    // 0x1C32:0B: SM events missed
   ECAT_MON_TOO_SMALL = 9,    // 0x1C32:0C: cycle time too small
+  ECAT_MON_FRAMES_LOST = 10, // the master's frames sent that never came back (slave -1)
 };
 #define ECAT_MON_COUNTERS 18   // rx, phy, lost on 4 ports, and the six others
 
@@ -80,6 +83,12 @@ typedef struct {
   uint32_t wc_zero, wc_incomplete;          // cycles in this period
   uint32_t wc_bad_all;                      // ... not complete since activation
   uint64_t period_ns;
+  // frames lost (tx - rx of the master's statistics)
+  int have_lost;
+  uint64_t last_lost;
+  uint64_t lost_grew_ns;
+  uint32_t lost_sum;                        // in this period
+  uint32_t lost_all;                        // since activation
 } ecat_mon_master_t;
 
 /// The code of a counter: kind << 8 | port (port 0 for those of the chip).
@@ -102,5 +111,8 @@ void ecat_mon_slave_period(ecat_events_t *log, ecat_mon_slave_t *s, uint64_t now
 /// Every cycle: the domain's working counter state (0 zero, 1 incomplete, 2 complete).
 void ecat_mon_wc(ecat_mon_master_t *m, unsigned wc_state);
 void ecat_mon_master_period(ecat_events_t *log, ecat_mon_master_t *m, uint64_t now_ns);
+/// The master's frame counts since it started (sent, received), once a second
+/// after a receive: the difference grows by the frames lost.
+void ecat_mon_frames(ecat_events_t *log, ecat_mon_master_t *m, uint64_t now_ns, uint64_t tx, uint64_t rx);
 
 #endif

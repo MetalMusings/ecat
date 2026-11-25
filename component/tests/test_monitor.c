@@ -150,4 +150,29 @@ static void test_monitor_wc(void) {
   CHECK_EQ((int)m.wc_bad_all, 3);
 }
 
-RUN_TESTS("monitor", test_monitor_counters, test_monitor_watchdogs_and_sync, test_monitor_dc, test_monitor_wc)
+static void test_monitor_frames_lost(void) {
+  ecat_mon_master_t m;
+  uint64_t t = 1000 * S;
+
+  ecat_events_init(&L, NULL);
+  ecat_mon_master_init(&m, t);
+  ecat_mon_frames(&L, &m, t, 1000, 999);           // the base (one on its way)
+  ecat_mon_frames(&L, &m, t + S, 2000, 2000);      // it came back: nothing lost
+  CHECK_EQ((int)L.next, 0);
+  ecat_mon_frames(&L, &m, t + 2 * S, 3000, 2997);  // three lost: an onset
+  CHECK_EQ((int)L.next, 1);
+  CHECK_EQ(last(0)->type, ECAT_EV_MON_ONSET);
+  CHECK_EQ(last(0)->slave, -1);
+  CHECK_EQ(last(0)->a, ecat_mon_code(ECAT_MON_FRAMES_LOST, 0));
+  CHECK_EQ((int)last(0)->b, 3);
+  ecat_mon_frames(&L, &m, t + 3 * S, 4000, 3996);  // one more soon after: in the sum only
+  CHECK_EQ((int)L.next, 1);
+  CHECK_EQ((int)m.lost_all, 4);
+  ecat_mon_master_period(&L, &m, t + ECAT_MON_PERIOD_S * S);
+  CHECK_EQ((int)L.next, 2);
+  CHECK_EQ(last(0)->type, ECAT_EV_MON_SUM);
+  CHECK_EQ((int)last(0)->b, 4);
+}
+
+RUN_TESTS("monitor", test_monitor_counters, test_monitor_watchdogs_and_sync, test_monitor_dc, test_monitor_wc,
+          test_monitor_frames_lost)

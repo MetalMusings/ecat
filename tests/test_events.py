@@ -248,6 +248,9 @@ class TestMasterMessages(unittest.TestCase):
                                       "PDI watchdog expired: the slave's processor stopped answering (0x0443)": 1})
         self.assertEqual([(w[:6], n) for _, w, n in h.onsets], [("port 1", 3), ("PDI wa", 1)])
         self.assertNotIn(-1, events.history(log))
+        lost = events.Event(9, 0, events.MON_ONSET, -1, 10 << 8, 4)
+        self.assertEqual(events.text(lost), ("warn", "master: frames lost (sent by the master, never came "
+                                                     "back) began to grow (+4)"))
 
     def test_version_1_has_none(self):
         write_log(self.path, [(0, events.START, -1, 4, 0)], version=1)

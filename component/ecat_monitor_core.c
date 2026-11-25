@@ -129,6 +129,28 @@ void ecat_mon_wc(ecat_mon_master_t *m, unsigned wc_state) {
 void ecat_mon_master_period(ecat_events_t *log, ecat_mon_master_t *m, uint64_t now_ns) {
   if (now_ns - m->period_ns < (uint64_t)ECAT_MON_PERIOD_S * NS_PER_S) return;
   if (m->wc_zero || m->wc_incomplete) ecat_events_add(log, ECAT_EV_MON_WC, -1, m->wc_zero, m->wc_incomplete);
+  if (m->lost_sum) ecat_events_add(log, ECAT_EV_MON_SUM, -1, ecat_mon_code(ECAT_MON_FRAMES_LOST, 0), m->lost_sum);
   m->wc_zero = m->wc_incomplete = 0;
+  m->lost_sum = 0;
   m->period_ns = now_ns;
+}
+
+void ecat_mon_frames(ecat_events_t *log, ecat_mon_master_t *m, uint64_t now_ns, uint64_t tx, uint64_t rx) {
+  uint64_t lost = tx >= rx ? tx - rx : 0, grew;
+
+  if (!m->have_lost) {
+    m->have_lost = 1;
+    m->last_lost = lost;
+    return;
+  }
+  // a frame still on its way at a read comes back later: the difference can shrink
+  grew = lost > m->last_lost ? lost - m->last_lost : 0;
+  m->last_lost = lost;
+  if (grew == 0) return;
+  if (m->lost_grew_ns == 0 || now_ns - m->lost_grew_ns >= (uint64_t)ECAT_MON_QUIET_S * NS_PER_S) {
+    ecat_events_add(log, ECAT_EV_MON_ONSET, -1, ecat_mon_code(ECAT_MON_FRAMES_LOST, 0), (uint32_t)grew);
+  }
+  m->lost_grew_ns = now_ns;
+  m->lost_sum += (uint32_t)grew;
+  m->lost_all += (uint32_t)grew;
 }

@@ -99,6 +99,9 @@ static const lcec_pindesc_t master_pins[] = {
     {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, guard_cycles), "%s.guard-cycles"},
 #endif
     {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, wc_bad_cycles), "%s.wc-bad-cycles"},
+#ifdef EC_HAVE_FRAME_STATS
+    {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, frames_lost), "%s.frames-lost"},
+#endif
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -1183,6 +1186,21 @@ static void ecat_monitor(lcec_master_t *master) {
     ecat_mon_wc(&master->mon, master->domain_state.wc_state);
     hal_set_uint(master->hal_data->wc_bad_cycles, master->mon.wc_bad_all);
   }
+#ifdef EC_HAVE_FRAME_STATS
+  // the frames the master lost: once a second, after this cycle's receive
+  if (now - master->mon_frames_ns >= 1000000000ull) {
+    ec_master_frame_stats_t fs;
+    master->mon_frames_ns = now;
+    fs.size = sizeof(fs);
+    rtapi_mutex_get(&master->mutex);
+    int ok = ecrt_master_frame_stats(master->master, &fs) == 0;
+    rtapi_mutex_give(&master->mutex);
+    if (ok) {
+      ecat_mon_frames(master->events, &master->mon, now, fs.tx_frames, fs.rx_frames);
+      hal_set_uint(master->hal_data->frames_lost, master->mon.lost_all);
+    }
+  }
+#endif
   ecat_mon_master_period(master->events, &master->mon, now);
   rtapi_mutex_get(&master->mutex);
   for (slave = master->first_slave; slave != NULL; slave = slave->next) ecat_monitor_slave(master, slave, now);

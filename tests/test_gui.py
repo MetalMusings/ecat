@@ -1951,6 +1951,10 @@ class TestMonitorRows(unittest.TestCase):
         self.assertIn("9 cycles in OP with the working counter not complete", rows[2][1])
         # an older ecat without the pins: nothing
         self.assertEqual(gui.monitor_rows(self.CFG, {}, {}), [])
+        # the master's frame statistics (master 1.7)
+        self.assertEqual(gui.monitor_rows(self.CFG, {"ecat.0.frames-lost": "0"}, {}),
+                         [(True, "0 frames lost since the bus started (sent, never came back)")])
+        self.assertFalse(gui.monitor_rows(self.CFG, {"ecat.0.frames-lost": "3"}, {})[0][0])
 
 
 class TestPdoEditing(WindowBase):

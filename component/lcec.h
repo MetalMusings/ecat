@@ -215,6 +215,9 @@ typedef struct lcec_master_data {
   hal_uint_t auto_shift_input_margin; ///< globalShiftTime="auto": ns from SYNC0 until the slaves' inputs are ready.
 #endif
   hal_uint_t wc_bad_cycles;         ///< Long-term monitoring: cycles in OP whose working counter was not complete.
+#ifdef EC_HAVE_FRAME_STATS
+  hal_uint_t frames_lost;           ///< ... frames the master sent that never came back, since activation.
+#endif
 } lcec_master_data_t;
 
 typedef struct lcec_slave_state {
@@ -295,6 +298,7 @@ typedef struct lcec_master {
   ecat_mon_master_t mon;            ///< Long-term monitoring (ecat_monitor_core.h).
   int mon_started;                  ///< mon set up after activation
   int ref_clock_index;              ///< Position of the DC reference clock chosen, -1: none
+  uint64_t mon_frames_ns;           ///< when the master's frame statistics were last read
   ecat_events_limit_t ev_late;      ///< Rate limit of ECAT_EV_LATE.
   int ev_guard_last;                ///< The stop guard's state the recorder last saw.
 } lcec_master_t;
