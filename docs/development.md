@@ -3865,3 +3865,52 @@ one it was built for; packages per LinuxCNC version, including Debian's
 2.9.4. Drive-specific steps such as enabling the ECT60 again belong in the
 drive layer (homecomp's README: the drive component alone owns the
 control word).
+
+### Remarks on homecomp's way of homing (read 2026-11-25, b13bf72)
+
+Read from its code and LinuxCNC 2.10's `homing.c`; points 1-3 come from the
+test above, 4 and 5 are not tried. For our own decisions, not posted.
+
+1. **The home point is taken where the motor stands, not where the drive
+   set its zero.** At the drive's "homed" homecomp sets
+   `motor_offset = actual - backlash - HOME_OFFSET` from the position of
+   that moment. The drive's reference point (CiA 402: the position becomes
+   0x607C there) is not used, so the result depends on where the motor came
+   to rest after it. Against the springy end stop (method 36) this gave
+   397 counts through homecomp and 300 through `index-enable`, with the
+   same `HOME_OFFSET` -3: about 1 mm. Small with a switch or an index,
+   worse repeatability than needed with torque homing. `index-enable` in
+   ecat uses the drive's own coordinate (drive position 0 = `HOME_OFFSET`).
+2. **No guard while the drive moves on its own.** Motion holds the command
+   and `cia-pos-fb-out` follows it (README: following-error protection is
+   removed), soft limits do not apply: only the drive's own limits and
+   `cia-timeout-ms` (default 30 s; 120 s was needed here) stop a drive that
+   misses its switch. A travel limit on the real feedback belongs in
+   homecomp; ecat's `home-max-travel` gives it only with ecat's profile.
+3. **The final move starts on the drive's "homed".** It should wait until
+   the drive is back in its cyclic mode, enabled, and following (position
+   at rest, command and feedback agree): "finished homing" is not "follows
+   again" (the ECT60's 27/47 counts above). ecat now reports `stat-homed`
+   only then, but homecomp should not rely on every drive layer doing so.
+4. **A joint stays homed when the drive loses its position** (drive power
+   lost, fault). The same holds for `index-enable`; a homing module is the
+   natural place for a "position lost" pin from the drive that unhomes the
+   joint.
+5. **Coupled joints (negative `HOME_SEQUENCE`, gantry) are synchronised
+   only in the final move.** For a joint with `request-custom-homing` the
+   base search and latch states are skipped; the joint stays in
+   `HOME_START` until the drive reports homed, then goes to
+   `HOME_FINAL_MOVE_START`, where `homing.c`'s `sync_ready()` makes the
+   sides start and end the final move together. Aborts are coupled: a
+   failing side aborts its sequence peers at once (`cia-peer-abort`).
+   LinuxCNC 2.10's own homing runs every leg of a coupled pair together
+   (back off, search, slow down when the first side trips, latch), so the
+   sides are never driven apart by more than their switches' misalignment.
+   Two drives homing on their own search at their own speeds and stop on
+   their own: the gantry is twisted by the difference until both are done,
+   with no following-error check during it. Homecomp's tests cover a mixed
+   pair (one drive-homed, one standard joint) in a negative sequence, in
+   simulation; two drive-homed joints in one negative sequence are not
+   tested. This cannot be fixed inside homecomp while the drive owns the
+   motion; for a rigid gantry, homing through LinuxCNC (`index-enable` or
+   LinuxCNC's switches) keeps the sides together.
