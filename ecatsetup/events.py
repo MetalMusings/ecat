@@ -36,6 +36,22 @@ LINK, MASTER_AL, RESPONDING, WC = 10, 11, 12, 13
 SLAVE_AL, SLAVE_ONLINE, SLAVE_OP, DC_SYNC = 20, 21, 22, 23
 DRIVE_FAULT, DRIVE_BLOCK, DRIVE_CLEAR = 30, 31, 32
 GUARD, LATE, SHIFT = 40, 41, 42
+# long-term monitoring (component/ecat_monitor_core.h): a code is kind << 8 | port
+MON_DC, MON_DC_OVER, MON_ONSET, MON_SUM, MON_WC = 50, 51, 52, 53, 54
+MON_PERIOD_S = 600          # ECAT_MON_PERIOD_S: the summaries' period
+MON_DC_LIMIT_NS = 1000      # ECAT_MON_DC_LIMIT_NS
+# kind: (what, severity when it grows)
+MON_KINDS = {
+    1: ("rx errors (invalid frames received)", "warn"),
+    2: ("phy errors (the physical layer)", "warn"),
+    3: ("link lost", "error"),
+    4: ("frames the chip could not process (0x030C)", "warn"),
+    5: ("PDI errors, the bus to the slave's processor (0x030D)", "warn"),
+    6: ("process data watchdog expired: outputs late (0x0442)", "warn"),
+    7: ("PDI watchdog expired: the slave's processor stopped answering (0x0443)", "error"),
+    8: ("SM events missed: a frame came after the slave's cycle started (0x1C32:0B)", "warn"),
+    9: ("cycles too short for the slave (0x1C32:0C)", "warn"),
+}
 
 # how serious an event is, for the window: "info", "warn" or "error"
 WC_STATES = {0: "zero", 1: "incomplete", 2: "complete"}
@@ -306,7 +322,63 @@ def text(e, names=None):
     if t == SHIFT:
         return ("info" if e.b == 2 else "warn",
                 "SYNC0 shift %d us, turn-around %d cycles" % (e.a // 1000, e.b))
+    if t == MON_DC:
+        return ("info" if e.a <= MON_DC_LIMIT_NS else "warn",
+                "%s: DC clock at most %d ns off the reference clock in %d min (%d samples)"
+                % (who, e.a, MON_PERIOD_S // 60, e.b))
+    if t == MON_DC_OVER:
+        return "warn", "%s: DC clock %d ns off the reference clock (more than %d ns)" % (who, e.a, e.b)
+    if t in (MON_ONSET, MON_SUM):
+        what, sev = monitor_counter(e.a)
+        if t == MON_ONSET:
+            return sev, "%s: %s began to grow (+%d)" % (who, what, e.b)
+        return sev, "%s: %s: +%d in %d min" % (who, what, e.b, MON_PERIOD_S // 60)
+    if t == MON_WC:
+        return "warn", "working counter not complete in %d cycles in %d min (%d zero, %d incomplete): " \
+                       "frames lost or late" % (e.a + e.b, MON_PERIOD_S // 60, e.a, e.b)
     return "info", "event %d (%s, %d, %d)" % (t, who, e.a, e.b)
+
+
+def monitor_counter(code):
+    """(what, severity) of a monitored counter's code (kind << 8 | port)."""
+    kind, port = code >> 8, code & 0xFF
+    what, sev = MON_KINDS.get(kind, ("counter %d" % kind, "warn"))
+    return ("port %d %s" % (port, what) if kind in (1, 2, 3) else what), sev
+
+
+@dataclass
+class SlaveHistory:
+    """What the long-term monitoring recorded about one slave in a run."""
+    dc: list            # [(time, largest |difference| ns in the period)], oldest first
+    dc_over: list       # [(time, |difference| ns)]: beyond the limit
+    counters: dict      # what -> total growth recorded (sums, and onsets after the last sum)
+    onsets: list        # [(time, what, growth)]
+
+
+def history(log):
+    """{position: SlaveHistory} from a run's long-term monitoring events."""
+    out = {}
+    pending = {}        # (slave, code) -> growth in onsets since the last sum
+    for e in log.events:
+        if e.type not in (MON_DC, MON_DC_OVER, MON_ONSET, MON_SUM) or e.slave < 0:
+            continue
+        h = out.setdefault(e.slave, SlaveHistory([], [], {}, []))
+        if e.type == MON_DC:
+            h.dc.append((e.time, e.a))
+        elif e.type == MON_DC_OVER:
+            h.dc_over.append((e.time, e.a))
+        else:
+            what = monitor_counter(e.a)[0]
+            if e.type == MON_ONSET:
+                h.onsets.append((e.time, what, e.b))
+                pending[(e.slave, what)] = pending.get((e.slave, what), 0) + e.b
+            else:   # a period's sum includes its onsets
+                h.counters[what] = h.counters.get(what, 0) + e.b
+                pending[(e.slave, what)] = 0
+    for (slave, what), n in pending.items():
+        if n:
+            out[slave].counters[what] = out[slave].counters.get(what, 0) + n
+    return out
 
 
 def annotate(evs, names=None):

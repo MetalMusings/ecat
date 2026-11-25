@@ -1888,6 +1888,27 @@ class TestWindow(WindowBase):
             w.check_news()
             self.assertIsNone(w.news_mark)          # seen
 
+    def test_long_term_history_of_a_slave(self):
+        """The Slave status page shows the chosen slave's long-term history
+        from the run in the event log: its DC curve and the counters."""
+        from ecatsetup import events
+        sys.path.insert(0, os.path.dirname(__file__))
+        from test_events import write_log
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "ev")
+        write_log(path, [(0, events.START, -1, 1, 0), (1, events.MON_DC, 0, 30, 600),
+                         (2, events.MON_DC, 0, 45, 600), (3, events.MON_ONSET, 0, 7 << 8, 2)])
+        with mock.patch.object(events, "PATH", path):
+            w = self.window()
+            w.select_slave(0)
+            page = w.trouble_page
+            page.show_events()
+            self.assertIn("at most 45 ns off the reference clock", page.longterm_dc.text())
+            self.assertFalse(page.longterm_curve.isHidden())
+            self.assertEqual(page.longterm_curve.values, [30, 45])
+            self.assertIn("PDI watchdog expired", page.longterm_counts.text())
+            self.assertIn("Began to grow", page.longterm_counts.text())
+
     def test_test_page_without_a_test(self):
         w = self.window()
         w.select_slave(0)
@@ -1895,6 +1916,41 @@ class TestWindow(WindowBase):
         self.assertFalse(w.test_page.start_card.isHidden())
         self.assertTrue(w.test_page.io.isHidden())
         self.assertTrue(w.header.stop.isHidden())
+
+
+@unittest.skipIf(gui is None, "PyQt5 is not installed")
+class TestMonitorRows(unittest.TestCase):
+    """The Synchronisation card's rows from the long-term monitoring pins."""
+
+    CFG = {"slaves": [
+        {"position": 0, "name": "drive-0", "dc": {"assign-activate": "0x0300"}},
+        {"position": 1, "name": "drive-1", "dc": {"assign-activate": "0x0300"}},
+        {"position": 2, "name": "io", "dc": {"assign-activate": "0x0000"}},
+        {"position": 3, "name": "drive-3", "dc": {"assign-activate": "0x0300"}, "unused": True}]}
+
+    def test_reference_clock_is_the_first_with_dc(self):
+        self.assertEqual(gui.dc_slaves(self.CFG), ("drive-0", ["drive-1"]))
+        self.assertEqual(gui.dc_slaves({}), (None, []))
+
+    def test_rows(self):
+        seen = {}
+        pins = {"drive-1.dc-diff-ns": "-7", "drive-1.dc-diff-max-ns": "12", "drive-0.error-count": "0",
+                "drive-1.error-count": "0", "io.error-count": "0", "ecat.0.wc-bad-cycles": "0"}
+        rows = gui.monitor_rows(self.CFG, pins, seen)
+        self.assertEqual(rows[0], (True, "DC clocks against the reference clock (drive-0): drive-1 -7 ns; "
+                                         "at most 12 ns since LinuxCNC loaded, 7 ns since you began looking"))
+        self.assertEqual(rows[1], (True, "No error counter of a slave grew since LinuxCNC loaded"))
+        self.assertEqual(len(rows), 2)
+        pins.update({"drive-1.dc-diff-ns": "3", "drive-1.dc-diff-max-ns": "4000", "io.error-count": "5",
+                     "ecat.0.wc-bad-cycles": "9"})
+        rows = gui.monitor_rows(self.CFG, pins, seen)
+        self.assertFalse(rows[0][0])
+        self.assertIn("7 ns since you began looking", rows[0][1])     # the largest seen is kept
+        self.assertEqual(rows[1], (False, "Error counters grew since LinuxCNC loaded: io 5 (Slave status: "
+                                          "the event log says which, and when)"))
+        self.assertIn("9 cycles in OP with the working counter not complete", rows[2][1])
+        # an older ecat without the pins: nothing
+        self.assertEqual(gui.monitor_rows(self.CFG, {}, {}), [])
 
 
 class TestPdoEditing(WindowBase):

@@ -48,6 +48,12 @@ enum {
   ECAT_EV_GUARD = 40,       // a: stop guard state (0 idle, 1 taking down, 2 done), b: done: the slaves' AL states
   ECAT_EV_LATE = 41,        // the guard sent a cycle for a late servo thread; a: lateness us, b: suppressed since
   ECAT_EV_SHIFT = 42,       // the automatic SYNC0 shift changed; a: shift ns, b: turn-around cycles
+  // long-term monitoring (ecat_monitor_core.h); a code is kind << 8 | port
+  ECAT_EV_MON_DC = 50,      // a DC slave's period summary; a: largest |system time difference| ns, b: samples
+  ECAT_EV_MON_DC_OVER = 51,  // a: |system time difference| ns beyond the limit, b: the limit ns
+  ECAT_EV_MON_ONSET = 52,   // a counter grew after being quiet; a: code, b: growth
+  ECAT_EV_MON_SUM = 53,     // a counter's growth in the period; a: code, b: growth
+  ECAT_EV_MON_WC = 54,      // master: cycles in the period with the working counter a: zero, b: incomplete
 };
 
 typedef struct {

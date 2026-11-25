@@ -369,6 +369,13 @@ component recorded while LinuxCNC ran ([event log](#event-log-and-report)),
 optionally only for this slave and the master. Both are refreshed every 2 s
 while the page is shown.
 
+The **Long-term** card shows the chosen slave's history in the run chosen
+in the event log: its DC clock's largest difference to the reference clock
+in each 10 minutes as a curve (the dashed line is 1 us), how often it went
+beyond that, and the error counters that grew, with when they began. It
+needs no *Examine*: the component records it while LinuxCNC or the test
+runs ([long-term monitoring](#the-component-in-linuxcnc)).
+
 When the master reports an error or a warning while another tab is shown,
 the *Slave status* tab gets a dot: red for an error, amber for warnings only;
 its tooltip says how many. Showing the tab clears it.
@@ -2266,6 +2273,27 @@ the servo thread. What that means:
   the slaves are asked back to OP; DC slaves (such as the ECT60) then stop
   in SAFEOP with a synchronization error, as they did before the guard:
   restart instead.
+- **Long-term monitoring.** While it runs, the component reads, outside
+  the cyclic process data and at a low rate, what the master does not
+  watch by itself: every second each slave's port error counters
+  (`0x0300`-`0x0313`: rx, phy, lost link), the chip's processing and PDI
+  error counters (`0x030C`, `0x030D`), the watchdog counters (`0x0442`
+  process data, counted in OP only; `0x0443` PDI) and, for a DC slave that
+  is not the reference clock, its system time difference (`0x092C`: how
+  far its clock is from the reference clock; the master checks that only
+  once, before SYNC0 starts); every ten seconds a DC slave's `0x1C32:0B`
+  (SM events missed) and `0x1C32:0C` (cycle time too small), and once a
+  slave aborts these it is not asked again (the master logs that abort
+  once). The event log gets a line when a counter begins to grow after a
+  quiet minute (to compare with the torch, the spindle, ...), every 10
+  minutes the growth of each counter that grew and each DC slave's
+  largest difference, at once a DC difference beyond 1 us (at most once a
+  minute per slave), and every 10 minutes the cycles in OP whose working
+  counter was not complete. Pins: `<slave>.dc-diff-ns` (the last
+  difference), `<slave>.dc-diff-max-ns` (the largest since loading),
+  `<slave>.error-count` (all monitored counters' growth since loading) and
+  `ecat.0.wc-bad-cycles`. The *Synchronisation* card (test and *Watch
+  LinuxCNC*) and the *Long-term* card on the *Slave status* page show them.
 - `ecat.take-down` does the same on request while the thread runs, and
   `ecat-take-down` sets it and waits for PREOP; it is no longer needed in
   `[HAL]SHUTDOWN`.
@@ -3873,6 +3901,9 @@ The component records, with the time to the millisecond:
 | stop guard | The servo thread stopped: the guard takes the slaves to PREOP, and says whether they got there (or it gave up, with the states they were left in); or the servo thread runs again. |
 | servo thread late | The guard sent a cycle for a servo thread more than a quarter period late (at most one line a second, with the number left out). |
 | SYNC0 shift | `sync0-shift-ns: auto` chose a shift, with the turn-around in cycles. |
+| DC clock at most N ns off, DC clock N ns off | Long-term monitoring of a DC slave: every 10 minutes its largest system time difference to the reference clock, and at once a difference beyond 1 us. |
+| ... began to grow, ...: +N in 10 min | Long-term monitoring: a port's rx, phy or lost-link counter, the PDI or processing error counter, a watchdog counter, or `0x1C32:0B`/`:0C`, when it begins to grow after a quiet minute, and its growth every 10 minutes. |
+| working counter not complete in N cycles | Long-term monitoring: the cycles in OP in the last 10 minutes whose working counter was zero or incomplete (frames lost or late). |
 | master: ... | The master's own messages (its log, up to level info), such as "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!" or an SDO abort while it configures a slave. Shown between the events at their time; one repeated right after itself is shown once, with the count. The master reads a slave's object dictionary up to each object's highest subindex, so an object with gaps in its subindexes (allowed; `0x1C32`/`0x1C33` have them) gives two warnings per gap: they are shown as one information line, "object dictionary: N subindexes of ... do not exist". |
 
 Slave states are read once a second, as for the component's state pins;

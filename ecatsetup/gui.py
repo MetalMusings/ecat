@@ -3596,6 +3596,39 @@ class StepCard(Card):
         self.set_tone({"red": "red", "grey": "grey"}.get(kind))
 
 
+class Sparkline(QWidget):
+    """A small curve of values over time (the long-term monitoring)."""
+
+    def __init__(self):
+        super().__init__()
+        self.values = []
+        self.limit = None
+        self.setMinimumHeight(48)
+        self.setMinimumWidth(240)
+
+    def set_values(self, values, limit=None):
+        self.values, self.limit = list(values), limit
+        self.update()
+
+    def paintEvent(self, _ev):
+        if not self.values:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width() - 4, self.height() - 4
+        top = max(max(self.values), self.limit or 0) or 1
+        n = len(self.values)
+
+        def at(i, v):
+            return QPointF(2 + (w * i / (n - 1) if n > 1 else w / 2), 2 + h - h * v / top)
+        if self.limit and self.limit <= top:
+            p.setPen(QPen(AMBER, 1, Qt.DashLine))
+            p.drawLine(at(0, self.limit), at(n - 1, self.limit) if n > 1 else at(0, self.limit))
+        p.setPen(QPen(self.palette().color(QPalette.Highlight), 1.5))
+        p.drawPolyline(QPolygonF([at(i, v) for i, v in enumerate(self.values)]))
+        p.end()
+
+
 class TroubleshootPage(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -3719,6 +3752,19 @@ class TroubleshootPage(QWidget):
         body.addWidget(self.master_says)
         lay.addWidget(self.body)
 
+        # long-term monitoring: the chosen slave's history in the run shown in the event log
+        self.longterm = Card("Long-term (the chosen slave)",
+                             "What ecat recorded about this slave while LinuxCNC or the test ran: "
+                             "its DC clock against the reference clock (the largest difference in "
+                             "each %d minutes) and the error counters that grew, with when they "
+                             "began. From the run chosen in the event log below." % (events.MON_PERIOD_S // 60))
+        self.longterm_dc = self.longterm.add(label(wrap=True))
+        self.longterm_curve = Sparkline()
+        self.longterm.add(self.longterm_curve)
+        self.longterm_counts = self.longterm.add(label(wrap=True))
+        self.longterm_counts.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.longterm)
+
         # the flight recorder: events of the bus while LinuxCNC ran
         self.events = Card("Event log", "What the ecat component recorded: link, states, "
                                         "working counter, drive faults, the stop guard, and the "
@@ -3814,6 +3860,7 @@ class TroubleshootPage(QWidget):
         names = events.names_of(self.win.session.cfg)
         if recorded:
             self.show_meaning(log, names, path)
+        self.show_longterm(log if recorded else None)
         shown = log.events
         said = events.folded(sorted((log.texts or []) + free, key=lambda x: x.time))
         pos = self.win.current if isinstance(self.win.current, int) else None
@@ -3838,6 +3885,45 @@ class TroubleshootPage(QWidget):
             t.setItem(r, 2, item(msg, colour=colours[sev] if kind == "event" else colours[sev] or GREY,
                                  font=mono() if kind == "text" else None))
         fit_table(t, minimum=1)
+
+    def show_longterm(self, log):
+        """The chosen slave's long-term history in a run (events.history)."""
+        pos = self.win.current if isinstance(self.win.current, int) else None
+        h = events.history(log).get(pos) if log is not None and pos is not None else None
+        if h is None:
+            self.longterm_dc.setText(
+                "Nothing recorded about this slave in this run. ecat records it while LinuxCNC or "
+                "the test runs (a run of an ecat older than this program has none)."
+                if pos is not None else "Choose a slave.")
+            self.longterm_curve.hide()
+            self.longterm_counts.setText("")
+            self.longterm_counts.hide()
+            self.longterm.set_tone(None)
+            return
+        bad = False
+        if h.dc:
+            worst = max(v for _, v in h.dc)
+            hours = (h.dc[-1][0] - h.dc[0][0]) / 3600 + events.MON_PERIOD_S / 3600
+            self.longterm_dc.setText(
+                "DC clock: at most %d ns off the reference clock over %.1f h (each point: the largest "
+                "in %d min; the dashed line: %d ns)%s" % (
+                    worst, hours, events.MON_PERIOD_S // 60, events.MON_DC_LIMIT_NS,
+                    "; beyond the limit %d times, the last at %s" % (len(h.dc_over), events.stamp(h.dc_over[-1][0]))
+                    if h.dc_over else ""))
+            self.longterm_curve.set_values([v for _, v in h.dc], events.MON_DC_LIMIT_NS)
+            self.longterm_curve.show()
+            bad = bool(h.dc_over) or worst > events.MON_DC_LIMIT_NS
+        else:
+            self.longterm_dc.setText("DC clock: not watched (no dc:, or the reference clock itself), or "
+                                     "no %d minutes have passed yet." % (events.MON_PERIOD_S // 60))
+            self.longterm_curve.hide()
+        lines = ["%s: +%d" % (what, n) for what, n in sorted(h.counters.items())]
+        if h.onsets:
+            lines.append("Began to grow (the last %d):" % min(10, len(h.onsets)))
+            lines += ["  %s  %s (+%d)" % (events.stamp(t), what, n) for t, what, n in h.onsets[-10:]]
+        self.longterm_counts.setText("\n".join(lines) if lines else "No error counter grew.")
+        self.longterm_counts.show()
+        self.longterm.set_tone("red" if bad or h.counters or h.onsets else None)
 
     def show_meaning(self, log, names, path):
         """What the log means on this computer: judged again when the log or the
@@ -5449,6 +5535,68 @@ def room_for_two(period, offsets, margin, input_margin):
     return period - margin - input_margin - (max(offsets) - min(offsets))
 
 
+def dc_slaves(cfg):
+    """(reference clock's name or None, [names of the other DC slaves]) as the
+    component chooses (ecat_ref_clock_choice): the DC slaves of the file are
+    those with dc: and an AssignActivate that is not 0; the reference clock is
+    the one at the lowest position."""
+    found = []
+    for s in (cfg or {}).get("slaves") or []:
+        dc = s.get("dc") or {}
+        try:
+            act = int(str(dc.get("assign-activate", 0)), 0)
+        except ValueError:
+            act = 0
+        if dc and act and not s.get("unused") and s.get("position") is not None and s.get("name"):
+            found.append((s["position"], s["name"]))
+    found.sort()
+    return (found[0][1] if found else None), [n for _, n in found[1:]]
+
+
+def monitor_rows(cfg, pins, seen):
+    """[(ok, text)] from the component's long-term monitoring pins while
+    LinuxCNC or the test runs. pins: {name: value text} of all pins; seen:
+    {slave: largest |difference| seen since watching began}, updated here."""
+    rows = []
+    ref, others = dc_slaves(cfg)
+    diffs = []
+    worst = 0
+    for name in others:
+        try:
+            d = int(pins.get(name + ".dc-diff-ns"), 0)
+            m = int(pins.get(name + ".dc-diff-max-ns"), 0)
+        except (TypeError, ValueError):
+            continue
+        seen[name] = max(seen.get(name, 0), abs(d))
+        worst = max(worst, m)
+        diffs.append("%s %+d ns" % (name, d))
+    if diffs:
+        rows.append((worst <= events.MON_DC_LIMIT_NS,
+                     "DC clocks against the reference clock (%s): %s; at most %d ns since LinuxCNC "
+                     "loaded, %d ns since you began looking" % (ref, ", ".join(diffs), worst,
+                                                               max(seen.values() or [0]))))
+    errors = []
+    for s in (cfg or {}).get("slaves") or []:
+        try:
+            n = int(pins.get("%s.error-count" % s.get("name")), 0)
+        except (TypeError, ValueError):
+            continue
+        if n:
+            errors.append("%s %d" % (s["name"], n))
+    if errors:
+        rows.append((False, "Error counters grew since LinuxCNC loaded: %s (Slave status: the event "
+                     "log says which, and when)" % ", ".join(errors)))
+    elif any(k.endswith(".error-count") for k in pins):
+        rows.append((True, "No error counter of a slave grew since LinuxCNC loaded"))
+    try:
+        bad = int(pins.get("ecat.0.wc-bad-cycles"), 0)
+    except (TypeError, ValueError):
+        bad = None
+    if bad:
+        rows.append((False, "%d cycles in OP with the working counter not complete: frames lost or late" % bad))
+    return rows
+
+
 def sync_rows(cfg, get, offsets, period, pll=(), irq=None):
     """[(ok, text)] about the bus's synchronisation while the test runs.
     get(name): an ecat.0 pin's value as text, or None; offsets: send-offset
@@ -5548,7 +5696,7 @@ class TestPage(QWidget):
         except (TypeError, ValueError):
             pass
         iface = ((self.win.session.cfg or {}).get("master") or {}).get("interface")
-        rows = sync_rows(self.win.session.cfg, get, self.offsets, period, self.pll, irq_row(iface))
+        rows = sync_rows(self.win.session.cfg, get, self.offsets, period, self.pll, irq_row(iface)) + self.monitor
         for (mark, text), row in zip(self.sync_rows, rows + [None] * len(self.sync_rows)):
             mark.setVisible(row is not None)
             text.setVisible(row is not None)
@@ -5699,7 +5847,9 @@ class TestPage(QWidget):
                                                  "cycle and when the frame is sent; from the "
                                                  "component's ecat.0 pins.")
         self.sync_rows = []
-        for _ in range(12):
+        self.dc_seen = {}            # slave -> largest |DC difference| seen since watching began
+        self.monitor = []            # monitor_rows of the last reading
+        for _ in range(15):
             r = QHBoxLayout()
             mark = pill()
             mark.setFixedWidth(26)
@@ -9044,6 +9194,8 @@ class MainWindow(QMainWindow):
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
+            self.test_page.dc_seen = {}
+            self.test_page.monitor = []
             self.test_page.pll = []
             if watched:
                 self.set_messages([(GREY, "", ["Stopped watching; LinuxCNC was not touched."])])
@@ -9171,6 +9323,8 @@ class MainWindow(QMainWindow):
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
+            self.test_page.dc_seen = {}
+            self.test_page.monitor = []
             self.test_page.pll = []
             if run.watching:
                 self.set_messages([(AMBER, "", ["LinuxCNC has stopped: the watching ended."])])
@@ -9200,6 +9354,14 @@ class MainWindow(QMainWindow):
             "" if get("link-up") == "TRUE" else ", link DOWN"),
             ("blue" if all_op else "red") if run.watching else "amber" if all_op else "red")
         if self.tabs.currentWidget() is self.test_page:
+            # the long-term monitoring's pins of every slave: all pins, every 2 s
+            self.monitor_polls = getattr(self, "monitor_polls", 0) + 1
+            if self.monitor_polls % 10 == 1:
+                try:
+                    every = {n: p.value for n, p in run.pins("").items()}
+                except testmode.TestError:
+                    every = {}
+                self.test_page.monitor = monitor_rows(self.session.cfg, every, self.test_page.dc_seen)
             self.test_page.show_sync(lambda n: m["ecat.0." + n].value if "ecat.0." + n in m
                                      else None, run.period)
             self.test_page.update_values()
@@ -9391,6 +9553,8 @@ class MainWindow(QMainWindow):
             self.test = None
             self.test_page.sync_card.hide()
             self.test_page.offsets = []
+            self.test_page.dc_seen = {}
+            self.test_page.monitor = []
             self.test_page.pll = []
         event.accept()
 

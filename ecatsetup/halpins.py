@@ -19,7 +19,7 @@ MASTER = [
     ("pll-err", "sint", "out"), ("pll-out", "sint", "out"), ("pll-reset-count", "uint", "out"),
     ("dc-phased", "bool", "out"), ("send-offset", "sint", "out"), ("shift-time", "uint", "out"),
     ("turnaround-cycles", "sint", "out"), ("guard-state", "sint", "out"),
-    ("guard-cycles", "uint", "out"),
+    ("guard-cycles", "uint", "out"), ("wc-bad-cycles", "uint", "out"),
     ("pll-step", "uint", "rw"), ("pll-max-err", "uint", "rw"), ("dc-phase-max-err", "uint", "rw"),
     ("send-offset-max", "sint", "rw"), ("auto-shift-margin", "uint", "rw"),
     ("auto-shift-input-margin", "uint", "rw"),
@@ -29,6 +29,7 @@ SLAVE = [
     ("slave-state-init", "bool", "out"), ("slave-state-preop", "bool", "out"),
     ("slave-state-safeop", "bool", "out"), ("slave-state-op", "bool", "out"),
     ("slave-dc-sync-failed", "bool", "out"),
+    ("dc-diff-ns", "sint", "out"), ("dc-diff-max-ns", "uint", "out"), ("error-count", "uint", "out"),
 ]
 CIA402 = [
     ("enable", "bool", "in"), ("pos-cmd", "real", "in"), ("velocity-cmd", "real", "in"),

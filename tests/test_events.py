@@ -220,6 +220,35 @@ class TestMasterMessages(unittest.TestCase):
         self.assertEqual(events.text_line(T(0, 0, 4, "EtherCAT 0-1: x", "free master"), 2),
                          "free master: EtherCAT 0-1: x (2 times)")
 
+    def test_long_term_monitoring(self):
+        """The monitoring's events: their text, and the history per slave
+        (sums include their onsets; an onset after the last sum counts)."""
+        PHY1, PDIWD = (2 << 8) | 1, 7 << 8
+        write_log(self.path, [(0, events.START, -1, 4, 0),
+                              (1, events.MON_ONSET, 2, PHY1, 3),
+                              (2, events.MON_DC_OVER, 2, 5000, 1000),
+                              (3, events.MON_SUM, 2, PHY1, 7),
+                              (4, events.MON_DC, 2, 40, 600),
+                              (5, events.MON_DC, 2, 5000, 600),
+                              (6, events.MON_ONSET, 2, PDIWD, 1),
+                              (7, events.MON_WC, -1, 2, 5)])
+        log = events.read(self.path)
+        texts = [events.text(e) for e in log.events]
+        self.assertEqual(texts[1], ("warn", "slave 2: port 1 phy errors (the physical layer) began to grow (+3)"))
+        self.assertEqual(texts[3][1], "slave 2: port 1 phy errors (the physical layer): +7 in 10 min")
+        self.assertEqual(texts[4], ("info", "slave 2: DC clock at most 40 ns off the reference clock in "
+                                            "10 min (600 samples)"))
+        self.assertEqual(texts[5][0], "warn")
+        self.assertEqual(texts[6][0], "error")      # the processor stopped answering
+        self.assertIn("working counter not complete in 7 cycles", texts[7][1])
+        h = events.history(log)[2]
+        self.assertEqual([v for _, v in h.dc], [40, 5000])
+        self.assertEqual([v for _, v in h.dc_over], [5000])
+        self.assertEqual(h.counters, {"port 1 phy errors (the physical layer)": 7,
+                                      "PDI watchdog expired: the slave's processor stopped answering (0x0443)": 1})
+        self.assertEqual([(w[:6], n) for _, w, n in h.onsets], [("port 1", 3), ("PDI wa", 1)])
+        self.assertNotIn(-1, events.history(log))
+
     def test_version_1_has_none(self):
         write_log(self.path, [(0, events.START, -1, 4, 0)], version=1)
         log = events.read(self.path)

@@ -98,6 +98,7 @@ static const lcec_pindesc_t master_pins[] = {
     {HAL_SINT, HAL_OUT, offsetof(lcec_master_data_t, guard_state), "%s.guard-state"},
     {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, guard_cycles), "%s.guard-cycles"},
 #endif
+    {HAL_UINT, HAL_OUT, offsetof(lcec_master_data_t, wc_bad_cycles), "%s.wc-bad-cycles"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -123,6 +124,9 @@ static const lcec_pindesc_t slave_pins[] = {
     {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, state_safeop), "%s.slave-state-safeop"},
     {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, state_op), "%s.slave-state-op"},
     {HAL_BOOL, HAL_OUT, offsetof(lcec_slave_state_t, dc_sync_failed), "%s.slave-dc-sync-failed"},
+    {HAL_SINT, HAL_OUT, offsetof(lcec_slave_state_t, dc_diff), "%s.dc-diff-ns"},
+    {HAL_UINT, HAL_OUT, offsetof(lcec_slave_state_t, dc_diff_max), "%s.dc-diff-max-ns"},
+    {HAL_UINT, HAL_OUT, offsetof(lcec_slave_state_t, error_count), "%s.error-count"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -1033,6 +1037,7 @@ static void ecat_select_ref_clock(lcec_master_t *master) {
   int *position, *has_dc;
   int n = 0, i;
 
+  master->ref_clock_index = -1;
   for (slave = master->first_slave; slave != NULL; slave = slave->next) n++;
   if (n == 0) return;
   position = LCEC_ALLOCATE_ARRAY(int, n);
@@ -1051,6 +1056,7 @@ static void ecat_select_ref_clock(lcec_master_t *master) {
   lcec_free(has_dc);
   if (i < 0) return;
   for (slave = master->first_slave; i > 0; slave = slave->next) i--;
+  master->ref_clock_index = slave->index;
   if (ecrt_master_select_reference_clock(master->master, slave->config) != 0) {
     rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "master %s: could not make slave %s (position %d) the DC reference clock\n",
         master->name, slave->name, slave->index);
@@ -1058,6 +1064,129 @@ static void ecat_select_ref_clock(lcec_master_t *master) {
   }
   rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "master %s: DC reference clock is slave %s (position %d), the first with dc:\n",
       master->name, slave->name, slave->index);
+}
+
+/// Long-term monitoring (ecat_monitor_core.h): the requests it reads with,
+/// made before activation. Each slave gets one register request; a DC slave
+/// (one with dc:) also SDO requests for 0x1C32:0B and :0C, which ETG.1020
+/// gives slaves that synchronise (one that has not got them aborts once, and
+/// is not asked again).
+static void ecat_monitor_setup(lcec_master_t *master) {
+  lcec_slave_t *slave;
+
+  for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+    int dc = slave->dc_conf != NULL && slave->dc_conf->assignActivate != 0;
+    slave->mon_reg = ecrt_slave_config_create_reg_request(slave->config, 0x14);
+    if (dc) {
+      slave->mon_sdo[0] = ecrt_slave_config_create_sdo_request(slave->config, 0x1C32, 0x0B, 2);
+      slave->mon_sdo[1] = ecrt_slave_config_create_sdo_request(slave->config, 0x1C32, 0x0C, 2);
+      if (slave->mon_sdo[0] != NULL) ecrt_sdo_request_timeout(slave->mon_sdo[0], 1000);
+      if (slave->mon_sdo[1] != NULL) ecrt_sdo_request_timeout(slave->mon_sdo[1], 1000);
+    }
+  }
+}
+
+/// One step of a slave's monitoring round: start the next read, or take the
+/// value of the one that finished. A round reads the error counters, the
+/// watchdog counters and (a DC slave that is not the reference clock) the
+/// system time difference every second, and every tenth round 0x1C32:0B/:0C.
+/// Called every cycle; a request still busy is left until the next.
+static void ecat_monitor_slave(lcec_master_t *master, lcec_slave_t *slave, uint64_t now) {
+  ec_reg_request_t *reg = slave->mon_reg;
+  ec_request_state_t st;
+  int k;
+
+  if (reg == NULL) return;
+  for (;;) {
+    switch (slave->mon_step) {
+      case 0:  // idle until the next round
+        if (now - slave->mon_round_ns < 1000000000ull || !slave->state.online) return;
+        slave->mon_round_ns = now;
+        slave->mon_rounds++;
+        if (ecrt_reg_request_read(reg, 0x0300, 0x14) != 0) return;
+        slave->mon_step = 1;
+        return;
+      case 1:  // the error counters
+        st = ecrt_reg_request_state(reg);
+        if (st == EC_REQUEST_BUSY) return;
+        if (st == EC_REQUEST_SUCCESS) ecat_mon_errors(master->events, &slave->mon, now, ecrt_reg_request_data(reg));
+        ecrt_reg_request_read(reg, 0x0440, 4);
+        slave->mon_step = 2;
+        return;
+      case 2:  // the watchdog counters
+        st = ecrt_reg_request_state(reg);
+        if (st == EC_REQUEST_BUSY) return;
+        if (st == EC_REQUEST_SUCCESS)
+          ecat_mon_watchdogs(master->events, &slave->mon, now, ecrt_reg_request_data(reg), slave->state.operational);
+        if (slave->mon.dc) {
+          ecrt_reg_request_read(reg, 0x092C, 4);
+          slave->mon_step = 3;
+          return;
+        }
+        slave->mon_step = 4;
+        continue;
+      case 3:  // the system time difference
+        st = ecrt_reg_request_state(reg);
+        if (st == EC_REQUEST_BUSY) return;
+        if (st == EC_REQUEST_SUCCESS) ecat_mon_dc(master->events, &slave->mon, now, EC_READ_U32(ecrt_reg_request_data(reg)));
+        slave->mon_step = 4;
+        continue;
+      case 4:  // every tenth round: the SDOs
+      case 5:
+        k = slave->mon_step - 4;
+        if (slave->mon_rounds % 10 != 1 || slave->mon_sdo[k] == NULL) {
+          slave->mon_step = k == 0 ? 5 : 8;
+          continue;
+        }
+        ecrt_sdo_request_read(slave->mon_sdo[k]);
+        slave->mon_step = 6 + k;
+        return;
+      case 6:  // 0x1C32:0B, 0x1C32:0C
+      case 7:
+        k = slave->mon_step - 6;
+        st = ecrt_sdo_request_state(slave->mon_sdo[k]);
+        if (st == EC_REQUEST_BUSY) return;
+        if (st == EC_REQUEST_SUCCESS && ecrt_sdo_request_data_size(slave->mon_sdo[k]) >= 2) {
+          ecat_mon_sync(master->events, &slave->mon, now, k == 0 ? ECAT_MON_SM_MISSED : ECAT_MON_TOO_SMALL,
+              EC_READ_U16(ecrt_sdo_request_data(slave->mon_sdo[k])));
+        } else if (st == EC_REQUEST_ERROR) {
+          slave->mon_sdo[k] = NULL;  // the slave has not got it: not asked again
+        }
+        slave->mon_step = k == 0 ? 5 : 8;
+        continue;
+      default:  // the round is done
+        ecat_mon_slave_period(master->events, &slave->mon, now);
+        hal_set_sint(slave->hal_state_data->dc_diff, slave->mon.dc_diff);
+        hal_set_uint(slave->hal_state_data->dc_diff_max, slave->mon.dc_max_all);
+        hal_set_uint(slave->hal_state_data->error_count, slave->mon.total);
+        slave->mon_step = 0;
+        return;
+    }
+  }
+}
+
+/// Long-term monitoring, every cycle after activation.
+static void ecat_monitor(lcec_master_t *master) {
+  lcec_slave_t *slave;
+  uint64_t now = ecat_events_now();
+
+  if (!master->mon_started) {
+    master->mon_started = 1;
+    ecat_mon_master_init(&master->mon, now);
+    for (slave = master->first_slave; slave != NULL; slave = slave->next) {
+      int dc = slave->dc_conf != NULL && slave->dc_conf->assignActivate != 0 && slave->index != master->ref_clock_index;
+      ecat_mon_slave_init(&slave->mon, slave->index, dc, now);
+    }
+  }
+  // the cycles whose frame came back incomplete, while every slave of the file is in OP
+  if (master->all_op) {
+    ecat_mon_wc(&master->mon, master->domain_state.wc_state);
+    hal_set_uint(master->hal_data->wc_bad_cycles, master->mon.wc_bad_all);
+  }
+  ecat_mon_master_period(master->events, &master->mon, now);
+  rtapi_mutex_get(&master->mutex);
+  for (slave = master->first_slave; slave != NULL; slave = slave->next) ecat_monitor_slave(master, slave, now);
+  rtapi_mutex_give(&master->mutex);
 }
 
 static void ecat_config_dc(lcec_master_t *master) {
@@ -2314,6 +2443,7 @@ void lcec_read_master(void *arg, long period) {
     ecat_config_dc(master);
     ecat_select_ref_clock(master);
     ecat_config_eoe(master);
+    ecat_monitor_setup(master);
   }
 
   // Delayed activation: activate master on first read call
@@ -2415,6 +2545,8 @@ void lcec_read_master(void *arg, long period) {
     master->dc_sync_failed = dc_sync_failed;
     hal_set_bool(master->hal_data->dc_sync_failed, dc_sync_failed);
   }
+
+  ecat_monitor(master);
 }
 
 #ifdef RTAPI_TASK_PLL_SUPPORT

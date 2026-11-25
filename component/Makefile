@@ -41,7 +41,7 @@ endif
 CFLAGS_ECAT := $(EXTRA_CFLAGS) -Wall -I. -I$(USPACE_BUILD)/include -MMD -MP
 
 objs := lcec_main.o lcec_ethercat.o lcec_pins.o lcec_malloc.o lcec_lookup.o \
-	lcec_modparam.o lcec_devicelist.o lcec_autoshift.o ecat_config.o ecat_startcheck.o ecat_events.o devices/lcec_generic.o devices/ecat_cia402.o devices/ecat_encoder.o \
+	lcec_modparam.o lcec_devicelist.o lcec_autoshift.o ecat_config.o ecat_startcheck.o ecat_events.o ecat_monitor_core.o devices/lcec_generic.o devices/ecat_cia402.o devices/ecat_encoder.o \
 	devices/ecat_serial.o devices/ecat_serial_core.o devices/ecat_serial_bridge.o
 
 probe_objs := ecat_rtprobe.o ecat_rtprobe_core.o
@@ -84,7 +84,7 @@ ecat_rtprobe.so: $(probe_objs)
 
 # Unit tests: a device's code with a fake of HAL, the master and lcec
 # (tests/fake.c), so that its read and write functions run without a bus.
-tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial tests/test_serial_bridge tests/test_hal29 tests/test_rtprobe
+tests := tests/test_generic tests/test_cia402 tests/test_encoder tests/test_config tests/test_autoshift tests/test_startcheck tests/test_int64 tests/test_events tests/test_bits tests/test_captured tests/test_serial tests/test_serial_bridge tests/test_hal29 tests/test_rtprobe tests/test_monitor
 tests/test_generic: tests/test_generic.o tests/fake.o devices/lcec_generic.o
 tests/test_cia402: tests/test_cia402.o tests/fake.o tests/fake_generic.o devices/ecat_cia402.o
 tests/test_encoder: tests/test_encoder.o tests/fake.o tests/fake_generic.o devices/ecat_encoder.o
@@ -100,6 +100,7 @@ tests/test_serial_bridge: TEST_LIBS = -lmodbus -lpthread
 tests/test_hal29: tests/test_hal29.o tests/fake.o
 tests/test_rtprobe: tests/test_rtprobe.o tests/fake.o ecat_rtprobe_core.o
 tests/test_events: tests/test_events.o tests/fake.o tests/fake_generic.o ecat_events.o
+tests/test_monitor: tests/test_monitor.o tests/fake.o tests/fake_generic.o ecat_events.o ecat_monitor_core.o
 -include tests/*.d
 
 $(tests):

@@ -31,6 +31,7 @@ extern "C" {
 #include "lcec_conf.h"
 #include "lcec_autoshift.h"
 #include "ecat_events.h"
+#include "ecat_monitor_core.h"
 
 /// HAL component name, the same as the module file (ecat.so) and the prefix of
 /// the component's own pins and functions (ecat.read-all, ecat.0.all-op).
@@ -213,6 +214,7 @@ typedef struct lcec_master_data {
   hal_uint_t auto_shift_margin;     ///< globalShiftTime="auto": ns kept between a frame and SYNC0.
   hal_uint_t auto_shift_input_margin; ///< globalShiftTime="auto": ns from SYNC0 until the slaves' inputs are ready.
 #endif
+  hal_uint_t wc_bad_cycles;         ///< Long-term monitoring: cycles in OP whose working counter was not complete.
 } lcec_master_data_t;
 
 typedef struct lcec_slave_state {
@@ -223,6 +225,9 @@ typedef struct lcec_slave_state {
   hal_bool_t state_safeop;  ///< Is the device in state `SAFEOP`?  Equivalant to the `.slave-state-safeop` HAL pin.
   hal_bool_t state_op;      ///< Is the device in state `OP`?  Equivalant to the `.slave-state-op` HAL pin.
   hal_bool_t dc_sync_failed;  ///< The slave's DC sync check timed out; SYNC0 runs on an unsynchronized clock.
+  hal_sint_t dc_diff;       ///< Long-term monitoring: the last system time difference (0x092C), ns.
+  hal_uint_t dc_diff_max;   ///< ... its largest absolute value since loading, ns.
+  hal_uint_t error_count;   ///< ... growth of the monitored error counters since loading.
 } lcec_slave_state_t;
 
 typedef struct lcec_master {
@@ -287,6 +292,9 @@ typedef struct lcec_master {
 #endif
   ecat_events_t *events;            ///< The flight recorder, or NULL (ecat_events.h).
   ecat_events_master_t ev_last;     ///< What the recorder last saw of the master.
+  ecat_mon_master_t mon;            ///< Long-term monitoring (ecat_monitor_core.h).
+  int mon_started;                  ///< mon set up after activation
+  int ref_clock_index;              ///< Position of the DC reference clock chosen, -1: none
   ecat_events_limit_t ev_late;      ///< Rate limit of ECAT_EV_LATE.
   int ev_guard_last;                ///< The stop guard's state the recorder last saw.
 } lcec_master_t;
@@ -380,6 +388,12 @@ typedef struct lcec_slave {
   void *encoder_data;                        ///< Data of the slave's encoder channels (ecat), if any.
   void *serial_data;                         ///< Data of the slave's serial channels (ecat), if any.
   ecat_events_slave_t ev_last;               ///< What the flight recorder last saw of the slave.
+  ecat_mon_slave_t mon;                      ///< Long-term monitoring (ecat_monitor_core.h).
+  ec_reg_request_t *mon_reg;                 ///< ... its register reads, or NULL
+  ec_sdo_request_t *mon_sdo[2];              ///< ... 0x1C32:0B and :0C, or NULL (not asked again after an abort)
+  int mon_step;                              ///< ... where the round is
+  uint64_t mon_round_ns;                     ///< ... when the last round started
+  unsigned mon_rounds;
 } lcec_slave_t;
 
 /// Record an event of a slave in its master's flight recorder (ecat_events.h).
