@@ -765,6 +765,62 @@ static void test_homing_timeout(void) {
   CHECK_EQ(PIN_S32("x.fault-reason"), 9);
 }
 
+// home-hold (a homing module): a failed homing only stops the homing; the
+// drive goes back to its mode, enabled, and home-error tells the module
+static void module_failed(void) {
+  int i;
+  for (i = 0; i < 5; i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 0);
+  CHECK_EQ(PIN_BIT("x.home-error"), 1);
+  CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 0);
+  CHECK(!hm.active);
+  CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
+  CHECK_EQ(hm_cycle() & 0x1F, 0x0F);  // enabled, bit 4 low
+}
+
+static void test_homing_module_failures(void) {
+  int i;
+  // the drive's homing error
+  homing_drive();
+  PIN_BIT("x.home-hold") = 1;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 5; i++) hm_cycle();
+  hm.error = 1;
+  CHECK_EQ(hm_cycle() & 0x10, 0);
+  hm.error = 0;
+  module_failed();
+  // home-timeout-ms
+  homing_drive();
+  hm.cycles = 1000000;
+  PIN_BIT("x.home-hold") = 1;
+  PIN_U32("x.home-timeout-ms") = 50;
+  hm_enable();
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 60; i++) hm_cycle();
+  module_failed();
+  // home-max-travel
+  homing_drive();
+  hm.cycles = 1000;
+  PIN_BIT("x.home-hold") = 1;
+  PIN_FLOAT("x.pos-scale") = 10;
+  hm_enable();
+  PIN_FLOAT("x.home-max-travel") = 5;
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 16; i++) hm_cycle_moving();
+  module_failed();
+  // the module drops home after it: nothing more; a new request homes again
+  PIN_BIT("x.home") = 0;
+  hm_cycle();
+  PIN_FLOAT("x.home-max-travel") = 0;
+  PIN_BIT("x.home") = 1;
+  for (i = 0; i < 1100 && !PIN_BIT("x.stat-homed"); i++) hm_cycle();
+  CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
+  CHECK_EQ(PIN_BIT("x.home-error"), 0);
+}
+
 static void test_homing_abandoned_by_motion(void) {
   int i;
   homing_drive();
@@ -2642,7 +2698,7 @@ RUN_TESTS("cia402", test_ff_pins_only_with_the_objects, test_ff_velocity, test_f
     test_command_not_a_number, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
     test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_travel_and_actual_position,
     test_homing_travel_limit, test_homing_travel_both_ways, test_homing_error, test_homing_timeout,
-    test_homing_abandoned_by_motion, test_homing_module_request, test_homing_module_abort, test_homing_pulse_without_hold, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
+    test_homing_abandoned_by_motion, test_homing_module_request, test_homing_module_failures, test_homing_module_abort, test_homing_pulse_without_hold, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,
     test_homing_not_while_disabled, test_homing_with_stale_result_bits, test_homing_enable_again,
     test_homing_without_enable_again, test_homing_enable_again_timeout, test_homing_speed_tells_a_set_position, test_pv_pins, test_pv_needs_target_velocity,
     test_pv_runs_at_the_command, test_pv_halts_before_switching_off, test_pv_enable_again_while_halting,

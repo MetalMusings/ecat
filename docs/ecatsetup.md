@@ -2916,7 +2916,10 @@ one).
 
 A homing error (status word bit 13), a timeout or more than
 `home-max-travel` shuts the drive down,
-like the faults above, and sets `home-error`. If motion abandons homing
+like the faults above, and sets `home-error` (motion, waiting on
+`index-enable`, learns of it only by the fault). With `home-hold` (a
+homing module) it only stops the homing instead: the drive goes back to
+its mode, enabled, and `home-error` is set. If motion abandons homing
 (clears `index-enable`), or `enable` goes false, the profile stops the
 drive's homing and returns to the configured mode without a fault.
 
@@ -3058,12 +3061,12 @@ them): `HOME_SEARCH_VEL = 0`, `HOME_LATCH_VEL = 0`, `HOME_USE_INDEX = NO`,
 and `HOME_FINAL_VEL` for the move to `HOME`. The module has its own time
 limit, `joint.N.cia-timeout-ms` (30 s by default); the card's HAL lines
 set it with `home-timeout-ms`. `home-max-travel` guards the drive as
-before. A homing error, `home-timeout-ms` or `home-max-travel` shuts the
-drive down as before (the profile's rule): LinuxCNC sees the amplifier
-fault and the module ends its homing; switch the machine on again before
-the next try. When the module gives up by itself (its own time limit, or
-homing aborted in LinuxCNC), it drops `home` and the drive stops homing
-and goes back to its mode without a fault.
+before. A homing error, `home-timeout-ms` or `home-max-travel` only
+stops the homing here (with `home-hold`): the drive goes back to its
+mode, still enabled, `home-error` tells the module, and the module ends
+LinuxCNC's homing; the joint can be jogged or homed again at once. When
+the module gives up by itself (its own time limit, or homing aborted in
+LinuxCNC), it drops `home` and the drive stops homing the same way.
 
 Not tried on a machine yet.
 

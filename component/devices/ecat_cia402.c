@@ -810,6 +810,22 @@ static int homing_travel(cia402_t *d, long period) {
   return max > 0 && hal_get_real(d->home_travel) > max;
 }
 
+/// Homing failed (a homing error, home-timeout-ms, home-max-travel).
+/// Started by a homing module (home with home-hold), only the homing is
+/// stopped: home-error tells the module, which ends LinuxCNC's homing, and
+/// the drive goes back to its mode, enabled. Otherwise the drive is shut
+/// down: motion, waiting on index-enable, learns of it only by the fault.
+static void homing_failed(cia402_t *d, int why) {
+  hal_set_bool(d->home_error, 1);
+  if (!d->hs_index && opt_bool(d->home_hold)) {
+    d->hs = HS_BACK;
+    d->hs_ns = 0;
+    d->hs_ok = 0;
+  } else {
+    block(d, why);
+  }
+}
+
 /// Homing has ended, in the mode it began in: index-enable is cleared and
 /// the drive follows its command again, from its new position. stat-homed
 /// comes now, not at "homing attained": a homing module (HOMEMOD) starts
@@ -846,8 +862,7 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
   }
   d->hs_ns += period;
   if ((d->hs == HS_TO_HM || d->hs == HS_HOMING || d->hs == HS_BACK) && homing_travel(d, period)) {
-    hal_set_bool(d->home_error, 1);
-    block(d, WHY_HOMING_TRAVEL);
+    homing_failed(d, WHY_HOMING_TRAVEL);
   }
   // the starter gave up: motion cleared index-enable, or with home-hold
   // a homing module dropped home (it aborted)
@@ -903,13 +918,13 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
         d->hs_ns = 0;
         bits = 0;
       } else if (sw & SW_HOMING_ERROR) {
-        hal_set_bool(d->home_error, 1);
-        block(d, WHY_HOMING_ERROR);
+        homing_failed(d, WHY_HOMING_ERROR);
+        bits = 0;
       } else if ((sw & (SW_HOMING_ATTAINED | SW_TARGET_REACHED)) != (SW_HOMING_ATTAINED | SW_TARGET_REACHED)) {
         d->hs_seen = 1;
         if (opt_uint(d->home_timeout_ms) != 0 && d->hs_ns > (long long)opt_uint(d->home_timeout_ms) * 1000000LL) {
-          hal_set_bool(d->home_error, 1);
-          block(d, WHY_HOMING_TIMEOUT);
+          homing_failed(d, WHY_HOMING_TIMEOUT);
+          bits = 0;
         }
       } else if (d->hs_seen || d->hs_ns >= HOMING_SETTLE_NS) {
         // attained and reached: a drive that keeps these bits from an
