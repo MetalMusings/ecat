@@ -208,6 +208,7 @@ enum {
 };
 
 #define MODE_CHANGE_NS 1000000000LL  // a mode change must be done within this
+#define AGAIN_SETTLE_NS 100000000LL  // home-enable-again: time in "Ready to switch on" before up again
 #define HOMING_SETTLE_NS 20000000LL  // see the homing result no earlier, unless homing was seen
 #define SW_TARGET_REACHED 0x0400
 #define SW_HOMING_ATTAINED 0x1000
@@ -334,7 +335,8 @@ typedef struct {
   int hs_cycles;        // cycles in HS_STOP
   int32_t hs_last;      // the drive's position last cycle, counts (home-travel)
   int enable_again;     // cia402.home-enable-again
-  int again_down;       // HS_AGAIN: still going down to "Switched on"
+  int again_down;       // HS_AGAIN: still going down to "Ready to switch on", or waiting there
+  int again_ready;      // HS_AGAIN: "Ready to switch on" reached, settling
   double home_speed;    // cia402.home-speed, counts/s; 0: not known
   int index_old, home_old;
   long long stop_ns;    // PV, PP: time halting before switching off
@@ -853,7 +855,8 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
 
   d->index_old = index;
   d->home_old = home;
-  if (!run || (d->state != ST_OPERATION_ENABLED && !(d->hs == HS_AGAIN && d->state == ST_SWITCHED_ON))) {
+  if (!run || (d->state != ST_OPERATION_ENABLED &&
+               !(d->hs == HS_AGAIN && (d->state == ST_SWITCHED_ON || d->state == ST_READY_TO_SWITCH_ON)))) {
     // disabled or shut down: homing is abandoned, the mode goes back
     d->hs = HS_IDLE;
     d->hs_ok = 0;
@@ -939,10 +942,12 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       if (hal_get_sint(d->opmode_display) == d->active) {
         if (d->enable_again) {
           // the drive is to be enabled again before it follows: down to
-          // "Switched on" (axis_write's control word), then up
+          // "Ready to switch on" (axis_write's control word), a pause with
+          // the target at the actual position, then up
           d->hs = HS_AGAIN;
           d->hs_ns = 0;
           d->again_down = 1;
+          d->again_ready = 0;
         } else {
           homing_done(d);
         }
@@ -951,8 +956,20 @@ static uint16_t homing(cia402_t *d, int run, uint16_t sw, long period) {
       }
       break;
     case HS_AGAIN:
-      if (d->again_down && d->state == ST_SWITCHED_ON) {
-        d->again_down = 0;  // the control word enables it again
+      // An ECT60 taken only to "Switched on" kept an offset between its
+      // target and where it counts from (27 counts after torque homing
+      // against a springy stop, 2026-11-25); machine off ("Ready to switch
+      // on") clears it. AGAIN_SETTLE_NS there lets a springy stop settle
+      // while the target follows the actual position.
+      if (d->again_down && d->state == ST_READY_TO_SWITCH_ON) {
+        if (!d->again_ready) {
+          d->again_ready = 1;
+          d->hs_ns = 0;
+        } else if (d->hs_ns >= AGAIN_SETTLE_NS) {
+          d->again_down = 0;  // the control word enables it again
+          d->again_ready = 0;
+          d->hs_ns = 0;
+        }
       } else if (!d->again_down && d->state == ST_OPERATION_ENABLED) {
         homing_done(d);
       } else if (d->hs_ns > MODE_CHANGE_NS) {
@@ -1229,14 +1246,16 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
       cw = CW_SHUTDOWN;
       break;
     case ST_READY_TO_SWITCH_ON:
-      cw = run ? CW_SWITCH_ON : CW_SHUTDOWN;
+      // home-enable-again: stays there while it settles
+      cw = (run && !(d->hs == HS_AGAIN && d->again_down)) ? CW_SWITCH_ON : CW_SHUTDOWN;
       break;
     case ST_SWITCHED_ON:
-      cw = (run && mode_ok) ? CW_ENABLE_OPERATION : run ? CW_SWITCH_ON : CW_SHUTDOWN;
+      cw = (run && d->hs == HS_AGAIN && d->again_down) ? CW_SHUTDOWN
+           : (run && mode_ok) ? CW_ENABLE_OPERATION : run ? CW_SWITCH_ON : CW_SHUTDOWN;
       break;
     case ST_OPERATION_ENABLED:
-      // home-enable-again: "Disable operation", down to "Switched on"
-      cw = (run && d->hs == HS_AGAIN && d->again_down) ? CW_SWITCH_ON
+      // home-enable-again: "Shutdown", down to "Ready to switch on"
+      cw = (run && d->hs == HS_AGAIN && d->again_down) ? CW_SHUTDOWN
            : run ? (CW_ENABLE_OPERATION | hbits | pbits | mbits) : halt ? (CW_ENABLE_OPERATION | CW_HALT) : CW_SHUTDOWN;
       break;
     default:

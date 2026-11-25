@@ -574,6 +574,8 @@ static unsigned hm_cycle(void) {
   hm.cw_old = cw;
   if (hm.states) {
     if (base == SW_ENABLED && (cw & 0x0F) == 0x07) hm.sw = SW_SWITCHED_ON;
+    else if ((base == SW_ENABLED || base == SW_SWITCHED_ON) && (cw & 0x0F) == 0x06) hm.sw = SW_READY;
+    else if (base == SW_READY && (cw & 0x0F) == 0x07) hm.sw = SW_SWITCHED_ON;
     else if (base == SW_SWITCHED_ON && (cw & 0x0F) == 0x0F) hm.sw = SW_ENABLED;
   }
   return cw;
@@ -967,11 +969,15 @@ static void test_homing_not_while_disabled(void) {
   CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
 }
 
-// home-enable-again: after homing the drive goes down to "Switched on" and
-// is enabled again before index-enable is cleared and it follows pos-cmd
-// (an ECT60 ignores its target after torque homing until enabled again).
+// home-enable-again: after homing the drive goes down to "Ready to switch
+// on", waits there AGAIN_SETTLE_NS with its target at its actual position
+// (a springy stop may move it), and is enabled again before index-enable is
+// cleared and it follows pos-cmd (an ECT60 ignores its target after torque
+// homing until enabled again, and keeps an offset if taken only to
+// "Switched on").
 static void test_homing_enable_again(void) {
-  int i, down = 0, up = 0;
+  int i, ready = 0, up = 0;
+  unsigned before;
   homing_drive_with(1, 0);
   hm.states = 1;
   hm.home = 0;
@@ -980,27 +986,32 @@ static void test_homing_enable_again(void) {
   PIN_FLOAT("x.pos-cmd") = 123.45;
   hm_enable();
   PIN_BIT("x.index-enable") = 1;
-  for (i = 0; i < 80 && PIN_BIT("x.index-enable"); i++) {
+  for (i = 0; i < 400 && PIN_BIT("x.index-enable"); i++) {
     unsigned cw;
     PIN_FLOAT("x.pos-cmd") += 0.01;
+    if (hm.sw == SW_READY) {
+      // the stop springs back while the drive is off: the target follows
+      fake_set(S, 0x6064, 0, (uint32_t)((int32_t)fake_get(S, 0x6064, 0) + 1));
+    }
+    before = hm.sw;
     cw = hm_cycle();
-    if ((cw & 0x0F) == 0x07) {
-      down++;
+    // from "Operation enabled" straight to "Ready to switch on" (Shutdown)
+    if (before == 0 || before == SW_ENABLED) CHECK((cw & 0x0F) != 0x07);
+    if (hm.sw == SW_READY) {
+      ready++;
+      CHECK_EQ(cw & 0x0F, 0x06);
       CHECK_EQ(PIN_BIT("x.stat-homed"), 0);  // not before it follows
       CHECK_EQ(PIN_BIT("x.index-enable"), 1);  // motion still waits
       CHECK_NEAR(PIN_FLOAT("x.pos-fb"), PIN_FLOAT("x.pos-cmd"), 0);
       CHECK_EQ((int8_t)fake_get(S, 0x6060, 0), 8);
     }
-    if (down && hm.sw == SW_SWITCHED_ON) up = 1;
-    // never a target from motion while not done: the drive's position,
-    // before or after it set it at home
-    if (PIN_BIT("x.index-enable")) {
-      int32_t t = (int32_t)fake_get(S, 0x607A, 0);
-      CHECK(t == 12345 || t == 0);
-    }
+    if (ready && hm.sw == SW_ENABLED) up = 1;
   }
-  CHECK(down >= 1);
+  // about 100 ms (100 cycles) in "Ready to switch on", and a little
+  CHECK(ready >= 100 && ready <= 106);
   CHECK(up);
+  // enabled with the target where the drive stood, after it sprang back
+  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), (int32_t)fake_get(S, 0x6064, 0));
   CHECK_EQ(PIN_BIT("x.index-enable"), 0);
   CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
   CHECK_EQ(hm.sw, SW_ENABLED);
@@ -1008,13 +1019,15 @@ static void test_homing_enable_again(void) {
   CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
   CHECK_EQ(PIN_S32("x.fault-reason"), 0);
   // then it follows motion from its new position
-  PIN_FLOAT("x.pos-cmd") = 0.02;
-  hm_cycle();
-  CHECK_NEAR(PIN_FLOAT("x.pos-fb"), 0, 0);
-  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 2);
-  PIN_FLOAT("x.pos-cmd") = 0.05;
-  hm_cycle();
-  CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), 5);
+  {
+    int32_t at = (int32_t)fake_get(S, 0x6064, 0);
+    PIN_FLOAT("x.pos-cmd") = at / 100.0 + 0.02;
+    hm_cycle();
+    CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), at + 2);
+    PIN_FLOAT("x.pos-cmd") = at / 100.0 + 0.05;
+    hm_cycle();
+    CHECK_EQ((int32_t)fake_get(S, 0x607A, 0), at + 5);
+  }
   CHECK_EQ(fake_get(S, 0x6040, 0) & 0x0F, 0x0F);
 }
 
@@ -1025,12 +1038,15 @@ static void test_homing_without_enable_again(void) {
   hm.states = 1;
   hm_enable();
   PIN_BIT("x.home") = 1;
-  for (i = 0; i < 80; i++) CHECK(((hm_cycle() & 0x0F) != 0x07));
+  for (i = 0; i < 80; i++) {
+    unsigned cw = hm_cycle() & 0x0F;
+    CHECK(cw != 0x07 && cw != 0x06);
+  }
   CHECK_EQ(PIN_BIT("x.stat-homed"), 1);
   CHECK_EQ(PIN_BIT("x.stat-homing"), 0);
 }
 
-// a drive that does not go down to "Switched on" is shut down after 1 s
+// a drive that does not go down to "Ready to switch on" is shut down after 1 s
 static void test_homing_enable_again_timeout(void) {
   int i;
   homing_drive_with(1, 0);  // hm.states 0: it stays "Operation enabled"

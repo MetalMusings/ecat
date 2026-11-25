@@ -2807,8 +2807,12 @@ enabled", and only by a new rising edge. The profile then:
 4. clears bit 4, writes the mode in use, holds the target at the
    actual position, and waits for the drive to report the mode;
 5. with *Enable the drive again after homing* (below), takes the drive
-   down to "Switched on" and enables it again (within 1 s, or it is shut
-   down with `fault-reason` 3), still holding the target;
+   down to "Ready to switch on" (as machine off does), waits 100 ms there
+   with the target at the drive's actual position (a springy stop may
+   push the axis back meanwhile), and enables it again (each step within
+   1 s, or it is shut down with `fault-reason` 3). An ECT60 taken down
+   only to "Switched on" kept an offset of 0.27 mm between its target and
+   where it stood after torque homing against a springy stop;
 6. clears `index-enable` and sets `stat-homed`: only now, when the drive
    follows its command again.
 
