@@ -523,7 +523,8 @@ def fit_table(t, minimum=1):
         h += t.rowHeight(r)
     if t.rowCount() < minimum:
         h += 30 * (minimum - t.rowCount())
-    h += t.horizontalScrollBar().sizeHint().height()
+    if t.horizontalScrollBarPolicy() != Qt.ScrollBarAlwaysOff:
+        h += t.horizontalScrollBar().sizeHint().height()     # room for it, when it may come
     t.setFixedHeight(h)
 
 
@@ -3658,6 +3659,8 @@ class LivePage(QWidget):
                                        "Click one for its pins below.")
         self.overview_table = table(["Slave", "Name", "State", "Drive"], 3)
         self.overview_table.cellClicked.connect(self.row_chosen)
+        # four short columns: no scroll bar, and no room left for one under the last row
+        self.overview_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.overview.add(self.overview_table)
         self.overview.hide()
         lay.insertWidget(lay.indexOf(self.pins_card), self.overview)

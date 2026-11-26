@@ -992,6 +992,9 @@ class TestWindow(WindowBase):
             scroll.assert_called_once()
             live.update_overview(every)
             self.assertEqual(t.currentRow(), 1)
+            # as tall as its header and rows: no empty row under the last
+            self.assertEqual(t.height(), t.horizontalHeader().sizeHint().height() + 4
+                             + sum(t.rowHeight(r) for r in range(t.rowCount())))
         finally:
             w.test = None
 
