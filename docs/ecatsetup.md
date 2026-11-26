@@ -422,7 +422,8 @@ the chosen slave the page shows a series of steps (each ok, warning or
 failed), what the slave says (AL state and status code), the cable and
 link (port error counters), the slave's own processor (whether it runs
 behind the EtherCAT chip, and its synchronisation; see
-[step 3](#step-3-cable-and-connectors)), the slave's own message history (0x10F3), and
+[step 3](#step-3-cable-and-connectors)), the slave's own message history (0x10F3), and for a CiA 402
+drive its state and error code.
 A port counter that has reached 255 is marked: it cannot show whether the fault is
 still there, so the diagnosis says to write the counter (0x0300 for rx and phy
 errors, 0x0310 for lost links) or power the slave off, and run it again.

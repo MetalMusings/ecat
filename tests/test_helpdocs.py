@@ -65,6 +65,16 @@ class TestTheDocuments(unittest.TestCase):
         for key, (f, anchor) in helpdocs.TOPICS.items():
             self.assertIsNotNone(self.docs.find(f, anchor), "%s -> %s#%s" % (key, f, anchor))
 
+    def test_every_card_of_the_window_has_a_topic(self):
+        """Each card's ? leads to its documentation (the rule before a
+        release, 2026-11-26): a new card needs its TOPICS entry."""
+        import re
+        with open(os.path.join(os.path.dirname(helpdocs.__file__), "gui.py")) as f:
+            titles = set(re.findall(r'Card\("([^"]+)"', f.read()))
+        no_help = {"Not examined yet"}      # a placeholder until Examine
+        self.assertTrue(titles)
+        self.assertEqual(sorted(titles - no_help - set(helpdocs.TOPICS)), [])
+
     def test_every_link_between_the_documents_works(self):
         import re
         for i, s in enumerate(self.docs.sections):
