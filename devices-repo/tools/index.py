@@ -25,7 +25,7 @@ QUERY = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     discussions(first: 50, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { number url upvoteCount author { login }
+      nodes { number url upvoteCount createdAt body author { login }
         comments(first: 100) { nodes { author { login } body updatedAt } } } } } }"""
 
 
@@ -77,6 +77,7 @@ def build(threads, root=ROOT):
             files.append({"path": rel, "vendor": "0x" + vendor.upper(), "product": "0x" + product.upper(),
                           "name": raw.get("name"), "discussion": number, "url": t.get("url"),
                           "author": (t.get("author") or {}).get("login"),
+                          "created": t.get("createdAt"), "words": devicedata.post_words(t.get("body") or ""),
                           "upvotes": t.get("upvoteCount", 0), "facts": len(devicedata.facts(raw)),
                           "reports": reports})
     index = {"format": devicedata.FORMAT, "files": files}

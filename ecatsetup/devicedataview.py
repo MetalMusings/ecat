@@ -490,9 +490,7 @@ class DeviceDataDialog(QDialog):
             if e.get("discussion") is None:
                 self.file_box.addItem("From %s%s" % (e["ref"], refused))
             else:
-                self.file_box.addItem("#%s by %s: %d up, %s%s" % (
-                    e.get("discussion"), e.get("author") or "?", e.get("upvotes") or 0,
-                    devicedata.summary(e.get("reports")), refused))
+                self.file_box.addItem(devicedata.describe(e) + refused)
         self.file_box.blockSignals(False)
         self.file_box.setVisible(bool(self.files))
         if not self.files:
@@ -557,7 +555,8 @@ class DeviceDataDialog(QDialog):
                 self.rows = [r for r in devicedata.compare(self.ident, e["raw"]) if not r["same"]]
                 same = len(devicedata.facts(e["raw"])) - len(self.rows)
                 words = [r.get("words") for r in e.get("reports") or [] if r.get("words")]
-                self.file_info.setText("%d fact%s differ from what is in use%s.%s" % (
+                self.file_info.setText("%s%d fact%s differ from what is in use%s.%s" % (
+                    "The sender wrote: \"%s\"\n" % e["words"][:300] if e.get("words") else "",
                     len(self.rows), "" if len(self.rows) == 1 else "s",
                     ", %d are the same" % same if same else "",
                     (" Latest report: \"%s\"" % words[-1][:200]) if words else ""))

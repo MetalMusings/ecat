@@ -3599,7 +3599,8 @@ class TestDeviceData(WindowBase):
         with mock.patch.dict(os.environ, {"ECATSETUP_DEVICES_URL": "file://" + tgz}):
             dlg.fetch()
         self.assertEqual(dlg.file_box.count(), 1)
-        self.assertIn("#5 by bob: 2 up, 1 worked", dlg.file_box.itemText(0))
+        self.assertEqual(dlg.file_box.itemText(0), "#5 · MetalMusings EaserCAT 7000 · 0x2001 is a command, not "
+                         "a setting, 0x2002 is a command, not a setting and 1 more · bob · 2 up, 1 worked")
         self.assertIn("2 facts differ", dlg.file_info.text())
         # the whole shared file, grouped the same way, marked against what is in use
         dlg.whole_button.setChecked(True)

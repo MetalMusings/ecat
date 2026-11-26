@@ -382,12 +382,18 @@ class TestRepoTools(unittest.TestCase):
         rel = "devices/00000a88-0a880002/7.yaml"
         rep = devicedata.report(rel, "worked", ["commands 0x2010"], words="ok here")
         threads = [{"number": 7, "url": "https://x/7", "upvoteCount": 3, "author": {"login": "alice"},
+                    "createdAt": "2026-11-26T18:00:00Z", "body": body.replace(devicedata.WRITE_HERE, "My mill's X."),
                     "comments": {"nodes": [{"author": {"login": "bob"}, "body": rep, "updatedAt": "t"},
                                            {"author": {"login": "eve"}, "body": "nice"}]}}]
         idx = self.index.build(threads, self.root)
         self.assertEqual(len(idx["files"]), 1)          # 8's thread is gone: its file removed
         e = idx["files"][0]
         self.assertEqual((e["path"], e["upvotes"], e["author"]), (rel, 3, "alice"))
+        self.assertEqual((e["created"], e["words"]), ("2026-11-26T18:00:00Z", "My mill's X."))
+        line = devicedata.describe(dict(e, raw=devicedata.read_raw(os.path.join(self.root, rel))))
+        self.assertTrue(line.startswith("#7 · Rtelligent ECT60 · 0x2010 is a command, not a setting, "), line)
+        self.assertIn("more · alice, 2026-11-26 · 3 up, 1 worked", line)
+        self.assertEqual(devicedata.post_words(body), "")
         self.assertEqual([(r["author"], r["result"], r["words"]) for r in e["reports"]],
                          [("bob", "worked", "ok here")])
         self.assertFalse(os.path.exists(os.path.join(self.root, "devices/00000a88-0a880002/8.yaml")))

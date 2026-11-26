@@ -472,12 +472,36 @@ def share(raw):
     s = strip(raw)
     m = s.get("match") or {}
     title = "%s (vendor %s, product %s)" % (s.get("name", "device"), m.get("vendor"), m.get("product"))
-    body = ("Shared from EtherCAT Setup. Contributions are %s.\n\n"
-            "Write here what the device is, and how the facts were found.\n\n"
-            "```yaml\n%s```\n" % (LICENCE, yaml.safe_dump(s, sort_keys=False, allow_unicode=True)))
+    body = ("%s %s.\n\n%s\n\n```yaml\n%s```\n" % (
+        SHARED_FROM, LICENCE, WRITE_HERE, yaml.safe_dump(s, sort_keys=False, allow_unicode=True)))
     q = urllib.parse.urlencode({"category": CATEGORY, "title": title, "body": body},
                                quote_via=urllib.parse.quote)
     return title, body, "https://github.com/%s/discussions/new?%s" % (REPO, q)
+
+
+SHARED_FROM = "Shared from EtherCAT Setup. Contributions are"
+WRITE_HERE = "Write here what the device is, and how the facts were found."
+
+
+def post_words(body):
+    """What the sender wrote in a post, besides the file and the standard lines
+    (for the index: the list in the window shows it)."""
+    text = _FENCE.sub("", body or "")
+    lines = [ln for ln in text.splitlines() if not ln.startswith(SHARED_FROM) and ln.strip() != WRITE_HERE]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()[:500]
+
+
+def describe(entry):
+    """A shared file in one line for the list: number, name, its facts, who and when,
+    votes and reports."""
+    raw = entry.get("raw") or {}
+    names = [label(p) for p in facts(raw)]
+    what = ", ".join(names[:2]) + (" and %d more" % (len(names) - 2) if len(names) > 2 else "") \
+        if names else "no facts"
+    who = ", ".join(x for x in (entry.get("author"), (entry.get("created") or "")[:10]) if x)
+    return "#%s · %s · %s · %s · %d up, %s" % (
+        entry.get("discussion"), raw.get("name", "?"), what, who or "?", entry.get("upvotes") or 0,
+        summary(entry.get("reports")))
 
 
 _FENCE = re.compile(r"^```[ \t]*(\S*)[^\n]*\n(.*?)^```", re.M | re.S)
@@ -670,6 +694,7 @@ def shared_for(ident):
         out.append({"path": rel, "raw": raw, "problems": check(raw),
                     "discussion": e.get("discussion"), "url": e.get("url"),
                     "author": e.get("author"), "upvotes": e.get("upvotes", 0),
+                    "created": e.get("created"), "words": e.get("words") or "",
                     "reports": e.get("reports") or []})
     worked = lambda x: sum(1 for r in x["reports"] if r.get("result") == "worked")
     out.sort(key=lambda x: (bool(x["problems"]), -worked(x), -(x["upvotes"] or 0), x["path"]))
