@@ -7,13 +7,13 @@ bus's state, and the pages Bus, Workbench, Live, Diagnose and HAL & LinuxCNC.
 - Bus: the slaves, and per slave where its configuration comes from, its
   mode and sync, process data and pins, and settings; all editable,
   checked while editing, saved to ethercat.yaml.
-- Live: what runs (the free master, the I/O test, LinuxCNC watched), the
+- Live: what runs (the free master, the workbench, LinuxCNC watched), the
   synchronisation, every slave's state and the chosen slave's pins, live
   and read only.
 - Diagnose: a slave's way from INIT to OP, what it says (AL status code,
   CiA 402 state), its cables, its own messages (0x10F3), the master's
   messages, the long-term card, the event log and the symptoms.
-- Workbench: what is done with the bus (needs the I/O test, testmode.py:
+- Workbench: what is done with the bus (while the workbench runs, testmode.py:
   ecat in halrun): outputs set, SDOs read and written, a drive moved,
   homed, its switches tried and its response measured.
 - HAL & LinuxCNC: the pins and the lines for a HAL file; writing them
@@ -633,7 +633,7 @@ class Worker(QThread):
         except tool.ToolError as e:
             self.failed.emit("Cannot reach a master: %s\nStart one with: sudo ethercat-uspace start" % e)
         except testmode.TestError as e:
-            self.failed.emit("Test mode: %s" % e)
+            self.failed.emit("Workbench: %s" % e)
         except Exception as e:  # shown to the user rather than lost in a thread
             self.failed.emit("%s: %s" % (type(e).__name__, e))
 
@@ -681,7 +681,7 @@ class Header(QFrame):
         lay.addWidget(self.save)
         self.stop = QPushButton("STOP")
         self.stop.setObjectName("danger")
-        self.stop.setToolTip("Stop the test: outputs back to 0, halrun ends. When watching "
+        self.stop.setToolTip("Stop the workbench: outputs back to 0, halrun ends. When watching "
                              "LinuxCNC: stop watching; LinuxCNC is not touched")
         self.stop.clicked.connect(win.stop_test)
         lay.addWidget(self.stop)
@@ -863,7 +863,7 @@ class MasterView(QWidget):
         self.period.setSingleStep(250)
         self.period.setSuffix(" us")
         self.period.setValue(1000)
-        self.period.setToolTip("The servo thread's period for the I/O test and the checks, "
+        self.period.setToolTip("The servo thread's period for the workbench and the checks, "
                                "without an INI file. With one, its SERVO_PERIOD is used.")
         self.period.valueChanged.connect(self.period_edited)
         ini.addWidget(self.period)
@@ -1515,7 +1515,7 @@ class SlaveView(QWidget):
 
         # homing (CiA 402 hm)
         self.homing_card = Card("Homing by the drive",
-                                "The drive's own homing (0x6098), used by the test's Home button "
+                                "The drive's own homing (0x6098), used by the workbench's Home button "
                                 "and by LinuxCNC when the joint homes through the drive. The "
                                 "choice is written to Settings.")
         hform = QFormLayout()
@@ -3595,7 +3595,7 @@ class BusPage(QWidget):
 
 class LivePage(QWidget):
     """What runs and what the bus does now, read only: the free master, the
-    I/O test or a LinuxCNC being watched; the Synchronisation card, every
+    workbench or a LinuxCNC being watched; the Synchronisation card, every
     slave's state, and the chosen slave's pins."""
 
     def __init__(self, win):
@@ -3617,7 +3617,7 @@ class LivePage(QWidget):
         self.source_watch.clicked.connect(lambda: win.start_watch())
         srow.addWidget(self.source_watch)
         self.source_bench = QPushButton("Workbench")
-        self.source_bench.setToolTip("Start the I/O test there: the bus in OP without LinuxCNC; "
+        self.source_bench.setToolTip("Start the workbench there: the bus in OP without LinuxCNC; "
                                      "its values show here too.")
         self.source_bench.clicked.connect(lambda: win.show_tab(win.test_page))
         srow.addWidget(self.source_bench)
@@ -3633,7 +3633,7 @@ class LivePage(QWidget):
         lay.addWidget(self.sync)
 
         self.pins_card = Card("Pins (the chosen slave)", "Live and read only, every 200 ms: "
-                              "from the I/O test or from LinuxCNC being watched.")
+                              "from the workbench or from LinuxCNC being watched.")
         self.pins_drive = self.pins_card.add(label(wrap=True))
         self.pins_drive.setTextFormat(Qt.RichText)
         self.pins = PinTable(win, readonly=True)
@@ -3707,7 +3707,7 @@ class LivePage(QWidget):
         self.overview.setVisible(bool(rows))
 
     def show_source(self):
-        """The What runs card: the free master, the I/O test or LinuxCNC watched."""
+        """The What runs card: the free master, the workbench or LinuxCNC watched."""
         win, run = self.win, self.win.test
         running = run is not None and run.running
         watching = running and run.watching
@@ -3715,12 +3715,12 @@ class LivePage(QWidget):
             text = ("<b>Watching LinuxCNC</b> &nbsp; The values below are read from its HAL; "
                     "nothing is set, started or stopped from here.")
         elif running:
-            text = ("<b>The I/O test runs</b> (Workbench) &nbsp; The values below are the "
-                    "test's. LinuxCNC cannot run while the test has the bus.")
+            text = ("<b>The workbench runs</b> &nbsp; The values below are the workbench's. "
+                    "LinuxCNC cannot run while the workbench has the bus.")
         elif getattr(win.master_log, "pid", None):
             text = ("<b>The free master runs</b> &nbsp; The slaves wait in PREOP: Examine reads "
                     "them, and the event log has the master's messages. Live values need the bus "
-                    "in OP: start LinuxCNC and watch it, or the I/O test on the Workbench.")
+                    "in OP: start LinuxCNC and watch it, or start the workbench.")
         else:
             text = ("<b>No master runs here</b> &nbsp; Start LinuxCNC and watch it, or the I/O "
                     "test on the Workbench; the event log keeps the last runs.")
@@ -3730,7 +3730,7 @@ class LivePage(QWidget):
         self.source_watch.setEnabled(win.session.cfg is not None and not win.busy)
         self.source_bench.setVisible(not running or not watching)
         self.source_stop.setVisible(running)
-        self.source_stop.setText("Stop watching" if watching else "Stop the test")
+        self.source_stop.setText("Stop watching" if watching else "Stop the workbench")
         if not running:
             self.sync.hide()
             self.overview.hide()
@@ -3840,7 +3840,7 @@ def free_master_line(status, stats, free_texts):
             ", %d in the last second" % stats["loss_rate"] if stats.get("loss_rate") else ""))
     if any(t.source and ("UNMATCHED" in t.text or "TIMED OUT" in t.text) for t in free_texts):
         parts.append("its late datagrams (unmatched, timed out) come from a master without real-time "
-                     "priority: they say little about LinuxCNC's timing; the I/O test is what tells")
+                     "priority: they say little about LinuxCNC's timing; the workbench is what tells")
     return "; ".join(parts)
 
 
@@ -3915,7 +3915,7 @@ class TroubleshootPage(QWidget):
             "For a device the developer does not have: one file with every slave's identity, "
             "SII, object dictionary and values, PDOs and registers, the report, the ESI "
             "descriptions and, if tcpdump may run as root, a few seconds of frames. Takes about "
-            "a minute; only reads. Run it during the I/O test to have the frames of a bus in OP.")
+            "a minute; only reads. Run it while the workbench runs to have the frames of a bus in OP.")
         self.capture.clicked.connect(win.save_capture)
         row.addWidget(self.capture)
         lay.addLayout(row)
@@ -3992,7 +3992,7 @@ class TroubleshootPage(QWidget):
         self.history_none = self.history.add(label("", "hint", wrap=True))
         body.addWidget(self.history)
         self.master_says = Card("Messages from the master", "Oldest first: what the master said "
-                                "about this slave while ecat ran (the I/O test or LinuxCNC), "
+                                "about this slave while ecat ran (the workbench or LinuxCNC), "
                                 "from the event log, and while the free master ran (reading "
                                 "the bus, SDOs), from the system journal.")
         self.master_table = table(["Time", "Message"], 1)
@@ -4003,7 +4003,7 @@ class TroubleshootPage(QWidget):
 
         # long-term monitoring: the chosen slave's history in the run shown in the event log
         self.longterm = Card("Long-term (the chosen slave)",
-                             "What ecat recorded about this slave while LinuxCNC or the test ran: "
+                             "What ecat recorded about this slave while LinuxCNC or the workbench ran: "
                              "its DC clock against the reference clock (the largest difference in "
                              "each %d minutes) and the error counters that grew, with when they "
                              "began. From the run chosen in the event log below." % (events.MON_PERIOD_S // 60))
@@ -4143,7 +4143,7 @@ class TroubleshootPage(QWidget):
         if h is None:
             self.longterm_dc.setText(
                 "Nothing recorded about this slave in this run. ecat records it while LinuxCNC or "
-                "the test runs (a run of an ecat older than this program has none)."
+                "the workbench runs (a run of an ecat older than this program has none)."
                 if pos is not None else "Choose a slave.")
             self.longterm_curve.hide()
             self.longterm_counts.setText("")
@@ -4243,7 +4243,7 @@ class TroubleshootPage(QWidget):
             card.show_step(step, desc, step_status(r, value))
         self.step_note.setText(
             "The slave waits in PREOP: normal while only the free-running master runs "
-            "(ethercat-uspace start). LinuxCNC, or the test, takes it to OP."
+            "(ethercat-uspace start). LinuxCNC, or the workbench, takes it to OP."
             if r.state == 2 and not r.error and not r.last_code else "")
         self.step_note.setVisible(bool(self.step_note.text()))
 
@@ -4597,7 +4597,7 @@ class MoveCard(Card):
             self.fields[key] = box
         self.prepare = QPushButton("Write limits to the drive")
         self.prepare.setObjectName("primary")
-        self.prepare.setToolTip("Reads the drive's own values, writes the test's limits to it, and "
+        self.prepare.setToolTip("Reads the drive's own values, writes the workbench's limits to it, and "
                                 "sets velocity, acceleration and travel in HAL. The drive stays "
                                 "disabled; its values are written back when you are done.")
         self.prepare.clicked.connect(self.do_prepare)
@@ -4732,7 +4732,7 @@ class MoveCard(Card):
             self.unsupported.setText("LinuxCNC is only watched: nothing here moves the drive.")
         elif not ok:
             self.unsupported.setText("Only cia402 drives in CSP, PP or PV, or with hm in their "
-                                     "modes, can be moved in the test.")
+                                     "modes, can be moved on the workbench.")
         else:
             self.unsupported.setText("")
             if dt is None:
@@ -5201,7 +5201,7 @@ class ResponseCard(Card):
         side.addWidget(self.objects)
         self.add_button = QPushButton("Add them to the process data")
         self.add_button.setToolTip("Adds the objects to the drive's first input PDO in the "
-                                   "configuration; they are recorded once the test is started again")
+                                   "configuration; they are recorded once the workbench is started again")
         self.add_button.clicked.connect(self.add_objects)
         side.addWidget(self.add_button)
         self.measure = QPushButton("Measure (hold)")
@@ -5252,14 +5252,14 @@ class ResponseCard(Card):
         frow.addStretch(1)
         fl.addLayout(frow)
         brow = QHBoxLayout()
-        self.ff_try = QPushButton("Try in the test")
-        self.ff_try.setToolTip("Sets the drive's ff-* parameters in the test's HAL; measure again "
+        self.ff_try = QPushButton("Try on the workbench")
+        self.ff_try.setToolTip("Sets the drive's ff-* parameters in the workbench's HAL; measure again "
                                "to see the difference. The drive must be set to use 0x60B1 / 0x60B2 "
                                "(a vendor setting in its Settings).")
         self.ff_try.clicked.connect(lambda: self.try_feedforward())   # not clicked's bool
         brow.addWidget(self.ff_try)
         self.ff_off = QPushButton("Off")
-        self.ff_off.setToolTip("Feedforward 0 in the test")
+        self.ff_off.setToolTip("Feedforward 0 on the workbench")
         self.ff_off.clicked.connect(lambda: self.feedforward_off())
         brow.addWidget(self.ff_off)
         self.ff_keep = QPushButton("Keep in the configuration")
@@ -5296,7 +5296,7 @@ class ResponseCard(Card):
         tr.addWidget(self.try_value)
         self.try_button = QPushButton("Try it (write to the drive's RAM)")
         self.try_button.setToolTip("Writes the value to the drive with the drive disabled; its own "
-                                   "value is kept and put back by Undo, or when the test stops")
+                                   "value is kept and put back by Undo, or when the workbench stops")
         self.try_button.clicked.connect(self.try_setting)
         tr.addWidget(self.try_button)
         tr.addStretch(1)
@@ -5370,7 +5370,7 @@ class ResponseCard(Card):
         running = {c.key for c in response.columns(self.win.test.cfg,
                                                    self.win.test.drives.index(dt.name), dt.name)}
         if set(have) - running:
-            text += " Added since the test started: stop the test and start it again to record them."
+            text += " Added since the workbench started: stop it and start it again to record them."
         if missing:
             text += " Not in the process data: %s." % ", ".join(w for _i, _c, w in missing)
         self.objects.setText(text)
@@ -5402,7 +5402,7 @@ class ResponseCard(Card):
             self.ff_now.setText("")
             return
         ff = (self.win.session.slave(dt.position) or {}).get("cia402", {}).get("feedforward") or {}
-        self.ff_now.setText("In the test now: velocity %g, torque %g %% per mm/s², limit %g %%. "
+        self.ff_now.setText("On the workbench now: velocity %g, torque %g %% per mm/s², limit %g %%. "
                             "In the configuration: %s." % (
                                 now.get("velocity", 0.0), now.get("torque", 0.0),
                                 now.get("torque-max", response.FF_TORQUE_MAX),
@@ -5441,7 +5441,7 @@ class ResponseCard(Card):
         except testmode.TestError as e:
             self.win.status("Feedforward not set: %s" % e)
             return
-        self.win.status("Feedforward in the test: %s; measure again to compare"
+        self.win.status("Feedforward on the workbench: %s; measure again to compare"
                         % ", ".join("%s %g" % kv for kv in values.items()))
         self.show_feedforward_now(dt)
 
@@ -5484,7 +5484,7 @@ class ResponseCard(Card):
             QMessageBox.warning(self, TITLE, str(e))
             return
         self.win.changed()
-        self.win.status("Added %s to %s's inputs; save, then stop and start the test to record them"
+        self.win.status("Added %s to %s's inputs; save, then stop and start the workbench to record them"
                         % (", ".join(e["object"] for e in added), s.get("name")))
         self.show_drive(s)
 
@@ -5656,7 +5656,7 @@ class ResponseCard(Card):
         """The test stops: no halsampler is left running."""
         m = self.measurement
         if m is not None and m.active:
-            m.abort("the test stopped")
+            m.abort("the workbench stopped")
             m._finish()
 
     def tick(self):
@@ -5697,7 +5697,7 @@ class ResponseCard(Card):
                 "torque", 0.0) == 0.0:
             box.setText("%.4g" % res.torque_per_accel)
             self.ff_now.setText(self.ff_now.text() + " Torque per acceleration measured: %.4g "
-                                "(in the field; Try in the test to use it)." % res.torque_per_accel)
+                                "(in the field; Try on the workbench to use it)." % res.torque_per_accel)
         self.last_res = res
         self.saved.setText("Samples: %s (ecatsetup --response FILE shows this again)" % m.path)
         self.last = rec
@@ -5938,7 +5938,7 @@ def pll_text(get, pll):
 
 
 class SyncCard(Card):
-    """The Synchronisation card (Live tab): the ecat.0 pins of the I/O test or
+    """The Synchronisation card (Live tab): the ecat.0 pins of the workbench or
     of a LinuxCNC being watched, the long-term monitoring's rows (monitor),
     and Remember this period."""
 
@@ -6109,16 +6109,18 @@ class TestPage(QWidget):
         self.banner_text = self.banner.add(label(wrap=True))
         lay.addWidget(self.banner)
 
-        self.start_card = Card("I/O test")
+        self.start_card = Card("The workbench")
         self.start_card.add(label(
-            "The ecat component runs this configuration (as edited, saved or not) in halrun with a "
-            "servo thread, without LinuxCNC, and takes the slaves to OP. Inputs show here live, "
-            "and outputs of I/O slaves can be set. Pins set during the test go back to 0 when it "
-            "stops. A CSP drive can be moved in small steps, after limits are written to it, "
-            "only while a button is held.\n\n"
+            "Runs the bus from this window, without LinuxCNC: the ecat component runs this "
+            "configuration (as edited, saved or not) in halrun with a servo thread and takes the "
+            "slaves to OP. Here you then set outputs of I/O slaves, read and write SDOs, and move, "
+            "home and tune a drive: only after limits are written to it, and only while a button "
+            "is held. Outputs set here go back to 0 when the workbench stops. Meanwhile the Live "
+            "tab shows the synchronisation and every slave's state and pins.\n\n"
             "Before starting: stop LinuxCNC and the kernel master (sudo systemctl stop ethercat), "
-            "and make sure nothing wired to the outputs can do harm.", wrap=True))
-        self.start = QPushButton("Start the I/O test")
+            "and make sure nothing wired to the outputs can do harm. LinuxCNC cannot run while the "
+            "workbench runs.", wrap=True))
+        self.start = QPushButton("Start the workbench")
         self.start.setObjectName("primary")
         self.start.clicked.connect(win.start_test)
         row = QHBoxLayout()
@@ -6228,8 +6230,8 @@ class TestPage(QWidget):
         il = QHBoxLayout(self.io)
         il.setContentsMargins(0, 0, 0, 0)
         il.setSpacing(16)
-        self.outputs_card = Card("Outputs (to the slave)", "Set here; back to 0 when the test "
-                                                           "stops.")
+        self.outputs_card = Card("Outputs (to the slave)", "Set here; back to 0 when the "
+                                                           "workbench stops.")
         self.outputs = PinTable(win)
         self.outputs_card.add(self.outputs)
         self.outputs_card.lay.addStretch(1)
@@ -6242,7 +6244,7 @@ class TestPage(QWidget):
         lay.addWidget(self.io)
 
         self.all_card = Card("All pins", "As the component shows them; a drive's pins are not "
-                                         "set in the I/O test.")
+                                         "set on the workbench.")
         self.all_pins = PinTable(win)
         self.all_card.add(self.all_pins)
         lay.addWidget(self.all_card)
@@ -6259,7 +6261,7 @@ class TestPage(QWidget):
 
         # SDOs
         sdo = self.sdo_card = Card("SDO (CoE object)", "Read and write whenever a master runs: "
-                                   "the test, or the free-running master.")
+                                   "the workbench, or the free-running master.")
         form = QHBoxLayout()
         self.sdo_obj = QLineEdit()
         self.sdo_obj.setPlaceholderText("0x2000:01")
@@ -6376,7 +6378,7 @@ class TestPage(QWidget):
         self.sdo_card.setEnabled(not watching)
         self.sdo_card.hint.setText("Not while watching: LinuxCNC's master owns the bus."
                                    if watching else "Read and write whenever a master runs: "
-                                   "the test, or the free-running master.")
+                                   "the workbench, or the free-running master.")
         if running and run.watching:
             self.banner_text.setText(
                 "<b>LinuxCNC runs and owns the bus</b> &nbsp; Nothing can be done here while it "
@@ -6384,8 +6386,8 @@ class TestPage(QWidget):
                 "only.")
         elif running:
             self.banner_text.setText(
-                "<b>Test running</b> &nbsp; ecat in halrun, servo %s. Outputs set here go back "
-                "to 0 when the test stops (STOP, top right). A drive moves only while a button is "
+                "<b>The workbench runs</b> &nbsp; ecat in halrun, servo %s. Outputs set here go "
+                "back to 0 when it stops (STOP, top right). A drive moves only while a button is "
                 "held, and stops if this program stops answering.<br>Log: %s"
                 % (period_text(run.period), run.log_path))
         pos = self.position
@@ -6693,7 +6695,7 @@ class JointRow(QWidget):
         self.scale.setEnabled(j is not None)
         self.calc.setEnabled(j is not None)
         name = j["slave"] if j else None
-        set_pill(self.tested, "moved in the test" if name in tested else "", "green")
+        set_pill(self.tested, "moved on the workbench" if name in tested else "", "green")
         self.drive.blockSignals(False)
         self.scale.blockSignals(False)
 
@@ -7716,7 +7718,7 @@ class HalPage(QWidget):
         if self.plan is None or ini is None:
             return
         if self.win.test is not None:
-            QMessageBox.warning(self, TITLE, "Stop the test first.")
+            QMessageBox.warning(self, TITLE, "Stop the workbench first.")
             return
         d = os.path.dirname(os.path.abspath(ini))
         dest = os.path.join(d, self.yaml_name())
@@ -8579,7 +8581,7 @@ class MainWindow(QMainWindow):
         self.session = session
         self.reports = {}       # position -> diagnose.Report
         self.worker = None
-        self.test = None        # testmode.TestRun while the I/O test runs
+        self.test = None        # testmode.TestRun while the workbench runs
         self.current = None     # the chosen slave's position, MASTER_ITEM, or None
         self.messages_by_slave = {}
         self.master_offer_off = False       # "Don't ask again this session"
@@ -8706,9 +8708,9 @@ class MainWindow(QMainWindow):
         self.a_esi = act("Add ESI files...", self.add_esi)
         self.a_ini = act("Machine INI file...", self.choose_ini)
         menu.addSeparator()
-        self.a_test = act("Start the I/O test", self.start_test)
+        self.a_test = act("Start the workbench", self.start_test)
         self.a_watch = act("Watch LinuxCNC that runs (read only)", self.start_watch)
-        self.a_test_stop = act("Stop the test or the watching", self.stop_test)
+        self.a_test_stop = act("Stop the workbench or the watching", self.stop_test)
         menu.addSeparator()
         look = menu.addMenu("Appearance")
         group = QActionGroup(self)
@@ -8834,9 +8836,9 @@ class MainWindow(QMainWindow):
                                                 "" if s.period else " (default)")) if x))
         testing = self.test is not None
         if testing:
-            if not self.header.status.text().startswith(("● TEST", "● WATCH")):
+            if not self.header.status.text().startswith(("● WORKBENCH", "● WATCH")):
                 set_pill(self.header.status, "● WATCHING LinuxCNC" if self.test.watching
-                         else "● TEST MODE · I/O", "blue" if self.test.watching else "amber")
+                         else "● WORKBENCH · I/O", "blue" if self.test.watching else "amber")
         elif s.bus_error and not s.bus:
             set_pill(self.header.status, "● No master", "grey")
         elif s.bus:
@@ -9036,9 +9038,9 @@ class MainWindow(QMainWindow):
         if text.startswith("Cannot reach a master") and not self.master_just_started:
             QTimer.singleShot(0, self.offer_master_start)
         self.master_just_started = False
-        if text.startswith("Test mode: "):
+        if text.startswith("Workbench: "):
             # the messages are not on the Workbench: without this the button seems dead
-            QMessageBox.warning(self, TITLE, "The test did not start.\n\n" + text[len("Test mode: "):])
+            QMessageBox.warning(self, TITLE, "The workbench did not start.\n\n" + text[len("Workbench: "):])
 
     # -- starting the master
 
@@ -9391,11 +9393,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, TITLE, "The configuration has errors; fix them first.")
             return
         if QMessageBox.question(
-                self, TITLE, "Start the I/O test?\n\nThe ecat component runs this configuration "
-                "(as edited, saved or not) in halrun with a servo thread of %s, and takes the "
-                "slaves to OP. LinuxCNC must not run.\n\nOutputs of I/O slaves can then be set "
-                "on the Workbench: make sure nothing wired to them can do harm. "
-                "CiA 402 drives stay disabled until you write limits to one and hold a button."
+                self, TITLE, "Start the workbench?\n\nThis window then runs the bus: the ecat component runs "
+                "this configuration (as edited, saved or not) in halrun with a servo thread of %s, "
+                "and takes the slaves to OP. LinuxCNC must not run.\n\nOutputs of I/O slaves can "
+                "then be set: make sure nothing wired to them can do harm. CiA 402 drives stay "
+                "disabled until you write limits to one and hold a button."
                 % period_text(self.session.period or 1000000),
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
@@ -9411,12 +9413,12 @@ class MainWindow(QMainWindow):
             self.test_timer.start()
             self.heartbeat.start()
             self.pending_timer.start()
-            self.set_messages([(GREEN, "", ["Test running; log: %s" % run.log_path])])
+            self.set_messages([(GREEN, "", ["The workbench runs; log: %s" % run.log_path])])
             if self.tabs.currentWidget() is not self.test_page:
                 self.tabs.setCurrentWidget(self.test_page)
-        self.test_page.starting_text.setText("Starting the test...")
+        self.test_page.starting_text.setText("Starting the workbench...")
         self.test_page.starting.show()
-        self.run("Starting the test...", lambda progress: run.start(progress), started)
+        self.run("Starting the workbench...", lambda progress: run.start(progress), started)
 
     def start_watch(self):
         if self.test is not None:
@@ -9444,18 +9446,18 @@ class MainWindow(QMainWindow):
         self.run("Looking for LinuxCNC...", lambda progress: run.start(progress), started)
 
     def watch_busy_choice(self):
-        """What to do when Watch LinuxCNC is pressed while the I/O test runs:
+        """What to do when Watch LinuxCNC is pressed while the workbench runs:
         "live" (show the Live tab), "stop" (stop the test) or None."""
         box = QMessageBox(self)
         box.setWindowTitle(TITLE)
         box.setIcon(QMessageBox.Information)
-        box.setText("The I/O test is running: its live values are on the Live tab.")
+        box.setText("The workbench is running: its live values are on the Live tab.")
         box.setInformativeText(
             "Watching LinuxCNC is for a LinuxCNC that runs, and LinuxCNC cannot run "
-            "while the I/O test has the bus. Stop the test first, then start LinuxCNC "
+            "while the workbench has the bus. Stop the workbench first, then start LinuxCNC "
             "and press Watch LinuxCNC again.")
         to_live = box.addButton("Go to the Live tab", QMessageBox.AcceptRole)
-        stop = box.addButton("Stop the test", QMessageBox.DestructiveRole)
+        stop = box.addButton("Stop the workbench", QMessageBox.DestructiveRole)
         box.addButton(QMessageBox.Close)
         box.setDefaultButton(to_live)
         box.exec_()
@@ -9513,7 +9515,7 @@ class MainWindow(QMainWindow):
                 tool.master_mac()
             except tool.ToolError:
                 QTimer.singleShot(0, self.offer_master_start)
-        self.run("Stopping the test...", work, stopped)
+        self.run("Stopping the workbench...", work, stopped)
 
     def set_pin(self, pin, value):
         if self.test is None:
@@ -9648,7 +9650,7 @@ class MainWindow(QMainWindow):
             responding = "?"
         all_op = get("all-op") == "TRUE"
         set_pill(self.header.status, "● %s · %s · %s, %s slaves%s" % (
-            "WATCHING" if run.watching else "TEST MODE",
+            "WATCHING" if run.watching else "WORKBENCH",
             "read only" if run.watching else
             "drive can move" if any(dt.prepared for dt in self.drive_tests.values()) else "I/O",
             "all OP" if all_op else "NOT all OP", responding,

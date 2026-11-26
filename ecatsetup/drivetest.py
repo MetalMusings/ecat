@@ -1,5 +1,5 @@
 """The CiA 402 drive test: enable one drive and move it in small steps,
-within limits written to the drive itself, while the I/O test
+within limits written to the drive itself, while the workbench
 (testmode.TestRun) runs. A drive in CSP is jogged through a limit3 in
 HAL; a drive in PP moves by steps to a target the drive plans itself; a
 drive in PV runs at a low velocity while a button is held; a drive with

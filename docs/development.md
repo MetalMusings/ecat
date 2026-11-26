@@ -324,7 +324,7 @@ Moving a CiA 402 drive from a test program needs care:
 - **Emergency stop**: if the machine's E-stop is wired through EtherCAT
   I/O, test mode can use it.
 
-Built so far (CSP only, see [test mode](ecatsetup.md#test-mode)): hold-to-enable
+Built so far (CSP only, see [the workbench](ecatsetup.md#the-workbench)): hold-to-enable
 and jog buttons, the heartbeat through the drive's `watchdog` pin, limits
 written to the drive where it has the objects, and velocity,
 acceleration and travel limited in HAL by a `limit3`. The ECT60 has no

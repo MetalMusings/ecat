@@ -783,7 +783,7 @@ class TestWindow(WindowBase):
         w = self.window()
         w.worker = mock.Mock()
         with mock.patch.object(gui.QMessageBox, "warning") as warn:
-            w._failed("Test mode: The kernel EtherCAT master is loaded.\nStop it first")
+            w._failed("Workbench: The kernel EtherCAT master is loaded.\nStop it first")
         self.assertIn("did not start", warn.call_args[0][2])
         self.assertIn("kernel EtherCAT master", warn.call_args[0][2])
 
@@ -832,8 +832,8 @@ class TestWindow(WindowBase):
         with mock.patch.object(gui.QMessageBox, "exec_", fake_exec):
             self.assertIsNone(w.watch_busy_choice())
         self.assertIn("Live tab", seen["text"])
-        self.assertIn("cannot run while the I/O test", seen["text"])
-        self.assertIn("Stop the test", seen["buttons"])
+        self.assertIn("cannot run while the workbench", seen["text"])
+        self.assertIn("Stop the workbench", seen["buttons"])
         self.assertIn("Go to the Live tab", seen["buttons"])
 
     def test_live_tab_says_what_runs(self):
@@ -849,9 +849,9 @@ class TestWindow(WindowBase):
         w.test = mock.Mock(running=True, watching=False)
         try:
             live.show_source()
-            self.assertIn("The I/O test runs", live.source_text.text())
+            self.assertIn("The workbench runs", live.source_text.text())
             self.assertTrue(live.source_watch.isHidden())
-            self.assertEqual(live.source_stop.text(), "Stop the test")
+            self.assertEqual(live.source_stop.text(), "Stop the workbench")
             w.test.watching = True
             live.show_source()
             self.assertIn("Watching LinuxCNC", live.source_text.text())

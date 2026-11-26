@@ -3,7 +3,7 @@ and what the following error is made of.
 
 This is part 1 of the tuning idea (docs/ecatsetup.md "Measuring a drive's
 response"): it measures and changes nothing in the drive. It runs in the
-drive test (drivetest.DriveTest, prepared, in CSP) while the I/O test
+drive test (drivetest.DriveTest, prepared, in CSP) while the workbench
 (testmode.TestRun) runs, so every safety layer of the drive test holds:
 hold-to-enable, the heartbeat, the drive's travel, following-error and torque
 limits, and the limit3 in front of pos-cmd.

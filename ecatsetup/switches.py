@@ -29,8 +29,8 @@ GUIDE = ("The drive must know which of its inputs is the home switch (and the li
          "switches), and whether the switch is normally open or closed. Most drives set this "
          "per input in objects of the maker's own (0x2000 to 0x5FFF): a function for each input "
          "(home switch, limits, probe ...) and a polarity, for each input or as one bit per "
-         "input. See the drive's manual under digital inputs. Then try the switch on the Test "
-         "page (Switches card, during the I/O test): it tells whether the drive sees it.")
+         "input. See the drive's manual under digital inputs. Then try the switch on the "
+         "Workbench (Switches card, while the workbench runs): it tells whether the drive sees it.")
 
 
 def input_pin(slave):

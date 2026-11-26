@@ -1,6 +1,6 @@
 """The free-running master's messages, from the system journal.
 
-While the `ecat` component is the master (the I/O test, LinuxCNC), the
+While the `ecat` component is the master (the workbench, LinuxCNC), the
 master's messages are in the component's flight recorder (events.py). The
 free-running master that `ethercat-uspace start` starts (`ec_master`, for
 reading the bus, SDOs, the SII) logs to syslog instead, that is the system

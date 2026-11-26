@@ -159,7 +159,7 @@ def csp_drives(cfg):
 
 def hal_file(cfg, cfg_path, period):
     """The test's HAL file."""
-    lines = ["# Written by EtherCAT Setup for its test mode.",
+    lines = ["# Written by EtherCAT Setup for its workbench.",
              "loadrt ecat config=%s" % cfg_path,
              "loadrt threads name1=servo-thread period1=%d" % period]
     from . import response
@@ -227,7 +227,7 @@ def sdo_write_refused(slave, index, subindex):
                     pass
     if slave.get("profile") == "cia402" and any(
             0x6040 <= index - n * config.AXIS_OFFSET <= 0x67FF for n in range(len(config.axes(slave)))):
-        return "CiA 402 objects of a drive are written only in the CiA 402 test mode"
+        return "CiA 402 objects of a drive are written only by the workbench's Move card"
     return None
 
 
@@ -538,7 +538,7 @@ class TestRun:
         if not self.running:
             raise TestError("the test does not run")
         if not self.writable(pin):
-            raise TestError("%s cannot be set in the I/O test" % pin.name)
+            raise TestError("%s cannot be set on the workbench" % pin.name)
         if pin.type == "bool":
             text = "TRUE" if value in (True, 1, "1", "TRUE", "true") else "FALSE"
         elif pin.type == "real":

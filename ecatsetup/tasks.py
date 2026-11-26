@@ -23,7 +23,7 @@ TASKS = [
        "Choose ESI files..."),
       ("Read the bus, and look at where the proposal comes from.", "scan", "Rescan the bus"),
       ("Check its process data, pins, sync and settings.", "bus", "Bus"),
-      ("Run it in the I/O test.", "test", "Workbench"),
+      ("Run it on the workbench.", "test", "Workbench"),
       ("Watch the synchronisation and the slaves' state.", "live", "Live"),
       ("Keep what you chose as a quirk file for the device.", "bus", "Bus"),
       ("If it does not work, save a capture of the bus for the developer: the device as the "
@@ -31,7 +31,7 @@ TASKS = [
     ("Using a slave by hand",
      "Reading and setting I/O, moving a drive, trying homing, with no LinuxCNC.",
      [("Read the bus.", "scan", "Rescan the bus"),
-      ("Start the test, pick the slave, set outputs or move a drive in small steps.", "test",
+      ("Start the workbench, pick the slave, set outputs or move a drive in small steps.", "test",
        "Workbench")]),
     ("Tuning a servo drive",
      "A CSP drive lags or overshoots, or you want FERROR right: measure what its following "
@@ -39,7 +39,7 @@ TASKS = [
      [("Open the machine's ethercat.yaml.", "open", "Open..."),
       ("Have the drive's own following error (0x60F4) and torque (0x6077) in its process data "
        "(the Response card can add them).", "bus", "Bus"),
-      ("Start the test, choose the drive on the Move card and write its limits; the machine "
+      ("Start the workbench, choose the drive on the Move card and write its limits; the machine "
        "must be free to move and someone at it.", "test", "Workbench"),
       ("Measure on the Response card and read what it points at; try one setting at a time "
        "and keep what helps.", "test", "Workbench"),

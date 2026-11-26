@@ -5,7 +5,7 @@ works, with LinuxCNC configurations and perhaps another EtherCAT master
 that you want to keep. Everything below can be undone.
 
 Where to go next: [EtherCAT Setup](ecatsetup.md) for the program (its
-window, the test mode, writing into LinuxCNC, troubleshooting) and
+window, the workbench, writing into LinuxCNC, troubleshooting) and
 [What the slaves give in LinuxCNC](ecatsetup.md#what-the-slaves-give-in-linuxcnc) for what
 each kind of slave gives you in HAL; the [reference](reference.md) has the
 configuration file's format and every command-line option.
@@ -22,8 +22,8 @@ The packages do **not**:
 - touch your LinuxCNC configurations, `ethercat.service`, the kernel
   master, the kernel or the network configuration;
 - load or start anything: `ecat` is loaded only by a HAL file that says
-  `loadrt ecat`, and the master runs only inside LinuxCNC, in the test
-  mode of `ecatsetup`, or when you start it yourself;
+  `loadrt ecat`, and the master runs only inside LinuxCNC, on the
+  workbench of `ecatsetup`, or when you start it yourself;
 - conflict with the kernel master or with `lcec`: the component is called
   `ecat`, and the two masters are separate installs.
 
@@ -160,21 +160,21 @@ that would be commented out) before it writes, and keeps each changed
 file as `.bak`. [writing into LinuxCNC](ecatsetup.md#writing-the-configuration-into-linuxcnc) says what is written and how
 the check of your HAL files works.
 
-**4. The test mode.** It runs the `ecat` component in `halrun` without
+**4. The workbench.** It runs the `ecat` component in `halrun` without
 LinuxCNC and shows the slaves' pins live. Its servo period is the INI
 file's `SERVO_PERIOD`; to try slaves without a machine configuration, type
 it on the *Master* page (1 ms until then). The kernel master and LinuxCNC
 must be stopped, and the free-running master hands the bus over to the
-test; afterwards start the kernel master again as above. Inputs and
+workbench; afterwards start the kernel master again as above. Inputs and
 outputs of I/O slaves can be read and set; a drive does not move until
-you hold a button, and the test sets limits in the drive (and puts them
+you hold a button, and the workbench sets limits in the drive (and puts them
 back). Before moving a drive:
 
 - keep the emergency stop within reach and the axis away from its ends;
 - set the scale (counts per mm) first;
 - check what the drive's homing method (`0x6098`) does before using
   *Home*: only method 35 leaves the axis where it is;
-- read [test mode](ecatsetup.md#test-mode).
+- read [the workbench](ecatsetup.md#the-workbench).
 
 **5. In LinuxCNC.** Only now run the copy of your configuration. Start
 with the machine unable to do harm (no power to the axes, the
