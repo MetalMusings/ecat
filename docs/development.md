@@ -1592,7 +1592,8 @@ file that hides a shipped one, results without a revision. Tested in tests/test_
 Not built: a guided way to write a quirk file from scratch (today: *Save as quirk file...*
 and by hand), one place for both kinds, sharing results between users (a pull request on
 the shipped files is the way now), checking by running that a shipped result still holds
-(needs the device).
+(needs the device). The guided writing and the sharing are now an assignment:
+[Shared device data](#shared-device-data-assignment-2026-11-26).
 
 ## Tuning a drive (2026-11-16)
 
@@ -3936,3 +3937,93 @@ test above, 4 and 5 are not tried. For our own decisions, not posted.
    tested. This cannot be fixed inside homecomp while the drive owns the
    motion; for a rigid gantry, homing through LinuxCNC (`index-enable` or
    LinuxCNC's switches) keeps the sides together.
+
+## Shared device data (assignment 2026-11-26)
+
+Given by the user, not started. The aim: users write quirk files for the devices
+they use and make them available to others; the maintainer cannot write them all
+and does not review them beforehand.
+
+### Why
+
+A new drive works without a quirk file for most things (CiA 402's own objects,
+0x60E3, the ESI file). What a quirk file adds is what someone *learnt* about the
+device, nearly always in the window: an object that is a command, which input is
+which switch, settings a homing method needs, the drive not following after
+homing, a setting that improved the response, a value that means nothing. Today a
+user can only keep the pins, scales and settings (*Save as quirk file...*); the
+rest is YAML by hand, against the decision that users do not edit YAML (2026-11-20).
+
+### Decisions (the user, 2026-11-26)
+
+- **No review before use.** A file sent in is checked automatically and taken in;
+  users then comment, vote and report. The maintainer only removes a file on a
+  report.
+- **Where:** a data repository of its own, `MetalMusings/ecat-devices`, on GitHub.
+  Sending in needs a GitHub account; reading and using do not.
+- **Licence:** contributions are CC0. Manuals are cited (name, version, section),
+  never copied.
+- **HAL lines** are allowed in shared files only in a form that can be checked
+  automatically: `load` only components from a list of plain logic (such as
+  `edge`, `and2`, `or2`, `not`, `oneshot`, `debounce`, `timedelay`, `mux2`,
+  `conv_*`, `scale`; never `loadusr`), lines only `setp` and `net`, and these only
+  between the slave's own pins (`{pin:...}`, `{signal:...}`) and the file's own
+  instances (`{name}-...`), never a machine signal. Today's `hal: lines` are free
+  text (`quirks.py`): a shared file could run a program or take over the E-stop.
+  `beckhoff-el7041.yaml` passes as it is.
+- **Fetching:** only when the user asks (a button); kept in `~/.cache/ecatsetup`;
+  each ecat release carries a snapshot, so nothing needs the network.
+- **Layers, chosen one by one:** shipped, shared, own. A shared fact is shown
+  new against existing, one at a time, and the user chooses; the aim may be to try
+  another setting (a setting goes to *Try it / Undo*). Nothing is used silently.
+- **Share strips the machine's choices** (pin names, scales, offsets) and keeps the
+  device facts and their sources.
+- **Reports:** standard choices plus free text ("tried it: worked / did not", with
+  firmware and revision); the author can come back to update or add. A report
+  counts for more than a vote.
+- **Measured SYNC0 results** are shared too, as suggestions only (they depend much
+  on the machine).
+- **Order:** first a prototype of the whole chain, in any order, for the user to
+  test the concept; then built properly; then users invited to test; then another
+  review of code and methods; then the real release; then ongoing improvements on a
+  stable base.
+
+### What must be right by the real release
+
+Once other users' files exist and older windows read the repository, these are
+hard to change: the file format with a version number (readers skip unknown fields
+instead of refusing), the repository's layout and file names, the index file's
+format, a report's structure. Free to change later: the window, stricter checks
+(as long as accepted files still pass), the report's questions, new fields. The
+prototype may be rough in the window but should try the hard-to-change parts.
+
+### The prototype
+
+1. **Writing:** "Remember for this device type" for three facts, each kept with
+   its source: an object is a command (SDO card), which input is which switch
+   (Switches card), and a setting (from *Keep as setting* on the Response card or
+   the Settings card).
+2. **Share:** strips the file and opens the browser at a new GitHub Discussion,
+   prefilled, with the file as text in the post (a link cannot attach a file;
+   quirk files are small).
+3. **Check:** a GitHub Action runs the same check as the window (ecatsetup's own
+   module, not a copy), stores the file as `devices/<vendor>-<product>/<n>.yaml`
+   and answers in the thread. Every file sent in is kept apart; none overwrites
+   another.
+4. **Report:** the window writes a comment with the standard choices, free text and
+   a small machine-readable block. GitHub lets the author edit a comment or add
+   another.
+5. **Index:** the Action rebuilds an index file each night from the threads as they
+   are (votes, reports), so the window reads plain files only: no GitHub API, no
+   token.
+6. **Fetch and choose:** a button; each fact new against existing, one by one; a
+   setting can be tried and undone.
+
+The Action cannot check values against ESI files (the repository has none, and they
+may not be put there): it checks the format and the file against itself. Values are
+checked against the ESI file and the drive's own dictionary in the window, when the
+file is used.
+
+The prototype uses a public test repository, `MetalMusings/ecat-devices-test`,
+marked as a test and removed when the real one is made. Creating it is done only on
+the user's word.
