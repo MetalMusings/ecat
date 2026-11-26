@@ -1286,7 +1286,7 @@ configuration).
 Tried 2026-11-14 on the plasma cutter's bus: during the window's I/O test an
 SDO read of an object the ECT60 does not have (`ethercat upload -p0 0x607F 0`)
 made the master log three ERROR lines for slave 0-0 (upload aborted, abort
-code 0x06020000, request failed). After the test, the *Slave status* page of
+code 0x06020000, request failed). After the test, the *Slave status* page (now *Live*) of
 X (slave 0) showed the three lines with their time in *Messages from the
 master*; Y (slave 1) showed none. The ordinary start-up lines ("Using slave 0
 as DC reference clock") are the master's own, not a slave's, and are not
@@ -1577,7 +1577,7 @@ What EtherCAT Setup knows about a device beyond its ESI file, SII and dictionary
 two kinds of file: quirk files (pins, settings, limits, homing, HAL lines:
 `ecatsetup/devices`, written by hand or from a configured slave with *Save as quirk
 file...*) and the measured SYNC0 results (`ecatsetup/measured/sync0.yaml`, written by
-*Remember this period* on the Test page). A user's quirk file for a device replaces the
+*Remember this period* on the Test page, now the Live tab). A user's quirk file for a device replaces the
 one that came with the program, so a file with one new fact would drop the others; that
 is why the measured results are a store of their own.
 

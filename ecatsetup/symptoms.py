@@ -28,7 +28,7 @@ SYMPTOMS = [
     ("The cycle jitters, or the servo thread reports late cycles",
      "The turn-around is not steady (3 cycles now and then), or the servo thread is delayed by "
      "other work.",
-     "Test page, Synchronisation: turnaround-cycles should be 2 and the send-offset spread "
+     "Live tab, Synchronisation: turnaround-cycles should be 2 and the send-offset spread "
      "small; sync0-shift-ns: auto places SYNC0 for it. Event log: servo thread late. The "
      "real-time computer's settings (isolated CPUs, latency) matter most."),
     ("A slave stays in PREOP or SAFEOP",

@@ -11,7 +11,7 @@ A6: 0x2004): input_settings() looks for them by name in the drive's
 dictionary. A drive's quirk file may name the physical input bits
 (`homing: input-bits`, such as IN5: 20).
 
-No Qt here: the Test page's Switches card and the homing card use it.
+No Qt here: the Workbench's Switches card and the homing card use it.
 """
 
 import re

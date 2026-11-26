@@ -552,7 +552,7 @@ class TestRun:
 class WatchRun(TestRun):
     """A LinuxCNC that runs, watched through its HAL: the pins read live,
     nothing set, nothing started or stopped. It has the TestRun's reading
-    side, so that the Test page shows the same view; whatever would change
+    side, so that the Live tab shows the same view; whatever would change
     something is refused or does nothing."""
 
     watching = True

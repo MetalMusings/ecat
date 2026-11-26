@@ -800,21 +800,28 @@ class TestWindow(WindowBase):
         w = self.window()
         w.test = mock.Mock(running=True, watching=False)
         try:
-            with mock.patch.object(w, "watch_busy_choice", return_value="test") as ask, \
+            with mock.patch.object(w, "watch_busy_choice", return_value="live") as ask, \
                     mock.patch.object(gui.testmode, "WatchRun") as watch, \
-                    mock.patch.object(w.tabs, "setCurrentWidget") as show:
+                    mock.patch.object(w, "show_tab") as show:
                 w.start_watch()
-            ask.assert_called_once_with(False)
+            ask.assert_called_once_with()
             watch.assert_not_called()
-            show.assert_called_once_with(w.test_page)
+            show.assert_called_once_with(w.trouble_page)
             with mock.patch.object(w, "watch_busy_choice", return_value="stop"), \
                     mock.patch.object(w, "stop_test") as stop:
                 w.start_watch()
             stop.assert_called_once()
+            # already watching: no question, the Live tab
+            w.test.watching = True
+            with mock.patch.object(w, "watch_busy_choice") as ask, \
+                    mock.patch.object(w, "show_tab") as show:
+                w.start_watch()
+            ask.assert_not_called()
+            show.assert_called_once_with(w.trouble_page)
         finally:
             w.test = None
 
-    def test_watch_busy_box_names_the_test_tab(self):
+    def test_watch_busy_box_names_the_live_tab(self):
         w = self.window()
         seen = {}
 
@@ -823,13 +830,97 @@ class TestWindow(WindowBase):
             seen["buttons"] = [b.text() for b in box.buttons()]
             return 0
         with mock.patch.object(gui.QMessageBox, "exec_", fake_exec):
-            self.assertIsNone(w.watch_busy_choice(False))
-        self.assertIn("Test tab", seen["text"])
+            self.assertIsNone(w.watch_busy_choice())
+        self.assertIn("Live tab", seen["text"])
         self.assertIn("cannot run while the I/O test", seen["text"])
         self.assertIn("Stop the test", seen["buttons"])
-        with mock.patch.object(gui.QMessageBox, "exec_", fake_exec):
-            w.watch_busy_choice(True)
-        self.assertNotIn("Stop the test", seen["buttons"])
+        self.assertIn("Go to the Live tab", seen["buttons"])
+
+    def test_live_tab_says_what_runs(self):
+        w = self.window()
+        live = w.trouble_page
+        live.show_source()
+        self.assertIn("No master runs here", live.source_text.text())
+        self.assertFalse(live.source_watch.isHidden())
+        self.assertTrue(live.source_stop.isHidden())
+        w.master_log.pid = 7
+        live.show_source()
+        self.assertIn("The free master runs", live.source_text.text())
+        w.test = mock.Mock(running=True, watching=False)
+        try:
+            live.show_source()
+            self.assertIn("The I/O test runs", live.source_text.text())
+            self.assertTrue(live.source_watch.isHidden())
+            self.assertEqual(live.source_stop.text(), "Stop the test")
+            w.test.watching = True
+            live.show_source()
+            self.assertIn("Watching LinuxCNC", live.source_text.text())
+            self.assertEqual(live.source_stop.text(), "Stop watching")
+            self.assertTrue(live.source_bench.isHidden())
+        finally:
+            w.test = None
+            w.master_log.pid = None
+
+    def test_live_pins_are_read_only(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["name"] = "cia402", "x"
+        s["cia402"] = {"mode": "csp"}
+        P = gui.testmode.Pin
+        pins = {"x.cia-state": P("x.cia-state", "uint", "OUT", "4"),
+                "x.statusword": P("x.statusword", "uint", "OUT", "0x1237"),
+                "x.error-code": P("x.error-code", "uint", "OUT", "0"),
+                "x.enable": P("x.enable", "bool", "IN", "FALSE")}
+        run = mock.Mock(running=True, watching=False)
+        run.pins = lambda prefix: {n: p for n, p in pins.items() if n.startswith(prefix)}
+        run.writable = lambda pin: True              # the Workbench could set it: Live does not
+        w.test, w.current = run, 0
+        try:
+            live = w.trouble_page
+            live.update_pins()
+            self.assertFalse(live.pins_card.isHidden())
+            self.assertEqual(live.pins.rowCount(), 4)
+            self.assertTrue(live.pins.isColumnHidden(4))
+            self.assertTrue(all(live.pins.cellWidget(r, 4) is None for r in range(4)))
+            self.assertIn("Operation enabled", live.pins_drive.text())
+            self.assertIn("0x1237", live.pins_drive.text())
+            self.assertNotIn("error", live.pins_drive.text())
+            pins["x.cia-state"].value, pins["x.error-code"].value = "6", "0x7500"
+            live.update_pins()
+            self.assertIn("Fault", live.pins_drive.text())
+            self.assertIn("error 0x7500", live.pins_drive.text())
+            r = live.pins.rows["x.cia-state"]
+            self.assertEqual(live.pins.item(r, live.pins.VALUE).text(), "6")
+        finally:
+            w.test = None
+        w.trouble_page.update_pins()
+        self.assertTrue(w.trouble_page.pins_card.isHidden())
+
+    def test_workbench_does_nothing_while_watching(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["name"] = "cia402", "x"
+        s["cia402"] = {"mode": "csp"}
+        run = mock.Mock(running=True, watching=True, period=1000000, log_path="")
+        run.pins = lambda prefix: {}
+        w.test, w.current = run, 0
+        try:
+            w.test_page.show_slave()
+            self.assertTrue(w.test_page.drive.isHidden())
+            self.assertTrue(w.test_page.all_card.isHidden())
+            self.assertIn("Live tab", w.test_page.banner_text.text())
+            run.watching = False
+            w.test_page.show_slave()
+            self.assertFalse(w.test_page.drive.isHidden())
+        finally:
+            w.test = None
+
+    def test_tab_names(self):
+        w = self.window()
+        names = [w.tabs.bar.tabText(i) for i in range(w.tabs.count())]
+        self.assertIn("Live", names)
+        self.assertIn("Workbench", names)
+        self.assertNotIn("Test", names)
 
     def test_sdo_card_is_off_while_watching(self):
         w = self.window()
@@ -1676,7 +1767,7 @@ class TestWindow(WindowBase):
         s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
         s["device"], s["name"] = "ECT60", "x"
         s["dc"] = {"assign-activate": "0x0300"}
-        tp = w.test_page
+        tp = w.trouble_page.sync
         w.session.period = 110000                   # a period nothing was measured at, between 100 and 125
         asked, told = [], []
         yes = lambda parent, title, text, *a: (asked.append(text), gui.QMessageBox.Yes)[1]
@@ -1744,7 +1835,7 @@ class TestWindow(WindowBase):
 
     def test_remember_text_follows_the_run(self):
         w = self.window()
-        tp = w.test_page
+        tp = w.trouble_page.sync
         pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE", "pll-err": "1",
                 "shift-time": "70000", "turnaround-cycles": "2"}
         w.session.cfg["master"] = {"dc": {"servo-thread-follows-ref-clock": True, "sync0-shift-ns": "auto"}}
@@ -1896,7 +1987,7 @@ class TestWindow(WindowBase):
 
     def test_slave_status_tab_marks_new_errors(self):
         """Errors or warnings that come while another tab is shown put a red or
-        amber dot on the Slave status tab; showing that tab clears it."""
+        amber dot on the Live tab; showing that tab clears it."""
         from ecatsetup import events
         T = events.Text
         d = tempfile.mkdtemp()
@@ -1925,7 +2016,7 @@ class TestWindow(WindowBase):
             self.assertIsNone(w.news_mark)          # seen
 
     def test_long_term_history_of_a_slave(self):
-        """The Slave status page shows the chosen slave's long-term history
+        """The Live page shows the chosen slave's long-term history
         from the run in the event log: its DC curve and the counters."""
         from ecatsetup import events
         sys.path.insert(0, os.path.dirname(__file__))
@@ -1982,7 +2073,7 @@ class TestMonitorRows(unittest.TestCase):
         rows = gui.monitor_rows(self.CFG, pins, seen)
         self.assertFalse(rows[0][0])
         self.assertIn("7 ns since you began looking", rows[0][1])     # the largest seen is kept
-        self.assertEqual(rows[1], (False, "Error counters grew since LinuxCNC loaded: io 5 (Slave status: "
+        self.assertEqual(rows[1], (False, "Error counters grew since LinuxCNC loaded: io 5 (Live tab: "
                                           "the event log says which, and when)"))
         self.assertIn("9 cycles in OP with the working counter not complete", rows[2][1])
         # an older ecat without the pins: nothing

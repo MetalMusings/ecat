@@ -6,8 +6,8 @@ program. Usage:
 
     scripts/docs-screenshots [--out DIR] [NAME ...]
 
-NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-test, gui-response,
-gui-status, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply, gui-timing, gui-help);
+NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-workbench, gui-response,
+gui-live, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply, gui-timing, gui-help);
 without names all are taken. Look at them before committing: a change in
 the window can need another state than the one shown here.
 """
@@ -21,7 +21,7 @@ import types
 from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-test", "gui-sync", "gui-response", "gui-status",
+NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-workbench", "gui-sync", "gui-response", "gui-live",
          "gui-settings", "gui-settings-picker", "gui-hal", "gui-hal-apply", "gui-timing", "gui-help"]
 
 # English system messages (strerror) and no display: set before anything loads
@@ -124,10 +124,10 @@ class Shots:
     def bus_pages(self):
         w = self.window()
         self.page(w, w.start_page, "gui-start")
-        self.page(w, w.trouble_page, "gui-status")     # no slave chosen yet
+        self.page(w, w.trouble_page, "gui-live")     # no slave chosen yet
         self.page(w, w.bus_page, "gui-bus", gui.MASTER_ITEM)
         self.page(w, w.bus_page, "gui-slave", 0)
-        self.page(w, w.test_page, "gui-test")
+        self.page(w, w.test_page, "gui-workbench")
         if self.want("gui-sync"):
             self.sync(w)
         if self.want("gui-response"):
@@ -180,7 +180,7 @@ class Shots:
         pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
                 "shift-time": "144000", "turnaround-cycles": "2",
                 "auto-shift-margin": "41666", "auto-shift-input-margin": "41666"}
-        page = w.test_page
+        page = w.trouble_page.sync
         page.ok_since = time.monotonic() - 125
         real = gui.irq_row
         gui.irq_row = lambda iface: (True, "enp2s0's interrupts are on CPU 3, isolated for real "
@@ -195,8 +195,8 @@ class Shots:
         page.ok_since = time.monotonic() - 125
         page.show_sync(pins.get, 250000)
         self.settle()
-        page.sync_card.resize(900, page.sync_card.sizeHint().height())
-        self.save(page.sync_card, "gui-sync")
+        page.resize(900, page.sizeHint().height())
+        self.save(page, "gui-sync")
 
     def response(self, w):
         """The Response card after two measurements of the simulated drive on the bus

@@ -81,8 +81,12 @@ or `theme: dark`) for the next start. Light is the default, and the
 screenshots in this document show it.
 
 Five tabs, in the order you normally use them: **Start**, **Bus**,
-**Slave status**, **Test**, **HAL & LinuxCNC**; and a sixth, **Timing**,
+**Live**, **Workbench**, **HAL & LinuxCNC**; and a sixth, **Timing**,
 for the computer itself ([The computer's timing](#the-computers-timing)).
+*Live* is for looking: what the bus and the slaves do now, from whatever
+runs (the free master, the I/O test, or a LinuxCNC being watched), read
+only. *Workbench* is for doing: setting outputs, SDOs, moving, homing and
+tuning a drive; it needs the I/O test, so LinuxCNC must not run.
 
 ### Start
 
@@ -345,12 +349,30 @@ Choosing a slave shows:
 - **Settings** (continued): *Remove setting* removes the selected rows;
 - **Notes from the proposal**.
 
-The buttons *Status* and *Test this slave* in the slave's header jump to
-the other tabs with the slave chosen.
+The buttons *Live* and *Workbench* in the slave's header jump to those
+tabs with the slave chosen.
 
-### Slave status
+### Live
 
-![Slave status](images/gui-status.png)
+![Live](images/gui-live.png)
+
+What runs and what the bus does now; nothing here changes the machine.
+
+- **What runs**: the free master (slaves in PREOP: they can be examined),
+  the I/O test (started on the Workbench) or a LinuxCNC being watched, or
+  nothing. *Watch LinuxCNC (read only)* starts watching a LinuxCNC that
+  runs; *Stop watching* (or *Stop the test*) ends it. LinuxCNC cannot run
+  while the I/O test has the bus: *Watch LinuxCNC* pressed during the test
+  says so and offers to stop the test.
+- **Synchronisation**, while the test or a watch runs: DC state, where
+  SYNC0 falls and the turn-around, the `pll-err` spread, the room for two
+  cycles, where the network card's interrupts are, what was measured on
+  the drives, the frames the master lost, and the long-term monitoring's
+  rows; *Remember this period for the drives...* keeps what a good (or
+  refused) run shows ([details](#synchronisation-in-the-test-mode)).
+- **Pins (the chosen slave)**, while the test or a watch runs: every pin
+  of the slave with its value, read only, and for a drive its CiA 402
+  state, status word and error code in one line.
 
 Diagnosis of the slaves on the bus: *Examine again* / *Examine all*. For
 the chosen slave the page shows a series of steps (each ok, warning or
@@ -377,7 +399,7 @@ needs no *Examine*: the component records it while LinuxCNC or the test
 runs ([long-term monitoring](#the-component-in-linuxcnc)).
 
 When the master reports an error or a warning while another tab is shown,
-the *Slave status* tab gets a dot: red for an error, amber for warnings only;
+the *Live* tab gets a dot: red for an error, amber for warnings only;
 its tooltip says how many. Showing the tab clears it.
 
 The free master (`ec_master`, started with `ethercat-uspace start`) logs to
@@ -404,19 +426,16 @@ bus](#a-capture-of-the-bus)).
 At the bottom, **Symptoms** lists what is seen in LinuxCNC, what it usually
 comes from and what to do.
 
-### Test
+### Workbench
 
-![Test](images/gui-test.png)
+![Workbench](images/gui-workbench.png)
 
 Works with no LinuxCNC. *Start the I/O test* runs `ecat` in `halrun` on
 the bus; stop the kernel master first, or the two share the NIC
-([Getting started](getting-started.md#getting-started)). For the chosen slave:
+([Getting started](getting-started.md#getting-started)). The test's
+synchronisation and every slave's pins also show on the *Live* tab. For
+the chosen slave:
 
-- **Synchronisation**: DC state, where SYNC0 falls and the turn-around, the
-  `pll-err` spread, the room for two cycles, where the network card's
-  interrupts are, and what was measured on the drives; *Remember this period for
-  the drives...* keeps what a good (or refused) run shows
-  ([details](#synchronisation-in-the-test-mode));
 - **Outputs** and **Inputs**, live, and **All pins**. A pin's tooltip
   names the object it is in the process data (`0x60FD:00`, `0x6041:00 bit
   2`, with its name and PDO); *Object numbers* in the tables' heads shows
@@ -425,18 +444,18 @@ the bus; stop the kernel master first, or the two share the NIC
   have it too; pins the profile works out (`fault-reason`) have none.
   Outputs are set
   here and go back to 0 when the test stops;
-- **SDO**: read and write a CoE object while a master runs;
+- **SDO**: read and write a CoE object while a master runs (the test or the
+  free master; not while LinuxCNC is watched);
 - for a drive: the **CiA 402 state chain**, live values, the status word,
   and **Move**, which can move the axis. It writes limits to the drive,
   needs *Hold to enable* held down (a heartbeat shuts the drive down if
   the window hangs), has jogs, runs, homing and *Reset fault*, and puts
-  the drive's limits back with *Done*. Read [test mode](#test-mode)
-  before using it, and have the user at the machine.
+  the drive's limits back with *Done*; **Switches** and **Response** (tuning).
+  Read [test mode](#test-mode) before using it, and have the user at the
+  machine.
 
-*Watch LinuxCNC that runs (read only)* shows the pins of a LinuxCNC that is
-already running and changes nothing. LinuxCNC cannot run while the I/O test
-has the bus: pressed during the test, the button says so and offers the
-*Test* tab (where the test's live values are) or to stop the test.
+While a LinuxCNC is watched the Workbench shows only that LinuxCNC owns the
+bus: nothing can be done here then, and its values are on the *Live* tab.
 
 ### HAL & LinuxCNC
 
@@ -612,8 +631,8 @@ has not been tried at a machine yet.
    it is connected with `<=>`). Writing replaces the simulated encoder on
    those signals; the rest of the simulation (the speed command) stays
    until you take it out.
-5. **Check it by hand.** In the *Test* page (the free-running master and
-   `halrun`, no LinuxCNC) turn the spindle by hand: `enc.pos` counts one
+5. **Check it by hand.** In the I/O test on the *Workbench* (`halrun`,
+   no LinuxCNC) turn the spindle by hand: `enc.pos` counts one
    per turn in the direction you expect (if it is backwards, make
    `pos-scale` negative), and `index-enable` clears at the index pulse,
    where `pos` returns to 0. Only then run the machine.
@@ -700,7 +719,7 @@ command and what you want to read back.
    its pins (`mb2hal.vfd-cmd...`) to the spindle as for a USB adapter. The
    [HAL check](#checking-the-hal-files) warns if `SERIAL_BITS` or
    `SERIAL_PARITY` differ from the frame on the card.
-5. **Check it.** With LinuxCNC running (or the *Test* page's I/O test,
+5. **Check it.** With LinuxCNC running (or the I/O test on the *Workbench*,
    which loads `ecat` and so makes the port), these pins tell where it
    stops:
 
@@ -755,8 +774,8 @@ master package 1.4 or later.
    - *Gateway*, *DNS server*, *Host name* and *MAC address* can stay
      empty for a web page.
 3. **Save**, and write into LinuxCNC (*Apply*) as for any slave.
-4. **Start LinuxCNC** (or the *Test* page's I/O test, which loads `ecat`
-   too). When the bus is in OP, try it from a terminal on the same
+4. **Start LinuxCNC** (or the I/O test on the *Workbench*, which loads
+   `ecat` too). When the bus is in OP, try it from a terminal on the same
    computer (the card names both):
 
    ```
@@ -797,7 +816,7 @@ If it does not work:
 |---|---|
 | no *Network (EoE)* card | the slave has no EoE (step 1) |
 | `ping`: "Network is unreachable", or `ip addr show eoe0s4` has no address | LinuxCNC or the test is not running, the *computer's address* field is empty, or the master package is older than 1.4 (`ecat` then prints "this master cannot set eoe.host-ip" at start) |
-| `ping`: no answer, the device has the address | the slave did not take the address (*Slave status*, "Messages from the master": a set-IP error), has a fixed address of its own, or the subnet is also the computer's ordinary network (`ip route`) |
+| `ping`: no answer, the device has the address | the slave did not take the address (*Live* tab, "Messages from the master": a set-IP error), has a fixed address of its own, or the subnet is also the computer's ordinary network (`ip route`) |
 | `ping` answers, the browser does not | `http://` and port (the device's manual), a proxy setting in the browser |
 | the master's log says "No EoE processing because of missing callbacks!" | the master package is 1.3 or older |
 
@@ -850,7 +869,8 @@ to OP, as described above.
 
 ![The Synchronisation card during a 250 us run](images/gui-sync.png)
 
-While a test runs (*Test* page), the *Synchronisation* card shows, from
+While the I/O test runs, or LinuxCNC is watched, the *Synchronisation*
+card on the *Live* tab shows, from
 the master's pins (`ecat.0.*`):
 - whether all slaves are in OP;
 - distributed clocks: how many slaves use them, and whether the
@@ -915,7 +935,7 @@ point 4, which is a deliberate act:
 
 1. **Is it there, and is it the one the file expects?** The bus list, and
    the line under it that compares the bus with the configuration.
-2. **Why is it not in OP?** *Examine* on the *Slave status* page (or
+2. **Why is it not in OP?** *Examine* on the *Live* tab (or
    `ecatsetup --diagnose`): the slave's AL state and status code in plain
    words, and the master's own messages about it.
 3. **Is the cable or the connector at fault, or the slave's own
@@ -950,7 +970,7 @@ explains the fault.
 
 ### Step 2: why it is not in OP
 
-1. On the *Slave status* page, choose the slave and press *Examine again*
+1. On the *Live* tab, choose the slave and press *Examine again*
    (or *Examine all*; on the command line `ecatsetup --diagnose`, which
    asks for no SDOs of slaves without CoE). It reads, and changes nothing.
 2. Read the AL state and status code. The page gives the code's meaning
@@ -1002,7 +1022,7 @@ explains the fault.
 
 ### Step 4: in OP, with the I/O test
 
-1. Stop LinuxCNC. On the *Test* page, *Start the I/O test* runs the
+1. Stop LinuxCNC. On the *Workbench*, *Start the I/O test* runs the
    configuration in `halrun` and takes the slaves to OP ([test mode](#test-mode)).
 2. **Inputs**: change the signal (a switch, a sensor) and watch the pin.
    **Outputs**: set one, and see the device react. Make sure nothing
@@ -1017,7 +1037,7 @@ explains the fault.
    DC sync check failed, the turn-around (2 cycles is the aim), and how
    much the frame's send time varies. The slave's own view, where it has
    the ETG.1020 objects 0x1C32 (outputs) and 0x1C33 (inputs), is on the
-   *Slave status* page after *Examine*: its sync mode and cycle, the time
+   *Live* tab after *Examine*: its sync mode and cycle, the time
    its own work takes (`:06`) and the shortest cycle it states (`:05`), and
    while watched the cycles without new process data (`:0B`, the frame
    came after the slave's cycle started), the cycles too short for it
@@ -1036,7 +1056,7 @@ explains the fault.
    `scripts/ecat-events-follow` follows it live in a terminal.
 2. *Watch LinuxCNC (read only)* shows the pins of a running LinuxCNC;
    repeat what went wrong and see which value changes first.
-3. **Symptoms**, at the bottom of the *Slave status* page, lists what is
+3. **Symptoms**, at the bottom of the *Live* tab, lists what is
    seen in LinuxCNC, what it usually comes from and where to look.
 4. To ask for help: *Save report...* ([the report](#the-report)) and a few
    words on what you saw. For a device the developer does not have, add
@@ -1049,7 +1069,7 @@ explains the fault.
 
 ## Test mode
 
-EtherCAT Setup's Test page runs the configuration being edited, saved or
+EtherCAT Setup's I/O test (on the *Workbench*) runs the configuration being edited, saved or
 not, in `halrun` with the `ecat` component and a servo thread, without
 LinuxCNC. It is the same code that runs the machine.
 
@@ -1262,7 +1282,7 @@ There is no PID in LinuxCNC to tune. What LinuxCNC sees is the following
 error, `pos-cmd` - `pos-fb`, and `FERROR` must allow for it. Tuning here
 means finding what that error is made of and making the parts that are
 not the bus small, one change at a time, with a measurement before and
-after. The *Response* card on the Test page does the measuring and
+after. The *Response* card on the *Workbench* does the measuring and
 comparing; the details of each line are in [Measuring a drive's
 response](#measuring-a-drives-response) below.
 
@@ -1279,7 +1299,7 @@ first.*
 - The machine is free to move the test's distance both ways, someone is
   at it with the emergency stop within reach, and the drive is a `cia402`
   slave in CSP. The drive moves only while *Measure (hold)* is held.
-- Start the test (Test page), choose the drive on the *Move* card, give
+- Start the test (*Workbench*), choose the drive on the *Move* card, give
   its scale (counts per mm), travel, following error and max torque, and
   press *Write limits to the drive*. The Response card appears.
 - Record what the drive can tell: its own following error `0x60F4` and its
@@ -1514,19 +1534,19 @@ first part of tuning, the measuring.
 
 ### Watching LinuxCNC
 
-*Watch LinuxCNC that runs (read only)* on the *Test* page (or in the
-File menu) shows the pins of the `ecat` component in a LinuxCNC that
-runs, live, the same view as the test without anything that changes
-something: no output can be set, no drive limits are written, no drive is
-enabled, nothing is started or stopped, and *STOP* only ends the
-watching. It reads through `halcmd`, as the same user as LinuxCNC. The
+*Watch LinuxCNC (read only)* on the *Live* tab (or in the File menu)
+shows the pins of the `ecat` component in a LinuxCNC that runs, live, on
+the *Live* tab, without anything that changes something: no output can be
+set, no drive limits are written, no drive is enabled, nothing is started
+or stopped, and *STOP* only ends the watching; the *Workbench* is idle
+meanwhile. It reads through `halcmd`, as the same user as LinuxCNC. The
 *Synchronisation* card works too, so a slave's sync and a drive's state
 can be seen while the machine does its work. It stops by itself when
 LinuxCNC ends.
 
 The configuration open in the window is used to name the slaves; open
 the one LinuxCNC runs (`[ETHERCAT]CONFIG` in its INI file). The
-*Troubleshoot* page has a *Symptoms* guide: what is seen in LinuxCNC,
+*Live* tab has a *Symptoms* guide: what is seen in LinuxCNC,
 what it usually comes from, and where to look.
 
 Tried against a running LinuxCNC (the plasma cutter's QtPlasmaC with
@@ -2298,7 +2318,7 @@ the servo thread. What that means:
   difference), `<slave>.dc-diff-max-ns` (the largest since loading),
   `<slave>.error-count` (all monitored counters' growth since loading),
   `ecat.0.wc-bad-cycles` and (master 1.7) `ecat.0.frames-lost`. The *Synchronisation* card (test and *Watch
-  LinuxCNC*) and the *Long-term* card on the *Slave status* page show them.
+  LinuxCNC*) and the *Long-term* card on the *Live* tab show them.
 - `ecat.take-down` does the same on request while the thread runs, and
   `ecat-take-down` sets it and waits for PREOP; it is no longer needed in
   `[HAL]SHUTDOWN`.
@@ -2384,7 +2404,7 @@ Measure your own:
    cycle. `latency-histogram --nox --base N --servo N` (LinuxCNC's own tool) shows the
    thread's latency without the bus.
 4. Shorten the period in steps. When a drive refuses OP, or cycles are lost, go back
-   one step. Use *Remember this period for the drives...* on the Test page after a
+   one step. Use *Remember this period for the drives...* on the *Live* tab after a
    run that was good, so that the slave page knows it next time.
 
 ### CiA 402 drives
@@ -3167,7 +3187,7 @@ Switching between the two, on the homing card and then Apply, changes
   through it, and LinuxCNC does not start with such a line after
   switching back. Apply warns about them.
 
-The Test page's *Home (hold)* on the Move card homes the drive the same
+The *Workbench*'s *Home (hold)* on the Move card homes the drive the same
 way for such a joint (`home-hold` set): the drive's method, the mode
 changes, enabling it again and `stat-homed` are tried there, a failure
 only stops the homing. The module's own part (LinuxCNC's homing state,
@@ -3197,7 +3217,7 @@ configuration):
    pulses/s², and the ECT60's `0x2030:01`–`:06` and `0x2022`, see
    [Homing by the drive](#homing-by-the-drive).) Save.
 3. **Try it in the test first** ([PP, PV and homing](#pp-pv-and-homing)):
-   on the *Test* page, *Move* card, write the limits, tick *The homing may
+   on the *Workbench*, *Move* card, write the limits, tick *The homing may
    move the axis* and hold *Home (hold)*, away from the stop at first,
    with the emergency stop within reach. A switch on the drive's input
    can be checked before, in the I/O test (for the ECT60, `0x60FD` bit 2
@@ -3935,10 +3955,10 @@ number that respond is still reported offline.
 
 To see it:
 
-- in the window: the *Slave status* page, *Event log*, newest first,
+- in the window: the *Live* tab, *Event log*, newest first,
   refreshed every 2 s; *This run* or *The run before*, and *Only this
   slave*. *This run* also has the free master's messages of the window's
-  session ("free master: ...", see [Slave status](#slave-status));
+  session ("free master: ...", see [Live](#live));
 - on the command line: `ecatsetup --events` (this or the last run),
   `ecatsetup --events prev`; `ecatsetup --diagnose` shows each slave's
   messages from the master (from the latest run that has any) and ends with
@@ -4009,7 +4029,7 @@ problem of the same `id`. Each problem and each cause carries its own tests.
 
 ### The report
 
-*Save report...* on the *Troubleshoot* page, or
+*Save report...* on the *Live* tab, or
 
 ```
 ecatsetup --report [FILE] --ini <machine>.ini
@@ -4054,7 +4074,7 @@ posting it.
 
 When a device does not work and the developer does not have one, a
 capture gives them the device as the program sees it. *Save capture...* on
-the *Slave status* page, beside *Save report...*, or
+the *Live* tab, beside *Save report...*, or
 
 ```
 ecatsetup --capture [FILE] --esi <ESI folder> [--ini <machine>.ini]

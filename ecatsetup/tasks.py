@@ -10,7 +10,7 @@ TASKS = [
       ("Check the slaves' names, modes and pins.", "bus", "Bus"),
       ("Choose the INI file, connect each joint to a drive, and write: the simulation is "
        "replaced, the HAL files checked.", "hal", "HAL && LinuxCNC"),
-      ("Try the I/O and a drive's first moves without LinuxCNC.", "test", "Test")]),
+      ("Try the I/O and a drive's first moves without LinuxCNC.", "test", "Workbench")]),
     ("Changing a configuration that runs",
      "You edited HAL files, or the bus changed (a slave added, moved or replaced).",
      [("Open the machine's ethercat.yaml.", "open", "Open..."),
@@ -23,15 +23,15 @@ TASKS = [
        "Choose ESI files..."),
       ("Read the bus, and look at where the proposal comes from.", "scan", "Rescan the bus"),
       ("Check its process data, pins, sync and settings.", "bus", "Bus"),
-      ("Run it and watch the synchronisation.", "test", "Test"),
+      ("Start the I/O test on the Workbench, then watch the synchronisation on the Live tab.", "test", "Workbench"),
       ("Keep what you chose as a quirk file for the device.", "bus", "Bus"),
       ("If it does not work, save a capture of the bus for the developer: the device as the "
-       "program sees it.", "status", "Slave status")]),
+       "program sees it.", "status", "Live")]),
     ("Using a slave by hand",
      "Reading and setting I/O, moving a drive, trying homing, with no LinuxCNC.",
      [("Read the bus.", "scan", "Rescan the bus"),
       ("Start the test, pick the slave, set outputs or move a drive in small steps.", "test",
-       "Test")]),
+       "Workbench")]),
     ("Tuning a servo drive",
      "A CSP drive lags or overshoots, or you want FERROR right: measure what its following "
      "error is made of and change one thing at a time, with no LinuxCNC.",
@@ -39,11 +39,11 @@ TASKS = [
       ("Have the drive's own following error (0x60F4) and torque (0x6077) in its process data "
        "(the Response card can add them).", "bus", "Bus"),
       ("Start the test, choose the drive on the Move card and write its limits; the machine "
-       "must be free to move and someone at it.", "test", "Test"),
+       "must be free to move and someone at it.", "test", "Workbench"),
       ("Measure on the Response card and read what it points at; try one setting at a time "
-       "and keep what helps.", "test", "Test"),
+       "and keep what helps.", "test", "Workbench"),
       ("For a drive with 0x60B1 / 0x60B2: try LinuxCNC's feedforward on the same card and "
-       "keep it in the configuration.", "test", "Test"),
+       "keep it in the configuration.", "test", "Workbench"),
       ("Save, write into LinuxCNC, and set FERROR from the card's last line.", "hal",
        "HAL && LinuxCNC")]),
     ("Checking the computer's timing",
@@ -59,6 +59,6 @@ TASKS = [
      "Something unexpected happens and a slave may be the cause.",
      [("Watch the pins live without touching anything.", "watch", "Watch LinuxCNC"),
       ("Read the slaves' states and error counters, the event log and the symptom guide.",
-       "status", "Slave status"),
-      ("Save a report to attach when asking for help.", "status", "Slave status")]),
+       "status", "Live"),
+      ("Save a report to attach when asking for help.", "status", "Live")]),
 ]

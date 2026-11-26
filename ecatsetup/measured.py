@@ -5,7 +5,7 @@ Two files with the same format: the results that come with EtherCAT Setup
 (ecatsetup/measured/sync0.yaml) and the user's own
 (~/.config/ecatsetup/measured/sync0.yaml, or $ECATSETUP_MEASURED); they
 are added together, the user's winning for the same period. Written from
-the Test page ("Remember this period"). The component never reads them.
+the Live tab ("Remember this period"). The component never reads them.
 
 Only the periods that were tried count: a result "ok at 125 us" and
 "refused at 100 us" say nothing about 110 us.
@@ -201,7 +201,7 @@ def record(slave, period_ns, result, al_status=None, note="", today=None):
                         if not isinstance(r, dict) or r.get("period-us") != new["period-us"]] + [new]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
-        f.write("# Measured by EtherCAT Setup (Test page, Remember this period). See\n"
+        f.write("# Measured by EtherCAT Setup (Live tab, Remember this period). See\n"
                 "# ecatsetup/measured/sync0.yaml for what the lines mean.\n")
         yaml.safe_dump(entries, f, sort_keys=False, default_flow_style=None, allow_unicode=True, width=1000)
     return path

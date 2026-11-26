@@ -178,9 +178,9 @@ back). Before moving a drive:
 
 **5. In LinuxCNC.** Only now run the copy of your configuration. Start
 with the machine unable to do harm (no power to the axes, the
-spindle or the torch off). *Watch LinuxCNC that runs (read only)* on the
-*Test* page shows the pins live without changing anything, and if
-something is wrong the *Slave status* page, the event log and *Save
+spindle or the torch off). *Watch LinuxCNC (read only)* on the
+*Live* tab shows the pins live without changing anything, and if
+something is wrong the *Live* tab's diagnosis, the event log and *Save
 report...* give what to send when you ask for help
 ([event log](ecatsetup.md#event-log-and-report)).
 
@@ -200,6 +200,6 @@ Most problems are the two masters on one interface, the wrong network
 interface in the file, or a network card without XDP (use the transport
 `raw`). The
 list of the usual symptoms and what they come from is on the
-*Troubleshoot* page of the window, and `ecatsetup --diagnose` reports
+*Live* tab of the window, and `ecatsetup --diagnose` reports
 per slave why it is not in OP. [Troubleshooting a
 slave](ecatsetup.md#troubleshooting-a-slave) goes through it step by step.
