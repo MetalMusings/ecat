@@ -340,7 +340,7 @@ class TestWindow(WindowBase):
         from ecatsetup import tasks
         w = self.window()
         pages = {"bus": w.bus_page, "status": w.trouble_page, "test": w.test_page,
-                 "hal": w.hal_page, "timing": w.timing_page}
+                 "live": w.live_page, "hal": w.hal_page, "timing": w.timing_page}
         known = set(pages) | {"scan", "open", "update", "esi", "watch", "ini"}
         self.assertEqual({t for _, _, steps in tasks.TASKS for _, t, _ in steps} - known, set())
         self.assertEqual(len(w.start_page.buttons), sum(len(x[2]) for x in tasks.TASKS))
@@ -806,7 +806,7 @@ class TestWindow(WindowBase):
                 w.start_watch()
             ask.assert_called_once_with()
             watch.assert_not_called()
-            show.assert_called_once_with(w.trouble_page)
+            show.assert_called_once_with(w.live_page)
             with mock.patch.object(w, "watch_busy_choice", return_value="stop"), \
                     mock.patch.object(w, "stop_test") as stop:
                 w.start_watch()
@@ -817,7 +817,7 @@ class TestWindow(WindowBase):
                     mock.patch.object(w, "show_tab") as show:
                 w.start_watch()
             ask.assert_not_called()
-            show.assert_called_once_with(w.trouble_page)
+            show.assert_called_once_with(w.live_page)
         finally:
             w.test = None
 
@@ -838,7 +838,7 @@ class TestWindow(WindowBase):
 
     def test_live_tab_says_what_runs(self):
         w = self.window()
-        live = w.trouble_page
+        live = w.live_page
         live.show_source()
         self.assertIn("No master runs here", live.source_text.text())
         self.assertFalse(live.source_watch.isHidden())
@@ -876,7 +876,7 @@ class TestWindow(WindowBase):
         run.writable = lambda pin: True              # the Workbench could set it: Live does not
         w.test, w.current = run, 0
         try:
-            live = w.trouble_page
+            live = w.live_page
             live.update_pins()
             self.assertFalse(live.pins_card.isHidden())
             self.assertEqual(live.pins.rowCount(), 4)
@@ -893,8 +893,30 @@ class TestWindow(WindowBase):
             self.assertEqual(live.pins.item(r, live.pins.VALUE).text(), "6")
         finally:
             w.test = None
-        w.trouble_page.update_pins()
-        self.assertTrue(w.trouble_page.pins_card.isHidden())
+        w.live_page.update_pins()
+        self.assertTrue(w.live_page.pins_card.isHidden())
+
+    def test_live_overview_of_the_slaves(self):
+        w = self.window()
+        s0, s1 = w.session.slave(0), w.session.slave(1)
+        s0["profile"], s0["name"] = "cia402", "x"
+        s0["cia402"] = {"mode": "csp"}
+        s1["name"] = "io"
+        every = {"x.slave-online": "TRUE", "x.slave-state-op": "TRUE", "x.cia-state": "4",
+                 "io.slave-online": "TRUE", "io.slave-state-op": "FALSE",
+                 "io.slave-state-preop": "TRUE"}
+        live = w.live_page
+        live.update_overview(every)
+        t = live.overview_table
+        self.assertFalse(live.overview.isHidden())
+        self.assertEqual([[t.item(r, c).text() for c in range(4)] for r in range(t.rowCount())],
+                         [["0", "x", "OP", "Operation enabled"], ["1", "io", "PREOP", ""]])
+        every["io.slave-online"] = "FALSE"
+        every["x.cia-state"] = "7"
+        live.update_overview(every)
+        self.assertEqual((t.item(0, 3).text(), t.item(1, 2).text()), ("Fault", "offline"))
+        live.update_overview({})
+        self.assertTrue(live.overview.isHidden())
 
     def test_workbench_does_nothing_while_watching(self):
         w = self.window()
@@ -918,8 +940,7 @@ class TestWindow(WindowBase):
     def test_tab_names(self):
         w = self.window()
         names = [w.tabs.bar.tabText(i) for i in range(w.tabs.count())]
-        self.assertIn("Live", names)
-        self.assertIn("Workbench", names)
+        self.assertEqual(names[2:5], ["Workbench", "Live", "Diagnose"])
         self.assertNotIn("Test", names)
 
     def test_timer_tables_are_not_filled_again_unchanged(self):
@@ -1788,7 +1809,7 @@ class TestWindow(WindowBase):
         s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
         s["device"], s["name"] = "ECT60", "x"
         s["dc"] = {"assign-activate": "0x0300"}
-        tp = w.trouble_page.sync
+        tp = w.live_page.sync
         w.session.period = 110000                   # a period nothing was measured at, between 100 and 125
         asked, told = [], []
         yes = lambda parent, title, text, *a: (asked.append(text), gui.QMessageBox.Yes)[1]
@@ -1856,7 +1877,7 @@ class TestWindow(WindowBase):
 
     def test_remember_text_follows_the_run(self):
         w = self.window()
-        tp = w.trouble_page.sync
+        tp = w.live_page.sync
         pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE", "pll-err": "1",
                 "shift-time": "70000", "turnaround-cycles": "2"}
         w.session.cfg["master"] = {"dc": {"servo-thread-follows-ref-clock": True, "sync0-shift-ns": "auto"}}
@@ -2094,7 +2115,7 @@ class TestMonitorRows(unittest.TestCase):
         rows = gui.monitor_rows(self.CFG, pins, seen)
         self.assertFalse(rows[0][0])
         self.assertIn("7 ns since you began looking", rows[0][1])     # the largest seen is kept
-        self.assertEqual(rows[1], (False, "Error counters grew since LinuxCNC loaded: io 5 (Live tab: "
+        self.assertEqual(rows[1], (False, "Error counters grew since LinuxCNC loaded: io 5 (Diagnose tab: "
                                           "the event log says which, and when)"))
         self.assertIn("9 cycles in OP with the working counter not complete", rows[2][1])
         # an older ecat without the pins: nothing
@@ -2979,7 +3000,7 @@ class TestNoStrayWindows(WindowBase):
         self.addCleanup(lambda: self.app.removeEventFilter(watch))
         w = self.window()
         w.show()
-        for page in (w.start_page, w.bus_page, w.trouble_page, w.test_page, w.hal_page):
+        for page in (w.start_page, w.bus_page, w.trouble_page, w.test_page, w.live_page, w.hal_page):
             w.tabs.setCurrentWidget(page)
             self.app.processEvents()
         w.refresh()

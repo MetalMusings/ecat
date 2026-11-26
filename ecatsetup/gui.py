@@ -1,6 +1,6 @@
 """EtherCAT Setup's window (PyQt5), laid out as the mockups in
 docs/development.md: a header with the configuration and the
-bus's state, and the pages Bus, Live, Workbench and HAL & LinuxCNC.
+bus's state, and the pages Bus, Workbench, Live, Diagnose and HAL & LinuxCNC.
 
     ecatsetup --gui [ethercat.yaml] [--ini machine.ini] [--esi DIR]
 
@@ -8,9 +8,11 @@ bus's state, and the pages Bus, Live, Workbench and HAL & LinuxCNC.
   mode and sync, process data and pins, and settings; all editable,
   checked while editing, saved to ethercat.yaml.
 - Live: what runs (the free master, the I/O test, LinuxCNC watched), the
-  synchronisation and the chosen slave's pins live, read only; a slave's
-  way from INIT to OP, what it says (AL status code, CiA 402 state), its
-  cables, its own messages (0x10F3), the event log.
+  synchronisation, every slave's state and the chosen slave's pins, live
+  and read only.
+- Diagnose: a slave's way from INIT to OP, what it says (AL status code,
+  CiA 402 state), its cables, its own messages (0x10F3), the master's
+  messages, the long-term card, the event log and the symptoms.
 - Workbench: what is done with the bus (needs the I/O test, testmode.py:
   ecat in halrun): outputs set, SDOs read and written, a drive moved,
   homed, its switches tried and its response measured.
@@ -1300,9 +1302,12 @@ class SlaveView(QWidget):
         self.where = label("", "hint")
         row.addWidget(self.where)
         row.addStretch(1)
-        trouble = QPushButton("Live")
+        trouble = QPushButton("Diagnose")
         trouble.clicked.connect(lambda: win.show_tab(win.trouble_page))
         row.addWidget(trouble)
+        live = QPushButton("Live")
+        live.clicked.connect(lambda: win.show_tab(win.live_page))
+        row.addWidget(live)
         test = QPushButton("Workbench")
         test.clicked.connect(lambda: win.show_tab(win.test_page))
         row.addWidget(test)
@@ -3586,7 +3591,202 @@ class BusPage(QWidget):
         lay.addWidget(self.scroll, 1)
 
 
-# -- the Live page (class TroubleshootPage)
+# -- the Live page
+
+class LivePage(QWidget):
+    """What runs and what the bus does now, read only: the free master, the
+    I/O test or a LinuxCNC being watched; the Synchronisation card, every
+    slave's state, and the chosen slave's pins."""
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        content = QWidget()
+        lay = page_layout(content)
+        outer.addWidget(scroll(content))
+
+        # what runs: where the live values below come from
+        self.source = Card("What runs")
+        self.source_text = self.source.add(label(wrap=True))
+        srow = QHBoxLayout()
+        self.source_watch = QPushButton("Watch LinuxCNC (read only)")
+        self.source_watch.setToolTip("Show the pins of the ecat component in a running LinuxCNC, "
+                                     "live. Nothing is set; the machine is not touched.")
+        self.source_watch.clicked.connect(lambda: win.start_watch())
+        srow.addWidget(self.source_watch)
+        self.source_bench = QPushButton("Workbench")
+        self.source_bench.setToolTip("Start the I/O test there: the bus in OP without LinuxCNC; "
+                                     "its values show here too.")
+        self.source_bench.clicked.connect(lambda: win.show_tab(win.test_page))
+        srow.addWidget(self.source_bench)
+        self.source_stop = QPushButton("Stop watching")
+        self.source_stop.clicked.connect(lambda: win.stop_test())
+        srow.addWidget(self.source_stop)
+        srow.addStretch(1)
+        self.source.lay.addLayout(srow)
+        lay.addWidget(self.source)
+
+        self.sync = SyncCard(win)
+        self.sync.hide()
+        lay.addWidget(self.sync)
+
+        self.pins_card = Card("Pins (the chosen slave)", "Live and read only, every 200 ms: "
+                              "from the I/O test or from LinuxCNC being watched.")
+        self.pins_drive = self.pins_card.add(label(wrap=True))
+        self.pins_drive.setTextFormat(Qt.RichText)
+        self.pins = PinTable(win, readonly=True)
+        self.pins_card.add(self.pins)
+        self.pins_card.hide()
+        lay.addWidget(self.pins_card)
+        self.pins_for = None
+
+        # every slave of the file, one row each (every 2 s, from all pins)
+        self.overview = Card("Slaves", "Each slave's state, from the component's pins.")
+        self.overview_table = table(["Slave", "Name", "State", "Drive"], 3)
+        self.overview.add(self.overview_table)
+        self.overview.hide()
+        lay.insertWidget(lay.indexOf(self.pins_card), self.overview)
+
+        row = QHBoxLayout()
+        self.slave = QuietCombo()
+        self.slave.activated.connect(lambda i: win.select(self.slave.itemData(i), source=self))
+        row.addWidget(label("The chosen slave:", "hint"))
+        row.addWidget(self.slave)
+        row.addStretch(1)
+        self.pins_card.head.addLayout(row)
+        lay.addStretch(1)
+
+    def fill_slaves(self):
+        win = self.win
+        self.slave.blockSignals(True)
+        self.slave.clear()
+        for pos in win.positions():
+            self.slave.addItem("Slave %d · %s" % (pos, win.device(pos)), pos)
+        self.slave.setCurrentIndex(self.slave.findData(win.current))
+        self.slave.blockSignals(False)
+
+    def show_slave(self):
+        self.fill_slaves()
+        self.show_source()
+        self.update_pins()
+
+    def update_overview(self, every):
+        """Every slave's state from all pins (every: {pin: value}) of a run."""
+        cfg = self.win.session.cfg or {}
+        rows = []
+        for sl in cfg.get("slaves") or []:
+            n = sl.get("name")
+            if not n or sl.get("unused"):
+                continue
+            def v(pin):
+                return every.get("%s.%s" % (n, pin))
+            if v("slave-online") is None:
+                continue
+            if v("slave-state-op") == "TRUE":
+                state, colour = "OP", GREEN
+            elif v("slave-online") != "TRUE":
+                state, colour = "offline", RED
+            else:
+                state = next((x.upper() for x in ("safeop", "preop", "init")
+                              if v("slave-state-" + x) == "TRUE"), "?")
+                colour = AMBER
+            drive = ""
+            if sl.get("profile") == "cia402":
+                try:
+                    st = int(v("cia-state") or "-1")
+                except ValueError:
+                    st = -1
+                drive = DRIVE_STATES[st] if 0 <= st < len(DRIVE_STATES) else \
+                    "Fault" if st in (6, 7) else ""
+            rows.append(((str(sl.get("position")), None, "mono"), (n, None, None),
+                         (state, colour, None),
+                         (drive, RED if drive == "Fault" else None, None)))
+        put_rows(self.overview_table, rows)
+        self.overview.setVisible(bool(rows))
+
+    def show_source(self):
+        """The What runs card: the free master, the I/O test or LinuxCNC watched."""
+        win, run = self.win, self.win.test
+        running = run is not None and run.running
+        watching = running and run.watching
+        if watching:
+            text = ("<b>Watching LinuxCNC</b> &nbsp; The values below are read from its HAL; "
+                    "nothing is set, started or stopped from here.")
+        elif running:
+            text = ("<b>The I/O test runs</b> (Workbench) &nbsp; The values below are the "
+                    "test's. LinuxCNC cannot run while the test has the bus.")
+        elif getattr(win.master_log, "pid", None):
+            text = ("<b>The free master runs</b> &nbsp; The slaves wait in PREOP: Examine reads "
+                    "them, and the event log has the master's messages. Live values need the bus "
+                    "in OP: start LinuxCNC and watch it, or the I/O test on the Workbench.")
+        else:
+            text = ("<b>No master runs here</b> &nbsp; Start LinuxCNC and watch it, or the I/O "
+                    "test on the Workbench; the event log keeps the last runs.")
+        self.source_text.setTextFormat(Qt.RichText)
+        self.source_text.setText(text)
+        self.source_watch.setVisible(not running)
+        self.source_watch.setEnabled(win.session.cfg is not None and not win.busy)
+        self.source_bench.setVisible(not running or not watching)
+        self.source_stop.setVisible(running)
+        self.source_stop.setText("Stop watching" if watching else "Stop the test")
+        if not running:
+            self.sync.hide()
+            self.overview.hide()
+
+    def update_pins(self):
+        """The chosen slave's pins, live (timer), while a test or a watch runs."""
+        win, run = self.win, self.win.test
+        pos = win.current
+        s = win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
+        if run is None or not run.running or s is None or not s.get("name"):
+            self.pins_card.hide()
+            self.pins_for = None
+            return
+        prefix = "%s." % s["name"]
+        try:
+            pins = run.pins(prefix)
+            for a in config.axes(s):
+                if a + "." != prefix:
+                    pins.update(run.pins(a + "."))
+        except testmode.TestError:
+            return
+        key = (pos, frozenset(pins))
+        if key != self.pins_for:
+            d = win.session.dictionary(pos)
+            self.pins.fill(pins, prefix, run, halpins.sources(win.session.cfg),
+                           (lambda i, sub: d.name(i, sub)) if d else None)
+            self.pins_for = key
+        else:
+            self.pins.update_values(pins)
+        line = ""
+        if s.get("profile") == "cia402":
+            def v(n):
+                p = pins.get(prefix + n)
+                return p.value if p else None
+            try:
+                st = int(v("cia-state") or "-1")
+            except ValueError:
+                st = -1
+            state = DRIVE_STATES[st] if 0 <= st < len(DRIVE_STATES) else \
+                "Fault" if st in (6, 7) else "?"
+            try:
+                sw = "0x%04X" % int(v("statusword") or "0", 0)
+            except ValueError:
+                sw = "?"
+            try:
+                code = int(v("error-code") or "0", 0)
+            except ValueError:
+                code = 0
+            line = "<b>CiA 402:</b> %s &nbsp; status word %s%s" % (
+                state, sw, " &nbsp; error %s" % diagnose.error_text(code) if code else "")
+        self.pins_drive.setText(line)
+        self.pins_drive.setVisible(bool(line))
+        self.pins_card.show()
+
+
+# -- the Diagnose page (class TroubleshootPage)
 
 STEPS = [(1, "INIT", "Slave answers; identity read."),
          (2, "PREOP", "Mailbox works; SDOs can be read and written."),
@@ -3719,41 +3919,6 @@ class TroubleshootPage(QWidget):
         self.capture.clicked.connect(win.save_capture)
         row.addWidget(self.capture)
         lay.addLayout(row)
-
-        # what runs: where the live values below come from
-        self.source = Card("What runs")
-        self.source_text = self.source.add(label(wrap=True))
-        srow = QHBoxLayout()
-        self.source_watch = QPushButton("Watch LinuxCNC (read only)")
-        self.source_watch.setToolTip("Show the pins of the ecat component in a running LinuxCNC, "
-                                     "live. Nothing is set; the machine is not touched.")
-        self.source_watch.clicked.connect(lambda: win.start_watch())
-        srow.addWidget(self.source_watch)
-        self.source_bench = QPushButton("Workbench")
-        self.source_bench.setToolTip("Start the I/O test there: the bus in OP without LinuxCNC; "
-                                     "its values show here too.")
-        self.source_bench.clicked.connect(lambda: win.show_tab(win.test_page))
-        srow.addWidget(self.source_bench)
-        self.source_stop = QPushButton("Stop watching")
-        self.source_stop.clicked.connect(lambda: win.stop_test())
-        srow.addWidget(self.source_stop)
-        srow.addStretch(1)
-        self.source.lay.addLayout(srow)
-        lay.addWidget(self.source)
-
-        self.sync = SyncCard(win)
-        self.sync.hide()
-        lay.addWidget(self.sync)
-
-        self.pins_card = Card("Pins (the chosen slave)", "Live and read only, every 200 ms: "
-                              "from the I/O test or from LinuxCNC being watched.")
-        self.pins_drive = self.pins_card.add(label(wrap=True))
-        self.pins_drive.setTextFormat(Qt.RichText)
-        self.pins = PinTable(win, readonly=True)
-        self.pins_card.add(self.pins)
-        self.pins_card.hide()
-        lay.addWidget(self.pins_card)
-        self.pins_for = None
 
         flow = Card("When something goes wrong in a running machine",
                     "A guide: what to do then, in this order. None of it changes anything on "
@@ -4053,89 +4218,9 @@ class TroubleshootPage(QWidget):
         self.again.setEnabled(not win.busy and isinstance(win.current, int) and win.current >= 0)
         self.all.setEnabled(not win.busy)
 
-    def show_source(self):
-        """The What runs card: the free master, the I/O test or LinuxCNC watched."""
-        win, run = self.win, self.win.test
-        running = run is not None and run.running
-        watching = running and run.watching
-        if watching:
-            text = ("<b>Watching LinuxCNC</b> &nbsp; The values below are read from its HAL; "
-                    "nothing is set, started or stopped from here.")
-        elif running:
-            text = ("<b>The I/O test runs</b> (Workbench) &nbsp; The values below are the "
-                    "test's. LinuxCNC cannot run while the test has the bus.")
-        elif getattr(win.master_log, "pid", None):
-            text = ("<b>The free master runs</b> &nbsp; The slaves wait in PREOP: Examine reads "
-                    "them, and the event log has the master's messages. Live values need the bus "
-                    "in OP: start LinuxCNC and watch it, or the I/O test on the Workbench.")
-        else:
-            text = ("<b>No master runs here</b> &nbsp; Start LinuxCNC and watch it, or the I/O "
-                    "test on the Workbench; the event log keeps the last runs.")
-        self.source_text.setTextFormat(Qt.RichText)
-        self.source_text.setText(text)
-        self.source_watch.setVisible(not running)
-        self.source_watch.setEnabled(win.session.cfg is not None and not win.busy)
-        self.source_bench.setVisible(not running or not watching)
-        self.source_stop.setVisible(running)
-        self.source_stop.setText("Stop watching" if watching else "Stop the test")
-        if not running:
-            self.sync.hide()
-
-    def update_pins(self):
-        """The chosen slave's pins, live (timer), while a test or a watch runs."""
-        win, run = self.win, self.win.test
-        pos = win.current
-        s = win.session.slave(pos) if isinstance(pos, int) and pos >= 0 else None
-        if run is None or not run.running or s is None or not s.get("name"):
-            self.pins_card.hide()
-            self.pins_for = None
-            return
-        prefix = "%s." % s["name"]
-        try:
-            pins = run.pins(prefix)
-            for a in config.axes(s):
-                if a + "." != prefix:
-                    pins.update(run.pins(a + "."))
-        except testmode.TestError:
-            return
-        key = (pos, frozenset(pins))
-        if key != self.pins_for:
-            d = win.session.dictionary(pos)
-            self.pins.fill(pins, prefix, run, halpins.sources(win.session.cfg),
-                           (lambda i, sub: d.name(i, sub)) if d else None)
-            self.pins_for = key
-        else:
-            self.pins.update_values(pins)
-        line = ""
-        if s.get("profile") == "cia402":
-            def v(n):
-                p = pins.get(prefix + n)
-                return p.value if p else None
-            try:
-                st = int(v("cia-state") or "-1")
-            except ValueError:
-                st = -1
-            state = DRIVE_STATES[st] if 0 <= st < len(DRIVE_STATES) else \
-                "Fault" if st in (6, 7) else "?"
-            try:
-                sw = "0x%04X" % int(v("statusword") or "0", 0)
-            except ValueError:
-                sw = "?"
-            try:
-                code = int(v("error-code") or "0", 0)
-            except ValueError:
-                code = 0
-            line = "<b>CiA 402:</b> %s &nbsp; status word %s%s" % (
-                state, sw, " &nbsp; error %s" % diagnose.error_text(code) if code else "")
-        self.pins_drive.setText(line)
-        self.pins_drive.setVisible(bool(line))
-        self.pins_card.show()
-
     def show_slave(self):
         win = self.win
         self.fill_slaves()
-        self.show_source()
-        self.update_pins()
         pos = win.current
         r = win.reports.get(pos) if isinstance(pos, int) and pos >= 0 else None
         if r is None:
@@ -5746,7 +5831,7 @@ def monitor_rows(cfg, pins, seen):
         if n:
             errors.append("%s %d" % (s["name"], n))
     if errors:
-        rows.append((False, "Error counters grew since LinuxCNC loaded: %s (Live tab: the event "
+        rows.append((False, "Error counters grew since LinuxCNC loaded: %s (Diagnose tab: the event "
                      "log says which, and when)" % ", ".join(errors)))
     elif any(k.endswith(".error-count") for k in pins):
         rows.append((True, "No error counter of a slave grew since LinuxCNC loaded"))
@@ -6041,7 +6126,7 @@ class TestPage(QWidget):
         row.addStretch(1)
         row.addWidget(label("A LinuxCNC that runs is watched on the Live tab.", "hint"))
         to_live = QPushButton("Live")
-        to_live.clicked.connect(lambda: win.show_tab(win.trouble_page))
+        to_live.clicked.connect(lambda: win.show_tab(win.live_page))
         row.addWidget(to_live)
         self.start_card.add(row)
         self.starting = QWidget()
@@ -6240,7 +6325,7 @@ class TestPage(QWidget):
                 box.blockSignals(True)
                 box.setChecked(on)
                 box.blockSignals(False)
-        for t in (self.outputs, self.inputs, self.all_pins, self.win.trouble_page.pins):
+        for t in (self.outputs, self.inputs, self.all_pins, self.win.live_page.pins):
             t.show_objects(on)
         try:
             data = settings.load()
@@ -8529,6 +8614,7 @@ class MainWindow(QMainWindow):
         self.start_page = StartPage(self)
         self.bus_page = BusPage(self)
         self.trouble_page = TroubleshootPage(self)
+        self.live_page = LivePage(self)
         self.test_page = TestPage(self)
         self.hal_page = HalPage(self)
         self.timing_page = TimingPage(self)
@@ -8538,13 +8624,14 @@ class MainWindow(QMainWindow):
         self.help_from = None   # the page F1 or a ? came from, for Back
         self.tabs.addTab(self.start_page, "Start")
         self.tabs.addTab(self.bus_page, "Bus")
-        self.tabs.addTab(self.trouble_page, "Live")
         self.tabs.addTab(self.test_page, "Workbench")
+        self.tabs.addTab(self.live_page, "Live")
+        self.tabs.addTab(self.trouble_page, "Diagnose")
         self.tabs.addTab(self.hal_page, "HAL && LinuxCNC")
         self.tabs.addTab(self.timing_page, "Timing")
         self.tabs.addTab(self.help_page, "Help")
         # The master's messages: the free master's from the system journal
-        # (masterlog.py), and a mark on the Live tab for errors and
+        # (masterlog.py), and a mark on the Diagnose tab for errors and
         # warnings that came while another tab was shown.
         self.master_log = masterlog.MasterLog()
         self.news_seen = time.time()
@@ -8574,6 +8661,7 @@ class MainWindow(QMainWindow):
     def go(self, target):
         """A start page button: a page or an action."""
         pages = {"bus": self.bus_page, "status": self.trouble_page, "test": self.test_page,
+                 "live": self.live_page,
                  "hal": self.hal_page, "timing": self.timing_page}
         actions = {"scan": self.read_bus, "open": self.open_file, "update": self.update_from_bus,
                    "esi": self.add_esi, "watch": self.start_watch, "ini": self.choose_ini}
@@ -8783,6 +8871,7 @@ class MainWindow(QMainWindow):
             self.show_current()
         else:
             self.trouble_page.fill_slaves()
+            self.live_page.fill_slaves()
             self.test_page.fill_slaves()
 
     def select(self, key, source=None):
@@ -8803,7 +8892,8 @@ class MainWindow(QMainWindow):
     # the Help tab
 
     TAB_NAMES = (("start_page", "Start", "tab:start"), ("bus_page", "Bus", "tab:bus"),
-                 ("trouble_page", "Live", "tab:status"), ("test_page", "Workbench", "tab:test"),
+                 ("test_page", "Workbench", "tab:test"), ("live_page", "Live", "tab:live"),
+                 ("trouble_page", "Diagnose", "tab:status"),
                  ("hal_page", "HAL & LinuxCNC", "tab:hal"), ("timing_page", "Timing", "tab:timing"))
 
     def help_context(self, page=None):
@@ -8879,6 +8969,8 @@ class MainWindow(QMainWindow):
                 stack.setCurrentWidget(self.bus_page.slave)
         elif page is self.trouble_page:
             self.trouble_page.show_slave()
+        elif page is self.live_page:
+            self.live_page.show_slave()
         elif page is self.test_page:
             self.test_page.show_slave()
         elif page is self.hal_page:
@@ -9203,7 +9295,7 @@ class MainWindow(QMainWindow):
             self.refresh(keep_page=True)
 
     def examine(self, positions):
-        """Diagnose slaves (only reads) and show them on the Live page."""
+        """Diagnose slaves (only reads) and show them on the Diagnose page."""
         def work(progress):
             on_bus = set(tool.slave_positions())
             pos_list = [p for p in (positions or self.positions() or sorted(on_bus))
@@ -9346,8 +9438,8 @@ class MainWindow(QMainWindow):
                 first = self.positions()[:1]
                 if first:
                     self.current = first[0]
-            if self.tabs.currentWidget() is not self.trouble_page:
-                self.tabs.setCurrentWidget(self.trouble_page)
+            if self.tabs.currentWidget() is not self.live_page:
+                self.tabs.setCurrentWidget(self.live_page)
             self.refresh()
         self.run("Looking for LinuxCNC...", lambda progress: run.start(progress), started)
 
@@ -9371,11 +9463,11 @@ class MainWindow(QMainWindow):
 
     def watch_while_testing(self):
         if self.test.watching:          # already watched: its values are on the Live tab
-            self.show_tab(self.trouble_page)
+            self.show_tab(self.live_page)
             return
         choice = self.watch_busy_choice()
         if choice == "live":
-            self.show_tab(self.trouble_page)
+            self.show_tab(self.live_page)
         elif choice == "stop":
             self.stop_test()
 
@@ -9409,7 +9501,7 @@ class MainWindow(QMainWindow):
                                     % (drivetest.RESTORE_FILE, "\n".join(failed)))
             watched = run.watching
             self.test = None
-            self.trouble_page.sync.reset()
+            self.live_page.sync.reset()
             if watched:
                 self.set_messages([(GREY, "", ["Stopped watching; LinuxCNC was not touched."])])
                 self.refresh()
@@ -9534,7 +9626,7 @@ class MainWindow(QMainWindow):
             tail = run.log_tail()
             run.stop()
             self.test = None
-            self.trouble_page.sync.reset()
+            self.live_page.sync.reset()
             if run.watching:
                 self.set_messages([(AMBER, "", ["LinuxCNC has stopped: the watching ended."])])
             else:
@@ -9564,8 +9656,8 @@ class MainWindow(QMainWindow):
             ("blue" if all_op else "red") if run.watching else "amber" if all_op else "red")
         if self.tabs.currentWidget() is self.test_page:
             self.test_page.update_values()
-        elif self.tabs.currentWidget() is self.trouble_page:
-            live = self.trouble_page
+        elif self.tabs.currentWidget() is self.live_page:
+            live = self.live_page
             # the long-term monitoring's pins of every slave: all pins, every 2 s
             self.monitor_polls = getattr(self, "monitor_polls", 0) + 1
             if self.monitor_polls % 10 == 1:
@@ -9574,6 +9666,7 @@ class MainWindow(QMainWindow):
                 except testmode.TestError:
                     every = {}
                 live.sync.monitor = monitor_rows(self.session.cfg, every, live.sync.dc_seen)
+                live.update_overview(every)
             live.sync.show_sync(lambda n: m["ecat.0." + n].value if "ecat.0." + n in m
                                 else None, run.period)
             live.update_pins()
@@ -9694,7 +9787,7 @@ class MainWindow(QMainWindow):
 
     def news(self):
         """(errors, warnings) among the recorder's events and the master's
-        messages (the recorder's and the free master's) since the Live
+        messages (the recorder's and the free master's) since the Diagnose
         tab was last shown."""
         found = []
         try:
@@ -9710,7 +9803,7 @@ class MainWindow(QMainWindow):
         return new.count("error"), new.count("warn")
 
     def check_news(self):
-        """Every 2 s: follow the free master, and mark the Live tab."""
+        """Every 2 s: follow the free master, and mark the Diagnose tab."""
         self.master_log.poll()
         if self.tabs.currentWidget() is self.trouble_page:
             self.seen_news()
@@ -9722,7 +9815,7 @@ class MainWindow(QMainWindow):
         self.show_news(0, 0)
 
     def show_news(self, errors, warnings):
-        """A red (errors) or amber (warnings only) dot on the Live tab."""
+        """A red (errors) or amber (warnings only) dot on the Diagnose tab."""
         i = self.tabs.indexOf(self.trouble_page)
         bar = self.tabs.bar
         if not errors and not warnings:
@@ -9763,7 +9856,7 @@ class MainWindow(QMainWindow):
             self.heartbeat.stop()
             self.pending_timer.stop()
             self.test = None
-            self.trouble_page.sync.reset()
+            self.live_page.sync.reset()
         event.accept()
 
 

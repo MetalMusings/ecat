@@ -80,13 +80,15 @@ at once and is kept in `~/.config/ecatsetup/settings.yaml` (`theme: light`
 or `theme: dark`) for the next start. Light is the default, and the
 screenshots in this document show it.
 
-Five tabs, in the order you normally use them: **Start**, **Bus**,
-**Live**, **Workbench**, **HAL & LinuxCNC**; and a sixth, **Timing**,
-for the computer itself ([The computer's timing](#the-computers-timing)).
-*Live* is for looking: what the bus and the slaves do now, from whatever
-runs (the free master, the I/O test, or a LinuxCNC being watched), read
-only. *Workbench* is for doing: setting outputs, SDOs, moving, homing and
-tuning a drive; it needs the I/O test, so LinuxCNC must not run.
+Six tabs, in the order you normally use them: **Start**, **Bus**,
+**Workbench**, **Live**, **Diagnose**, **HAL & LinuxCNC**; and a seventh,
+**Timing**, for the computer itself ([The computer's timing](#the-computers-timing)).
+*Workbench* is for doing: setting outputs, SDOs, moving, homing and
+tuning a drive; it needs the I/O test, so LinuxCNC must not run. *Live* is
+for looking: what the bus and the slaves do now, from whatever runs (the
+I/O test or a LinuxCNC being watched), read only. *Diagnose* is for when
+something is wrong: examining a slave, the messages, the event log and
+the report.
 
 ### Start
 
@@ -349,82 +351,8 @@ Choosing a slave shows:
 - **Settings** (continued): *Remove setting* removes the selected rows;
 - **Notes from the proposal**.
 
-The buttons *Live* and *Workbench* in the slave's header jump to those
-tabs with the slave chosen.
-
-### Live
-
-![Live](images/gui-live.png)
-
-What runs and what the bus does now; nothing here changes the machine.
-
-- **What runs**: the free master (slaves in PREOP: they can be examined),
-  the I/O test (started on the Workbench) or a LinuxCNC being watched, or
-  nothing. *Watch LinuxCNC (read only)* starts watching a LinuxCNC that
-  runs; *Stop watching* (or *Stop the test*) ends it. LinuxCNC cannot run
-  while the I/O test has the bus: *Watch LinuxCNC* pressed during the test
-  says so and offers to stop the test.
-- **Synchronisation**, while the test or a watch runs: DC state, where
-  SYNC0 falls and the turn-around, the `pll-err` spread, the room for two
-  cycles, where the network card's interrupts are, what was measured on
-  the drives, the frames the master lost, and the long-term monitoring's
-  rows; *Remember this period for the drives...* keeps what a good (or
-  refused) run shows ([details](#synchronisation-in-the-test-mode)).
-- **Pins (the chosen slave)**, while the test or a watch runs: every pin
-  of the slave with its value, read only, and for a drive its CiA 402
-  state, status word and error code in one line.
-
-Diagnosis of the slaves on the bus: *Examine again* / *Examine all*. For
-the chosen slave the page shows a series of steps (each ok, warning or
-failed), what the slave says (AL state and status code), the cable and
-link (port error counters), the slave's own processor (whether it runs
-behind the EtherCAT chip, and its synchronisation; see
-[step 3](#step-3-cable-and-connectors)), the slave's own message history (0x10F3), and
-A port counter that has reached 255 is marked: it cannot show whether the fault is
-still there, so the diagnosis says to write the counter (0x0300 for rx and phy
-errors, 0x0310 for lost links) or power the slave off, and run it again.
-**Messages from the master**: what the master said about this slave while
-`ecat` ran (the I/O test or LinuxCNC), such as "Slave seems not to support
-distributed clocks!", and while the free master ran (reading the bus, SDOs,
-the SII; marked "free master:"), and the **Event log**: what the `ecat`
-component recorded while LinuxCNC ran ([event log](#event-log-and-report)),
-optionally only for this slave and the master. Both are refreshed every 2 s
-while the page is shown.
-
-The **Long-term** card shows the chosen slave's history in the run chosen
-in the event log: its DC clock's largest difference to the reference clock
-in each 10 minutes as a curve (the dashed line is 1 us), how often it went
-beyond that, and the error counters that grew, with when they began. It
-needs no *Examine*: the component records it while LinuxCNC or the test
-runs ([long-term monitoring](#the-component-in-linuxcnc)).
-
-When the master reports an error or a warning while another tab is shown,
-the *Live* tab gets a dot: red for an error, amber for warnings only;
-its tooltip says how many. Showing the tab clears it.
-
-The free master (`ec_master`, started with `ethercat-uspace start`) logs to
-the system journal, not to the event log. While the window is open it
-follows the journal of each free master that runs (one `journalctl` for each,
-up to level info) and keeps those messages until it closes. `ec_master` runs as
-root: a user in the group `systemd-journal` (or `adm`) reads its entries
-directly; otherwise the window uses `sudo -n journalctl` when sudo needs no
-password, as it does to start the master. Without either, the page says so:
-`sudo usermod -aG systemd-journal $USER` and logging in again makes them
-visible.
-
-A slave that stopped short of OP with the master's error flag but no AL
-status code is shown as "The master stopped bringing the slave up": the
-master gave up configuring it (a DC setting the slave cannot take, an SDO it
-refuses), or the slave refused and the master's acknowledgement cleared its
-code. The master's messages say which.
-
-For a running machine the page opens with a short flow: *Save report...*
-(a file to attach when you ask for help), then *Watch LinuxCNC (read only)*.
-*Save capture...*, beside *Save report...* at the top, records the whole
-bus for a developer who does not have the device ([A capture of the
-bus](#a-capture-of-the-bus)).
-At the bottom, **Symptoms** lists what is seen in LinuxCNC, what it usually
-comes from and what to do.
+The buttons *Diagnose*, *Live* and *Workbench* in the slave's header jump
+to those tabs with the slave chosen.
 
 ### Workbench
 
@@ -456,6 +384,86 @@ the chosen slave:
 
 While a LinuxCNC is watched the Workbench shows only that LinuxCNC owns the
 bus: nothing can be done here then, and its values are on the *Live* tab.
+
+### Live
+
+![Live](images/gui-live.png)
+
+What runs and what the bus does now; nothing here changes the machine.
+
+- **What runs**: the free master (slaves in PREOP: they can be examined),
+  the I/O test (started on the Workbench) or a LinuxCNC being watched, or
+  nothing. *Watch LinuxCNC (read only)* starts watching a LinuxCNC that
+  runs; *Stop watching* (or *Stop the test*) ends it. LinuxCNC cannot run
+  while the I/O test has the bus: *Watch LinuxCNC* pressed during the test
+  says so and offers to stop the test.
+- **Synchronisation**, while the test or a watch runs: DC state, where
+  SYNC0 falls and the turn-around, the `pll-err` spread, the room for two
+  cycles, where the network card's interrupts are, what was measured on
+  the drives, the frames the master lost, and the long-term monitoring's
+  rows; *Remember this period for the drives...* keeps what a good (or
+  refused) run shows ([details](#synchronisation-in-the-test-mode)).
+- **Slaves**, while the test or a watch runs: each slave's state (OP,
+  PREOP, offline) and a drive's CiA 402 state, every 2 s.
+- **Pins (the chosen slave)**, while the test or a watch runs: every pin
+  of the slave with its value, read only, and for a drive its CiA 402
+  state, status word and error code in one line.
+
+### Diagnose
+
+![Diagnose](images/gui-diagnose.png)
+
+Diagnosis of the slaves on the bus: *Examine again* / *Examine all*. For
+the chosen slave the page shows a series of steps (each ok, warning or
+failed), what the slave says (AL state and status code), the cable and
+link (port error counters), the slave's own processor (whether it runs
+behind the EtherCAT chip, and its synchronisation; see
+[step 3](#step-3-cable-and-connectors)), the slave's own message history (0x10F3), and
+A port counter that has reached 255 is marked: it cannot show whether the fault is
+still there, so the diagnosis says to write the counter (0x0300 for rx and phy
+errors, 0x0310 for lost links) or power the slave off, and run it again.
+**Messages from the master**: what the master said about this slave while
+`ecat` ran (the I/O test or LinuxCNC), such as "Slave seems not to support
+distributed clocks!", and while the free master ran (reading the bus, SDOs,
+the SII; marked "free master:"), and the **Event log**: what the `ecat`
+component recorded while LinuxCNC ran ([event log](#event-log-and-report)),
+optionally only for this slave and the master. Both are refreshed every 2 s
+while the page is shown.
+
+The **Long-term** card shows the chosen slave's history in the run chosen
+in the event log: its DC clock's largest difference to the reference clock
+in each 10 minutes as a curve (the dashed line is 1 us), how often it went
+beyond that, and the error counters that grew, with when they began. It
+needs no *Examine*: the component records it while LinuxCNC or the test
+runs ([long-term monitoring](#the-component-in-linuxcnc)).
+
+When the master reports an error or a warning while another tab is shown,
+the *Diagnose* tab gets a dot: red for an error, amber for warnings only;
+its tooltip says how many. Showing the tab clears it.
+
+The free master (`ec_master`, started with `ethercat-uspace start`) logs to
+the system journal, not to the event log. While the window is open it
+follows the journal of each free master that runs (one `journalctl` for each,
+up to level info) and keeps those messages until it closes. `ec_master` runs as
+root: a user in the group `systemd-journal` (or `adm`) reads its entries
+directly; otherwise the window uses `sudo -n journalctl` when sudo needs no
+password, as it does to start the master. Without either, the page says so:
+`sudo usermod -aG systemd-journal $USER` and logging in again makes them
+visible.
+
+A slave that stopped short of OP with the master's error flag but no AL
+status code is shown as "The master stopped bringing the slave up": the
+master gave up configuring it (a DC setting the slave cannot take, an SDO it
+refuses), or the slave refused and the master's acknowledgement cleared its
+code. The master's messages say which.
+
+For a running machine the page opens with a short flow: *Save report...*
+(a file to attach when you ask for help), then *Watch LinuxCNC (read only)*.
+*Save capture...*, beside *Save report...* at the top, records the whole
+bus for a developer who does not have the device ([A capture of the
+bus](#a-capture-of-the-bus)).
+At the bottom, **Symptoms** lists what is seen in LinuxCNC, what it usually
+comes from and what to do.
 
 ### HAL & LinuxCNC
 
@@ -816,7 +824,7 @@ If it does not work:
 |---|---|
 | no *Network (EoE)* card | the slave has no EoE (step 1) |
 | `ping`: "Network is unreachable", or `ip addr show eoe0s4` has no address | LinuxCNC or the test is not running, the *computer's address* field is empty, or the master package is older than 1.4 (`ecat` then prints "this master cannot set eoe.host-ip" at start) |
-| `ping`: no answer, the device has the address | the slave did not take the address (*Live* tab, "Messages from the master": a set-IP error), has a fixed address of its own, or the subnet is also the computer's ordinary network (`ip route`) |
+| `ping`: no answer, the device has the address | the slave did not take the address (*Diagnose* tab, "Messages from the master": a set-IP error), has a fixed address of its own, or the subnet is also the computer's ordinary network (`ip route`) |
 | `ping` answers, the browser does not | `http://` and port (the device's manual), a proxy setting in the browser |
 | the master's log says "No EoE processing because of missing callbacks!" | the master package is 1.3 or older |
 
@@ -935,7 +943,7 @@ point 4, which is a deliberate act:
 
 1. **Is it there, and is it the one the file expects?** The bus list, and
    the line under it that compares the bus with the configuration.
-2. **Why is it not in OP?** *Examine* on the *Live* tab (or
+2. **Why is it not in OP?** *Examine* on the *Diagnose* tab (or
    `ecatsetup --diagnose`): the slave's AL state and status code in plain
    words, and the master's own messages about it.
 3. **Is the cable or the connector at fault, or the slave's own
@@ -970,7 +978,7 @@ explains the fault.
 
 ### Step 2: why it is not in OP
 
-1. On the *Live* tab, choose the slave and press *Examine again*
+1. On the *Diagnose* tab, choose the slave and press *Examine again*
    (or *Examine all*; on the command line `ecatsetup --diagnose`, which
    asks for no SDOs of slaves without CoE). It reads, and changes nothing.
 2. Read the AL state and status code. The page gives the code's meaning
@@ -1037,7 +1045,7 @@ explains the fault.
    DC sync check failed, the turn-around (2 cycles is the aim), and how
    much the frame's send time varies. The slave's own view, where it has
    the ETG.1020 objects 0x1C32 (outputs) and 0x1C33 (inputs), is on the
-   *Live* tab after *Examine*: its sync mode and cycle, the time
+   *Diagnose* tab after *Examine*: its sync mode and cycle, the time
    its own work takes (`:06`) and the shortest cycle it states (`:05`), and
    while watched the cycles without new process data (`:0B`, the frame
    came after the slave's cycle started), the cycles too short for it
@@ -1056,7 +1064,7 @@ explains the fault.
    `scripts/ecat-events-follow` follows it live in a terminal.
 2. *Watch LinuxCNC (read only)* shows the pins of a running LinuxCNC;
    repeat what went wrong and see which value changes first.
-3. **Symptoms**, at the bottom of the *Live* tab, lists what is
+3. **Symptoms**, at the bottom of the *Diagnose* tab, lists what is
    seen in LinuxCNC, what it usually comes from and where to look.
 4. To ask for help: *Save report...* ([the report](#the-report)) and a few
    words on what you saw. For a device the developer does not have, add
@@ -1546,7 +1554,7 @@ LinuxCNC ends.
 
 The configuration open in the window is used to name the slaves; open
 the one LinuxCNC runs (`[ETHERCAT]CONFIG` in its INI file). The
-*Live* tab has a *Symptoms* guide: what is seen in LinuxCNC,
+*Diagnose* tab has a *Symptoms* guide: what is seen in LinuxCNC,
 what it usually comes from, and where to look.
 
 Tried against a running LinuxCNC (the plasma cutter's QtPlasmaC with
@@ -2318,7 +2326,7 @@ the servo thread. What that means:
   difference), `<slave>.dc-diff-max-ns` (the largest since loading),
   `<slave>.error-count` (all monitored counters' growth since loading),
   `ecat.0.wc-bad-cycles` and (master 1.7) `ecat.0.frames-lost`. The *Synchronisation* card (test and *Watch
-  LinuxCNC*) and the *Long-term* card on the *Live* tab show them.
+  LinuxCNC*) and the *Long-term* card on the *Diagnose* tab show them.
 - `ecat.take-down` does the same on request while the thread runs, and
   `ecat-take-down` sets it and waits for PREOP; it is no longer needed in
   `[HAL]SHUTDOWN`.
@@ -3955,10 +3963,10 @@ number that respond is still reported offline.
 
 To see it:
 
-- in the window: the *Live* tab, *Event log*, newest first,
+- in the window: the *Diagnose* tab, *Event log*, newest first,
   refreshed every 2 s; *This run* or *The run before*, and *Only this
   slave*. *This run* also has the free master's messages of the window's
-  session ("free master: ...", see [Live](#live));
+  session ("free master: ...", see [Diagnose](#diagnose));
 - on the command line: `ecatsetup --events` (this or the last run),
   `ecatsetup --events prev`; `ecatsetup --diagnose` shows each slave's
   messages from the master (from the latest run that has any) and ends with
@@ -4029,7 +4037,7 @@ problem of the same `id`. Each problem and each cause carries its own tests.
 
 ### The report
 
-*Save report...* on the *Live* tab, or
+*Save report...* on the *Diagnose* tab, or
 
 ```
 ecatsetup --report [FILE] --ini <machine>.ini
@@ -4074,7 +4082,7 @@ posting it.
 
 When a device does not work and the developer does not have one, a
 capture gives them the device as the program sees it. *Save capture...* on
-the *Live* tab, beside *Save report...*, or
+the *Diagnose* tab, beside *Save report...*, or
 
 ```
 ecatsetup --capture [FILE] --esi <ESI folder> [--ini <machine>.ini]

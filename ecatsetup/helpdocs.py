@@ -166,6 +166,7 @@ TOPICS = {
     "tab:bus": ("ecatsetup.md", "bus"),
     "tab:status": ("ecatsetup.md", "troubleshooting-a-slave"),
     "tab:test": ("ecatsetup.md", "test-mode"),
+    "tab:live": ("ecatsetup.md", "live"),
     "tab:hal": ("ecatsetup.md", "writing-the-configuration-into-linuxcnc"),
     "tab:timing": ("ecatsetup.md", "the-computers-timing"),
     "tab:master": ("ecatsetup.md", "starting-the-master"),

@@ -7,7 +7,7 @@ program. Usage:
     scripts/docs-screenshots [--out DIR] [NAME ...]
 
 NAME is a file name without .png (gui-start, gui-bus, gui-slave, gui-workbench, gui-response,
-gui-live, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply, gui-timing, gui-help);
+gui-live, gui-diagnose, gui-settings, gui-settings-picker, gui-hal, gui-hal-apply, gui-timing, gui-help);
 without names all are taken. Look at them before committing: a change in
 the window can need another state than the one shown here.
 """
@@ -21,7 +21,7 @@ import types
 from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-workbench", "gui-sync", "gui-response", "gui-live",
+NAMES = ["gui-start", "gui-bus", "gui-slave", "gui-workbench", "gui-sync", "gui-response", "gui-live", "gui-diagnose",
          "gui-settings", "gui-settings-picker", "gui-hal", "gui-hal-apply", "gui-timing", "gui-help"]
 
 # English system messages (strerror) and no display: set before anything loads
@@ -124,10 +124,12 @@ class Shots:
     def bus_pages(self):
         w = self.window()
         self.page(w, w.start_page, "gui-start")
-        self.page(w, w.trouble_page, "gui-live")     # no slave chosen yet
+        self.page(w, w.trouble_page, "gui-diagnose")     # no slave chosen yet
         self.page(w, w.bus_page, "gui-bus", gui.MASTER_ITEM)
         self.page(w, w.bus_page, "gui-slave", 0)
         self.page(w, w.test_page, "gui-workbench")
+        if self.want("gui-live"):
+            self.live(w)
         if self.want("gui-sync"):
             self.sync(w)
         if self.want("gui-response"):
@@ -180,7 +182,7 @@ class Shots:
         pins = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "dc-phased": "TRUE",
                 "shift-time": "144000", "turnaround-cycles": "2",
                 "auto-shift-margin": "41666", "auto-shift-input-margin": "41666"}
-        page = w.trouble_page.sync
+        page = w.live_page.sync
         page.ok_since = time.monotonic() - 125
         real = gui.irq_row
         gui.irq_row = lambda iface: (True, "enp2s0's interrupts are on CPU 3, isolated for real "
@@ -197,6 +199,49 @@ class Shots:
         self.settle()
         page.resize(900, page.sizeHint().height())
         self.save(page, "gui-sync")
+
+    def live(self, w):
+        """The Live tab while a LinuxCNC is watched: a fake run whose pins are
+        the fake bus's slaves in OP."""
+        P = gui.testmode.Pin
+        pins = {}
+        for sl in w.session.cfg["slaves"]:
+            n = sl["name"]
+            for pin, t, d, v in (("slave-online", "bool", "OUT", "TRUE"),
+                                 ("slave-state-op", "bool", "OUT", "TRUE"),
+                                 ("slave-oper", "bool", "OUT", "TRUE"),
+                                 ("in-0", "bool", "OUT", "FALSE"), ("in-1", "bool", "OUT", "TRUE"),
+                                 ("out-0", "bool", "IN", "TRUE"), ("out-1", "bool", "IN", "FALSE")):
+                pins["%s.%s" % (n, pin)] = P("%s.%s" % (n, pin), t, d, v)
+        ecat0 = {"all-op": "TRUE", "dc-sync-failed": "FALSE", "slaves-responding": "2",
+                 "link-up": "TRUE", "frames-lost": "0"}
+
+        class Run:
+            running = watching = True
+            period = 1000000
+            log_path = ""
+
+            def pins(self, prefix):
+                return {k: v for k, v in pins.items() if k.startswith(prefix)}
+
+            def writable(self, pin):
+                return False
+        w.test, w.current = Run(), 0
+        try:
+            w.show_tab(w.live_page)
+            live = w.live_page
+            every = {k: p.value for k, p in pins.items()}
+            every.update({"ecat.0." + k: v for k, v in ecat0.items()})
+            live.sync.monitor = gui.monitor_rows(w.session.cfg, every, live.sync.dc_seen)
+            live.sync.show_sync(ecat0.get, 1000000)
+            live.update_overview(every)
+            live.update_pins()
+            w.status("Watching LinuxCNC: read only.")
+            self.settle()
+            self.save(w, "gui-live")
+        finally:
+            w.test = None
+            w.refresh()
 
     def response(self, w):
         """The Response card after two measurements of the simulated drive on the bus

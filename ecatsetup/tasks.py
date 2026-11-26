@@ -23,10 +23,11 @@ TASKS = [
        "Choose ESI files..."),
       ("Read the bus, and look at where the proposal comes from.", "scan", "Rescan the bus"),
       ("Check its process data, pins, sync and settings.", "bus", "Bus"),
-      ("Start the I/O test on the Workbench, then watch the synchronisation on the Live tab.", "test", "Workbench"),
+      ("Run it in the I/O test.", "test", "Workbench"),
+      ("Watch the synchronisation and the slaves' state.", "live", "Live"),
       ("Keep what you chose as a quirk file for the device.", "bus", "Bus"),
       ("If it does not work, save a capture of the bus for the developer: the device as the "
-       "program sees it.", "status", "Live")]),
+       "program sees it.", "status", "Diagnose")]),
     ("Using a slave by hand",
      "Reading and setting I/O, moving a drive, trying homing, with no LinuxCNC.",
      [("Read the bus.", "scan", "Rescan the bus"),
@@ -59,6 +60,6 @@ TASKS = [
      "Something unexpected happens and a slave may be the cause.",
      [("Watch the pins live without touching anything.", "watch", "Watch LinuxCNC"),
       ("Read the slaves' states and error counters, the event log and the symptom guide.",
-       "status", "Live"),
-      ("Save a report to attach when asking for help.", "status", "Live")]),
+       "status", "Diagnose"),
+      ("Save a report to attach when asking for help.", "status", "Diagnose")]),
 ]
