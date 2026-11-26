@@ -235,7 +235,7 @@ class TestSession(BusTest):
 
 try:
     from PyQt5.QtCore import QEvent, QUrl
-    from PyQt5.QtWidgets import QApplication, QFormLayout
+    from PyQt5.QtWidgets import QApplication, QDialog, QFormLayout
     from ecatsetup import gui
 except ImportError:  # pragma: no cover
     gui = None
@@ -3476,3 +3476,165 @@ class TestHelp(WindowBase):
             block = block.next()
         self.assertTrue(widths)
         self.assertTrue(all(0 < x <= h.text.viewport().width() for x in widths), widths)
+
+
+@unittest.skipIf(gui is None, "PyQt5 is not installed")
+class TestDeviceData(WindowBase):
+    """Shared device data (prototype): remembering a fact where it is learnt,
+    the Device data dialog, Share, Fetch, the facts one by one, Report."""
+
+    def setUp(self):
+        super().setUp()
+        from ecatsetup import devicedataview, quirks
+        self.dv, self.quirks = devicedataview, quirks
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        env = {"ECATSETUP_DEVICES": os.path.join(self.tmp.name, "devices"),
+               "ECATSETUP_SHARED_CACHE": os.path.join(self.tmp.name, "cache")}
+        p = mock.patch.dict(os.environ, env)
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(quirks.load, True)
+        quirks.load(reload=True)
+        for target, kw in ((devicedataview.SourceDialog, {"exec_": mock.DEFAULT}),):
+            m = mock.patch.multiple(target, **kw)
+            mocks = m.start()
+            mocks["exec_"].return_value = QDialog.Accepted
+            self.addCleanup(m.stop)
+        self.opened = []
+        o = mock.patch.object(devicedataview, "open_url", self.opened.append)
+        o.start()
+        self.addCleanup(o.stop)
+
+    def test_remember_share_fetch_choose_and_report(self):
+        import json
+        import tarfile
+        import urllib.parse
+        import yaml
+        from ecatsetup import devicedata
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        ident = self.quirks.identity(w.session.slave(0))
+        # a setting remembered for the device type, from the Settings card
+        page.add_setting()
+        row = page.st.rowCount() - 1
+        page.st.item(row, 0).setText("0x2000:02")
+        page.st.item(row, 3).setText("5")
+        page.st.selectRow(row)
+        path = page.remember_setting()
+        self.assertTrue(path.startswith(self.tmp.name))
+        self.assertEqual(self.quirks.settings(ident)[0]["value"], 5)
+        # a command, from the SDO card
+        w.test_page.remember_command((0x2001, 0))
+        self.assertIn(0x2001, self.quirks.of(ident)["commands"])
+        src = devicedata.sources(ident)
+        self.assertEqual(src["settings 0x2000:02"]["kind"], "tried")
+        # the dialog: both facts, yours, with their sources
+        dlg = page.device_data()
+        self.addCleanup(dlg.deleteLater)
+        texts = [[dlg.facts.item(r, c).text() for c in range(4)] for r in range(dlg.facts.rowCount())]
+        row = next(t for t in texts if t[0] == "Setting 0x2000:02")
+        self.assertEqual(row[2], "yours")
+        self.assertIn("value: 5", row[1])
+        # where it comes from: the kind, the date and the slave's revision
+        self.assertEqual(row[3], "tried on a machine, %s, 0x00000002" % devicedata.today())
+        self.assertIn(["Pin for 0x7000:00", "shipped"], [[t[0], t[2]] for t in texts])
+        # Share opens the prefilled post, without asking in the test
+        url = dlg.share(confirm=False)
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.assertEqual(devicedata.from_post(q["body"][0]), devicedata.strip(
+            devicedata.read_raw(devicedata.own_path(ident))))
+        self.assertEqual(self.opened, [url])
+        # someone shares another value; fetched, it is offered fact by fact
+        theirs = devicedata.strip(devicedata.read_raw(devicedata.own_path(ident)))
+        devicedata.put(theirs, ("settings", "0x2000:02"), {"type": "USINT", "value": 9})
+        devicedata.put(theirs, ("commands", "0x2002"), "another command")
+        folder = "devices/%08x-%08x" % ident
+        tgz = os.path.join(self.tmp.name, "r.tar.gz")
+        with tarfile.open(tgz, "w:gz") as tar:
+            for name, text in (("index.json", json.dumps({"format": 1, "files": [
+                    {"path": folder + "/5.yaml", "discussion": 5, "url": "https://example/5",
+                     "author": "bob", "upvotes": 2, "reports": [{"result": "worked", "words": "fine"}]}]})),
+                    (folder + "/5.yaml", yaml.safe_dump(theirs))):
+                b = text.encode()
+                info = tarfile.TarInfo("r-main/" + name)
+                info.size = len(b)
+                tar.addfile(info, __import__("io").BytesIO(b))
+        with mock.patch.dict(os.environ, {"ECATSETUP_DEVICES_URL": "file://" + tgz}):
+            dlg.fetch()
+        self.assertEqual(dlg.file_box.count(), 1)
+        self.assertIn("#5 by bob: 2 up, 1 worked", dlg.file_box.itemText(0))
+        self.assertIn("2 facts differ", dlg.file_info.text())
+        self.assertIn("1 of 2: 0x2002 is a command", dlg.step.text())
+        self.assertTrue(dlg.try_button.isHidden())
+        dlg.use()
+        self.assertEqual(self.quirks.of(ident)["commands"][0x2002], "another command")
+        self.assertEqual(devicedata.sources(ident)["commands 0x2002"]["ref"], "https://example/5")
+        self.assertIn("2 of 2: Setting 0x2000:02", dlg.step.text())
+        self.assertIn("value: 5", dlg.step.text())               # in use
+        self.assertIn("value: 9", dlg.step.text())               # shared
+        self.assertFalse(dlg.try_button.isHidden())               # a setting can be tried
+        dlg.skip_button.click()                                   # Skip leaves it as it was
+        self.assertEqual(self.quirks.settings(ident)[0]["value"], 5)
+        self.assertIn("last of them", dlg.step.text())
+        # Try it: into the drive's RAM, its own value kept; Undo puts it back
+        drive = {(0x2000, 2): 5, (0x6041, 0): 0}
+        writes = []
+
+        def download(pos, i, sub, v, t):
+            writes.append((i, sub, v))
+            drive[(i, sub)] = int(v)
+        with mock.patch.object(self.dv.tool, "upload", lambda pos, i, sub, t: drive.get((i, sub))), \
+                mock.patch.object(self.dv.tool, "download", download):
+            dlg.go(1)
+            dlg.try_button.click()
+            self.assertEqual(drive[(0x2000, 2)], 9)
+            self.assertTrue(dlg.undo_button.isEnabled())
+            dlg.undo_button.click()
+            self.assertEqual(drive[(0x2000, 2)], 5)
+            self.assertFalse(dlg.undo_button.isEnabled())
+            drive[(0x6041, 0)] = 0x27                       # operation enabled: refused
+            with mock.patch.object(self.dv.QMessageBox, "warning") as warn:
+                dlg.try_button.click()
+            self.assertIn("enabled", warn.call_args[0][2])
+            self.assertEqual(drive[(0x2000, 2)], 5)
+        self.assertEqual(writes, [(0x2000, 2, "9"), (0x2000, 2, "5")])
+        # Report: copied, the thread opened
+        rep = mock.Mock()
+        rep.exec_.return_value = QDialog.Accepted
+        rep.text.return_value = devicedata.report(folder + "/5.yaml", "partly", dlg.used, words="x")
+        text = dlg.report(rep)
+        self.assertEqual(QApplication.clipboard().text(), text)
+        self.assertEqual(self.opened[-1], "https://example/5")
+        self.assertEqual(devicedata.read_report(text)["used"], ["commands 0x2002"])
+        # Forget takes one of yours away again
+        r = next(i for i, p in enumerate(dlg.in_use) if p == ("commands", "0x2002"))
+        dlg.facts.selectRow(r)
+        dlg.forget()
+        self.assertNotIn(0x2002, self.quirks.of(ident)["commands"])
+
+    def test_a_switch_test_offers_to_name_the_input(self):
+        w = self.window()
+        card = w.test_page.switches
+        slave = {"name": "x", "position": 0, "profile": "cia402",
+                 "identity": {"vendor": "0x00000099", "product": "0x00000001"},
+                 "cia402": {"mode": "csp"},
+                 "process-data": {"inputs": [{"pdo": "0x1A00", "entries": [
+                     {"object": "0x60FD:00", "bits": 32, "type": "UDINT", "pin": "digital-inputs"}]}]}}
+        card.show_drive(slave)
+        card.start("home")
+        card.step_test(0x0, 100.0)
+        card.step_test(0x0, 101.1)
+        card.step_test(0x100000, 101.2)
+        card.step_test(0x100000, 101.6)
+        self.assertFalse(card.name_button.isHidden())
+        self.assertIn("bit 20", card.name_button.text())
+        with mock.patch.object(w.session, "slave", lambda pos: slave):
+            card.name_input("DI3")
+        self.assertEqual(self.quirks.of((0x99, 1))["homing"]["input-bits"], {"DI3": 20})
+        card.start("home")
+        card.step_test(0x0, 200.0)
+        card.step_test(0x0, 201.1)
+        card.step_test(0x0, 216.2)
+        self.assertTrue(card.name_button.isHidden())

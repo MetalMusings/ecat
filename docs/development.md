@@ -3956,9 +3956,10 @@ rest is YAML by hand, against the decision that users do not edit YAML (2026-11-
 
 ### Decisions (the user, 2026-11-26)
 
-- **No review before use.** A file sent in is checked automatically and taken in;
-  users then comment, vote and report. The maintainer only removes a file on a
-  report.
+- **No review before use; the user reviews at use.** A file sent in is checked
+  automatically and taken in; whoever uses it reviews each fact as they choose it,
+  one by one (the user's wording, 2026-11-26). Users then comment, vote and report.
+  The maintainer only removes a file on a report.
 - **Where:** a data repository of its own, `MetalMusings/ecat-devices`, on GitHub.
   Sending in needs a GitHub account; reading and using do not.
 - **Licence:** contributions are CC0. Manuals are cited (name, version, section),
@@ -4027,3 +4028,43 @@ file is used.
 The prototype uses a public test repository, `MetalMusings/ecat-devices-test`,
 marked as a test and removed when the real one is made. Creating it is done only on
 the user's word.
+
+### The prototype: built (2026-11-26)
+
+- `ecatsetup/devicedata.py` (no Qt): facts and their paths (`facts`, `get`, `put`,
+  `merge`), the user's own file fact by fact with sources (`remember`), sharing
+  (`strip`, `check`, `check_hal`, `share`, `from_post`, `repo_path`), reports
+  (`report`, `read_report`), fetching (`fetch`: the repository's tar.gz from
+  codeload.github.com, only `index.json` and `devices/<v>-<p>/<n>.yaml` taken, no
+  links, size limits; `shared_for` checks each file again) and choosing (`compare`,
+  `take`). `quirks.load` lays a user's file over the shipped one by `merge`; quirk
+  files have `format` and `sources`, and a newer format's unknown keys are skipped.
+  *Save as quirk file* merges into the user's file instead of replacing it.
+- `ecatsetup/devicedataview.py`: *Remember for the device type...* (Settings card),
+  *Remember it as a command...* (SDO card's Run command, for an object not known as
+  one), *Name input bit ...* (Switches card, after a test that reached one physical
+  input), each asking where the fact comes from; the *Device data...* dialog (slave
+  page): facts in use with From and Source, Share yours, Forget, Fetch, the files
+  with votes and reports, the differing facts one at a time with Use it / Skip /
+  Back, Try it / Undo for a setting (`tuning.try_value`: drive disabled, its own
+  value kept and put back at Undo or when the workbench stops), Report (copied, the
+  thread opened: GitHub takes no prefilled comment).
+- `devices-repo/` (README, CC0 LICENSE, `.github/workflows/intake.yml`,
+  `tools/intake.py`, `tools/index.py`) and `scripts/devices-repo-build DIR`, which
+  adds a copy of `ecatsetup` as `checker/` (the real repository will fetch ecat at
+  a tag instead). The Action runs on a Discussion (intake, then the index), on a
+  comment and nightly (the index); it checks out `main` as it is, since runs queue
+  and the event's own commit may be older (found at the first try: a push rejected).
+- The test repository
+  [MetalMusings/ecat-devices-test](https://github.com/MetalMusings/ecat-devices-test)
+  (public, made 2026-11-26 on the user's word, Discussions on, category *General*).
+  Tried there: a test device posted as Discussion #1 was taken in with a reply in
+  the thread; a report as a comment came into `index.json`; #2 with a `loadusr`
+  line was refused with the reason; the window's `fetch` and `shared_for` read it
+  back. The checks were mutation-checked (pins, loadusr, a machine signal, the
+  archive's members, the second check, layering, an empty query, a newer format).
+- Not in the prototype: a form for how inputs get their function and polarity
+  (`homing.inputs`, needs the manual), values against the ESI file's ranges when a
+  fact is used (the dictionary's presence is checked for Try it), `tried:` from
+  *Keep as setting* on the Response card, measured SYNC0 results, a help topic for
+  the dialog.

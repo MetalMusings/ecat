@@ -82,6 +82,11 @@ class TestFiles(unittest.TestCase):
                 self.assertEqual(quirks.command({"identity": {"vendor": "0xA88",
                                                               "product": "0x0A880002"}}, 0x2011),
                                  "mine")
+                # laid over the shipped file: what only the shipped file says stays
+                ect = quirks.of((0xA88, 0xA880002))
+                self.assertIn(0x2010, ect["commands"])
+                self.assertEqual(ect["limits"]["following-error"], (0x2022, 0, "uint32"))
+                self.assertTrue(ect["layers"][0].endswith("rtelligent-ect60.yaml"))
                 self.assertEqual(len(quirks.problems), 1)
                 self.assertIn("bad.yaml: unknown keys matsh", quirks.problems[0])
             finally:

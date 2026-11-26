@@ -211,7 +211,7 @@ def report(today=None):
     """What device data there is, as text for `ecatsetup --device-data`: quirk files and
     measured results, the user's and those that came with the program, and what looks
     wrong: files that could not be read, results without a revision or older than a
-    year, a user quirk file that hides a shipped one, a user result that differs from a
+    year, a user quirk file laid over a shipped one, a user result that differs from a
     shipped result for the same period."""
     today = today or datetime.date.today()
     lines, notes = [], []
@@ -233,8 +233,8 @@ def report(today=None):
     theirs = matches(quirks.SHIPPED)
     for key, name in matches(quirks.user_dir()).items():
         if key in theirs:
-            notes.append("your %s replaces the shipped %s for the same device: what only the "
-                         "shipped file says is not used" % (name, theirs[key]))
+            notes.append("your %s is laid over the shipped %s for the same device: where both "
+                         "say something, yours is used" % (name, theirs[key]))
     for pr in quirks.problems:
         notes.append("quirk file not read: " + pr)
     lines.append("Measured SYNC0 results:")

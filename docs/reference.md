@@ -812,8 +812,13 @@ The format of the files described in [Quirk files](ecatsetup.md#quirk-files). **
 
 
 ```yaml
+format: 1                  # the file format (shared files need it)
 name: Beckhoff EL7041
 match: {vendor: '0x00000002', product: '0x1B813052'}
+
+sources:                   # where each fact comes from (optional)
+  commands 0x2010: {kind: manual, ref: ECT manual 2.4.6, date: 2026-11-26}
+  settings 0x8010:01: {kind: tried, date: 2026-11-26, revision: '0x00100000'}
 
 pins:                      # when the slave is proposed
   '0x7010:21': {pin: velocity, hal-type: real, scale: 32767}
@@ -862,8 +867,15 @@ lcec:                      # importing lcec XML files
 Every key but `name` is optional. A file with only `lcec` (no `match`)
 serves the import alone.
 
+Your file for a device is laid over the one that comes with the program,
+fact by fact: where both say something about the same thing (a command,
+a setting's object, an input's name, a tuning object, ...), yours is
+used, and the rest of the shipped file stays.
+
 | Key | |
 |---|---|
+| `format` | The file format, now 1. A file of a newer format is read without the keys this program does not know; an older program does not refuse it. |
+| `sources` | Per fact, where it comes from: `kind` (`manual`, `tried`, `shared`, `other`) and optionally `ref`, `date`, `revision`, `firmware`, `by`, `given`. A fact is named by its key and object, as `commands 0x2010`, `settings 0x2009:00`, `homing input-bits IN5`, `tuning 0x2009:00`, `measure ignore 0x6077`, `hal`. *Device data...* writes them. |
 | `match` | `vendor` and `product` of the device. |
 | `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [the configuration file](#pdos-and-entries); or `split`, a list of bit pin names from bit 0 (`null` for a bit without a pin) for an object that holds several bits. Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. *Save as quirk file* keeps bit pins too. |
 | `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [the configuration file](#pdos-and-entries). |
@@ -892,6 +904,25 @@ quirk file. They are left out, with a note in the plan, when an object
 has no pin in the configuration, when a placeholder cannot be filled, or
 when your HAL files load the same component (HAL loads a component only
 once: add the instance names there and connect them by hand).
+
+### Shared files (prototype)
+
+A file shared through *Device data...* ([shared device
+data](ecatsetup.md#shared-device-data-prototype)) is checked with
+stricter rules, here and in the data repository:
+
+- `format` is needed, and not newer than the program's;
+- no `pins` (pin names, scales and offsets are a machine's choice);
+- `match` is needed;
+- `hal`: `load` only components of plain logic (`and2`, `or2`, `xor2`,
+  `not`, `edge`, `oneshot`, `debounce`, `timedelay`, `mux2`, `scale`,
+  `comp`, `lowpass`, `flipflop`, `toggle`, `sum2`, `limit1`, `conv_*`),
+  instances named `{name}-...`; `addf` only those instances; `lines` only
+  `setp` and `net`, and these only between the slave's pins
+  (`{pin:...}`), its signals (`{signal:...}`) and the file's own instances,
+  `setp` with a number only;
+- every `sources` entry names a fact of the file and has a `kind`;
+- at most 32 KB, texts at most 2000 characters.
 
 ### Homing (quirk files)
 

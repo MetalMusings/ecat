@@ -4,8 +4,9 @@ ESI file, SII and dictionary, read from quirk files (docs/ecatsetup.md).
 Quirk files are YAML, one per device or family: those that come with
 EtherCAT Setup (ecatsetup/devices/*.yaml) and the user's own
 (~/.config/ecatsetup/devices/*.yaml, or $ECATSETUP_DEVICES). A user's file
-for the same vendor and product replaces the one that came with the
-program. Quirks act only through what EtherCAT Setup writes (ethercat.yaml,
+for the same vendor and product is laid over the one that came with the
+program, fact by fact (devicedata.merge): where both say something, the
+user's is used; the rest of the shipped file stays. Quirks act only through what EtherCAT Setup writes (ethercat.yaml,
 ethercat.hal) or does in its test mode; the component never reads them,
 so that the written files stay complete and predictable.
 """
@@ -19,7 +20,10 @@ from . import config
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
 KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec", "homing",
-        "tuning", "measure"}
+        "tuning", "measure", "format", "sources"}
+# the newest file format this program reads (devicedata.FORMAT); a file of a newer
+# format may hold keys this one does not know: they are skipped, not refused
+FORMAT = 1
 # what a tuning entry is about (response.KINDS)
 TUNING_KINDS = {"command-filter", "position-loop", "feedforward", "torque", "gain-high", "other"}
 
@@ -52,9 +56,14 @@ def parse(data, path="<quirk>"):
     if not isinstance(data, dict):
         raise QuirkError("not a YAML mapping")
     unknown = set(data) - KEYS
-    if unknown:
+    fmt = data.get("format")
+    newer = isinstance(fmt, int) and fmt > FORMAT
+    if unknown and not newer:
         raise QuirkError("unknown keys %s" % ", ".join(sorted(unknown)))
-    q = {"name": str(data.get("name") or os.path.basename(path)), "path": path}
+    if data.get("sources") is not None and not isinstance(data["sources"], dict):
+        raise QuirkError("sources: a mapping of facts to where they come from")
+    q = {"name": str(data.get("name") or os.path.basename(path)), "path": path, "raw": data,
+         "sources": dict(data.get("sources") or {})}
     m = data.get("match")
     if m is not None:
         if not isinstance(m, dict) or "vendor" not in m or "product" not in m:
@@ -251,20 +260,40 @@ _cache = None
 problems = []   # files that could not be read, as text
 
 
+def _read(d):
+    out = []
+    for path in sorted(glob.glob(os.path.join(d, "*.yaml"))):
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f)
+            out.append((parse(data, path), data))
+        except (OSError, yaml.YAMLError, TypeError, ValueError, AttributeError) as e:
+            problems.append("%s: %s" % (path, e))
+    return out
+
+
 def load(reload=False):
-    """All quirks: the user's first, then those that came with the program."""
+    """All quirks: the user's first, each laid over the shipped file for the
+    same device (q["layers"] names it), then those that came with the program."""
+    from . import devicedata
     global _cache
     if _cache is not None and not reload:
         return _cache
     del problems[:]
+    shipped = _read(SHIPPED)
     out = []
-    for d in (user_dir(), SHIPPED):
-        for path in sorted(glob.glob(os.path.join(d, "*.yaml"))):
+    for q, data in _read(user_dir()):
+        mine = set(q.get("matches", [q.get("match")]))
+        under = next(((sq, sd) for sq, sd in shipped
+                      if mine & set(sq.get("matches", [sq.get("match")]))), None)
+        if under:
             try:
-                with open(path) as f:
-                    out.append(parse(yaml.safe_load(f), path))
-            except (OSError, yaml.YAMLError, TypeError, ValueError, AttributeError) as e:
-                problems.append("%s: %s" % (path, e))
+                q = parse(devicedata.merge(under[1], data), q["path"])
+                q["layers"] = [under[0]["path"]]
+            except (TypeError, ValueError, AttributeError) as e:
+                problems.append("%s over %s: %s" % (q["path"], under[0]["path"], e))
+        out.append(q)
+    out += [sq for sq, _ in shipped]
     _cache = out
     return out
 
@@ -280,7 +309,7 @@ def identity(slave):
 
 def of(key):
     """The quirk of a (vendor, product), or of a configuration's slave; {}
-    if there is none. The user's file wins."""
+    if there is none. The user's file (laid over the shipped one) comes first."""
     if isinstance(key, dict):
         key = identity(key)
     return next((q for q in load() if key in q.get("matches", [q.get("match")])), {}) if key else {}
@@ -419,8 +448,17 @@ def file_name(slave):
 def save(slave, path=None):
     """Write a slave's quirk file into the user's folder (or path); returns
     the path. Reloads the quirks."""
+    from . import devicedata
     data = from_slave(slave)
     path = path or os.path.join(user_dir(), file_name(slave))
+    try:
+        with open(path) as f:
+            old = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        old = None
+    if isinstance(old, dict):
+        # what was remembered before (commands, inputs, sources) stays
+        data = devicedata.merge(old, data)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         f.write("# Quirk file for %s, saved by EtherCAT Setup from a configured slave.\n"

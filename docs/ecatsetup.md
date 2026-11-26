@@ -40,7 +40,7 @@ Contents:
 - [Event log and report](#event-log-and-report): what to send when asking
   for help, and [a capture of the bus](#a-capture-of-the-bus) for a device
   the developer does not have;
-- [Quirk files](#quirk-files): keeping what you chose for a device;
+- [Quirk files](#quirk-files): keeping what you learnt about a device, and sharing it;
 - [Which LinuxCNC](#which-linuxcnc): the run-in-place tree it works with;
 - [Command line](#command-line).
 
@@ -4241,19 +4241,55 @@ them, so the written files say everything that happens.
 
 | Folder | |
 |---|---|
-| `~/.config/ecatsetup/devices/*.yaml` (or `$ECATSETUP_DEVICES`) | Your own. A file here for a vendor and product replaces the one that comes with the program. |
-| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `beckhoff-el7041.yaml`, `beckhoff-el70x1-position.yaml`, `metalmusings-easercat-7000.yaml`. |
+| `~/.config/ecatsetup/devices/*.yaml` (or `$ECATSETUP_DEVICES`) | Your own. A file here for a vendor and product is laid over the one that comes with the program, fact by fact: where both say something, yours is used; the rest of the shipped file stays. |
+| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `stepperonline-a6.yaml`, `gerui-ec1.yaml`, `beckhoff-el7041.yaml`, `beckhoff-el70x1-position.yaml`, `metalmusings-easercat-7000.yaml`. |
 
 *Save as quirk file...* on a slave's page writes one from a slave as you
 have configured it: its identity, the pin names, HAL types, scales and
 offsets of its process data, and its settings. It is saved as
 `<vendor>-<product>.yaml` in your folder, and the next slave of that
-device (vendor and product) is proposed with them. Add the rest
-(`commands`, `limits`, `hal`) by hand if the device needs them.
+device (vendor and product) is proposed with them. What you remembered
+for the device type before (below) stays in the file.
+
+What you learn about a device in the window can be kept for its type
+where you learn it, each fact with where it comes from (the manual, a
+try on this machine):
+
+- *Remember for the device type...* on the Settings card: the chosen
+  setting;
+- *Run command...* on the SDO card, for an object that is not known as a
+  command: *Remember it as a command...*;
+- after a switch test on the Switches card that reached one input:
+  *Name input bit ...* (such as IN5 or DI3, as the manual names it).
 
 A file that cannot be read is skipped, with a warning in the window and
-from `ecatsetup --check`. To share one, post it or propose it for the
-program, with where each fact comes from (a manual, a test on a machine).
+from `ecatsetup --check`.
+
+### Shared device data (prototype)
+
+**A prototype, being tried; it uses a test repository that will go.**
+*Device data...* on a slave's page shows what is known about its device
+type beyond the ESI file, fact by fact: each fact's value, whether it came
+with the program or is yours, and where it comes from.
+
+- **Share yours...** opens a new post in the data repository
+  ([MetalMusings/ecat-devices-test](https://github.com/MetalMusings/ecat-devices-test))
+  in your browser with your facts; your pin names and scales are left out.
+  Sending it needs a GitHub account. It is checked automatically there and
+  shared under CC0 (anyone may use it); nobody reviews it beforehand.
+- **Fetch shared data** downloads what others shared, only when you press
+  it (no account needed). Each file is checked again here.
+- **You review what you take.** Choose a file (with its up-votes and
+  reports), and its facts that differ from yours are shown one at a
+  time: what is in use, what the file says and where it comes from.
+  *Use it* puts the fact into your own file (with where it came from),
+  *Skip* leaves it. A shared setting can be tried first: *Try it* writes
+  it into the drive's RAM while the drive stands disabled, keeping the
+  drive's own value, and *Undo* (or stopping the workbench) puts that back.
+- **Report...** tells how a file worked for you (worked, partly, did not
+  work, and your own words): the report is copied and the file's thread
+  opens, to paste it as a comment. You can edit it later or add another.
+- **Forget** takes one of your facts out of your file again.
 
 The format of a quirk file is in the reference
 ([Quirk files](reference.md#quirk-files)): it is still a part of the

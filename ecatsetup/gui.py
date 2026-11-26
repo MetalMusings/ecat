@@ -1372,6 +1372,12 @@ class SlaveView(QWidget):
             "(vendor and product), so the next proposal for one starts from them")
         self.quirk_button.clicked.connect(self.save_quirk)
         esi_row.addWidget(self.quirk_button)
+        self.device_data_button = QPushButton("Device data...")
+        self.device_data_button.setToolTip(
+            "What is known about this device type beyond its ESI file and where each fact comes "
+            "from; share yours, fetch what others shared (prototype)")
+        self.device_data_button.clicked.connect(self.device_data)
+        esi_row.addWidget(self.device_data_button)
         esi_row.addStretch(1)
         self.source.add(esi_row)
         self.source.lay.addStretch(1)
@@ -1778,6 +1784,12 @@ class SlaveView(QWidget):
             "following error trips first and the drive is the second line of defence")
         self.ferror_button.clicked.connect(self.suggest_following_error)
         buttons.addWidget(self.ferror_button)
+        self.remember_setting_button = QPushButton("Remember for the device type...")
+        self.remember_setting_button.setToolTip(
+            "Keep the chosen setting in your own quirk file for this device type, with where it "
+            "comes from, so the next one gets it and you can share it (Device data...)")
+        self.remember_setting_button.clicked.connect(self.remember_setting)
+        buttons.addWidget(self.remember_setting_button)
         self.hex_box = QCheckBox("Values in hex")
         self.hex_box.setToolTip("Show the values (and what the slave has now) as 0x hex. You can "
                                 "type a value in either form: 255 or 0xFF")
@@ -1805,6 +1817,29 @@ class SlaveView(QWidget):
         self.notes_text = self.notes.add(label(wrap=True))
         lay.addWidget(self.notes)
         lay.addStretch(1)
+
+    def device_data(self):
+        from . import devicedataview
+        if devicedataview.device(self.win, self.position) is None:
+            self.win.status("This slave has no vendor and product")
+            return None
+        dlg = devicedataview.DeviceDataDialog(self.win, self.position)
+        dlg.show()
+        return dlg
+
+    def remember_setting(self):
+        """The chosen setting, remembered for the device type (with its source)."""
+        from . import devicedataview
+        s = self.win.session.slave(self.position)
+        rows = self.st.selectionModel().selectedRows() if self.st.selectionModel() else []
+        sts = (s or {}).get("settings") or []
+        if not rows or rows[0].row() >= len(sts):
+            self.win.status("Choose a setting first")
+            return None
+        st = sts[rows[0].row()]
+        value = {k: st[k] for k in ("type", "value", "name") if k in st}
+        return devicedataview.remember(self.win, self, self.position, ("settings", config.obj(
+            *config.parse_obj(st["object"]))), value, "Setting %s %s" % (st["object"], st.get("name", "")))
 
     def save_quirk(self):
         s = self.win.session.slave(self.position)
@@ -5122,6 +5157,30 @@ class SwitchCard(Card):
         self.add(self.result)
         self.missing = label("", "hint", wrap=True)
         self.add(self.missing)
+        self.name_row = QHBoxLayout()
+        self.name_button = QPushButton("Name this input...")
+        self.name_button.setToolTip("Remember for the device type which input this 0x60FD bit is (as the "
+                                    "drive's manual or its connector names it)")
+        self.name_button.clicked.connect(self.name_input)
+        self.name_row.addWidget(self.name_button)
+        self.name_row.addStretch(1)
+        self.add(self.name_row)
+        self.name_button.hide()
+        self.found_bit = None
+
+    def name_input(self, name=None):
+        """The physical input the last test reached, named for the device type."""
+        from . import devicedataview
+        if self.found_bit is None or self.slave is None:
+            return None
+        if name is None:
+            name, ok = QInputDialog.getText(self, TITLE, "Which input is 0x60FD bit %d (as the manual or "
+                                            "the connector names it, such as IN5 or DI3)?" % self.found_bit)
+            if not ok or not name.strip():
+                return None
+        return devicedataview.remember(self.win, self, self.slave.get("position"),
+                                       ("homing", "input-bits", name.strip()), self.found_bit,
+                                       "Input %s is 0x60FD bit" % name.strip())
 
     def show_drive(self, slave):
         if slave is not self.slave:
@@ -5226,12 +5285,19 @@ class SwitchCard(Card):
                 return
             if now - t["since"] < self.STABLE_S:
                 return
-            self.finish(switches.verdict(kind, base, now_v, self.slave))
+            self.finish(switches.verdict(kind, base, now_v, self.slave), base ^ now_v)
         elif now - t["t"] >= self.WAIT_S:
             self.finish(switches.verdict(kind, base, base, self.slave))
 
-    def finish(self, found):
+    def finish(self, found, changed=0):
         level, text = found
+        # one physical input changed: it can be named for the device type
+        bits = [b for b in range(16, 32) if changed >> b & 1]
+        self.found_bit = bits[0] if len(bits) == 1 else None
+        self.name_button.setVisible(self.found_bit is not None)
+        if self.found_bit is not None:
+            self.name_button.setText("Name input bit %d (%s)..." % (
+                self.found_bit, switches.bit_name(self.found_bit, self.slave)))
         self.test = None
         self.step.setText("Done: you can release the switch.")
         self.result.setText(text)
@@ -6611,10 +6677,12 @@ class TestPage(QWidget):
         known = quirks.command_run(s, *t) or {}
         reason = guidance.command_reason(s, t[0], entry)
         if reason is None:
-            QMessageBox.information(
-                self, TITLE, "0x%04X:%02X is not known as a command. Use Write for an ordinary "
-                "object; to make this one a command, list it under commands: in a quirk file "
-                "(docs/ecatsetup.md)." % t)
+            if QMessageBox.information(
+                    self, TITLE, "0x%04X:%02X is not known as a command. Use Write for an ordinary "
+                    "object.\n\nIs it a command (it does something when written, such as zero the "
+                    "position)? Then remember it as one for this device type: Yes." % t,
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+                self.remember_command(t)
             return
         value = str(known["value"]) if known.get("value") is not None else \
             self.sdo_value.text().strip()
@@ -6644,6 +6712,17 @@ class TestPage(QWidget):
             QMessageBox.warning(self, TITLE, "The slave refused:\n%s" % e)
             return
         self.win.status("Ran command 0x%04X:%02X = %s on slave %d" % (t[0], t[1], value, pos))
+
+    def remember_command(self, t=None):
+        """An object of the chosen slave is a command: remembered for its device type."""
+        from . import devicedataview
+        t = t or self._sdo_target()
+        if not t:
+            return None
+        return devicedataview.remember(
+            self.win, self, self.position, ("commands", "0x%04X" % t[0]), None,
+            "0x%04X is a command, not a setting" % t[0],
+            note=self.win.session.object_name(self.position, *t) or "")
 
     def sdo_write(self):
         t = self._sdo_target()

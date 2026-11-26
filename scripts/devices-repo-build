@@ -1,0 +1,20 @@
+#!/bin/sh
+# Assemble the shared device data repository (PROTOTYPE) in DIR: devices-repo/
+# (README, LICENSE, the Action and its tools) and a copy of the ecatsetup
+# package as checker/ecatsetup, so that the Action runs the window's own check.
+# The real repository will fetch ecatsetup from ecat at a tag instead.
+#
+#   scripts/devices-repo-build DIR
+set -e
+[ $# -eq 1 ] || { echo "usage: $0 DIR" >&2; exit 2; }
+here=$(cd "$(dirname "$0")/.." && pwd)
+dir=$1
+mkdir -p "$dir"
+cp -r "$here/devices-repo/." "$dir/"
+rm -rf "$dir/checker"
+mkdir -p "$dir/checker" "$dir/devices"
+tar -C "$here" --exclude=__pycache__ -cf - ecatsetup | tar -C "$dir/checker" -xf -
+rm -rf "$dir/tools/__pycache__"
+[ -e "$dir/index.json" ] || printf '{\n "files": [],\n "format": 1\n}\n' > "$dir/index.json"
+[ -e "$dir/devices/.keep" ] || : > "$dir/devices/.keep"
+echo "$dir: built from ecat $(git -C "$here" rev-parse --short HEAD)"

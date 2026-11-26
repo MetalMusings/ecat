@@ -78,7 +78,7 @@ class TestMeasured(Base):
         with open(os.path.join(os.environ["ECATSETUP_DEVICES"], "mine.yaml"), "w") as f:
             f.write("name: mine\nmatch: {vendor: '0x00000A88', product: '0x0A880002'}\n")
         text = measured.report(today=date(2026, 12, 2))
-        self.assertIn("your mine.yaml replaces the shipped rtelligent-ect60.yaml", text)
+        self.assertIn("your mine.yaml is laid over the shipped rtelligent-ect60.yaml", text)
         self.assertIn("100 us: you found ok, the shipped result is refused", text)
         self.assertIn("90 us: no valid date", text)
 
