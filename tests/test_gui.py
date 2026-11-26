@@ -342,7 +342,17 @@ class TestWindow(WindowBase):
         pages = {"bus": w.bus_page, "status": w.trouble_page, "test": w.test_page,
                  "live": w.live_page, "hal": w.hal_page, "timing": w.timing_page}
         known = set(pages) | {"scan", "open", "update", "esi", "watch", "ini"}
-        self.assertEqual({t for _, _, steps in tasks.TASKS for _, t, _ in steps} - known, set())
+        targets = {t for _, _, steps in tasks.TASKS for _, t, _ in steps}
+        helps = {t for t in targets if t.startswith("help:")}
+        self.assertEqual(targets - known - helps, set())
+        # a guide's step opens the Help tab at a topic that exists
+        from ecatsetup import helpdocs
+        self.assertTrue(helps)
+        for t in helps:
+            self.assertIn(t[len("help:"):], helpdocs.TOPICS)
+        with mock.patch.object(w, "show_help") as show:
+            w.go("help:guide:homing")
+            show.assert_called_once_with("guide:homing")
         self.assertEqual(len(w.start_page.buttons), sum(len(x[2]) for x in tasks.TASKS))
         self.assertIs(w.tabs.currentWidget(), w.bus_page)       # a configuration is open
         for target, page in pages.items():

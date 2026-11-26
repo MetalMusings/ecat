@@ -100,11 +100,16 @@ The line at the top tells what is open: configuration, bus, INI file. The
 tasks:
 
 - a new machine, from a simulated configuration;
+- moving an lcec configuration to ecat ([From an lcec configuration](#from-an-lcec-configuration));
 - changing a configuration that runs;
 - bringing up a new slave;
 - using a slave by hand;
+- homing by the drive ([the guide](#from-linuxcncs-homing-to-the-drives); its
+  last step's button *The guide* opens it on the Help tab);
 - tuning a servo drive ([step by step](#tuning-a-servo-drive-step-by-step));
-- troubleshooting while LinuxCNC runs.
+- checking the computer's timing ([Timing](#timing));
+- when something goes wrong in a running machine (the dot on *Diagnose*,
+  watching LinuxCNC, the report).
 
 ### Bus
 

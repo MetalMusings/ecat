@@ -8705,6 +8705,8 @@ class MainWindow(QMainWindow):
                    "esi": self.add_esi, "watch": self.start_watch, "ini": self.choose_ini}
         if target in pages:
             self.show_tab(pages[target])
+        elif target.startswith("help:"):
+            self.show_help(target[len("help:"):])
         elif target in actions and not self.busy:
             actions[target]()
 
