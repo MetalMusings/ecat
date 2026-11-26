@@ -235,6 +235,7 @@ class TestSession(BusTest):
 
 try:
     from PyQt5.QtCore import QEvent, QUrl
+    from PyQt5.QtTest import QTest
     from PyQt5.QtWidgets import QApplication, QDialog, QFormLayout
     from ecatsetup import gui
 except ImportError:  # pragma: no cover
@@ -3554,6 +3555,26 @@ class TestDeviceData(WindowBase):
         dlg.link(QUrl("card:settings"))
         self.assertIs(w.tabs.currentWidget(), w.bus_page)
         self.assertIs(w.current, 0)
+        # a card hidden now: the one that leads to it, and the status says when it shows
+        shown, why = self.dv.show_card(w, 0, "homing")
+        self.assertIs(shown, w.slave_page.op_card)
+        self.assertIn("tick Homing (hm)", why)
+        shown, why = self.dv.show_card(w, 0, "switches")
+        self.assertIs(shown, w.test_page.start_card)
+        self.assertIn("Start the workbench", why)
+        w.resize(1200, 700)
+        w.show()
+        QTest.qWait(50)
+        w.bus_page.scroll.verticalScrollBar().setValue(0)
+        shown, why = self.dv.show_card(w, 0, "settings")
+        self.assertEqual((shown, why), (w.slave_page.settings_card, ""))
+        QTest.qWait(120)
+        # scrolled so that the card's top is in view
+        area = w.bus_page.scroll
+        top = shown.mapTo(area.widget(), shown.rect().topLeft()).y()
+        bar = area.verticalScrollBar().value()
+        self.assertGreater(bar, 0)
+        self.assertTrue(bar <= top <= bar + area.viewport().height(), (bar, top))
         # Share opens the prefilled post, without asking in the test
         url = dlg.share(confirm=False)
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)

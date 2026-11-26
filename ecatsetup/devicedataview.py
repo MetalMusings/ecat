@@ -8,7 +8,7 @@ import html
 import os
 import urllib.parse
 
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                              QHBoxLayout, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
@@ -17,18 +17,26 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialo
 from . import devicedata, measured, quirks, settings, testmode, tool, tuning
 from .gui import TITLE, label
 
-# where each card is: (the tab's page, the card) from the main window; devicedata.KINDS
-# names a fact's card by these ids
+# where each card is, from the main window: (the tab's page, the card, the card shown
+# instead while it is hidden, when it shows). devicedata.KINDS names a fact's card by
+# these ids
+_BENCH = "It shows on the Workbench while the workbench runs: Start the workbench."
 CARDS = {
-    "settings": ("bus", lambda w: w.bus_page, lambda w: w.slave_page.settings_card),
-    "process-data": ("bus", lambda w: w.bus_page, lambda w: w.slave_page.pd_card),
-    "homing": ("bus", lambda w: w.bus_page, lambda w: w.slave_page.homing_card),
-    "sdo": ("workbench", lambda w: w.test_page, lambda w: w.test_page.sdo_card),
-    "switches": ("workbench", lambda w: w.test_page, lambda w: w.test_page.switches),
-    "move": ("workbench", lambda w: w.test_page, lambda w: w.test_page.move),
-    "response": ("workbench", lambda w: w.test_page, lambda w: w.test_page.response),
-    "sync": ("live", lambda w: w.live_page, lambda w: w.live_page.sync),
-    "from-lcec": ("hal", lambda w: w.hal_page, lambda w: w.hal_page.lcec_card),
+    "settings": (lambda w: w.bus_page, lambda w: w.slave_page.settings_card, None, ""),
+    "process-data": (lambda w: w.bus_page, lambda w: w.slave_page.pd_card, None, ""),
+    "homing": (lambda w: w.bus_page, lambda w: w.slave_page.homing_card, lambda w: w.slave_page.op_card,
+               "It shows for a CiA 402 drive with homing among its modes: tick Homing (hm) under "
+               "Operation and sync."),
+    "sdo": (lambda w: w.test_page, lambda w: w.test_page.sdo_card, None, ""),
+    "switches": (lambda w: w.test_page, lambda w: w.test_page.switches,
+                 lambda w: w.test_page.start_card, _BENCH),
+    "move": (lambda w: w.test_page, lambda w: w.test_page.move, lambda w: w.test_page.start_card, _BENCH),
+    "response": (lambda w: w.test_page, lambda w: w.test_page.response,
+                 lambda w: w.test_page.start_card, _BENCH),
+    "sync": (lambda w: w.live_page, lambda w: w.live_page.sync, lambda w: w.live_page.source,
+             "It shows on the Live tab while something runs: the workbench, or a watched LinuxCNC."),
+    "from-lcec": (lambda w: w.hal_page, lambda w: w.hal_page.lcec_card, None,
+                  "It shows when the INI file's configuration is an lcec one."),
 }
 CARD_NAMES = {"settings": "Settings", "process-data": "Process data", "homing": "Homing by the drive",
               "sdo": "SDO", "switches": "Switches", "move": "Move", "response": "Response",
@@ -156,23 +164,41 @@ def open_url(url):
 
 
 def show_card(win, position, card):
-    """Bring a card into view, for the chosen slave: the card owns the fact."""
+    """Bring a card into view, for the chosen slave: the card owns the fact. A card
+    hidden now (no homing mode, no workbench running) is not there to show: the card
+    that leads to it is shown instead, and the status line says when it shows.
+    Returns (the card shown, why the card itself is not, or "")."""
     if card not in CARDS:
-        return None
-    _, page, widget = CARDS[card]
+        return None, ""
+    page, widget, instead, when = CARDS[card]
     if isinstance(position, int):
         win.select_slave(position)
-    win.show_tab(page(win))
-    w = widget(win)
+    tab = page(win)
+    win.show_tab(tab)
     QApplication.processEvents()
-    p = w.parentWidget()
-    while p is not None and not isinstance(p, QScrollArea):
-        p = p.parentWidget()
-    if p is not None:
-        p.ensureWidgetVisible(w, 0, 0)
+    w = widget(win)
+    why = ""
+    if not w.isVisibleTo(tab):
+        why = "The %s card is not shown now. %s" % (CARD_NAMES.get(card, card), when)
+        w = instead(win) if instead else tab
+        win.status(why)
     win.raise_()
     win.activateWindow()
-    return w
+    # after the tab is laid out: scrolling at once uses the old geometry
+    reveal(w)
+    QTimer.singleShot(50, lambda: reveal(w))
+    return w, why
+
+
+def reveal(w):
+    try:
+        p = w.parentWidget()
+        while p is not None and not isinstance(p, QScrollArea):
+            p = p.parentWidget()
+        if p is not None:
+            p.ensureWidgetVisible(w, 0, 0)
+    except RuntimeError:        # the window went meanwhile
+        pass
 
 
 def _mark(src, mine):

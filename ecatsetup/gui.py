@@ -1383,7 +1383,7 @@ class SlaveView(QWidget):
         self.source.lay.addStretch(1)
         two.addWidget(self.source, 1)
 
-        op = Card("Operation and sync")
+        op = self.op_card = Card("Operation and sync")
         self.cia402 = QWidget()
         cform = QFormLayout(self.cia402)
         cform.setContentsMargins(0, 0, 0, 0)
