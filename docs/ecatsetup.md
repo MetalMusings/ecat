@@ -408,7 +408,8 @@ What runs and what the bus does now; nothing here changes the machine.
   rows; *Remember this period for the drives...* keeps what a good (or
   refused) run shows ([details](#synchronisation-on-the-live-tab)).
 - **Slaves**, while the workbench or a watch runs: each slave's state (OP,
-  PREOP, offline) and a drive's CiA 402 state, every 2 s.
+  PREOP, offline) and a drive's CiA 402 state, every 2 s. Click a slave to
+  choose it: its pins come into view below.
 - **Pins (the chosen slave)**, while the workbench or a watch runs: every pin
   of the slave with its value, read only, and for a drive its CiA 402
   state, status word and error code in one line.

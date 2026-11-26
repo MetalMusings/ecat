@@ -963,6 +963,38 @@ class TestWindow(WindowBase):
         live.update_overview({})
         self.assertTrue(live.overview.isHidden())
 
+    def test_a_click_in_the_overview_chooses_the_slave(self):
+        """The slave chooser sits in the Pins card, below the fold on a small
+        screen (the user, 2026-11-26): a row of Slaves chooses the slave, and
+        the chosen one's row is marked."""
+        w = self.window()
+        s0, s1 = w.session.slave(0), w.session.slave(1)
+        s0["name"], s1["name"] = "x", "io"
+        every = {"x.slave-online": "TRUE", "x.slave-state-op": "TRUE",
+                 "io.slave-online": "TRUE", "io.slave-state-op": "TRUE"}
+        P = gui.testmode.Pin
+        pins = {"io.in-1": P("io.in-1", "bool", "OUT", "TRUE")}
+        run = mock.Mock(running=True, watching=True)
+        run.pins = lambda prefix: {n: p for n, p in pins.items() if n.startswith(prefix)}
+        w.test, w.current = run, 0
+        try:
+            live = w.live_page
+            live.update_overview(every)
+            t = live.overview_table
+            self.assertEqual(t.currentRow(), 0)
+            with mock.patch.object(live, "scroll_to_pins") as scroll:
+                t.cellClicked.emit(1, 1)
+                self.app.processEvents()
+            self.assertEqual(w.current, 1)
+            self.assertFalse(live.pins_card.isHidden())
+            self.assertEqual(live.pins.rowCount(), 1)
+            self.assertEqual(live.slave.currentData(), 1)
+            scroll.assert_called_once()
+            live.update_overview(every)
+            self.assertEqual(t.currentRow(), 1)
+        finally:
+            w.test = None
+
     def test_workbench_does_nothing_while_watching(self):
         w = self.window()
         s = w.session.slave(0)

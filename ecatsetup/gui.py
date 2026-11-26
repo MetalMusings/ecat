@@ -3615,7 +3615,8 @@ class LivePage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         content = QWidget()
         lay = page_layout(content)
-        outer.addWidget(scroll(content))
+        self.scroller = scroll(content)
+        outer.addWidget(self.scroller)
 
         # what runs: where the live values below come from
         self.source = Card("What runs")
@@ -3653,8 +3654,10 @@ class LivePage(QWidget):
         self.pins_for = None
 
         # every slave of the file, one row each (every 2 s, from all pins)
-        self.overview = Card("Slaves", "Each slave's state, from the component's pins.")
+        self.overview = Card("Slaves", "Each slave's state, from the component's pins. "
+                                       "Click one for its pins below.")
         self.overview_table = table(["Slave", "Name", "State", "Drive"], 3)
+        self.overview_table.cellClicked.connect(self.row_chosen)
         self.overview.add(self.overview_table)
         self.overview.hide()
         lay.insertWidget(lay.indexOf(self.pins_card), self.overview)
@@ -3676,6 +3679,27 @@ class LivePage(QWidget):
             self.slave.addItem("Slave %d · %s" % (pos, win.device(pos)), pos)
         self.slave.setCurrentIndex(self.slave.findData(win.current))
         self.slave.blockSignals(False)
+
+    def row_chosen(self, row, _column):
+        """A row of the Slaves card clicked: that slave's pins, brought into view."""
+        it = self.overview_table.item(row, 0)
+        try:
+            pos = int(it.text()) if it is not None else None
+        except ValueError:
+            return
+        if pos is None:
+            return
+        self.win.select(pos, source=self)
+        self.show_slave()
+        QTimer.singleShot(0, self.scroll_to_pins)
+
+    def scroll_to_pins(self):
+        """The Pins card's top at the top of the page (as far as it goes)."""
+        try:
+            bar = self.scroller.verticalScrollBar()
+            bar.setValue(min(bar.maximum(), max(0, self.pins_card.y() - 12)))
+        except RuntimeError:
+            pass    # the window closed meanwhile
 
     def show_slave(self):
         self.fill_slaves()
@@ -3714,6 +3738,15 @@ class LivePage(QWidget):
                          (state, colour, None),
                          (drive, RED if drive == "Fault" else None, None)))
         put_rows(self.overview_table, rows)
+        # the chosen slave's row marked
+        cur = str(self.win.current)
+        for r, cells in enumerate(rows):
+            if cells[0][0] == cur:
+                if self.overview_table.currentRow() != r:
+                    self.overview_table.selectRow(r)
+                break
+        else:
+            self.overview_table.clearSelection()
         self.overview.setVisible(bool(rows))
 
     def show_source(self):
