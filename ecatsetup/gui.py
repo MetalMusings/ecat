@@ -525,6 +525,33 @@ def fit_table(t, minimum=1):
     t.setFixedHeight(h)
 
 
+def put_rows(t, rows, minimum=1):
+    """Fill a read-only table from rows of cells (text, colour, font), unless
+    it already shows them; fitted to its rows (fit_table). Tables a timer
+    refreshes use it: in a resize-to-contents table inside a page's scroll
+    area each setItem laid the whole page out again (4 ms each), which held
+    the window up every 2 s and made scrolling slow. True if refilled."""
+    if rows == getattr(t, "shown_rows", None):
+        return False
+    t.shown_rows = rows
+    head = t.horizontalHeader()
+    modes = [head.sectionResizeMode(c) for c in range(t.columnCount())]
+    for c in range(t.columnCount()):
+        head.setSectionResizeMode(c, QHeaderView.Interactive)
+    t.setUpdatesEnabled(False)
+    try:
+        t.setRowCount(len(rows))
+        for r, cells in enumerate(rows):
+            for c, (text, colour, font) in enumerate(cells):
+                t.setItem(r, c, item(text, colour=colour, font=mono() if font == "mono" else None))
+    finally:
+        for c, m in enumerate(modes):
+            head.setSectionResizeMode(c, m)
+        t.setUpdatesEnabled(True)
+    fit_table(t, minimum=minimum)
+    return True
+
+
 def fit_columns(t, stretch=None, wide=(), maxw=150, maxwide=280):
     """Size a table's columns to their text but no wider than maxw (maxwide for `wide`
     ones), still draggable, so that a row with long text does not push the right-hand
@@ -3728,8 +3755,9 @@ class TroubleshootPage(QWidget):
         lay.addWidget(self.pins_card)
         self.pins_for = None
 
-        flow = Card("Something seems wrong in a running machine",
-                    "What to do, in this order. None of it changes anything on the machine.")
+        flow = Card("When something goes wrong in a running machine",
+                    "A guide: what to do then, in this order. None of it changes anything on "
+                    "the machine.")
         flow_text = flow.add(label(wrap=True))
         flow_text.setTextFormat(Qt.RichText)
         flow_text.setText(symptoms.flow_html())
@@ -3903,8 +3931,7 @@ class TroubleshootPage(QWidget):
         except events.EventsError as e:
             if not free:
                 self.events_info.setText("; ".join(x for x in (str(e), free_status) if x))
-                self.events_table.setRowCount(0)
-                fit_table(self.events_table, minimum=1)
+                put_rows(self.events_table, [])
                 return
             # only the free master's messages: ecat has not run
             log, info, recorded = events.Log(path, 0.0, 0, 0, "", 0, [], []), str(e), False
@@ -3928,21 +3955,21 @@ class TroubleshootPage(QWidget):
         self.events_info.setText("; ".join(x for x in (info, free_status) if x))
         rows = list(reversed(events.merged(log, shown, said)[-200:]))
         t = self.events_table
-        t.setRowCount(len(rows))
         colours = {"info": None, "warn": AMBER, "error": RED}
         marks = {"info": "", "warn": "WARN", "error": "ERROR"}
         texts = events.annotate(log.events, names)
-        for r, (kind, x) in enumerate(rows):
+        lines = []
+        for kind, x in rows:
             if kind == "event":
                 sev, msg = texts[x.index]
                 when = x.time
             else:
                 sev, msg, when = x[0].severity, events.text_line(*x), x[0].time
-            t.setItem(r, 0, item(events.stamp(when), font=mono()))
-            t.setItem(r, 1, item(marks[sev], colour=colours[sev]))
-            t.setItem(r, 2, item(msg, colour=colours[sev] if kind == "event" else colours[sev] or GREY,
-                                 font=mono() if kind == "text" else None))
-        fit_table(t, minimum=1)
+            lines.append((events.stamp(when), sev, msg, kind))
+        put_rows(t, [((when, None, "mono"), (marks[sev], colours[sev], None),
+                      (msg, colours[sev] if kind == "event" else colours[sev] or GREY,
+                       "mono" if kind == "text" else None))
+                     for when, sev, msg, kind in lines])
 
     def show_longterm(self, log):
         """The chosen slave's long-term history in a run (events.history)."""
@@ -4250,16 +4277,11 @@ class TroubleshootPage(QWidget):
         path, said = events.slave_messages(pos)
         free = events.folded([t for t in self.win.master_log.texts() if t.slave == pos])
         rows = sorted(said + free, key=lambda x: x[0].time)[-30:]
-        self.master_table.setRowCount(0)
-        for t, n in rows:
-            row = self.master_table.rowCount()
-            self.master_table.insertRow(row)
-            colour = {"error": RED, "warn": AMBER}.get(t.severity)
-            self.master_table.setItem(row, 0, item(events.stamp(t.time), font=mono()))
-            self.master_table.setItem(row, 1, item(("%s: " % t.source if t.source else "") + t.text +
-                                                   (" (%d times)" % n if n > 1 else ""),
-                                                   colour=colour, font=mono()))
-        fit_table(self.master_table)
+        put_rows(self.master_table, [
+            ((events.stamp(t.time), None, "mono"),
+             (("%s: " % t.source if t.source else "") + t.text + (" (%d times)" % n if n > 1 else ""),
+              {"error": RED, "warn": AMBER}.get(t.severity), "mono"))
+            for t, n in rows])
         self.master_table.setVisible(bool(rows))
         notes = []
         if said and path and path.endswith(".prev"):
@@ -8631,6 +8653,8 @@ class MainWindow(QMainWindow):
             except OSError as e:
                 self.status("Could not save the mode: %s" % e)
         # table text and messages take the new colours when drawn again
+        for t in self.findChildren(QTableWidget):
+            t.shown_rows = None         # put_rows: fill again with the new colours
         self.refresh()
         self.update()
 

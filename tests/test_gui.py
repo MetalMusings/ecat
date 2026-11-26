@@ -922,6 +922,27 @@ class TestWindow(WindowBase):
         self.assertIn("Workbench", names)
         self.assertNotIn("Test", names)
 
+    def test_timer_tables_are_not_filled_again_unchanged(self):
+        # the Live tab's event log and master's messages are refreshed every 2 s:
+        # filling them again each time held the window up and made scrolling slow
+        w = self.window()
+        t = gui.table(["A", "B"], 1)
+        rows = [(("1", None, "mono"), ("x", gui.RED, None))]
+        self.assertTrue(gui.put_rows(t, rows))
+        self.assertFalse(gui.put_rows(t, list(rows)))
+        self.assertEqual((t.rowCount(), t.item(0, 1).text()), (1, "x"))
+        self.assertTrue(gui.put_rows(t, rows + [(("2", None, None), ("y", None, None))]))
+        self.assertEqual(t.rowCount(), 2)
+        self.assertTrue(gui.put_rows(t, []))
+        self.assertEqual(t.rowCount(), 0)
+        live = w.trouble_page
+        live.show_events()
+        with mock.patch.object(live.events_table, "setItem") as put:
+            live.show_events()
+        put.assert_not_called()
+        w.set_theme("dark", save=False)
+        w.set_theme("light", save=False)
+
     def test_sdo_card_is_off_while_watching(self):
         w = self.window()
         run = mock.Mock(running=True, watching=True)
