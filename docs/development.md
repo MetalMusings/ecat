@@ -4093,3 +4093,34 @@ periods under Timing; `devicedata.unknowns` (switchable, kept in settings.yaml a
 objects known, for a DC slave no measured period, each with the card to learn it on.
 A shared file can be shown the same way, each fact marked new, the same, or with the
 value in use. Waits (the user): a list of every known device, also those not on the bus.
+
+### Assignment: how each card makes its facts (2026-11-26, given, NOT started)
+
+The user: go through how each card chooses what goes into the quirk file, such as
+the link between `0x2010` and *zero-at-start*. Much of the shipped files was written
+by hand from manuals and machine tests; the question now is how a user, alone, makes
+the same file from the window. Each kind (`devicedata.KINDS`) needs a card that
+produces it, with what the user is asked, what the window can find out by itself (the
+dictionary, ESI, a test), and what only a manual can say.
+
+First inventory (what exists on 2026-11-26):
+
+| Kind | Owning card | Made from the window now? | To work out |
+|---|---|---|---|
+| `commands` | SDO | Yes: *Run command...* on an object not known as one | The rich form (value, type, confirm for Run command); suggest from the dictionary's names (guidance.command_reason) |
+| `settings` | Settings | Yes: *Remember for the device type...* | Which settings are the device's (worth sharing) and which the machine's |
+| `homing methods` | Homing | No | Drives without 0x60E3 (the ECT60): from the manual; test each method? |
+| `homing describe` | Homing | No | Text per method: what it needs (switch, stop), which way |
+| `homing extras` | Homing | No | Settings a method needs (ECT60 0x2030 for torque homing): kept after a homing that worked |
+| `homing enable-again` | Homing / Move | No | The Move card's follow check after homing could find it and offer it |
+| `homing input-bits` | Switches | Yes: *Name input bit...* after a switch test | Names from the connector or the manual |
+| `homing inputs` | Switches | No | Function and polarity objects per input: a form, from the manual; test by switching |
+| `limits` | Move | No | Where the drive keeps its following-error window, and that it ignores 0x607D in CSP (found by a test) |
+| `tuning` | Response | No | *Look for settings* finds them by name; *Keep as setting* could keep `kind`, range, factory, `tried` |
+| `measure ignore` | Response | No | A value that stays constant or means nothing: the analysis could offer it |
+| `pins` | Process data | *Save as quirk file* (all at once) | Never shared; per pin? |
+| `hal` | none | No (shipped or shared only, decided) | |
+| `lcec` | From lcec | No | The user's example: lcec's sdoConfig `0x2010` -> `cia402.zero-at-start`, modParams -> settings. From lcec shows the old rows: a translation chosen there could be remembered. The decision "lcec only shipped or shared" may need another look, since From lcec is a card that uses it |
+
+To decide with the user: the order, and per kind what the user is asked and how it is
+checked before it is kept.
