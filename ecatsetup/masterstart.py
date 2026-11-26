@@ -6,7 +6,7 @@ ask, and only then call `run(plan, ...)`. The window never runs as root.
 The command is `sudo [-n] ethercat-uspace start [-- -i NIC -t TRANSPORT]`.
 NIC and transport come from the file's `master:` section when it names
 them, otherwise from ethercat-uspace.conf (the tool reads it). If the
-kernel master is loaded (/dev/EtherCAT0) the plan also has
+kernel master has the card (kernelmaster.conflict) the plan also has
 `sudo systemctl stop ethercat`, visibly: it may be in use on purpose.
 """
 
@@ -15,7 +15,7 @@ import shlex
 import shutil
 import subprocess
 
-from . import config, tool
+from . import config, kernelmaster, tool
 
 SYS_NET = "/sys/class/net"
 KERNEL_MASTER_DEVICE = "/dev/EtherCAT0"
@@ -102,7 +102,7 @@ def linuxcnc_running(proc="/proc"):
 
 
 def plan(cfg=None, sys_net=SYS_NET, kernel_device=KERNEL_MASTER_DEVICE, interface=None,
-         conf=None):
+         conf=None, kernel_confs=kernelmaster.CONFS):
     """What to run to get a master. `cfg` is the loaded file (or None);
     `interface` a network card the user chose, used in place of the file's.
     Interface and transport are passed only when they are valid (an existing
@@ -126,11 +126,13 @@ def plan(cfg=None, sys_net=SYS_NET, kernel_device=KERNEL_MASTER_DEVICE, interfac
     if extra:
         start += ["--"] + extra
     commands = [start]
-    if os.path.exists(kernel_device):
-        commands.insert(0, ["systemctl", "stop", "ethercat"])
-        notes.append("The kernel master is loaded (%s). It is stopped first: it shares "
-                     "the network card, and may be in use on purpose." % kernel_device)
     passed = extra[1] if extra else None
+    # the kernel master only when it is in the way of this card (kernelmaster.py)
+    in_way = kernelmaster.conflict(passed or conf_interface(conf), device=kernel_device,
+                                   confs=kernel_confs, sys_net=sys_net)
+    if in_way:
+        commands.insert(0, ["systemctl", "stop", "ethercat"])
+        notes.append(in_way + " It is stopped first; it may be in use on purpose.")
     needs = passed is None and not conf_interface(conf)
     return Plan(commands, notes, passed, needs)
 

@@ -40,11 +40,12 @@ import subprocess
 import tempfile
 import time
 
-from . import config, lcnc_env, netif, quirks
+from . import config, kernelmaster, lcnc_env, netif, quirks
 
 HALRUN = os.environ.get("ECAT_HALRUN") or lcnc_env.program("halrun")
 HALCMD = os.environ.get("ECAT_HALCMD") or lcnc_env.program("halcmd")
-KERNEL_MASTER = "/dev/EtherCAT0"
+KERNEL_MASTER = kernelmaster.DEVICE
+KERNEL_CONFS = kernelmaster.CONFS
 TEST_LOCK = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
                          "ecatsetup", "test.lock")
 
@@ -350,9 +351,10 @@ class TestRun:
             raise
 
     def _start(self, progress, timeout):
-        if os.path.exists(KERNEL_MASTER):
-            raise TestError("The kernel EtherCAT master is loaded and may use the network card.\n"
-                            "Stop it first: sudo systemctl stop ethercat")
+        in_way = kernelmaster.conflict(((self.cfg or {}).get("master") or {}).get("interface"),
+                                       device=KERNEL_MASTER, confs=KERNEL_CONFS)
+        if in_way:
+            raise TestError(in_way + "\n" + kernelmaster.FIX)
         if hal_running():
             raise TestError("HAL runs already (LinuxCNC or halrun): stop it first")
         problem = interface_problem(self.cfg)

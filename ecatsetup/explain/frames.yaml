@@ -84,16 +84,16 @@
     - id: kernel-master-at-boot
       title: The IgH kernel master starts at the next boot
       silent: true
-      possible: "kernel_master == False and kernel_service_enabled"
-      ruled-out: "masters_read and not kernel_service_enabled"
-      evidence: "ethercat.service is enabled"
+      possible: "kernel_at_boot"
+      ruled-out: "masters_read and not kernel_at_boot"
+      evidence: "{kernel_at_boot_text}"
       check: "systemctl is-enabled ethercat"
       fix: >
         Not loaded now, but after the next start it takes the card again: sudo
         systemctl disable ethercat.
       tests:
-        possible: {kernel_master: false, kernel_service_enabled: true, masters_read: true}
-        ruled-out: {kernel_master: false, kernel_service_enabled: false, masters_read: true}
+        possible: {kernel_at_boot: true, kernel_at_boot_text: "takes enp2s0", masters_read: true}
+        ruled-out: {kernel_at_boot: false, masters_read: true}
         not checked: {masters_read: false}
 
     - id: late-thread

@@ -175,7 +175,10 @@ class TestJudged(unittest.TestCase):
 
     def test_judged(self):
         masters = {"device": False, "modules": ["ec_master", "ec_r8169"], "enabled": "enabled",
-                   "active": "active", "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True}
+                   "active": "active", "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True,
+                   "kernel_in_way": "The kernel EtherCAT master is loaded and uses enp1s0 (MASTER0_DEVICE="
+                                    "enp1s0 in /etc/ethercat.conf): two masters on one card do not work.",
+                   "kernel_at_boot": None}
         port = diagnose.Port(1, True, {"rx": 0, "phy": 0, "fwd": 0, "lost": 0},
                              {"rx": 0, "phy": 0, "fwd": 0, "lost": 0})
         reports = [diagnose.Report(0, "x", False, 8, False, 0, ports=[port])]
@@ -190,14 +193,14 @@ class TestJudged(unittest.TestCase):
             "nic-carries-lan": "ruled out", "nic-irq-cpu": "not checked", "nic-realtek": "possible",
             "cable": "ruled out", "late-not-lost": "not checked", "dropped-in-computer": "not checked"})
         kernel = next(c for c in f.causes if c["id"] == "kernel-master")
-        self.assertEqual(kernel["evidence"], "modules ec_master, ec_r8169; ethercat.service is active")
+        self.assertIn("uses enp1s0 (MASTER0_DEVICE=enp1s0", kernel["evidence"])
         eee = next(c for c in f.causes if c["id"] == "nic-eee")
         self.assertIn("ethtool --set-eee enp1s0 eee off", eee["fix"])
         # likely first, ruled out last
         order = [c["state"] for c in f.causes]
         self.assertEqual(order, sorted(order, key=["likely", "possible", "not checked", "ruled out"].index))
         text = "\n".join(explain.text_lines([f]))
-        self.assertIn("[x]  The IgH kernel master is loaded beside the userspace master: modules ec_master", text)
+        self.assertIn("[x]  The IgH kernel master is loaded beside the userspace master: The kernel", text)
         self.assertIn("What to do: Two masters on one card", text)
         self.assertIn("[ok] A cable, a connector or a slave's power", text)
         self.assertIn("How to check: The Timing tab", text)
@@ -217,7 +220,8 @@ class TestJudged(unittest.TestCase):
         self.assertNotIn("kernel master", "\n".join(explain.text_lines([f])))
         f = explain.findings(explain.context(log(evs)))[0]          # masters not read
         self.assertNotIn("kernel-master", [c["id"] for c in f.causes])
-        at_boot = dict(none, enabled="enabled")
+        at_boot = dict(none, enabled="enabled", kernel_at_boot="The kernel EtherCAT master starts with "
+                       "the computer (ethercat.service is enabled) and takes enp1s0.")
         f = explain.findings(explain.context(log(evs), masters=at_boot))[0]
         self.assertIn("kernel-master-at-boot", [c["id"] for c in f.causes])
 

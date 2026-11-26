@@ -296,11 +296,14 @@ class TestReport(unittest.TestCase):
             computer.add("cmdline", "Kernel command line", "BOOT_IMAGE=/boot/vmlinuz root=UUID=85eb-24a ro "
                          "isolcpus=3", "/proc/cmdline")
             facts = {"device": False, "modules": ["ec_master"], "enabled": "enabled", "active": "active",
-                     "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True}
+                     "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True,
+                     "kernel_in_way": "The kernel EtherCAT master is loaded and uses enp1s0 "
+                                      "(MASTER0_DEVICE=enp1s0 in /etc/ethercat.conf): two masters "
+                                      "on one card do not work.", "kernel_at_boot": None}
             with mock.patch.object(events, "PATH", os.path.join(d, "ev")), \
                     mock.patch.object(tool, "slave_positions", no_master), \
                     mock.patch.object(report, "master_status", lambda: None), \
-                    mock.patch.object(report, "master_facts", lambda: facts), \
+                    mock.patch.object(report, "master_facts", lambda **k: facts), \
                     mock.patch.object(report, "computer", lambda ini: computer):
                 text = report.build(None, ini)
             # a run with frames lost: the report starts with what it means
@@ -310,15 +313,15 @@ class TestReport(unittest.TestCase):
             with mock.patch.object(events, "PATH", os.path.join(d, "ev")), \
                     mock.patch.object(tool, "slave_positions", no_master), \
                     mock.patch.object(report, "master_status", lambda: None), \
-                    mock.patch.object(report, "master_facts", lambda: facts), \
+                    mock.patch.object(report, "master_facts", lambda **k: facts), \
                     mock.patch.object(report, "computer", lambda ini: computer):
                 lost = report.build(None, ini)
         self.assertNotIn("## What the event log means", text)
         self.assertLess(lost.index("## Versions"), lost.index("## What the event log means"))
         self.assertLess(lost.index("## What the event log means"), lost.index("## Configuration"))
         self.assertIn("Frames were lost or came back too late\n  Seen: working counter zero 1 times", lost)
-        self.assertIn("[x]  The IgH kernel master is loaded beside the userspace master: modules ec_master; "
-                      "ethercat.service is active", lost)
+        self.assertIn("[x]  The IgH kernel master is loaded beside the userspace master: The kernel EtherCAT "
+                      "master is loaded and uses enp1s0", lost)
         # the configuration found from the INI file, checked
         self.assertIn("## Configuration %s" % os.path.join(d, "ethercat.yaml"), text)
         self.assertIn("Check: no errors", text)
@@ -369,14 +372,26 @@ class TestReport(unittest.TestCase):
                            [("12", "ec_master", "/opt/x/ec_master -i enp1s0 -t raw"),
                             ("40", "rtapi_app", "rtapi_app start"),
                             ("41", "milltask", "milltask -ini x.ini")])
-            lines = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
-                                   run=lambda *a: answers[a[1]])
-        self.assertEqual(lines[0], "IgH kernel master: not loaded; modules ec_generic, ec_master; "
+            conf = os.path.join(d, "ethercat.conf")
+            with open(conf, "w") as f:
+                f.write("MASTER0_DEVICE=enp1s0\n")
+            open(os.path.join(d, "EtherCAT0"), "w").close()
+            lines = report.masters(facts=report.master_facts(
+                proc=d, kernel_device=os.path.join(d, "EtherCAT0"), run=lambda *a: answers[a[1]],
+                interface="enp1s0", kernel_confs=(conf,)))
+            other = report.masters(facts=report.master_facts(
+                proc=d, kernel_device=os.path.join(d, "EtherCAT0"), run=lambda *a: answers[a[1]],
+                interface="enp2s0", kernel_confs=(conf,)))
+        # on another card it is listed, without a warning
+        self.assertFalse(any(x.startswith("WARNING") for x in other))
+        self.assertEqual(lines[0], "IgH kernel master: loaded (%s); modules ec_generic, ec_master; "
+                                   % os.path.join(d, "EtherCAT0") +
                                    "ethercat.service enabled, active")
         self.assertEqual(lines[1], "Free userspace master: pid 12: /opt/x/ec_master -i enp1s0 -t raw")
         self.assertEqual(lines[2], "LinuxCNC: running (milltask); rtapi_app (HAL, with ecat's master "
                                    "when loaded): running")
-        self.assertTrue(lines[3].startswith("WARNING: the IgH kernel master is loaded"))
+        self.assertTrue(lines[3].startswith("WARNING: The kernel EtherCAT master is loaded and uses enp1s0"))
+        self.assertIn("sudo systemctl disable ethercat", lines[3])
 
     def test_masters_userspace_only(self):
         from ecatsetup import report
@@ -393,7 +408,7 @@ class TestReport(unittest.TestCase):
                                  "LinuxCNC: not running; rtapi_app (HAL, with ecat's master when "
                                  "loaded): not running"])
         self.assertTrue(loaded[0].startswith("IgH kernel master: loaded ("))
-        self.assertTrue(loaded[-1].startswith("WARNING"))
+        self.assertTrue(loaded[-1].startswith("WARNING"))     # the card is not known: may be in the way
 
     def test_masters_modules_without_service(self):
         # modules loaded by hand or by an old setup, no ethercat.service
@@ -403,18 +418,22 @@ class TestReport(unittest.TestCase):
             lines = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
                                    run=lambda *a: "")
         self.assertIn("modules ec_master, ec_r8169; ethercat.service not installed", lines[0])
-        self.assertTrue(lines[-1].startswith("WARNING: the IgH kernel master is loaded"))
+        # modules without /dev/EtherCAT0: listed, but not in the way of any card
+        self.assertFalse(lines[-1].startswith("WARNING"))
 
     def test_masters_enabled_service_only(self):
         from ecatsetup import report
         answers = {"is-enabled": "enabled", "is-active": "inactive"}
         with tempfile.TemporaryDirectory() as d:
             self.fake_proc(d)
-            lines = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
-                                   run=lambda *a: answers[a[1]])
+            conf = os.path.join(d, "ethercat.conf")
+            with open(conf, "w") as f:
+                f.write("MASTER0_DEVICE=enp1s0\n")
+            lines = report.masters(facts=report.master_facts(
+                proc=d, kernel_device=os.path.join(d, "EtherCAT0"), run=lambda *a: answers[a[1]],
+                interface="enp1s0", kernel_confs=(conf,)))
         self.assertIn("ethercat.service enabled, inactive", lines[0])
-        self.assertEqual(lines[-1], "Note: ethercat.service is enabled: the kernel master starts "
-                                    "at the next boot.")
+        self.assertTrue(lines[-1].startswith("Note: The kernel EtherCAT master starts with the computer"))
 
     def test_build_info(self):
         from ecatsetup import report

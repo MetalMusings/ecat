@@ -4187,7 +4187,8 @@ class TroubleshootPage(QWidget):
         from . import report as report_mod, rtcheck
         ini = win.session.ini_path if win.session.ini_path and os.path.exists(win.session.ini_path) else None
         try:
-            ctx = explain.context(log, names, masters=report_mod.master_facts(),
+            iface = ((win.session.cfg or {}).get("master") or {}).get("interface")
+            ctx = explain.context(log, names, masters=report_mod.master_facts(interface=iface),
                                   inv=rtcheck.inventory(ini=ini),
                                   interface=((win.session.cfg or {}).get("master") or {}).get("interface"),
                                   reports=list(win.reports.values()))

@@ -264,9 +264,21 @@ class TestTestMode(unittest.TestCase):
         with self.assertRaisesRegex(testmode.TestError, "HAL runs already"):
             testmode.TestRun(cfg()).start(timeout=1)
 
-    def test_refuses_with_the_kernel_master(self):
-        with mock.patch.object(testmode, "KERNEL_MASTER", self.dir.name):
-            with self.assertRaisesRegex(testmode.TestError, "systemctl stop ethercat"):
+    def test_refuses_with_the_kernel_master_on_its_card(self):
+        conf = os.path.join(self.dir.name, "ethercat.conf")
+        with open(conf, "w") as f:
+            f.write("MASTER0_DEVICE=enp1s0\n")
+        with mock.patch.object(testmode, "KERNEL_MASTER", self.dir.name), \
+                mock.patch.object(testmode, "KERNEL_CONFS", (conf,)):
+            with self.assertRaisesRegex(testmode.TestError, "uses enp1s0.*\n.*systemctl stop ethercat"):
+                testmode.TestRun(cfg()).start(timeout=1)
+        # on another card it is not in the way: whatever stops the start, not that
+        with open(conf, "w") as f:
+            f.write("MASTER0_DEVICE=enp9s0\n")
+        with mock.patch.object(testmode, "KERNEL_MASTER", self.dir.name), \
+                mock.patch.object(testmode, "KERNEL_CONFS", (conf,)), \
+                mock.patch.object(testmode, "hal_running", lambda: True):
+            with self.assertRaisesRegex(testmode.TestError, "HAL runs already"):
                 testmode.TestRun(cfg()).start(timeout=1)
 
     def test_refuses_an_interface_that_cannot_work(self):

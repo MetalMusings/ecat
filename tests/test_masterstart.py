@@ -160,8 +160,22 @@ class PlanTest(unittest.TestCase):
         # with a link first; no wireless, nothing without a device (enp1s0 here, lo, bridges)
         self.assertEqual(masterstart.wired(self.net), [("enp2s0", True), ("enp3s0", False)])
 
+    def test_kernel_master_on_another_card_is_left_alone(self):
+        conf = os.path.join(self.net, "..", "ethercat.conf")
+        with open(conf, "w") as f:
+            f.write("MASTER0_DEVICE=enp9s0\n")
+        p = masterstart.plan({"master": {"interface": "enp2s0"}}, sys_net=self.net,
+                             kernel_device=self.net, kernel_confs=(conf,))
+        self.assertNotIn(["systemctl", "stop", "ethercat"], p.commands)
+        with open(conf, "w") as f:
+            f.write("MASTER0_DEVICE=enp2s0\n")
+        p = masterstart.plan({"master": {"interface": "enp2s0"}}, sys_net=self.net,
+                             kernel_device=self.net, kernel_confs=(conf,))
+        self.assertEqual(p.commands[0], ["systemctl", "stop", "ethercat"])
+        self.assertIn("uses enp2s0", " ".join(p.notes))
+
     def test_kernel_master_is_stopped_first_and_visibly(self):
-        p = self.plan(kernel=self.net)      # any path that exists
+        p = self.plan(kernel=self.net)      # any path that exists; the card is not known
         self.assertEqual(p.commands[0], ["systemctl", "stop", "ethercat"])
         self.assertEqual(len(p.commands), 2)
         self.assertIn("sudo systemctl stop ethercat", masterstart.text(p))

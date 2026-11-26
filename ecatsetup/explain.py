@@ -186,7 +186,8 @@ def from_log(log, names=None):
 def from_masters(f):
     """report.master_facts as names."""
     if f is None:
-        return {"masters_read": False, "kernel_master": None, "hal_running": None}
+        return {"masters_read": False, "kernel_master": None, "kernel_at_boot": None,
+                "hal_running": None}
     bits = []
     if f["device"]:
         bits.append("/dev/EtherCAT0 exists")
@@ -194,8 +195,12 @@ def from_masters(f):
         bits.append("modules " + ", ".join(f["modules"]))
     if f["active"] == "active":
         bits.append("ethercat.service is active")
-    return {"masters_read": True, "kernel_master": f["kernel_master"],
-            "kernel_master_text": "; ".join(bits) or "not loaded",
+    # in the way of ecat's card only (kernelmaster.py): elsewhere it is no cause
+    in_way = f.get("kernel_in_way")
+    return {"masters_read": True, "kernel_master": bool(in_way),
+            "kernel_master_text": in_way or "; ".join(bits) or "not loaded",
+            "kernel_at_boot": bool(f.get("kernel_at_boot")),
+            "kernel_at_boot_text": f.get("kernel_at_boot") or "",
             "kernel_service_enabled": f["enabled"] == "enabled",
             "free_masters": len(f["free"]), "hal_running": f["rtapi"]}
 

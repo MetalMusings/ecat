@@ -22,7 +22,7 @@ import re
 import subprocess
 import time
 
-from . import config, diagnose, events, integrate, masterstart, netif, quirks, tool
+from . import config, diagnose, events, integrate, kernelmaster, masterstart, netif, quirks, tool
 
 PACKAGES = ["linuxcnc-ecat", "linuxcnc-ethercat-uspace", "linuxcnc-uspace", "linuxcnc"]
 INI_KEYS = {
@@ -117,11 +117,13 @@ def _processes(proc="/proc"):
     return out
 
 
-def master_facts(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None):
+def master_facts(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None, interface=None,
+                 kernel_confs=None):
     """The EtherCAT masters of this computer as data: the IgH kernel master
     (device, ec_* modules, ethercat.service), free userspace masters,
     LinuxCNC and rtapi_app. `kernel_master` is True when the kernel master
-    is loaded: it must not share a network card with the userspace master."""
+    is loaded; `kernel_in_way` / `kernel_at_boot` say (kernelmaster.py) when
+    it has, or at the next start will have, the card `interface` ecat uses."""
     run = run or _run
     mods = []
     try:
@@ -130,13 +132,17 @@ def master_facts(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None):
     except OSError:
         pass
     procs = _processes(proc)
-    f = {"device": os.path.exists(kernel_device), "modules": mods,
+    f = {"device": os.path.exists(kernel_device), "device_path": kernel_device, "modules": mods,
          "enabled": run("systemctl", "is-enabled", "ethercat.service"),
          "active": run("systemctl", "is-active", "ethercat.service"),
          "free": [(p, c) for p, comm, c in procs if comm in FREE_MASTER_PROCESSES],
          "rtapi": any(comm == "rtapi_app" for _, comm, _ in procs),
          "linuxcnc": sorted({comm for _, comm, _ in procs if comm in masterstart.LINUXCNC_PROCESSES})}
     f["kernel_master"] = bool(f["device"] or mods or f["active"] == "active")
+    confs = kernel_confs or kernelmaster.CONFS
+    f["kernel_in_way"] = kernelmaster.conflict(interface, device=kernel_device, confs=confs)
+    f["kernel_at_boot"] = None if f["kernel_in_way"] else kernelmaster.at_boot(
+        interface, f["enabled"] == "enabled", confs=confs)
     return f
 
 
@@ -146,7 +152,7 @@ def masters(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None, facts=No
     out = []
     if f["kernel_master"] or f["enabled"] == "enabled":     # named only when it is there
         out.append("IgH kernel master: %s; modules %s; ethercat.service %s" % (
-            "loaded (%s)" % kernel_device if f["device"] else "not loaded",
+            "loaded (%s)" % f.get("device_path", kernel_device) if f["device"] else "not loaded",
             ", ".join(f["modules"]) if f["modules"] else "none",
             "%s, %s" % (f["enabled"], f["active"]) if f["enabled"] else "not installed"))
     for pid, cmd in f["free"]:
@@ -156,12 +162,10 @@ def masters(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None, facts=No
     out.append("LinuxCNC: %s; rtapi_app (HAL, with ecat's master when loaded): %s" % (
         "running (%s)" % ", ".join(f["linuxcnc"]) if f["linuxcnc"] else "not running",
         "running" if f["rtapi"] else "not running"))
-    if f["kernel_master"]:
-        out.append("WARNING: the IgH kernel master is loaded. It must not use the network card "
-                   "of the userspace master: `sudo systemctl stop ethercat` (and `sudo systemctl "
-                   "disable ethercat` so that it does not come back at the next start).")
-    elif f["enabled"] == "enabled":
-        out.append("Note: ethercat.service is enabled: the kernel master starts at the next boot.")
+    if f.get("kernel_in_way"):
+        out.append("WARNING: %s %s" % (f["kernel_in_way"], kernelmaster.FIX))
+    elif f.get("kernel_at_boot"):
+        out.append("Note: %s %s" % (f["kernel_at_boot"], kernelmaster.FIX))
     return out
 
 
@@ -285,7 +289,7 @@ def build(cfg_path=None, ini_path=None, bus=True, seconds=2.0):
                 _section(out, name)
                 _file(out, path)
 
-    facts = master_facts()
+    facts = master_facts(interface=((cfg or {}).get("master") or {}).get("interface"))
     _section(out, "EtherCAT masters")
     out += ["- " + x for x in masters(facts=facts)]
     if bus:

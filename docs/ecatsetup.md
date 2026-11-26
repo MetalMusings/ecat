@@ -1056,8 +1056,8 @@ explains the fault.
 
 ### Step 5: while LinuxCNC runs, and asking for help
 
-1. Faults that only come in LinuxCNC: the **event log** on the *Slave
-   status* page (*Only this slave and the master*) shows what the
+1. Faults that only come in LinuxCNC: the **event log** on the *Diagnose*
+   tab (*Only this slave and the master*) shows what the
    component recorded, kept after LinuxCNC stops, with the run before.
    `scripts/ecat-events-follow` follows it live in a terminal.
 2. *Watch LinuxCNC (read only)* shows the pins of a running LinuxCNC;
@@ -1072,6 +1072,32 @@ explains the fault.
 5. What you found and chose for a device (pin names, settings, a PDO set):
    keep it as a quirk file ([keeping what you chose](#keeping-what-you-chose)),
    so that the next slave of the same kind starts from it.
+
+### "The kernel EtherCAT master is loaded and uses ..."
+
+This message comes only when the kernel EtherCAT master (IgH's
+`ethercat.service`, `/dev/EtherCAT0`) has the network card `ecat` uses: its
+configuration (`/etc/ethercat.conf`) names that card, its MAC address, or
+any card (`ff:ff:ff:ff:ff:ff`), or cannot be read. Two masters on one card
+take each other's frames, so `ecat` does not start in LinuxCNC, the
+workbench does not start, and starting the master from the window stops
+the kernel master first (shown, never done unseen). When frames are lost
+while it is loaded, the event log's *What this means* names it as the
+likely cause; the report says so under *EtherCAT masters*.
+
+Stop it, and keep it from starting with the computer:
+
+```
+sudo systemctl stop ethercat
+sudo systemctl disable ethercat
+```
+
+If `ec_*` modules stay loaded, restart the computer. A kernel master
+that has another network card is left alone and not mentioned; to keep
+both, give each its own card (`MASTER0_DEVICE` in `/etc/ethercat.conf`,
+the *Master* page's network interface for `ecat`). "Starts with the
+computer and takes ..." means it is not running now but will take the
+card at the next start: `sudo systemctl disable ethercat`.
 
 ## The workbench
 

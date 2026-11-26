@@ -742,7 +742,9 @@ def show_events(args):
     from . import explain, report, rtcheck
     try:
         found = explain.findings(explain.context(
-            log, names, masters=report.master_facts(), inv=rtcheck.inventory(ini=args.ini),
+            log, names, masters=report.master_facts(
+                interface=((cfg or {}).get("master") or {}).get("interface")),
+            inv=rtcheck.inventory(ini=args.ini),
             interface=((cfg or {}).get("master") or {}).get("interface")))
     except Exception as e:      # a bad symptom file must not hide the log
         print("\n(cannot say what the log means: %s)" % e)

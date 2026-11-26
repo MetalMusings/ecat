@@ -1954,9 +1954,10 @@ class TestWindow(WindowBase):
                  (3, events.WC, -1, 2, 1)]
         write_log(path, start)
         facts = {"device": False, "modules": ["ec_master"], "enabled": "enabled", "active": "active",
-                 "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True}
+                 "free": [], "rtapi": False, "linuxcnc": [], "kernel_master": True,
+                 "kernel_in_way": "The kernel EtherCAT master is loaded and uses lo.", "kernel_at_boot": None}
         with mock.patch.object(events, "PATH", path), \
-                mock.patch.object(report, "master_facts", lambda: facts), \
+                mock.patch.object(report, "master_facts", lambda **k: facts), \
                 mock.patch.object(rtcheck, "inventory", lambda roots=None, ini=None: rtcheck.Inventory()):
             w = self.window()
             page = w.trouble_page
