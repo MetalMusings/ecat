@@ -78,6 +78,20 @@ class TestFromLog(unittest.TestCase):
         self.assertEqual((c["wc_zero"], c["wc_incomplete"], c["lost"]), (0, 0, 0))
         self.assertFalse(explain.findings(explain.context(log(START))))
 
+    def test_the_stop_is_not_counted(self):
+        """The workbench's stop: the working counter drops as the slaves go to
+        PREOP, the thread ends late, the master closes with an unmatched
+        datagram. No fault."""
+        E = events.Event
+        evs = START + [E(20, 1020.0, events.WC, -1, 1, 2), E(21, 1020.001, events.WC, -1, 0, 1),
+                       E(22, 1020.4, events.SLAVE_AL, 0, 0x02, 0x08), E(23, 1020.44, events.LATE, -1, 779, 0),
+                       E(24, 1020.45, events.GUARD, -1, 1, 0), E(25, 1020.5, events.STOP, -1, 0, 0)]
+        lg = log(evs, [])
+        lg.texts = [events.Text(0, 1020.6, 4, "EtherCAT WARNING 0: 1 datagram UNMATCHED!")]
+        c = explain.from_log(lg)
+        self.assertEqual((c["wc_zero"], c["wc_incomplete"], c["late"], c["unmatched"]), (0, 0, 0, 0))
+        self.assertFalse(explain.findings(explain.context(lg)))
+
     def test_frames_lost_while_running(self):
         """Mücke's log: working counter zero, skipped and unmatched datagrams,
         the drives shut down for invalid process data."""

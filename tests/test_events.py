@@ -153,6 +153,78 @@ DC_WARN = "EtherCAT WARNING 0-2: Slave seems not to support distributed clocks!"
 DC_ERR = "EtherCAT ERROR 0-2: Failed to set DC cycle times: No response."
 
 
+class TestStop(unittest.TestCase):
+    """What comes with a stop (the slaves to PREOP, the servo thread ending, the
+    master closing) is no fault: the user's red dot after stopping the
+    workbench, 2026-11-26."""
+
+    E = events.Event
+
+    def run_then(self, stop):
+        """A run in OP from t 0..1, then the stop records from t 30."""
+        E = self.E
+        up = [E(0, 0.0, events.LINK, -1, 1, 0), E(1, 0.5, events.MASTER_AL, -1, 0x08, 0x02),
+              E(2, 0.6, events.WC, -1, 2, 1)]
+        return up + [E(3 + i, 30.0 + t, typ, slave, a, b) for i, (t, typ, slave, a, b) in enumerate(stop)]
+
+    # the workbench's stop as the user's log had it (an ecat without the take-down event)
+    STOP = [(0.000, events.WC, -1, 1, 2), (0.001, events.WC, -1, 0, 1),
+            (0.426, events.SLAVE_AL, 0, 0x02, 0x08), (0.426, events.SLAVE_OP, 0, 0, 0),
+            (0.426, events.MASTER_AL, -1, 0x02, 0x08), (0.441, events.LATE, -1, 779, 0),
+            (0.445, events.GUARD, -1, 1, 0), (0.445, events.GUARD, -1, 2, 0x02),
+            (0.507, events.STOP, -1, 0, 0)]
+
+    def test_an_older_ecat_stop_is_found_from_its_end(self):
+        evs = self.run_then(self.STOP)
+        self.assertEqual(events.stop_began(evs), 30.0)
+        t = events.annotate(evs)
+        self.assertEqual({t[e.index][0] for e in evs[3:]}, {"info"})
+        self.assertTrue(t[3][1].endswith(" (at the stop)"), t[3][1])
+        self.assertNotIn("(at the stop)", t[len(evs) - 1][1])     # info anyway: no mark
+
+    def test_the_take_down_event_marks_the_start(self):
+        E = self.E
+        evs = self.run_then([(-5.0, events.TAKE_DOWN, -1, 1, 0)] + self.STOP)
+        self.assertEqual(events.stop_began(evs), 25.0)
+        # cleared again (the slaves back to OP): no stop
+        evs = self.run_then([(-5.0, events.TAKE_DOWN, -1, 1, 0), (-4.0, events.TAKE_DOWN, -1, 0, 0)])
+        self.assertIsNone(events.stop_began(evs))
+        self.assertIn("orderly stop", events.text(E(0, 0, events.TAKE_DOWN, -1, 1, 0))[1])
+
+    def test_a_fault_before_the_stop_stays_a_fault(self):
+        # the working counter dropped 10 s before the user stopped: a fault
+        stop = [(-10.0, events.WC, -1, 0, 2)] + self.STOP[2:]
+        evs = self.run_then(stop)
+        t = events.annotate(evs)
+        self.assertEqual(t[3][0], "error")
+        # a slave in SAFEOP + ERROR is no orderly stop: it and what came before stay
+        stop = self.STOP[:2] + [(0.2, events.SLAVE_AL, 1, 0x14, 0x08)] + self.STOP[2:]
+        evs = self.run_then(stop)
+        t = events.annotate(evs)
+        self.assertEqual([t[3][0], t[5][0]], ["error", "warn"])
+        # a cable break while stopping is not calmed
+        evs = self.run_then([(0.0, events.LINK, -1, 0, 1)] + self.STOP)
+        self.assertEqual(events.annotate(evs)[3][0], "error")
+        # still running (no end in the log): nothing is calmed
+        evs = self.run_then(self.STOP[:6])
+        self.assertIsNone(events.stop_began(evs))
+
+    def test_the_recorders_messages_at_the_stop(self):
+        evs = self.run_then(self.STOP)
+        began = events.stop_began(evs)
+        T = events.Text
+        err = T(0, 30.5, 3, "EtherCAT ERROR 0-2: Failed to receive AL state datagram")
+        self.assertEqual(events.text_shown(err, 1, began),
+                         ("info", "master: EtherCAT ERROR 0-2: Failed to receive AL state datagram (at the stop)"))
+        self.assertEqual(events.text_shown(T(1, 5.0, 3, "EtherCAT ERROR 0-2: x"), 1, began)[0], "error")
+        # the free master's are its own, also after the stop
+        free = T(2, 31.0, 3, "EtherCAT ERROR 0-2: y", source="free master")
+        self.assertEqual(events.text_shown(free, 1, began)[0], "error")
+        log = events.Log("/x", 0.0, 1000000, 1, "", len(evs), evs, [err], 1)
+        (t, n), = events.slave_texts(log, 2)
+        self.assertEqual((t.severity, t.text.endswith("(at the stop)")), ("info", True))
+
+
 class TestMasterMessages(unittest.TestCase):
     """The master's own messages, kept from version 2."""
 

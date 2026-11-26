@@ -15,7 +15,7 @@ import os
 import re
 import struct
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import diagnose
 
@@ -35,7 +35,7 @@ START, ACTIVATED, STOP = 1, 2, 3
 LINK, MASTER_AL, RESPONDING, WC = 10, 11, 12, 13
 SLAVE_AL, SLAVE_ONLINE, SLAVE_OP, DC_SYNC = 20, 21, 22, 23
 DRIVE_FAULT, DRIVE_BLOCK, DRIVE_CLEAR = 30, 31, 32
-GUARD, LATE, SHIFT = 40, 41, 42
+GUARD, LATE, SHIFT, TAKE_DOWN = 40, 41, 42, 43
 # long-term monitoring (component/ecat_monitor_core.h): a code is kind << 8 | port
 MON_DC, MON_DC_OVER, MON_ONSET, MON_SUM, MON_WC, MON_START = 50, 51, 52, 53, 54, 55
 MON_FRAMES_LOST = 10        # the kind of the master's lost frames (slave -1)
@@ -232,8 +232,12 @@ def text_line(t, times=1):
 
 
 def slave_texts(log, position):
-    """The master's messages about one slave, oldest first, folded."""
-    return folded([t for t in (log.texts or []) if t.slave == position])
+    """The master's messages about one slave, oldest first, folded. Those
+    that came with the stop (stop_began) are info, marked so."""
+    began = stop_began(log.events)
+    return folded([replace(t, level=6, text=t.text + AT_STOP)
+                   if at_stop(t, began) and t.severity != "info" else t
+                   for t in (log.texts or []) if t.slave == position])
 
 
 def slave_messages(position, paths=None):
@@ -321,6 +325,9 @@ def text(e, names=None):
     if t == LATE:
         return "warn", "servo thread late: %d us since its last write%s" % (
             e.a, ", %d more within the second" % e.b if e.b else "")
+    if t == TAKE_DOWN:
+        return "info", "take-down: outputs zero, slaves to PREOP (an orderly stop)" if e.a \
+            else "take-down cleared: slaves to OP"
     if t == SHIFT:
         return ("info" if e.b == 2 else "warn",
                 "SYNC0 shift %d us, turn-around %d cycles" % (e.a // 1000, e.b))
@@ -408,16 +415,91 @@ def history(log):
     return out
 
 
+# An ecat older than the take-down event: the stop is found from its end (the
+# stop guard, or ecat unloading) back over what a stop gives, at most this long.
+STOP_LEAD_S = 3.0
+AT_STOP = " (at the stop)"
+
+
+def _stop_like(e):
+    """What an orderly stop gives: the working counter dropping, the slaves
+    going down without an error, the servo thread ending."""
+    if e.type == WC:
+        return e.a != 2
+    if e.type == SLAVE_AL:
+        return not e.a & 0x10 and (e.a & 0x0F) in (1, 2, 4)
+    if e.type == SLAVE_OP:
+        return not e.a
+    if e.type == GUARD:
+        return e.a == 1
+    return e.type in (MASTER_AL, LATE)
+
+
+def stop_began(evs):
+    """When the run's stop began (time), or None while it runs (or the end is
+    not in the log). What comes from then on is the stop, not a fault: the
+    working counter drops when the slaves go to PREOP, the servo thread ends
+    late, the master closes. From the take-down event (LinuxCNC's shutdown,
+    the workbench's stop); with an older ecat, back from the stop guard or the
+    unloading over what a stop gives."""
+    downs = [e for e in evs if e.type == TAKE_DOWN]
+    if downs:
+        return downs[-1].time if downs[-1].a else None
+    end = None
+    for i, e in enumerate(evs):
+        if e.type == STOP or (e.type == GUARD and e.a == 1 and not any(
+                x.type == GUARD and x.a == 0 for x in evs[i + 1:])):
+            end = i
+            break
+    if end is None:
+        return None
+    began = evs[end].time
+    for e in reversed(evs[:end]):
+        if e.time < evs[end].time - STOP_LEAD_S:
+            break
+        if e.type in (MON_DC, MON_DC_OVER, MON_ONSET, MON_SUM, MON_WC):
+            continue
+        if not _stop_like(e):
+            break
+        began = e.time
+    return began
+
+
+def at_stop(e, began):
+    """Whether an event or a message of the recorder came with the stop."""
+    if began is None or e.time < began:
+        return False
+    if isinstance(e, Text):
+        return not e.source         # the free master's are its own
+    return _stop_like(e)
+
+
+def text_severity(t, began):
+    """A message's severity: the recorder's from the stop on are info."""
+    return "info" if at_stop(t, began) else t.severity
+
+
+def text_shown(t, times, began):
+    """(severity, line) of a message, marked when it came with the stop."""
+    line = text_line(t, times)
+    if at_stop(t, began) and t.severity != "info":
+        return "info", line + AT_STOP
+    return t.severity, line
+
+
 def annotate(evs, names=None):
     """{event index: (severity, text)} for events in order, with what the events
-    before them say: the master reading the bus again, or the slaves still
-    coming up, are not faults. An event whose context is not in the list (the
-    log was overwritten) gets its own text."""
+    before them say: the master reading the bus again, the slaves still
+    coming up, or the stop (stop_began) are not faults. An event whose
+    context is not in the list (the log was overwritten) gets its own text."""
     out = {}
     responding = master_al = link = None
+    began = stop_began(evs)
     for e in evs:
         sev, msg = text(e, names)
-        if e.type == LINK:
+        if at_stop(e, began):
+            sev, msg = "info", msg + (AT_STOP if sev != "info" else "")
+        elif e.type == LINK:
             link = e.a
         elif e.type == RESPONDING:
             responding = e.a
@@ -457,6 +539,7 @@ def report(log, names=None, out=print, last=None):
     rows = merged(log)
     rows = rows[-last:] if last else rows
     texts = annotate(log.events, names)
+    began = stop_began(log.events)
     marks = {"info": "", "warn": "WARN", "error": "ERROR"}
     for kind, x in rows:
         if kind == "event":
@@ -464,7 +547,8 @@ def report(log, names=None, out=print, last=None):
             out("%s %-5s %s" % (stamp(x.time), marks[sev], msg))
         else:
             t, n = x
-            out("%s %-5s %s" % (stamp(t.time), marks[t.severity], text_line(t, n)))
+            sev, line = text_shown(t, n, began)
+            out("%s %-5s %s" % (stamp(t.time), marks[sev], line))
     if not rows:
         out("(no events)")
 

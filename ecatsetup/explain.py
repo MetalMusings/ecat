@@ -134,15 +134,18 @@ def _count(rx, texts):
 
 def from_log(log, names=None):
     """What the event log shows, as names the symptoms use. Events the
-    log explains as the slaves still coming up (events.annotate) are not
-    counted."""
+    log explains as the slaves still coming up or as the stop
+    (events.annotate, events.stop_began) are not counted."""
     if log is None:
         return {"log": False}
     evs = log.events
     sev = events.annotate(evs, names)
     running = [e for e in evs if sev[e.index][0] != "info"]
-    texts = log.texts or []
-    late = sum(1 + e.b for e in evs if e.type == events.LATE)
+    # what came with the stop (the slaves to PREOP, the thread ending, the
+    # master closing) is no fault
+    began = events.stop_began(evs)
+    texts = [t for t in log.texts or [] if not events.at_stop(t, began)]
+    late = sum(1 + e.b for e in evs if e.type == events.LATE and not events.at_stop(e, began))
     blocks = [e for e in evs if e.type == events.DRIVE_BLOCK]
     ctx = {
         "log": True,
@@ -175,7 +178,7 @@ def from_log(log, names=None):
     ctx["port_errors_run_text"] = "; ".join("slave %d port %d: %s" % (
         e["slave"], e["port"], ", ".join("%s +%d" % kv for kv in sorted(e["counts"].items())))
         for e in ctx["port_errors_run"])
-    lates = [e.time for e in evs if e.type == events.LATE]
+    lates = [e.time for e in evs if e.type == events.LATE and not events.at_stop(e, began)]
     faults = [e.time for e in running if e.type == events.WC and e.a in (0, 1)] + \
         [e.time for e in evs if e.type == events.MON_ONSET and e.slave < 0]
     ctx["faults"] = len(faults)

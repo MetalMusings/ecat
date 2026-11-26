@@ -2699,6 +2699,8 @@ static void lcec_take_down(lcec_master_t *master) {
 
   if (take != master->taking_down) {
     master->taking_down = take;
+    // what follows (working counter, PREOP) is the orderly stop, not a fault
+    ecat_events_add(master->events, ECAT_EV_TAKE_DOWN, -1, take, 0);
 #ifdef EC_HAVE_REQUEST_AL_STATE
     ecrt_master_request_al_state(master->master, take ? EC_AL_STATE_PREOP : EC_AL_STATE_OP);
     rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "master %s: %s\n", master->name,

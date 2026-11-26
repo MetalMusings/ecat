@@ -527,6 +527,16 @@ def fit_table(t, minimum=1):
     t.setFixedHeight(h)
 
 
+def cell_font(name):
+    """A cell's font by name: None, "mono", "bold" or "mono bold"."""
+    if not name:
+        return None
+    f = mono() if "mono" in name else QFont()
+    if "bold" in name:
+        f.setBold(True)
+    return f
+
+
 def put_rows(t, rows, minimum=1):
     """Fill a read-only table from rows of cells (text, colour, font), unless
     it already shows them; fitted to its rows (fit_table). Tables a timer
@@ -545,7 +555,7 @@ def put_rows(t, rows, minimum=1):
         t.setRowCount(len(rows))
         for r, cells in enumerate(rows):
             for c, (text, colour, font) in enumerate(cells):
-                t.setItem(r, c, item(text, colour=colour, font=mono() if font == "mono" else None))
+                t.setItem(r, c, item(text, colour=colour, font=cell_font(font)))
     finally:
         for c, m in enumerate(modes):
             head.setSectionResizeMode(c, m)
@@ -3885,7 +3895,8 @@ class TroubleshootPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         content = QWidget()
         lay = page_layout(content)
-        outer.addWidget(scroll(content))
+        self.scroller = scroll(content)
+        outer.addWidget(self.scroller)
 
         row = QHBoxLayout()
         self.title = label("", "bigTitle")
@@ -4071,6 +4082,7 @@ class TroubleshootPage(QWidget):
         self.events_timer = QTimer(self)
         self.events_timer.setInterval(2000)
         self.events_timer.timeout.connect(self.show_events)
+        self.new_since = None   # the event log's rows after this time are new (bold)
 
     def showEvent(self, ev):
         super().showEvent(ev)
@@ -4117,24 +4129,47 @@ class TroubleshootPage(QWidget):
         if self.events_slave.isChecked() and pos is not None:
             shown = [e for e in shown if e.slave in (-1, pos)]
             said = [(x, n) for x, n in said if x.slave in (None, pos)]
-        self.events_info.setText("; ".join(x for x in (info, free_status) if x))
         rows = list(reversed(events.merged(log, shown, said)[-200:]))
         t = self.events_table
         colours = {"info": None, "warn": AMBER, "error": RED}
         marks = {"info": "", "warn": "WARN", "error": "ERROR"}
         texts = events.annotate(log.events, names)
-        lines = []
+        began = events.stop_began(log.events)
+        # errors and warnings that came while another tab was shown: in bold
+        since = self.new_since if path == events.PATH else None
+        lines, new = [], 0
         for kind, x in rows:
             if kind == "event":
                 sev, msg = texts[x.index]
                 when = x.time
             else:
-                sev, msg, when = x[0].severity, events.text_line(*x), x[0].time
-            lines.append((events.stamp(when), sev, msg, kind))
-        put_rows(t, [((when, None, "mono"), (marks[sev], colours[sev], None),
+                (sev, msg), when = events.text_shown(x[0], x[1], began), x[0].time
+            fresh = since is not None and when > since and sev != "info"
+            new += fresh
+            lines.append((events.stamp(when), sev, msg, kind, " bold" if fresh else ""))
+        if new:
+            info += "; %d new since you last looked, in bold" % new
+        self.events_info.setText("; ".join(x for x in (info, free_status) if x))
+        put_rows(t, [((when, None, "mono" + bold), (marks[sev], colours[sev], bold.strip()),
                       (msg, colours[sev] if kind == "event" else colours[sev] or GREY,
-                       "mono" if kind == "text" else None))
-                     for when, sev, msg, kind in lines])
+                       ("mono" if kind == "text" else "") + bold))
+                     for when, sev, msg, kind, bold in lines])
+
+    def show_new(self, since):
+        """Opened for news (MainWindow.open_news): the latest run, the rows
+        after `since` in bold, and the event log card at the page's top."""
+        self.new_since = since
+        self.events_run.setCurrentIndex(0)
+        self.show_events()
+        QTimer.singleShot(0, self.scroll_to_events)
+
+    def scroll_to_events(self):
+        """The event log card's top at the top of the page (after the layout)."""
+        try:
+            bar = self.scroller.verticalScrollBar()
+            bar.setValue(min(bar.maximum(), max(0, self.events.y() - 12)))
+        except RuntimeError:
+            pass    # the window closed meanwhile
 
     def show_longterm(self, log):
         """The chosen slave's long-term history in a run (events.history)."""
@@ -8643,7 +8678,8 @@ class MainWindow(QMainWindow):
         self.news_timer.timeout.connect(self.check_news)
         self.news_timer.start()
         self.tabs.currentChanged.connect(
-            lambda _: self.seen_news() if self.tabs.currentWidget() is self.trouble_page else None)
+            lambda _: self.open_news() if self.tabs.currentWidget() is self.trouble_page
+            else setattr(self.trouble_page, "new_since", None))     # seen: no longer bold
         QShortcut(QKeySequence(Qt.Key_F1), self, self.f1)
         QShortcut(QKeySequence(Qt.Key_Escape), self.help_page, self.help_back)
         self.tabs.currentChanged.connect(lambda _: self.show_current())
@@ -9791,6 +9827,11 @@ class MainWindow(QMainWindow):
         """(errors, warnings) among the recorder's events and the master's
         messages (the recorder's and the free master's) since the Diagnose
         tab was last shown."""
+        return self.news_lines()[:2]
+
+    def news_lines(self):
+        """(errors, warnings, the first new one as a line or None). What came
+        with a stop (events.stop_began) is no news."""
         found = []
         try:
             log = events.read(events.PATH)
@@ -9798,11 +9839,15 @@ class MainWindow(QMainWindow):
             log = None
         if log is not None:
             notes = events.annotate(log.events, events.names_of(self.session.cfg))
-            found += [(e.time, notes[e.index][0]) for e in log.events]
-            found += [(t.time, t.severity) for t, _ in events.folded(log.texts or [])]
-        found += [(t.time, t.severity) for t, _ in events.folded(self.master_log.texts())]
-        new = [sev for when, sev in found if when > self.news_seen]
-        return new.count("error"), new.count("warn")
+            began = events.stop_began(log.events)
+            found += [(e.time,) + notes[e.index] for e in log.events]
+            found += [(t.time,) + events.text_shown(t, n, began) for t, n in events.folded(log.texts or [])]
+        found += [(t.time, t.severity, events.text_line(t, n))
+                  for t, n in events.folded(self.master_log.texts())]
+        new = sorted(f for f in found if f[0] > self.news_seen and f[1] != "info")
+        sevs = [f[1] for f in new]
+        first = "%s %s" % (events.stamp(new[0][0])[11:], new[0][2]) if new else None
+        return sevs.count("error"), sevs.count("warn"), first
 
     def check_news(self):
         """Every 2 s: follow the free master, and mark the Diagnose tab."""
@@ -9810,13 +9855,22 @@ class MainWindow(QMainWindow):
         if self.tabs.currentWidget() is self.trouble_page:
             self.seen_news()
         else:
-            self.show_news(*self.news())
+            self.show_news(*self.news_lines())
+
+    def open_news(self):
+        """The Diagnose tab was opened: with news, the event log card shows
+        what is new in bold."""
+        errors, warnings = self.news()
+        since = self.news_seen
+        self.seen_news()
+        if errors or warnings:
+            self.trouble_page.show_new(since)
 
     def seen_news(self):
         self.news_seen = time.time()
         self.show_news(0, 0)
 
-    def show_news(self, errors, warnings):
+    def show_news(self, errors, warnings, first=None):
         """A red (errors) or amber (warnings only) dot on the Diagnose tab."""
         i = self.tabs.indexOf(self.trouble_page)
         bar = self.tabs.bar
@@ -9832,7 +9886,9 @@ class MainWindow(QMainWindow):
         self.news_mark.setStyleSheet("color: %s; font-size: 14px;" % (RED if errors else AMBER).name())
         parts = (["%d error%s" % (errors, "s" if errors != 1 else "")] if errors else []) + \
                 (["%d warning%s" % (warnings, "s" if warnings != 1 else "")] if warnings else [])
-        tip = "New since you last looked: %s from the master or the event log" % " and ".join(parts)
+        tip = "New since you last looked: %s from the master or the event log%s.\n" \
+              "Open the tab: the event log card shows them in bold." % (
+                  " and ".join(parts), ", the first:\n" + first if first else "")
         bar.setTabToolTip(i, tip)
         self.news_mark.setToolTip(tip)
 

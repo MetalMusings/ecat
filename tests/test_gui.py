@@ -2058,6 +2058,55 @@ class TestWindow(WindowBase):
             w.check_news()
             self.assertIsNone(w.news_mark)          # seen
 
+    def test_a_stop_is_no_news_and_news_is_shown_in_bold(self):
+        """The workbench's stop (slaves to PREOP, the thread ending, the master
+        closing) puts no dot on Diagnose; an error does, the tooltip names it,
+        and opening the tab shows it in bold with the event log card on top."""
+        from ecatsetup import events
+        E, T = events.Event, events.Text
+        w = self.window()
+        w.master_log = self.FakeMasterLog()
+        w.tabs.setCurrentWidget(w.test_page)
+        now = time.time()
+        w.news_seen = now - 60
+        run = [E(0, now - 100, events.START, -1, 5, 0), E(1, now - 99, events.LINK, -1, 1, 0),
+               E(2, now - 98, events.MASTER_AL, -1, 0x08, 0x02), E(3, now - 97.9, events.WC, -1, 2, 1)]
+        stop = [E(4, now - 10, events.TAKE_DOWN, -1, 1, 0), E(5, now - 9.9, events.WC, -1, 0, 2),
+                E(6, now - 9.5, events.SLAVE_AL, 0, 0x02, 0x08), E(7, now - 9.4, events.LATE, -1, 779, 0),
+                E(8, now - 9.4, events.GUARD, -1, 1, 0), E(9, now - 9.3, events.STOP, -1, 0, 0)]
+        said = [T(0, now - 9.2, 3, "EtherCAT ERROR 0-2: Failed to receive AL state datagram")]
+        logs = {}
+
+        def read(path=events.PATH):
+            return logs[path]
+        logs[events.PATH] = events.Log(events.PATH, now - 100, 1000000, 1, "", 10, run + stop, said, 1)
+        with mock.patch.object(events, "read", side_effect=read):
+            w.check_news()
+            self.assertIsNone(w.news_mark)              # the stop: no news
+            fault = E(10, now - 30, events.DRIVE_FAULT, 0, 0x7500, 0x218)
+            logs[events.PATH] = events.Log(events.PATH, now - 100, 1000000, 1, "", 11,
+                                           run + [fault] + stop, said, 1)
+            w.check_news()
+            self.assertIsNotNone(w.news_mark)
+            tip = w.tabs.bar.tabToolTip(w.tabs.indexOf(w.trouble_page))
+            self.assertIn("1 error", tip)
+            self.assertIn("drive fault 0x7500", tip)
+            page = w.trouble_page
+            w.tabs.setCurrentWidget(page)
+            self.assertIsNone(w.news_mark)
+            self.assertIn("1 new since you last looked", page.events_info.text())
+            t = page.events_table
+            bold = [t.item(r, 2).text() for r in range(t.rowCount()) if t.item(r, 2).font().bold()]
+            self.assertEqual(len(bold), 1)
+            self.assertIn("drive fault", bold[0])
+            stopped = [t.item(r, 2).text() for r in range(t.rowCount())
+                       if t.item(r, 2).text().endswith("(at the stop)")]
+            self.assertTrue(any("Failed to receive" in x for x in stopped))
+            # leaving the tab: seen, no longer bold
+            w.tabs.setCurrentWidget(w.test_page)
+            page.show_events()
+            self.assertFalse(any(t.item(r, 2).font().bold() for r in range(t.rowCount())))
+
     def test_long_term_history_of_a_slave(self):
         """The Live page shows the chosen slave's long-term history
         from the run in the event log: its DC curve and the counters."""

@@ -436,9 +436,12 @@ beyond that, and the error counters that grew, with when they began. It
 needs no *Examine*: the component records it while LinuxCNC or the workbench
 runs ([long-term monitoring](#the-component-in-linuxcnc)).
 
-When the master reports an error or a warning while another tab is shown,
-the *Diagnose* tab gets a dot: red for an error, amber for warnings only;
-its tooltip says how many. Showing the tab clears it.
+When the master or the event log reports an error or a warning while
+another tab is shown, the *Diagnose* tab gets a dot: red for an error, amber
+for warnings only. Its tooltip says how many and gives the first of them.
+Opening the tab clears the dot, puts the *Event log* card at the top and
+shows what is new in bold (until you leave the tab). What comes with a stop
+is no news: see [the event log](#the-event-log).
 
 The free master (`ec_master`, started with `ethercat-uspace start`) logs to
 the system journal, not to the event log. While the window is open it
@@ -3949,6 +3952,7 @@ The component records, with the time to the millisecond:
 | DC sync check | The master's check that a slave's clock is within 10 us before SYNC0 starts. |
 | drive fault | A CiA 402 drive's fault, with its error code (`0x603F`) as text. |
 | the profile shut the drive down | The cia402 profile's `fault-reason` (watchdog, enable timeout, no valid process data, ...), see [cia402](#cia-402-drives). |
+| take-down | An orderly stop began: LinuxCNC's shutdown (`ecat-take-down`) or the workbench's stop zeroes the outputs and takes the slaves to PREOP while process data still flows. |
 | stop guard | The servo thread stopped: the guard takes the slaves to PREOP, and says whether they got there (or it gave up, with the states they were left in); or the servo thread runs again. |
 | servo thread late | The guard sent a cycle for a servo thread more than a quarter period late (at most one line a second, with the number left out). |
 | SYNC0 shift | `sync0-shift-ns: auto` chose a shift, with the turn-around in cycles. |
@@ -3978,6 +3982,15 @@ offline for a while, and the working counter shows zero or incomplete while the
 slaves climb back to OP. The log shows these as information (with the reason),
 not as errors, when the events before them explain them: a slave beyond the
 number that respond is still reported offline.
+
+A stop looks like a fault, too: the working counter drops as the slaves go
+to PREOP, the last servo cycle comes late, and the master, closing, may
+report an unmatched datagram or a failed state read. From the take-down on
+(or, with an `ecat` older than that event, from the end of the run back over
+such events, at most 3 s) these are information, marked *(at the stop)*;
+they do not mark the *Diagnose* tab and *What this means* does not count
+them. A slave that goes to an error state, a link down or a drive fault
+during the stop is still an error.
 
 To see it:
 
