@@ -4286,6 +4286,11 @@ not known yet* adds, in amber, what is missing and where to learn it
   shared under CC0 (anyone may use it); nobody reviews it beforehand.
 - **Fetch shared data** downloads what others shared, only when you press
   it (no account needed). Each file is checked again here.
+- **Open a file...** and **Paste...** take a quirk file from elsewhere,
+  such as one posted in a forum (the file itself, or a post with it in a
+  ` ```yaml ` block). It is checked the same way, refused when it is for
+  another device, and gone through fact by fact like a fetched one; each
+  fact you use says it came from that file.
 - **You review what you take.** Choose a file (with its up-votes and
   reports); *Show the whole shared file* shows it grouped the same way,
   each fact marked new, the same, or with what is in use now. Its facts

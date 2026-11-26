@@ -10,8 +10,8 @@ import urllib.parse
 
 from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-                             QHBoxLayout, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+                             QFormLayout, QHBoxLayout, QInputDialog, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
                              QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
 
 from . import devicedata, measured, quirks, settings, testmode, tool, tuning
@@ -283,7 +283,7 @@ class DeviceDataDialog(QDialog):
         self.slave, self.ident, self.name, self.revision = device(win, position)
         self.setWindowTitle("Device data - %s" % TITLE)
         self.resize(980, 760)
-        self.files, self.rows, self.at, self.used = [], [], 0, []
+        self.files, self.rows, self.at, self.used, self.imports = [], [], 0, [], []
         lay = QVBoxLayout(self)
         lay.addWidget(label("<b>%s</b> &nbsp; vendor 0x%08X, product 0x%08X%s &nbsp; "
                             "<span style='color:#b45309'>prototype</span>" % (
@@ -326,6 +326,15 @@ class DeviceDataDialog(QDialog):
         self.fetch_button = QPushButton("Fetch shared data")
         self.fetch_button.clicked.connect(self.fetch)
         row.addWidget(self.fetch_button)
+        self.open_button = QPushButton("Open a file...")
+        self.open_button.setToolTip("A quirk file from elsewhere, such as a forum post: checked, then its facts "
+                                    "one by one like a fetched one")
+        self.open_button.clicked.connect(lambda: self.open_file())
+        row.addWidget(self.open_button)
+        self.paste_button = QPushButton("Paste...")
+        self.paste_button.setToolTip("Paste a quirk file, or a post with one in a ```yaml block")
+        self.paste_button.clicked.connect(lambda: self.paste())
+        row.addWidget(self.paste_button)
         self.fetched = label("", "hint")
         row.addWidget(self.fetched, 1)
         lay.addLayout(row)
@@ -389,7 +398,8 @@ class DeviceDataDialog(QDialog):
         res = measured.results(self.ident)
         unknown = devicedata.unknowns(self.slave, now, res) if self.unknown_box.isChecked() else []
         e = self.entry() if self.whole_button.isChecked() else None
-        other = ("Shared file #%s by %s" % (e.get("discussion"), e.get("author") or "?"), e["raw"]) \
+        other = (("Shared file #%s by %s" % (e.get("discussion"), e.get("author") or "?")
+                  if e.get("discussion") is not None else "The file from %s" % e["ref"]), e["raw"]) \
             if e is not None and not e["problems"] else None
         bar = self.page.verticalScrollBar().value()
         self.page.setHtml(page_html(self.name, self.ident, self.revision, self.esi_line(), now, own,
@@ -472,16 +482,19 @@ class DeviceDataDialog(QDialog):
     def show_files(self):
         f = devicedata.fetched()
         self.fetched.setText("Fetched %s." % f["time"].replace("T", " ") if f else "Not fetched yet.")
-        self.files = devicedata.shared_for(self.ident)
+        self.files = self.imports + devicedata.shared_for(self.ident)
         self.file_box.blockSignals(True)
         self.file_box.clear()
         for e in self.files:
-            self.file_box.addItem("#%s by %s: %d up, %s%s" % (
-                e.get("discussion"), e.get("author") or "?", e.get("upvotes") or 0,
-                devicedata.summary(e.get("reports")), " (REFUSED by the check)" if e["problems"] else ""))
+            refused = " (REFUSED by the check)" if e["problems"] else ""
+            if e.get("discussion") is None:
+                self.file_box.addItem("From %s%s" % (e["ref"], refused))
+            else:
+                self.file_box.addItem("#%s by %s: %d up, %s%s" % (
+                    e.get("discussion"), e.get("author") or "?", e.get("upvotes") or 0,
+                    devicedata.summary(e.get("reports")), refused))
         self.file_box.blockSignals(False)
-        for w in (self.file_box, self.thread_button, self.report_button):
-            w.setVisible(bool(self.files))
+        self.file_box.setVisible(bool(self.files))
         if not self.files:
             self.file_info.setText("Nothing shared for this device%s." % ("" if f else " yet: fetch first"))
         self.file_chosen()
@@ -490,9 +503,49 @@ class DeviceDataDialog(QDialog):
         i = self.file_box.currentIndex()
         return self.files[i] if 0 <= i < len(self.files) else None
 
+    def take_in(self, text, ref):
+        """A quirk file from elsewhere: checked, put first among the files, chosen."""
+        try:
+            raw = devicedata.from_text(text)
+        except devicedata.Error as e:
+            QMessageBox.warning(self, TITLE, "Not read: %s" % e)
+            return None
+        e = devicedata.imported(raw, self.ident, ref)
+        self.imports = [x for x in self.imports if x["ref"] != ref] + [e]
+        self.show_files()
+        self.file_box.setCurrentIndex(self.files.index(e))
+        self.file_chosen()
+        return e
+
+    def open_file(self, path=None):
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Open a quirk file - %s" % TITLE, os.path.expanduser("~"),
+                                                  "Quirk files (*.yaml *.yml *.txt);;All files (*)")
+        if not path:
+            return None
+        try:
+            with open(path, errors="replace") as f:
+                text = f.read(256 * 1024 + 1)
+        except OSError as e:
+            QMessageBox.warning(self, TITLE, "Could not read %s: %s" % (path, e))
+            return None
+        return self.take_in(text, os.path.basename(path))
+
+    def paste(self, text=None):
+        if text is None:
+            text, ok = QInputDialog.getMultiLineText(
+                self, "Paste a quirk file - %s" % TITLE, "The quirk file, or a post with one in a ```yaml block:",
+                QApplication.clipboard().text())
+            if not ok:
+                return None
+        return self.take_in(text, "pasted text, %s" % devicedata.today())
+
     def file_chosen(self, *_):
         e = self.entry()
         self.rows, self.at = [], 0
+        online = e is not None and bool(e.get("url"))
+        self.thread_button.setVisible(online)
+        self.report_button.setVisible(online)
         self.whole_button.setVisible(e is not None and not e["problems"])
         if self.whole_button.isChecked():
             self.show_facts()

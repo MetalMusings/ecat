@@ -496,6 +496,39 @@ def from_post(body):
     raise Error("no ```yaml block with the quirk file in the post")
 
 
+def from_text(text):
+    """A quirk file from text from anywhere (a file, a forum post): the YAML itself,
+    or the first ```yaml block in it. Raises Error."""
+    text = text or ""
+    if len(text) > 256 * 1024:
+        raise Error("more than 256 KB: not a quirk file")
+    if "```" in text:
+        return from_post(text)
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise Error("not YAML: %s" % e)
+    if not isinstance(data, dict):
+        raise Error("not a quirk file (a YAML mapping)")
+    return data
+
+
+def imported(raw, ident, ref):
+    """A quirk file read from elsewhere as an entry like shared_for's: checked here,
+    and refused for another device. ref says where it came from (a file, "pasted")."""
+    problems = check(raw)
+    m = (raw or {}).get("match") if isinstance(raw, dict) else None
+    if isinstance(m, dict) and not problems:
+        try:
+            q = quirks.parse({"match": m})
+            if ident not in q["matches"]:
+                problems.append("it is for another device (vendor %s, product %s)" % (m.get("vendor"), m.get("product")))
+        except quirks.QuirkError as e:
+            problems.append(str(e))
+    return {"path": ref, "raw": raw, "problems": problems, "discussion": None, "url": None,
+            "author": None, "upvotes": 0, "reports": [], "ref": ref}
+
+
 def repo_path(raw, number):
     """Where the data repository keeps a file sent in as Discussion `number`."""
     m = raw["match"]
@@ -663,7 +696,7 @@ def take(ident, name, entry, path):
     """Keep one fact of a fetched file in the user's own quirk file; its source
     says where it came from (and the source the sharer gave)."""
     raw = entry["raw"]
-    src = {"kind": "shared", "ref": entry.get("url") or entry.get("path"),
+    src = {"kind": "shared", "ref": entry.get("url") or entry.get("ref") or entry.get("path"),
            "by": entry.get("author"), "date": today()}
     given = (raw.get("sources") or {}).get(key(path))
     if given:

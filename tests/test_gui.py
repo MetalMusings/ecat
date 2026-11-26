@@ -3655,6 +3655,35 @@ class TestDeviceData(WindowBase):
         self.assertNotIn(0x2002, self.quirks.of(ident)["commands"])
         self.assertNotIn("0x2002", dlg.page.toPlainText())
 
+    def test_a_file_from_elsewhere_is_gone_through_like_a_shared_one(self):
+        import yaml
+        from ecatsetup import devicedata
+        w = self.window()
+        ident = self.quirks.identity(w.session.slave(0))
+        dlg = self.dv.DeviceDataDialog(w, 0)
+        self.addCleanup(dlg.deleteLater)
+        raw = {"format": 1, "name": "x", "match": {"vendor": "0x%08X" % ident[0], "product": "0x%08X" % ident[1]},
+               "commands": {"0x2003": "from the forum"}}
+        path = os.path.join(self.tmp.name, "forum.yaml")
+        with open(path, "w") as f:
+            yaml.safe_dump(raw, f)
+        e = dlg.open_file(path)
+        self.assertEqual(e["problems"], [])
+        self.assertIn("From forum.yaml", dlg.file_box.currentText())
+        self.assertIn("1 of 1: 0x2003 is a command", dlg.step.text())
+        self.assertTrue(dlg.report_button.isHidden())          # no thread to report in
+        dlg.use()
+        self.assertEqual(devicedata.sources(ident)["commands 0x2003"]["ref"], "forum.yaml")
+        # pasted from a post, for another device: refused, nothing offered
+        post = "Mine:\n```yaml\n%s```" % yaml.safe_dump(dict(raw, match={"vendor": "0x1", "product": "0x2"}))
+        e = dlg.paste(post)
+        self.assertIn("another device", e["problems"][0])
+        self.assertIn("REFUSED", dlg.file_box.currentText())
+        self.assertEqual(dlg.step.text(), "")
+        with mock.patch.object(self.dv.QMessageBox, "warning") as warn:
+            self.assertIsNone(dlg.paste("not a quirk file"))
+        self.assertIn("Not read", warn.call_args[0][2])
+
     def test_share_with_nothing_of_your_own_says_how(self):
         w = self.window()
         dlg = self.dv.DeviceDataDialog(w, 0)

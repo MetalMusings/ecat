@@ -267,6 +267,31 @@ class TestNewerFormat(unittest.TestCase):
             quirks.parse({"format": 1, "colour": "red"})
 
 
+class TestFromElsewhere(Folders):
+    """A quirk file from a forum or a file: the same check, refused for another device."""
+
+    def test_raw_yaml_or_a_post_with_a_block(self):
+        raw = devicedata.strip(shipped("rtelligent-ect60.yaml"))
+        text = yaml.safe_dump(raw)
+        self.assertEqual(devicedata.from_text(text), raw)
+        post = "Here is mine for the ECT60:\n\n```yaml\n%s```\nWorks on my mill." % text
+        self.assertEqual(devicedata.from_text(post), raw)
+        for bad in ("just words", "- a list", "x" * (300 * 1024), "a: [unclosed"):
+            with self.assertRaises(devicedata.Error):
+                devicedata.from_text(bad)
+
+    def test_checked_and_refused_for_another_device(self):
+        raw = devicedata.strip(shipped("rtelligent-ect60.yaml"))
+        e = devicedata.imported(raw, ECT60, "mine.yaml")
+        self.assertEqual(e["problems"], [])
+        self.assertIn("another device", devicedata.imported(raw, EL7041, "mine.yaml")["problems"][0])
+        self.assertTrue(devicedata.imported(dict(raw, pins={}), ECT60, "x")["problems"])
+        devicedata.put(raw, ("commands", "0x2011"), "from a forum")
+        e = devicedata.imported(raw, ECT60, "mine.yaml")
+        devicedata.take(ECT60, "ECT60", e, ("commands", "0x2011"))
+        self.assertEqual(devicedata.sources(ECT60)["commands 0x2011"]["ref"], "mine.yaml")
+
+
 class TestKinds(unittest.TestCase):
     """The one table of fact kinds (devicedata.KINDS)."""
 

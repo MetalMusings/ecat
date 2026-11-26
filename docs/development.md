@@ -4094,6 +4094,11 @@ objects known, for a DC slave no measured period, each with the card to learn it
 A shared file can be shown the same way, each fact marked new, the same, or with the
 value in use. Waits (the user): a list of every known device, also those not on the bus.
 
+Later the same day (the user: a quirk file shared in a forum should be readable too):
+*Open a file...* and *Paste...* in the dialog (`devicedata.from_text`: the YAML or the
+first ```yaml block; `imported`: the same check, refused for another device), gone
+through like a fetched file; the source is the file's name or "pasted text".
+
 ### Assignment: how each card makes its facts (2026-11-26, given, NOT started)
 
 The user: go through how each card chooses what goes into the quirk file, such as
