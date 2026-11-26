@@ -434,7 +434,9 @@ the bus; stop the kernel master first, or the two share the NIC
   before using it, and have the user at the machine.
 
 *Watch LinuxCNC that runs (read only)* shows the pins of a LinuxCNC that is
-already running and changes nothing.
+already running and changes nothing. LinuxCNC cannot run while the I/O test
+has the bus: pressed during the test, the button says so and offers the
+*Test* tab (where the test's live values are) or to stop the test.
 
 ### HAL & LinuxCNC
 

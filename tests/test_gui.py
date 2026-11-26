@@ -796,6 +796,41 @@ class TestWindow(WindowBase):
         self.assertIn("Save a report", "".join(
             lab.text() for lab in page.findChildren(gui.QLabel)))
 
+    def test_watch_while_the_io_test_runs_says_where_to_look(self):
+        w = self.window()
+        w.test = mock.Mock(running=True, watching=False)
+        try:
+            with mock.patch.object(w, "watch_busy_choice", return_value="test") as ask, \
+                    mock.patch.object(gui.testmode, "WatchRun") as watch, \
+                    mock.patch.object(w.tabs, "setCurrentWidget") as show:
+                w.start_watch()
+            ask.assert_called_once_with(False)
+            watch.assert_not_called()
+            show.assert_called_once_with(w.test_page)
+            with mock.patch.object(w, "watch_busy_choice", return_value="stop"), \
+                    mock.patch.object(w, "stop_test") as stop:
+                w.start_watch()
+            stop.assert_called_once()
+        finally:
+            w.test = None
+
+    def test_watch_busy_box_names_the_test_tab(self):
+        w = self.window()
+        seen = {}
+
+        def fake_exec(box):
+            seen["text"] = box.text() + " " + box.informativeText()
+            seen["buttons"] = [b.text() for b in box.buttons()]
+            return 0
+        with mock.patch.object(gui.QMessageBox, "exec_", fake_exec):
+            self.assertIsNone(w.watch_busy_choice(False))
+        self.assertIn("Test tab", seen["text"])
+        self.assertIn("cannot run while the I/O test", seen["text"])
+        self.assertIn("Stop the test", seen["buttons"])
+        with mock.patch.object(gui.QMessageBox, "exec_", fake_exec):
+            w.watch_busy_choice(True)
+        self.assertNotIn("Stop the test", seen["buttons"])
+
     def test_sdo_card_is_off_while_watching(self):
         w = self.window()
         run = mock.Mock(running=True, watching=True)

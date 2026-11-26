@@ -9170,7 +9170,13 @@ class MainWindow(QMainWindow):
         self.run("Starting the test...", lambda progress: run.start(progress), started)
 
     def start_watch(self):
-        if self.session.cfg is None or self.test is not None:
+        if self.test is not None:
+            self.watch_while_testing()
+            return
+        if self.session.cfg is None:
+            QMessageBox.information(self, TITLE, "Watching LinuxCNC needs a configuration: open "
+                                    "the ethercat.yaml LinuxCNC runs with (File > Open), or the "
+                                    "INI file that names it.")
             return
         run = testmode.WatchRun(copy.deepcopy(self.session.cfg), self.session.period)
 
@@ -9187,6 +9193,35 @@ class MainWindow(QMainWindow):
                 self.tabs.setCurrentWidget(self.test_page)
             self.refresh()
         self.run("Looking for LinuxCNC...", lambda progress: run.start(progress), started)
+
+    def watch_busy_choice(self, watching):
+        """What to do when Watch LinuxCNC is pressed while a test or a watch
+        runs: "test" (go to the Test tab), "stop" (stop the I/O test) or None."""
+        box = QMessageBox(self)
+        box.setWindowTitle(TITLE)
+        box.setIcon(QMessageBox.Information)
+        if watching:
+            box.setText("LinuxCNC is already being watched.")
+            box.setInformativeText("Its live values are on the Test tab.")
+        else:
+            box.setText("The I/O test is running: its live values are on the Test tab.")
+            box.setInformativeText(
+                "Watching LinuxCNC is for a LinuxCNC that runs, and LinuxCNC cannot run "
+                "while the I/O test has the bus. Stop the test first, then start LinuxCNC "
+                "and press Watch LinuxCNC again.")
+        to_test = box.addButton("Go to the Test tab", QMessageBox.AcceptRole)
+        stop = None if watching else box.addButton("Stop the test", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Close)
+        box.setDefaultButton(to_test)
+        box.exec_()
+        return {to_test: "test", stop: "stop"}.get(box.clickedButton()) if box.clickedButton() else None
+
+    def watch_while_testing(self):
+        choice = self.watch_busy_choice(self.test.watching)
+        if choice == "test":
+            self.tabs.setCurrentWidget(self.test_page)
+        elif choice == "stop":
+            self.stop_test()
 
     def stop_test(self):
         if self.test is None:
