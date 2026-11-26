@@ -2349,7 +2349,8 @@ the servo thread. What that means:
   counter was not complete. With the userspace master 1.7 or later it also
   reads the master's own frame counts once a second: the frames sent that
   never came back are recorded the same way (an onset, and their number
-  every 10 minutes). Pins: `<slave>.dc-diff-ns` (the last
+  every 10 minutes); with an older master they are not counted and
+`ecat.0.frames-lost` stays 0. Pins: `<slave>.dc-diff-ns` (the last
   difference), `<slave>.dc-diff-max-ns` (the largest since loading),
   `<slave>.error-count` (all monitored counters' growth since loading),
   `ecat.0.wc-bad-cycles` and (master 1.7) `ecat.0.frames-lost`. The *Synchronisation* card (test and *Watch

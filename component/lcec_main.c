@@ -49,6 +49,11 @@ static void lcec_guard_event(struct lcec_master *master, int state, unsigned al_
 #pragma weak ecrt_master_get_sync_manager
 #pragma weak ecrt_master_get_pdo
 #pragma weak ecrt_master_get_pdo_entry
+// In the userspace master 1.7; without it (an ecat.so built against 1.7, run
+// with 1.6) the frames lost are not counted and frames-lost stays 0.
+#ifdef EC_HAVE_FRAME_STATS
+#pragma weak ecrt_master_frame_stats
+#endif
 #include "lcec.h"
 #include "rtapi_app.h"
 //#include <linuxcnc/rtapi_mutex.h>
@@ -1178,7 +1183,7 @@ static void ecat_monitor(lcec_master_t *master) {
     master->mon_started = 1;
     ecat_mon_master_init(&master->mon, now);
 #ifdef EC_HAVE_FRAME_STATS
-    ecat_events_add(master->events, ECAT_EV_MON_START, -1, 1, 0);
+    ecat_events_add(master->events, ECAT_EV_MON_START, -1, ecrt_master_frame_stats != NULL, 0);
 #else
     ecat_events_add(master->events, ECAT_EV_MON_START, -1, 0, 0);
 #endif
@@ -1194,7 +1199,7 @@ static void ecat_monitor(lcec_master_t *master) {
   }
 #ifdef EC_HAVE_FRAME_STATS
   // the frames the master lost: once a second, after this cycle's receive
-  if (now - master->mon_frames_ns >= 1000000000ull) {
+  if (ecrt_master_frame_stats != NULL && now - master->mon_frames_ns >= 1000000000ull) {
     ec_master_frame_stats_t fs;
     master->mon_frames_ns = now;
     fs.size = sizeof(fs);

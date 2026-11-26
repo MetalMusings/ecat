@@ -21,16 +21,16 @@
 # Build dependencies: build-essential git dpkg-dev libyaml-dev libmodbus-dev (C tests)
 #   LinuxCNC 2.10 or 2.9 (linuxcnc-uspace-dev, or a 2.10 run-in-place build: source
 #   its scripts/rip-environment first; halcompile must be on the PATH), and
-#   linuxcnc-ethercat-uspace 1.5 or newer (its headers in
+#   linuxcnc-ethercat-uspace 1.7 or newer (its headers in
 #   /opt/linuxcnc-ethercat-uspace/include).
 
 set -euo pipefail
 
 PKG=linuxcnc-ecat
-BASE_VERSION=0.25.1
+BASE_VERSION=0.26
 MASTER=/opt/linuxcnc-ethercat-uspace
 MASTER_PKG=linuxcnc-ethercat-uspace
-MASTER_MIN=1.6
+MASTER_MIN=1.7
 # The oldest 2.9 a 2.9 package asks for (the user's decision, 2026-11-17:
 # Debian 13's own package; the HAL API is the same in the whole series).
 LINUXCNC29_MIN=2.9.4
