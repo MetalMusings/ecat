@@ -42,6 +42,13 @@ CARD_NAMES = {"settings": "Settings", "process-data": "Process data", "homing": 
               "sdo": "SDO", "switches": "Switches", "move": "Move", "response": "Response",
               "sync": "Synchronisation", "from-lcec": "From lcec"}
 UNKNOWNS_SETTING = "device-data-unknowns"
+NOTHING_TO_SHARE = (
+    "You have no facts of your own about %s yet: what came with the program is shared already.\n\n"
+    "Remember what you learn about the device where you learn it, then share it here:\n"
+    "- a setting: choose it on the Settings card, then Remember for the device type...\n"
+    "- a command: Run command... on the Workbench's SDO card, for an object not known as one\n"
+    "- which input is which: test a switch on the Switches card, then Name input bit...\n\n"
+    "Your pin names and scales are never shared.")
 
 KINDS = [("tried", "Tried on this machine"), ("manual", "The device's manual"),
          ("other", "Somewhere else")]
@@ -388,7 +395,10 @@ class DeviceDataDialog(QDialog):
         self.page.setHtml(page_html(self.name, self.ident, self.revision, self.esi_line(), now, own,
                                     unknown, measured.describe(res), other))
         self.page.verticalScrollBar().setValue(bar)
-        self.share_button.setEnabled(bool(own))
+        self.share_button.setToolTip(
+            "Post your facts for this device (not your pin names or scales) so that others can use "
+            "them; needs a GitHub account" if devicedata.facts(devicedata.strip(own)) else
+            "Nothing of yours to share yet: remember a fact first (press to see how)")
 
     def unknown_toggled(self, on):
         try:
@@ -419,7 +429,8 @@ class DeviceDataDialog(QDialog):
 
     def share(self, confirm=True):
         own = devicedata.read_raw(devicedata.own_path(self.ident))
-        if not own:
+        if not own or not [f for f in devicedata.facts(devicedata.strip(own))]:
+            QMessageBox.information(self, TITLE, NOTHING_TO_SHARE % self.name)
             return None
         s = devicedata.strip(own)
         problems = devicedata.check(s)

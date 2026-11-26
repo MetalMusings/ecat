@@ -3655,6 +3655,16 @@ class TestDeviceData(WindowBase):
         self.assertNotIn(0x2002, self.quirks.of(ident)["commands"])
         self.assertNotIn("0x2002", dlg.page.toPlainText())
 
+    def test_share_with_nothing_of_your_own_says_how(self):
+        w = self.window()
+        dlg = self.dv.DeviceDataDialog(w, 0)
+        self.addCleanup(dlg.deleteLater)
+        self.assertTrue(dlg.share_button.isEnabled())
+        with mock.patch.object(self.dv.QMessageBox, "information") as info:
+            self.assertIsNone(dlg.share(confirm=False))
+        self.assertIn("Remember for the device type", info.call_args[0][2])
+        self.assertEqual(self.opened, [])
+
     def test_what_is_not_known_yet(self):
         from ecatsetup import devicedata, settings
         w = self.window()
