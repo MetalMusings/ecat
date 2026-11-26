@@ -359,8 +359,7 @@ to those tabs with the slave chosen.
 ![Workbench](images/gui-workbench.png)
 
 Works with no LinuxCNC. *Start the workbench* runs `ecat` in `halrun` on
-the bus; stop the kernel master first, or the two share the NIC
-([Getting started](getting-started.md#getting-started)). The workbench's
+the bus. The workbench's
 synchronisation and every slave's pins also show on the *Live* tab. For
 the chosen slave:
 
@@ -965,8 +964,7 @@ explains the fault.
 
 1. A master must run. With LinuxCNC stopped, EtherCAT Setup offers to start
    one ([starting the master](#starting-the-master)); with LinuxCNC running,
-   it reads through LinuxCNC's master. The kernel master must not have the
-   network card at the same time (`sudo systemctl stop ethercat`).
+   it reads through LinuxCNC's master.
 2. Look at the bus list on the *Bus* page. A slave that is missing, and
    every slave after it, has no power, or the cable before it is broken:
    check the power and the cable at the last slave that is listed.
@@ -1081,8 +1079,7 @@ EtherCAT Setup's workbench runs the configuration being edited, saved or
 not, in `halrun` with the `ecat` component and a servo thread, without
 LinuxCNC. It is the same code that runs the machine.
 
-Before starting it, stop LinuxCNC and the kernel master
-(`sudo systemctl stop ethercat`). The free-running master
+Before starting it, stop LinuxCNC. The free-running master
 (`ethercat-uspace start`) hands the bus over to the workbench by itself and
 does not come back when the workbench stops.
 
@@ -1705,9 +1702,7 @@ master's own `ethercat-uspace.conf` decides. When neither names one (no file
 yet, as for a first look at a bus, and no active `INTERFACE=` line in
 `ethercat-uspace.conf`), you are first asked which network card the slaves are
 on: the wired cards, those with a link first (the window lists them, the
-command line takes the first one on Enter). If the kernel master is loaded
-(`/dev/EtherCAT0`), `sudo systemctl stop ethercat` is shown and run first;
-it is never done without being shown. The box "Don't ask again this session"
+command line takes the first one on Enter). The box "Don't ask again this session"
 stops the offers, the button still works.
 
 The fork's own tool does the same. When you run `ethercat-uspace slaves`
@@ -1717,8 +1712,7 @@ it prints `sudo /opt/linuxcnc-ethercat-uspace/bin/ethercat start`, asks
 linuxcnc-ethercat-uspace 1.2). It asks only with a terminal on both stdin
 and stderr, never as root, never while LinuxCNC has the interface, and not
 when `ETHERCAT_USPACE_NO_PROMPT=1` is set (ecatsetup sets it when it calls
-the tool). With the kernel master loaded it shows
-`sudo systemctl stop ethercat` first, as above.
+the tool).
 
 A master that runs but does not fit is offered a restart: it has no link,
 sees no slaves, or sits on another network card than the configuration's
@@ -2285,9 +2279,7 @@ the servo thread. What that means:
   it does not start, with one line per slave in LinuxCNC's log (for
   example "slave 2 is EL2008 ...; the configuration expects EL1008 there"):
   read the bus again and use *Update from bus*. A different revision is
-  only a warning. It also refuses to start when the kernel EtherCAT master
-  is loaded for the same network card: `sudo systemctl stop ethercat` (and
-  `disable` to keep it stopped).
+  only a warning.
 - The bus stops in order by itself when LinuxCNC (or `halcmd stop`)
   stops the threads. Otherwise the slaves would lose their process data
   in OP and stop with an error (sync manager watchdog 0x001B,
@@ -3982,7 +3974,7 @@ usual causes, each judged against this computer:
 
 | Mark | |
 |---|---|
-| likely | This computer has it (the IgH kernel master loaded, EEE on the EtherCAT card). What to do is under it. |
+| likely | This computer has it (EEE on the EtherCAT card, say). What to do is under it. |
 | possible | A known risk is there (a Realtek card), not proof. |
 | not checked | Nothing here tells; under it, how to find out (the Timing tab, *Examine all*). |
 | ruled out | Checked, and it is not that. |
@@ -3995,7 +3987,7 @@ counters. It changes nothing. The same text is at the top of the
 [report](#the-report) and after `ecatsetup --events`.
 
 The first problem it knows (2026-11-18), from a user whose drives would not
-stay enabled after moving from the IgH kernel master to the userspace one:
+stay enabled:
 
 **Frames were lost or came back too late**: working counter zero while
 running (not while the slaves come up), or the master's *skipped*,
@@ -4003,8 +3995,7 @@ running (not while the slaves come up), or the master's *skipped*,
 exchanged and ecat shuts every drive down (`fault-reason` 2): a drive
 reaches "Operation enabled" and falls back at once. Late frames are mostly
 timing or a second user of the card, seldom the cable. The causes looked
-at: the IgH kernel master loaded (or enabled for the next boot), the servo
-thread late (ecat's *servo thread late* events, a turn-around of 3 cycles),
+at: the servo thread late (ecat's *servo thread late* events, a turn-around of 3 cycles),
 no PREEMPT_RT kernel, no isolated CPU, EEE on the card, the card also
 carrying the LAN, the card's interrupt not on the real-time CPU (while
 LinuxCNC runs), a Realtek card (`r8169`), and a cable or a slave's power
@@ -4058,10 +4049,8 @@ writes one Markdown file (`ethercat-report-<date>-<time>.md`) with:
   `[KINS]`, `[TRAJ]` units and velocity, each joint's limits, following
   error, scale and homing;
 - `ethercat-load.hal` and `ethercat.hal`;
-- the EtherCAT masters on the computer: the IgH kernel master (its device
-  `/dev/EtherCAT0`, `ec_*` modules, `ethercat.service` enabled/active, with
-  a warning when it is loaded: it must not share the card with the
-  userspace master), free userspace masters with their command lines, and
+- the EtherCAT masters on the computer: free userspace masters with their
+  command lines, and
   whether LinuxCNC and `rtapi_app` run; and the running master's own
   status (`ethercat-uspace master`: link, frames, lost frames);
 - the computer as the [real-time check](#the-computers-timing) reads it (kernel command

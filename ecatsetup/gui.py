@@ -6117,9 +6117,8 @@ class TestPage(QWidget):
             "home and tune a drive: only after limits are written to it, and only while a button "
             "is held. Outputs set here go back to 0 when the workbench stops. Meanwhile the Live "
             "tab shows the synchronisation and every slave's state and pins.\n\n"
-            "Before starting: stop LinuxCNC and the kernel master (sudo systemctl stop ethercat), "
-            "and make sure nothing wired to the outputs can do harm. LinuxCNC cannot run while the "
-            "workbench runs.", wrap=True))
+            "Before starting: stop LinuxCNC (it cannot run while the workbench runs), and make "
+            "sure nothing wired to the outputs can do harm.", wrap=True))
         self.start = QPushButton("Start the workbench")
         self.start.setObjectName("primary")
         self.start.clicked.connect(win.start_test)

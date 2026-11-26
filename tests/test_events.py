@@ -388,9 +388,8 @@ class TestReport(unittest.TestCase):
                 pass
             loaded = report.masters(proc=d, kernel_device=os.path.join(d, "EtherCAT0"),
                                     run=lambda *a: "")
-        self.assertEqual(lines, ["IgH kernel master: not loaded; modules none; "
-                                 "ethercat.service not installed",
-                                 "Free userspace master: none running",
+        # no kernel master: not named at all (the user, 2026-11-26)
+        self.assertEqual(lines, ["Free userspace master: none running",
                                  "LinuxCNC: not running; rtapi_app (HAL, with ecat's master when "
                                  "loaded): not running"])
         self.assertTrue(loaded[0].startswith("IgH kernel master: loaded ("))

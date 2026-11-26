@@ -7,10 +7,13 @@ real-time check's safe expressions (rtrules.compile_expr). Each symptom has
 a `when` over what the event log shows, a meaning in plain words and its
 causes in order; each cause is judged against this computer:
 
-- likely: the computer has it (a kernel master loaded, EEE on the card);
+- likely: the computer has it (EEE on the card);
 - possible: a known risk is there (a Realtek card), not proof;
 - ruled out: checked, and it is not that;
 - not checked: nothing here tells; `check` says where to find out.
+
+A cause with `silent: true` is listed only when likely or possible: the
+IgH kernel master is named only on a computer that has it.
 
 The context is built from the event log (events.Log), the masters on the
 computer (report.master_facts), the computer as the real-time check reads it
@@ -44,7 +47,7 @@ class ExplainError(Exception):
 
 class Cause:
     FIELDS = ("id", "title", "likely", "possible", "ruled-out", "evidence", "check", "fix", "look",
-              "tests")
+              "tests", "silent")
 
     def __init__(self, d, where):
         unknown = set(d) - set(self.FIELDS)
@@ -261,6 +264,8 @@ class Finding:
         self.causes = []
         for c in symptom.causes:
             state, ev = c.judge(ctx)
+            if c.d.get("silent") and state not in ("likely", "possible"):
+                continue        # named only when this computer has it
             self.causes.append({
                 "id": c.id, "title": rtrules.fill(c.d["title"], ctx), "state": state,
                 "evidence": " ".join((ev or "").split()),

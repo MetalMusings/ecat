@@ -15,8 +15,7 @@ SYMPTOMS = [
      "CiA 402 state and status word live; its error code (0x603F) is in the diagnosis."),
     ("A drive reaches \"Operation enabled\" and falls back at once; the event log has working "
      "counter zero, or the master's skipped, unmatched or timed-out datagrams",
-     "Frames come back too late: a second master on the network card (the IgH kernel master "
-     "left loaded), the servo thread running late, or the card (EEE, shared with the LAN, a "
+     "Frames come back too late: the servo thread running late, or the card (EEE, shared with the LAN, a "
      "Realtek card); seldom the cable. ecat shuts every drive down in such a cycle.",
      "Event log: the box \"What this means\" above the events judges each cause on this "
      "computer; the Timing tab measures the servo thread."),

@@ -65,6 +65,7 @@
 
     - id: kernel-master
       title: The IgH kernel master is loaded beside the userspace master
+      silent: true
       likely: "kernel_master"
       ruled-out: "kernel_master == False"
       evidence: "{kernel_master_text}"
@@ -82,6 +83,7 @@
 
     - id: kernel-master-at-boot
       title: The IgH kernel master starts at the next boot
+      silent: true
       possible: "kernel_master == False and kernel_service_enabled"
       ruled-out: "masters_read and not kernel_service_enabled"
       evidence: "ethercat.service is enabled"

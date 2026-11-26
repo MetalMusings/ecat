@@ -185,7 +185,7 @@ class TestJudged(unittest.TestCase):
         f = explain.findings(ctx)[0]
         states = {c["id"]: c["state"] for c in f.causes}
         self.assertEqual(states, {
-            "kernel-master": "likely", "kernel-master-at-boot": "not checked", "late-thread": "not checked",
+            "kernel-master": "likely", "late-thread": "not checked",
             "not-preempt-rt": "ruled out", "no-isolated-cpu": "ruled out", "nic-eee": "likely",
             "nic-carries-lan": "ruled out", "nic-irq-cpu": "not checked", "nic-realtek": "possible",
             "cable": "ruled out", "late-not-lost": "not checked", "dropped-in-computer": "not checked"})
@@ -204,6 +204,22 @@ class TestJudged(unittest.TestCase):
         html = explain.html([f])
         self.assertIn("The IgH kernel master is loaded", html)
         self.assertNotIn("<script", html)
+
+    def test_the_kernel_master_is_named_only_when_it_is_there(self):
+        # silent causes: not listed as ruled out or not checked (the user, 2026-11-26)
+        evs = START + [ev(7, events.WC, a=0, b=2)]
+        none = {"device": False, "modules": [], "enabled": "", "active": "", "free": [],
+                "rtapi": False, "linuxcnc": [], "kernel_master": False}
+        f = explain.findings(explain.context(log(evs), masters=none))[0]
+        ids = [c["id"] for c in f.causes]
+        self.assertNotIn("kernel-master", ids)
+        self.assertNotIn("kernel-master-at-boot", ids)
+        self.assertNotIn("kernel master", "\n".join(explain.text_lines([f])))
+        f = explain.findings(explain.context(log(evs)))[0]          # masters not read
+        self.assertNotIn("kernel-master", [c["id"] for c in f.causes])
+        at_boot = dict(none, enabled="enabled")
+        f = explain.findings(explain.context(log(evs), masters=at_boot))[0]
+        self.assertIn("kernel-master-at-boot", [c["id"] for c in f.causes])
 
     def test_cable_evidence_says_only_what_was_seen(self):
         evs = START + [ev(7, events.WC, a=0, b=2), ev(8, events.SLAVE_ONLINE, slave=3, a=0)]

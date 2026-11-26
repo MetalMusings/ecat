@@ -193,11 +193,6 @@ with older master headers they stay false.
 When the component is loaded (`loadrt ecat`), before it configures the
 slaves, it:
 
-- refuses to start when the kernel EtherCAT master is loaded and its
-  configuration (`/etc/ethercat.conf`, `MASTER0_DEVICE`) gives it the same
-  network card, by name, MAC address or `ff:ff:ff:ff:ff:ff`; or when that
-  configuration cannot be read. Two masters on one card do not work:
-  `sudo systemctl stop ethercat` (and `disable` to keep it stopped);
 - waits for the link (up to 10 s) and the master's scan of the bus;
 - compares each slave in the file with the slave at its position:
   vendor and product must be the same. A different or missing slave stops
@@ -213,12 +208,10 @@ slaves, it:
 
 With `master: start-check: false`, a difference or a missing link is a
 warning and the component starts as before: the master configures the
-slaves that match and leaves the others alone. The check of the kernel
-master is always made.
+slaves that match and leaves the others alone.
 
-Tried on the plasma cutter (2026-11-10, halrun, no motion): with the
-kernel master running, ecat refused before it took the card; with it
-stopped, the matching file loaded after waiting 3.5 s for the link and
+Tried on the plasma cutter (2026-11-10, halrun, no motion): the matching
+file loaded after waiting 3.5 s for the link and
 the scan, a wrong product code on slave 3 and an extra slave 4 in the
 file each stopped the load with their own line.
 

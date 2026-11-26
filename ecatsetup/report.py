@@ -143,10 +143,12 @@ def master_facts(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None):
 def masters(proc="/proc", kernel_device=KERNEL_MASTER_DEVICE, run=None, facts=None):
     """Lines on the EtherCAT masters of this computer (master_facts)."""
     f = facts or master_facts(proc, kernel_device, run)
-    out = ["IgH kernel master: %s; modules %s; ethercat.service %s" % (
-        "loaded (%s)" % kernel_device if f["device"] else "not loaded",
-        ", ".join(f["modules"]) if f["modules"] else "none",
-        "%s, %s" % (f["enabled"], f["active"]) if f["enabled"] else "not installed")]
+    out = []
+    if f["kernel_master"] or f["enabled"] == "enabled":     # named only when it is there
+        out.append("IgH kernel master: %s; modules %s; ethercat.service %s" % (
+            "loaded (%s)" % kernel_device if f["device"] else "not loaded",
+            ", ".join(f["modules"]) if f["modules"] else "none",
+            "%s, %s" % (f["enabled"], f["active"]) if f["enabled"] else "not installed"))
     for pid, cmd in f["free"]:
         out.append("Free userspace master: pid %s: %s" % (pid, cmd))
     if not f["free"]:
