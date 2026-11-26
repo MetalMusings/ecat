@@ -4268,9 +4268,16 @@ from `ecatsetup --check`.
 ### Shared device data (prototype)
 
 **A prototype, being tried; it uses a test repository that will go.**
-*Device data...* on a slave's page shows what is known about its device
-type beyond the ESI file, fact by fact: each fact's value, whether it came
-with the program or is yours, and where it comes from.
+*Device data...* on a slave's page shows everything known about its
+device type in one place: a line on its ESI file, then the facts grouped
+(commands and settings, homing, drive test, tuning, timing with the
+measured SYNC0 periods, process data, HAL and lcec), each with its value,
+where it comes from (came with the program, the manual, tried on a
+machine, shared), a link to **the card that owns it** and, for yours,
+*forget*. A fact is changed on its card, where it is used and can be
+tried; the page itself changes nothing but your sources. *Show what is
+not known yet* adds, in amber, what is missing and where to learn it
+(such as: which input is which, from the switch test).
 
 - **Share yours...** opens a new post in the data repository
   ([MetalMusings/ecat-devices-test](https://github.com/MetalMusings/ecat-devices-test))
@@ -4280,7 +4287,9 @@ with the program or is yours, and where it comes from.
 - **Fetch shared data** downloads what others shared, only when you press
   it (no account needed). Each file is checked again here.
 - **You review what you take.** Choose a file (with its up-votes and
-  reports), and its facts that differ from yours are shown one at a
+  reports); *Show the whole shared file* shows it grouped the same way,
+  each fact marked new, the same, or with what is in use now. Its facts
+  that differ from yours are then shown one at a
   time: what is in use, what the file says and where it comes from.
   *Use it* puts the fact into your own file (with where it came from),
   *Skip* leaves it. A shared setting can be tried first: *Try it* writes
@@ -4289,7 +4298,8 @@ with the program or is yours, and where it comes from.
 - **Report...** tells how a file worked for you (worked, partly, did not
   work, and your own words): the report is copied and the file's thread
   opens, to paste it as a comment. You can edit it later or add another.
-- **Forget** takes one of your facts out of your file again.
+- **forget** (on a fact of yours) takes it out of your file again; one that came with
+  the program comes back.
 
 The format of a quirk file is in the reference
 ([Quirk files](reference.md#quirk-files)): it is still a part of the

@@ -267,6 +267,35 @@ class TestNewerFormat(unittest.TestCase):
             quirks.parse({"format": 1, "colour": "red"})
 
 
+class TestKinds(unittest.TestCase):
+    """The one table of fact kinds (devicedata.KINDS)."""
+
+    def test_every_key_of_the_format_has_kinds(self):
+        heads = {k.path[0] for k in devicedata.KINDS}
+        self.assertEqual(quirks.KEYS - {"name", "match", "format", "sources"}, heads)
+
+    def test_every_shipped_fact_has_a_kind_a_section_and_a_known_card(self):
+        cards = {"settings", "process-data", "homing", "sdo", "switches", "move", "response", "sync",
+                 "from-lcec"}
+        for path in glob.glob(os.path.join(quirks.SHIPPED, "*.yaml")):
+            with open(path) as f:
+                raw = yaml.safe_load(f)
+            for p in devicedata.facts(raw):
+                k = devicedata.kind(p)
+                self.assertIsNotNone(k, (path, p))
+                self.assertIn(k.section, devicedata.SECTIONS)
+                self.assertTrue(k.card is None or k.card in cards, k)
+                self.assertNotIn("{", devicedata.label(p))
+        self.assertEqual(devicedata.label(("homing", "input-bits", "IN5")), "Input IN5 is 0x60FD bit")
+
+    def test_what_is_not_known_yet(self):
+        drive = {"profile": "cia402", "dc": {"assign-activate": "0x300"}}
+        found = devicedata.unknowns(drive, {}, [])
+        self.assertEqual([c for _, _, c in found], ["sdo", "switches", "response", "sync"])
+        self.assertEqual(devicedata.unknowns(drive, shipped("rtelligent-ect60.yaml"), [{"period-us": 500}]), [])
+        self.assertEqual(devicedata.unknowns({"profile": "generic"}, {}, []), [])
+
+
 def tool(root, name):
     import importlib.util
     spec = importlib.util.spec_from_file_location("devrepo_" + name, os.path.join(root, "tools", name + ".py"))

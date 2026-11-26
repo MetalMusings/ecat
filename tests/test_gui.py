@@ -3490,7 +3490,8 @@ class TestDeviceData(WindowBase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         env = {"ECATSETUP_DEVICES": os.path.join(self.tmp.name, "devices"),
-               "ECATSETUP_SHARED_CACHE": os.path.join(self.tmp.name, "cache")}
+               "ECATSETUP_SHARED_CACHE": os.path.join(self.tmp.name, "cache"),
+               "ECATSETUP_SETTINGS": os.path.join(self.tmp.name, "settings.yaml")}
         p = mock.patch.dict(os.environ, env)
         p.start()
         self.addCleanup(p.stop)
@@ -3530,16 +3531,26 @@ class TestDeviceData(WindowBase):
         self.assertIn(0x2001, self.quirks.of(ident)["commands"])
         src = devicedata.sources(ident)
         self.assertEqual(src["settings 0x2000:02"]["kind"], "tried")
-        # the dialog: both facts, yours, with their sources
+        # the device's page: the facts grouped, each with where it comes from and its card
         dlg = page.device_data()
         self.addCleanup(dlg.deleteLater)
-        texts = [[dlg.facts.item(r, c).text() for c in range(4)] for r in range(dlg.facts.rowCount())]
-        row = next(t for t in texts if t[0] == "Setting 0x2000:02")
-        self.assertEqual(row[2], "yours")
-        self.assertIn("value: 5", row[1])
-        # where it comes from: the kind, the date and the slave's revision
-        self.assertEqual(row[3], "tried on a machine, %s, 0x00000002" % devicedata.today())
-        self.assertIn(["Pin for 0x7000:00", "shipped"], [[t[0], t[2]] for t in texts])
+        html = dlg.page.toHtml()
+        text = dlg.page.toPlainText()
+        self.assertLess(text.index("Commands and settings"), text.index("Process data"))
+        self.assertIn("Setting 0x2000:02", text)
+        self.assertIn("value: 5", text)
+        # the kind, the date and the slave's revision
+        self.assertIn("tried on a machine, %s, 0x00000002" % devicedata.today(), text)
+        self.assertIn("came with the program", text)                # the shipped pin names
+        self.assertIn("card:settings", html)
+        self.assertIn("forget:settings 0x2000:02", html)
+        self.assertNotIn("forget:pins", html)                       # shipped: nothing to forget
+        # a card link brings the card that owns the fact into view
+        dlg.link(QUrl("card:sdo"))
+        self.assertIs(w.tabs.currentWidget(), w.test_page)
+        dlg.link(QUrl("card:settings"))
+        self.assertIs(w.tabs.currentWidget(), w.bus_page)
+        self.assertIs(w.current, 0)
         # Share opens the prefilled post, without asking in the test
         url = dlg.share(confirm=False)
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
@@ -3566,6 +3577,13 @@ class TestDeviceData(WindowBase):
         self.assertEqual(dlg.file_box.count(), 1)
         self.assertIn("#5 by bob: 2 up, 1 worked", dlg.file_box.itemText(0))
         self.assertIn("2 facts differ", dlg.file_info.text())
+        # the whole shared file, grouped the same way, marked against what is in use
+        dlg.whole_button.setChecked(True)
+        text = dlg.page.toPlainText()
+        self.assertIn("Shared file #5 by bob", text)
+        self.assertIn("in use now: {type: USINT, value: 5", text)
+        self.assertNotIn("Pin for", text)                            # pins are never shared
+        dlg.whole_button.setChecked(False)
         self.assertIn("1 of 2: 0x2002 is a command", dlg.step.text())
         self.assertTrue(dlg.try_button.isHidden())
         dlg.use()
@@ -3609,10 +3627,27 @@ class TestDeviceData(WindowBase):
         self.assertEqual(self.opened[-1], "https://example/5")
         self.assertEqual(devicedata.read_report(text)["used"], ["commands 0x2002"])
         # Forget takes one of yours away again
-        r = next(i for i, p in enumerate(dlg.in_use) if p == ("commands", "0x2002"))
-        dlg.facts.selectRow(r)
-        dlg.forget()
+        dlg.link(QUrl("forget:commands 0x2002"))
         self.assertNotIn(0x2002, self.quirks.of(ident)["commands"])
+        self.assertNotIn("0x2002", dlg.page.toPlainText())
+
+    def test_what_is_not_known_yet(self):
+        from ecatsetup import devicedata, settings
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"] = "cia402"
+        dlg = self.dv.DeviceDataDialog(w, 0)
+        self.addCleanup(dlg.deleteLater)
+        self.assertIn("Which input is which is not known", dlg.page.toPlainText())
+        self.assertIn("card:switches", dlg.page.toHtml())
+        dlg.unknown_box.setChecked(False)
+        self.assertNotIn("not known", dlg.page.toPlainText())
+        self.assertIs(settings.load()[self.dv.UNKNOWNS_SETTING], False)
+        ident = self.quirks.identity(s)
+        devicedata.remember(ident, "x", ("homing", "input-bits", "IN1"), 16, {"kind": "tried"})
+        dlg.unknown_box.setChecked(True)
+        self.assertNotIn("Which input is which", dlg.page.toPlainText())
+        self.assertIn("No commands known", dlg.page.toPlainText())
 
     def test_a_switch_test_offers_to_name_the_input(self):
         w = self.window()

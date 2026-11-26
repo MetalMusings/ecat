@@ -1682,7 +1682,7 @@ class SlaveView(QWidget):
         lay.addWidget(self.eoe_card)
 
         # process data
-        pd = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
+        pd = self.pd_card = Card("Process data", "Pins are named <name>.<pin>. Clear a pin to map the entry "
                                   "without one; entries the profile handles have no pins.")
         # the PDO of each direction, chosen from every PDO the device has; each says what it
         # gives, what does not suit is marked, not hidden (pdoreq.assignment_rows)
@@ -1752,7 +1752,7 @@ class SlaveView(QWidget):
         lay.addWidget(pd)
 
         # settings
-        st = Card("Settings", "SDOs written at every start, in PREOP. Add them from the slave's "
+        st = self.settings_card = Card("Settings", "SDOs written at every start, in PREOP. Add them from the slave's "
                               "dictionary, or type an object such as 0x2000:01 (it completes); "
                               "name and type come from the dictionary.")
         self.st = table(self.SET_COLUMNS, 1)

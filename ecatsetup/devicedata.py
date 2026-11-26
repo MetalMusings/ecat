@@ -23,6 +23,7 @@ import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 
 import yaml
 
@@ -66,36 +67,74 @@ def _obj_key(k):
         return text
 
 
+# -- the kinds of fact: ONE table (decided 2026-11-26). It says how a file's content
+# splits into facts, what each is called, where the window shows it (its section) and
+# which card owns it (the card is where it is learnt, tried and changed: there is no
+# quirk editor), and whether it may be shared. facts(), label(), check() and the
+# Device data page read it. "*" stands for a key (an object, a method, an input).
+
+@dataclass(frozen=True)
+class Kind:
+    path: tuple
+    section: str
+    label: str              # {1}, {2}: the path's parts
+    card: str = None        # devicedataview.CARDS
+    share: bool = True
+    value: str = ""         # what the value is, for the reference
+
+
+SECTIONS = ("Commands and settings", "Homing", "Drive test", "Tuning", "Process data", "HAL and lcec")
+KINDS = (
+    Kind(("commands", "*"), "Commands and settings", "{1} is a command, not a setting", "sdo",
+         value="why (text), or note/value/type/confirm for Run command"),
+    Kind(("settings", "*"), "Commands and settings", "Setting {1}", "settings",
+         value="type, value, name: written at every start"),
+    Kind(("homing", "methods"), "Homing", "Homing methods", "homing", value="list of 0x6098 values"),
+    Kind(("homing", "describe", "*"), "Homing", "Method {2}: what it does", "homing"),
+    Kind(("homing", "extras", "*"), "Homing", "Method {2}: settings it needs", "homing"),
+    Kind(("homing", "enable-again"), "Homing", "Enabled again after methods", "homing"),
+    Kind(("homing", "input-bits", "*"), "Homing", "Input {2} is 0x60FD bit", "switches"),
+    Kind(("homing", "inputs"), "Homing", "How the inputs get their function and polarity", "switches"),
+    Kind(("limits", "*"), "Drive test", "Limit: {1}", "move"),
+    Kind(("tuning", "*"), "Tuning", "Tuning object {1}", "response"),
+    Kind(("measure", "ignore", "*"), "Tuning", "{2} is not recorded when measuring", "response"),
+    Kind(("pins", "*"), "Process data", "Pin for {1}", "process-data", share=False,
+         value="a machine's choice: never shared"),
+    Kind(("hal",), "HAL and lcec", "HAL lines", None),
+    Kind(("lcec",), "HAL and lcec", "Translation of lcec's settings", "from-lcec"),
+)
+
+
+def _keys(raw, head):
+    """The keys at a path's head (settings: their objects)."""
+    if head == ("settings",):
+        return [_obj_key(st["object"]) for st in (raw or {}).get("settings") or []
+                if isinstance(st, dict) and "object" in st]
+    d = raw or {}
+    for p in head:
+        d = d.get(p) if isinstance(d, dict) else None
+    if not isinstance(d, dict):
+        return []
+    obj = head[0] in ("commands", "pins", "tuning", "measure")
+    return [_obj_key(k) if obj else str(k) for k in d]
+
+
 def facts(raw):
-    """The fact paths a quirk file's content holds, in file order."""
+    """The fact paths a quirk file's content holds, in the order of KINDS."""
     out = []
-    raw = raw or {}
-    for k in raw.get("commands") or {}:
-        out.append(("commands", _obj_key(k)))
-    for k in raw.get("limits") or {}:
-        out.append(("limits", str(k)))
-    for k in raw.get("pins") or {}:
-        out.append(("pins", _obj_key(k)))
-    for st in raw.get("settings") or []:
-        if isinstance(st, dict) and "object" in st:
-            out.append(("settings", _obj_key(st["object"])))
-    for k in ("hal", "lcec"):
-        if raw.get(k) is not None:
-            out.append((k,))
-    h = raw.get("homing") or {}
-    for k in ("methods", "enable-again", "inputs"):
-        if h.get(k) is not None:
-            out.append(("homing", k))
-    for k in ("describe", "extras"):
-        for n in h.get(k) or {}:
-            out.append(("homing", k, str(n)))
-    for n in h.get("input-bits") or {}:
-        out.append(("homing", "input-bits", str(n)))
-    for k in raw.get("tuning") or {}:
-        out.append(("tuning", _obj_key(k)))
-    for k in (raw.get("measure") or {}).get("ignore") or {}:
-        out.append(("measure", "ignore", _obj_key(k)))
+    for kind in KINDS:
+        if "*" in kind.path:
+            head = kind.path[:kind.path.index("*")]
+            out += [head + (k,) for k in _keys(raw, head)]
+        elif get(raw, kind.path) is not None:
+            out.append(kind.path)
     return out
+
+
+def kind(path):
+    """The Kind of a fact path, or None."""
+    return next((k for k in KINDS if len(k.path) == len(path)
+                 and all(a == "*" or a == b for a, b in zip(k.path, path))), None)
 
 
 def key(path):
@@ -167,30 +206,8 @@ def merge(base, top):
 
 def label(path):
     """A fact in words, for the window."""
-    head = path[0]
-    if head == "commands":
-        return "%s is a command, not a setting" % path[1]
-    if head == "settings":
-        return "Setting %s" % path[1]
-    if head == "limits":
-        return "Drive test limit: %s" % path[1]
-    if head == "pins":
-        return "Pin for %s" % path[1]
-    if head == "tuning":
-        return "Tuning: %s" % path[1]
-    if head == "measure":
-        return "Not recorded when measuring: %s" % path[2]
-    if head == "hal":
-        return "HAL lines"
-    if head == "lcec":
-        return "Translation of lcec's settings"
-    if head == "homing":
-        return {"methods": "Homing methods", "enable-again": "Enable again after homing methods",
-                "inputs": "How the inputs get their function and polarity"}.get(path[1]) or (
-            "Input %s is 0x60FD bit" % path[2] if path[1] == "input-bits" else
-            "Homing method %s: %s" % (path[2], "settings it needs" if path[1] == "extras"
-                                      else "description"))
-    return key(path)
+    k = kind(path)
+    return k.label.format(*path) if k else key(path)
 
 
 def text(value):
@@ -210,6 +227,29 @@ def source_text(src):
             "other": ""}.get(kind, kind)
     more = [str(src[k]) for k in ("ref", "date", "revision", "firmware", "by") if src.get(k)]
     return ", ".join([bits] + more if bits else more) or "no source given"
+
+
+def unknowns(slave, raw, measured_results):
+    """What is not known yet about a configured slave's device type, and where to
+    learn it: [(section, text, card)]. Shown on the Device data page (it can be
+    switched off)."""
+    out = []
+    raw = raw or {}
+    if (slave or {}).get("profile") == "cia402":
+        if not raw.get("commands"):
+            out.append(("Commands and settings", "No commands known. If an object does something when "
+                        "written (zero the position, store the parameters), remember it from Run command "
+                        "on the SDO card.", "sdo"))
+        if not (raw.get("homing") or {}).get("input-bits"):
+            out.append(("Homing", "Which input is which is not known: test a switch on the Switches card "
+                        "and name its input.", "switches"))
+        if not raw.get("tuning"):
+            out.append(("Tuning", "No tuning objects known: Look for settings in the drive on the Response "
+                        "card, and remember what helps.", "response"))
+    if (slave or {}).get("dc") and not measured_results:
+        out.append(("Timing", "No SYNC0 period measured for this device: after a run, Remember this period "
+                    "on the Live tab.", "sync"))
+    return out
 
 
 # -- the user's own file
@@ -388,11 +428,13 @@ def check(raw):
         out.append("format: a version number is needed (format: %d)" % FORMAT)
     elif fmt > FORMAT:
         out.append("format %d is newer than this check knows (%d)" % (fmt, FORMAT))
-    extra = set(raw) - SHARE_KEYS
-    if "pins" in extra:
-        out.append("pins: pin names and scales are a machine's choice and are not shared")
-    if extra - {"pins"}:
-        out.append("unknown keys: %s" % ", ".join(sorted(extra - {"pins"})))
+    extra = set(raw) - SHARE_KEYS - {k.path[0] for k in KINDS}
+    if extra:
+        out.append("unknown keys: %s" % ", ".join(sorted(extra)))
+    # a kind that is never shared is refused even when it is empty
+    private = sorted({k.path[0] for k in KINDS if not k.share} & set(raw))
+    for k in private:
+        out.append("%s: pin names and scales are a machine's choice and are not shared" % k)
     m = raw.get("match")
     if not isinstance(m, dict) or "vendor" not in m or "product" not in m:
         out.append("match: vendor and product are needed")

@@ -5,16 +5,35 @@ going through a shared file's facts one by one, Try / Undo for a setting,
 Report)."""
 
 import html
+import os
 import urllib.parse
 
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                              QHBoxLayout, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-                             QRadioButton, QVBoxLayout)
+                             QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
 
-from . import devicedata, quirks, testmode, tool, tuning
-from .gui import GREY, TITLE, item, label, mono, table
+from . import devicedata, measured, quirks, settings, testmode, tool, tuning
+from .gui import TITLE, label
+
+# where each card is: (the tab's page, the card) from the main window; devicedata.KINDS
+# names a fact's card by these ids
+CARDS = {
+    "settings": ("bus", lambda w: w.bus_page, lambda w: w.slave_page.settings_card),
+    "process-data": ("bus", lambda w: w.bus_page, lambda w: w.slave_page.pd_card),
+    "homing": ("bus", lambda w: w.bus_page, lambda w: w.slave_page.homing_card),
+    "sdo": ("workbench", lambda w: w.test_page, lambda w: w.test_page.sdo_card),
+    "switches": ("workbench", lambda w: w.test_page, lambda w: w.test_page.switches),
+    "move": ("workbench", lambda w: w.test_page, lambda w: w.test_page.move),
+    "response": ("workbench", lambda w: w.test_page, lambda w: w.test_page.response),
+    "sync": ("live", lambda w: w.live_page, lambda w: w.live_page.sync),
+    "from-lcec": ("hal", lambda w: w.hal_page, lambda w: w.hal_page.lcec_card),
+}
+CARD_NAMES = {"settings": "Settings", "process-data": "Process data", "homing": "Homing by the drive",
+              "sdo": "SDO", "switches": "Switches", "move": "Move", "response": "Response",
+              "sync": "Synchronisation", "from-lcec": "From lcec"}
+UNKNOWNS_SETTING = "device-data-unknowns"
 
 KINDS = [("tried", "Tried on this machine"), ("manual", "The device's manual"),
          ("other", "Somewhere else")]
@@ -136,6 +155,88 @@ def open_url(url):
     QDesktopServices.openUrl(QUrl(url))
 
 
+def show_card(win, position, card):
+    """Bring a card into view, for the chosen slave: the card owns the fact."""
+    if card not in CARDS:
+        return None
+    _, page, widget = CARDS[card]
+    if isinstance(position, int):
+        win.select_slave(position)
+    win.show_tab(page(win))
+    w = widget(win)
+    QApplication.processEvents()
+    p = w.parentWidget()
+    while p is not None and not isinstance(p, QScrollArea):
+        p = p.parentWidget()
+    if p is not None:
+        p.ensureWidgetVisible(w, 0, 0)
+    win.raise_()
+    win.activateWindow()
+    return w
+
+
+def _mark(src, mine):
+    """Where a fact comes from, short, for the page."""
+    if not mine:
+        return "came with the program"
+    if not src:
+        return "yours"
+    return devicedata.source_text(src)
+
+
+def page_html(name, ident, revision, esi_line, now, own, unknown=(), timing=None, other=None):
+    """The device's page: its facts grouped by section, each with its value, where
+    it comes from, its card and (yours) Forget. other: (label, raw) of a shared
+    file shown the same way, each fact marked against what is in use."""
+    raw = other[1] if other else now
+    srcs = (raw or {}).get("sources") or {}
+    rows = {sec: [] for sec in devicedata.SECTIONS + ("Timing",)}
+    for p in devicedata.facts(raw):
+        k = devicedata.kind(p)
+        if other and not k.share:
+            continue
+        rows[k.section].append((p, k))
+    out = ["<h3 style='margin-bottom:2px'>%s</h3>" % _html(name),
+           "<p style='margin-top:0'>vendor 0x%08X, product 0x%08X%s<br>%s</p>" % (
+               ident[0], ident[1], ", revision %s" % _html(revision) if revision else "", _html(esi_line))]
+    if other:
+        out.append("<p><b>%s</b>: as it would change what is in use. Choose its facts one by one "
+                   "below.</p>" % _html(other[0]))
+    for sec in devicedata.SECTIONS + ("Timing",):
+        lines = []
+        for p, k in rows.get(sec, []):
+            v = devicedata.get(raw, p)
+            key = devicedata.key(p)
+            mine = devicedata.get(own, p) is not None
+            links = []
+            if k.card:
+                links.append("<a href='card:%s'>%s card</a>" % (k.card, CARD_NAMES.get(k.card, k.card)))
+            if mine and not other:
+                links.append("<a href='forget:%s'>forget</a>" % _html(key))
+            if other:
+                was = devicedata.get(now, p)
+                state = "same as in use" if was == v else ("new" if was is None else
+                                                          "in use now: %s" % devicedata.text(was))
+                mark = "%s; <i>%s</i>" % (_html(devicedata.source_text(srcs.get(key))
+                                                if srcs.get(key) else "no source given"), _html(state))
+            else:
+                mark = _html(_mark(srcs.get(key), mine))
+            lines.append("<tr><td>%s</td><td><tt>%s</tt></td><td>%s</td><td>%s</td></tr>" % (
+                _html(k.label.format(*p)), _html(devicedata.text(v)), mark, " &middot; ".join(links)))
+        if sec == "Timing" and timing and not other:
+            lines.append("<tr><td>Measured SYNC0 periods</td><td><tt>%s</tt></td><td>%s</td><td>"
+                         "<a href='card:sync'>Synchronisation card</a></td></tr>" % (_html(timing), "measured"))
+        for usec, text, card in unknown if not other else ():
+            if usec == sec:
+                lines.append("<tr><td colspan='3'><i style='color:#b45309'>%s</i></td><td>"
+                             "<a href='card:%s'>%s card</a></td></tr>" % (
+                                 _html(text), card, CARD_NAMES.get(card, card)))
+        if lines:
+            out.append("<h4 style='margin-bottom:2px'>%s</h4><table cellspacing='0' cellpadding='3' "
+                       "width='100%%'>%s</table>" % (_html(sec), "".join(lines)))
+    return "".join(out)
+
+
 class DeviceDataDialog(QDialog):
     """A device type's facts: in use (shipped and yours, each with its source),
     Share yours, Fetch shared ones and go through a file's facts one by one."""
@@ -153,21 +254,33 @@ class DeviceDataDialog(QDialog):
                                 self.name, self.ident[0], self.ident[1],
                                 ", revision %s" % self.revision if self.revision else ""), wrap=True))
 
-        lay.addWidget(label("<b>In use</b>: what EtherCAT Setup knows about this device beyond its ESI "
-                            "file, and where each fact comes from.", wrap=True))
-        self.facts = table(["Fact", "Value", "From", "Source"], 1)
-        self.facts.horizontalHeader().setStretchLastSection(True)
-        lay.addWidget(self.facts, 2)
+        row = QHBoxLayout()
+        row.addWidget(label("<b>What is known about this device type</b>, grouped; each fact is changed "
+                            "on its card.", wrap=True), 1)
+        self.unknown_box = QCheckBox("Show what is not known yet")
+        try:
+            self.unknown_box.setChecked(bool(settings.load().get(UNKNOWNS_SETTING, True)))
+        except (OSError, ValueError, AttributeError):
+            self.unknown_box.setChecked(True)
+        self.unknown_box.toggled.connect(self.unknown_toggled)
+        row.addWidget(self.unknown_box)
+        lay.addLayout(row)
+        self.page = QTextBrowser()
+        self.page.setOpenLinks(False)
+        self.page.anchorClicked.connect(self.link)
+        lay.addWidget(self.page, 3)
         row = QHBoxLayout()
         self.share_button = QPushButton("Share yours...")
         self.share_button.setToolTip("Post your facts for this device (not your pin names or scales) so that "
                                      "others can use them; needs a GitHub account")
         self.share_button.clicked.connect(self.share)
-        self.forget_button = QPushButton("Forget")
-        self.forget_button.setToolTip("Take the chosen fact out of your own file (a shipped one comes back)")
-        self.forget_button.clicked.connect(self.forget)
         row.addWidget(self.share_button)
-        row.addWidget(self.forget_button)
+        self.whole_button = QPushButton("Show the whole shared file")
+        self.whole_button.setCheckable(True)
+        self.whole_button.setToolTip("Show the chosen shared file above, grouped like yours, each fact marked "
+                                     "against what is in use")
+        self.whole_button.toggled.connect(lambda _: self.show_facts())
+        row.addWidget(self.whole_button)
         row.addStretch(1)
         lay.addLayout(row)
 
@@ -224,36 +337,54 @@ class DeviceDataDialog(QDialog):
 
     # -- in use
 
+    def esi_line(self):
+        try:
+            dev = self.win.session.esi_device(self.position)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            dev = None
+        if dev is None:
+            return "No ESI file for it."
+        return "ESI file: %s (%s)%s" % (dev.name, os.path.basename(dev.path),
+                                        ", profile %d" % dev.profile if dev.profile else "")
+
     def show_facts(self):
         own = devicedata.read_raw(devicedata.own_path(self.ident)) or {}
         now = devicedata.current_raw(self.ident)
-        srcs = now.get("sources") or {}
-        self.in_use = devicedata.facts(now)
-        self.facts.setRowCount(0)
-        for p in self.in_use:
-            r = self.facts.rowCount()
-            self.facts.insertRow(r)
-            mine = devicedata.get(own, p) is not None
-            self.facts.setItem(r, 0, item(devicedata.label(p)))
-            self.facts.setItem(r, 1, item(devicedata.text(devicedata.get(now, p)), font=mono()))
-            self.facts.setItem(r, 2, item("yours" if mine else "shipped", colour=None if mine else GREY))
-            src = srcs.get(devicedata.key(p))
-            self.facts.setItem(r, 3, item(devicedata.source_text(src) if src else
-                                          ("" if mine else "came with the program"),
-                                          colour=None if src else GREY))
+        res = measured.results(self.ident)
+        unknown = devicedata.unknowns(self.slave, now, res) if self.unknown_box.isChecked() else []
+        e = self.entry() if self.whole_button.isChecked() else None
+        other = ("Shared file #%s by %s" % (e.get("discussion"), e.get("author") or "?"), e["raw"]) \
+            if e is not None and not e["problems"] else None
+        bar = self.page.verticalScrollBar().value()
+        self.page.setHtml(page_html(self.name, self.ident, self.revision, self.esi_line(), now, own,
+                                    unknown, measured.describe(res), other))
+        self.page.verticalScrollBar().setValue(bar)
         self.share_button.setEnabled(bool(own))
 
-    def chosen_fact(self):
-        rows = self.facts.selectionModel().selectedRows() if self.facts.selectionModel() else []
-        return self.in_use[rows[0].row()] if rows and rows[0].row() < len(self.in_use) else None
+    def unknown_toggled(self, on):
+        try:
+            data = settings.load()
+            data[UNKNOWNS_SETTING] = bool(on)
+            settings.save(data)
+        except (OSError, ValueError, AttributeError):
+            pass
+        self.show_facts()
 
-    def forget(self):
-        p = self.chosen_fact()
+    def link(self, url):
+        """card:<id> brings the card into view; forget:<fact> takes one of yours away."""
+        text = url.toString()
+        what, _, rest = text.partition(":")
+        if what == "card":
+            show_card(self.win, self.position, rest)
+        elif what == "forget":
+            self.forget(tuple(rest.split(" ")))
+
+    def forget(self, path):
         own = devicedata.read_raw(devicedata.own_path(self.ident)) or {}
-        if p is None or devicedata.get(own, p) is None:
-            self.win.status("Choose one of your own facts to forget")
+        if devicedata.get(own, path) is None:
             return
-        devicedata.remember(self.ident, self.name, p, None, None)
+        devicedata.remember(self.ident, self.name, path, None, None)
+        self.win.status("Forgotten: %s" % devicedata.label(path))
         self.show_facts()
         self.go(self.at)
 
@@ -322,6 +453,9 @@ class DeviceDataDialog(QDialog):
     def file_chosen(self, *_):
         e = self.entry()
         self.rows, self.at = [], 0
+        self.whole_button.setVisible(e is not None and not e["problems"])
+        if self.whole_button.isChecked():
+            self.show_facts()
         if e is not None:
             if e["problems"]:
                 self.file_info.setText("The check here refuses this file, so none of it can be used:\n%s"

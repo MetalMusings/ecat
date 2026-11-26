@@ -4068,3 +4068,28 @@ the user's word.
   fact is used (the dictionary's presence is checked for Try it), `tried:` from
   *Keep as setting* on the Response card, measured SYNC0 results, a help topic for
   the dialog.
+
+### No quirk editor; the fact kinds and the device's page (2026-11-26)
+
+Decided by the user: there is no quirk editor, and no "edit as text". Each kind of
+fact is owned by the card that uses it, which is its editor (in window terms, where
+it can be tried); a kind without such a card gets the card first. HAL lines and lcec
+translations come with the program or from shared files only. The Device data page
+shows, compares, takes, forgets and shares; it edits only sources and short notes.
+
+`devicedata.KINDS` is the one table of fact kinds: path (with `*` for a key), section,
+label, owning card, shared or not, what the value is. `facts`, `kind`, `label`,
+`check` (a kind that is never shared, `pins`, is refused even empty) and the page
+read it; tests check that every key of the format has kinds and every shipped fact a
+kind, section and known card. It is the part that must stay stable by the real
+release: it also sets how large a fact is (what a card sets at once).
+
+The page (`devicedataview.page_html`, a QTextBrowser): the device and a line on its
+ESI file, then the sections, each fact with value, source mark, a `card:` link
+(`devicedataview.CARDS`: tab and card; `show_card` selects the slave, shows the tab
+and scrolls the card into view) and `forget:` for the user's own; the measured SYNC0
+periods under Timing; `devicedata.unknowns` (switchable, kept in settings.yaml as
+`device-data-unknowns`): for a CiA 402 drive no commands, no input names or no tuning
+objects known, for a DC slave no measured period, each with the card to learn it on.
+A shared file can be shown the same way, each fact marked new, the same, or with the
+value in use. Waits (the user): a list of every known device, also those not on the bus.
