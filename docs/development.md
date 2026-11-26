@@ -3161,6 +3161,28 @@ LinuxCNC and its GUI running (2026-11-14). The GPE case needs a measurement
 beside LinuxCNC on turner. Scripts: the session's scratchpad (train-here,
 train-turner).
 
+**The GPE case beside LinuxCNC (2026-11-26, turner, ecat 0.26, master 1.7).**
+LinuxCNC with the Turner configuration and gmoccapy on turner's screen (the
+machine left off, nobody at it), `--rt-check --rt-way attach --rt-seconds 120
+--rt-twice`, the GPE counts before and after; first with the kernel line as it
+is, then without `acpi_mask_gpe=0x6F` (after a restart), then the line put back
+(restart; `/proc/cmdline` identical to before). Results in turner's
+`~/gpe-test/`.
+
+| Kernel line | GPEs in 4 min | Late at most (run 1 / run 2) | GPE finding |
+|---|---|---|---|
+| with `acpi_mask_gpe=0x6F` | none (gpe66: 5, at boot) | 19.6 / 22.1 us | none |
+| without it | none (gpe6F: 0; gpe66: 5, at boot) | 52.6 / 19.0 us | none |
+
+The storm did not come back: gpe6F, the one the mask is for, never fired. So
+the rule `acpi-gpe-storm` is still untried on a real storm; it stayed quiet as it
+should. What set off the storm on 2026-11-14 (an event of the board's
+embedded controller, the touch screen, the BIOS then) is not known. The first
+run without the mask had its 99.99 % at 51 us but "none over 20 us" in the
+spike count and only +-14 us from cycle to cycle: a steady offset, not
+spikes, most likely the thread's phase still moving after the start (SYNC0
+shift); not looked into.
+
 ### Step 7: the blind test on zx45 (2026-11-17)
 
 The user installed ecat's 2.9 package (Debian 13, LinuxCNC 2.9.4, a working-tree
