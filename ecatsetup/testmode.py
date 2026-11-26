@@ -573,6 +573,7 @@ class WatchRun(TestRun):
         self.written = {}
         self.lock = None
         self.gone = False
+        self.missing = []       # slaves of the file without pins in LinuxCNC's HAL
 
     def start(self, progress=lambda text: None, timeout=40.0):
         if not hal_running():
@@ -580,6 +581,15 @@ class WatchRun(TestRun):
         pins = self._try_pins("ecat.0.")
         if "ecat.0.all-op" not in pins:
             raise TestError("LinuxCNC runs, but the ecat component is not loaded in it")
+        # the slaves are found by their names: another configuration shows nothing
+        names = [x["name"] for x in used_slaves(self.cfg) if x.get("name")]
+        prefixes = {n.split(".", 1)[0] for n in self._try_pins("")}
+        self.missing = [n for n in names if n not in prefixes]
+        if names and len(self.missing) == len(names):
+            raise TestError(
+                "LinuxCNC runs another configuration: none of this one's slaves (%s) has pins "
+                "in its HAL. Open the configuration LinuxCNC runs with: the file its INI file "
+                "names ([ETHERCAT]CONFIG)." % ", ".join(names))
         progress("Watching LinuxCNC")
 
     @property

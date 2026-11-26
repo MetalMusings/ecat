@@ -9472,7 +9472,10 @@ class MainWindow(QMainWindow):
         def started(_):
             self.test = run
             self.test_timer.start()
-            self.set_messages([(GREEN, "", ["Watching LinuxCNC: read only."])])
+            self.set_messages([(GREEN, "", ["Watching LinuxCNC: read only."])] + (
+                [(AMBER, "", ["Not in LinuxCNC's HAL, so not shown: %s. LinuxCNC may run another "
+                              "version of this configuration." % ", ".join(run.missing)])]
+                if run.missing else []))
             if not isinstance(self.current, int) or self.current < 0:
                 # watching is often started from the Start page: show a slave, not an empty page
                 first = self.positions()[:1]
@@ -9824,6 +9827,25 @@ class MainWindow(QMainWindow):
             self.session.period = period
         self.refresh(keep_page=True)
         self.bus_page.master.show_config()
+        self.open_ini_config()
+
+    def open_ini_config(self):
+        """With no file open, open the configuration the INI file names
+        ([ETHERCAT]CONFIG): what LinuxCNC runs. A new configuration with
+        changes is dropped only when the user says so."""
+        s = self.session
+        if s.path or not s.ini_path:
+            return
+        path = integrate.ini_config(s.ini_path)
+        if not path or not os.path.exists(path):
+            return
+        if s.dirty and QMessageBox.question(
+                self, TITLE, "%s names %s, the configuration LinuxCNC runs with.\n\nOpen it? "
+                "The new configuration shown now is not saved and is dropped." % (
+                    os.path.basename(s.ini_path), path),
+                QMessageBox.Open | QMessageBox.Cancel) != QMessageBox.Open:
+            return
+        self.load(path)
 
     def news(self):
         """(errors, warnings) among the recorder's events and the master's
@@ -9946,6 +9968,9 @@ def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
             win.load(path)
         else:
             win.session.path = path
+    elif ini_path:
+        # no file given: the one the INI file names, as LinuxCNC runs it
+        win.open_ini_config()
     win.show()
     if ini_path and integrate.expanded_source(ini_path):
         QTimer.singleShot(300, lambda: win.set_ini(ini_path))

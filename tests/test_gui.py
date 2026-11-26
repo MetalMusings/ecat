@@ -633,6 +633,41 @@ class TestWindow(WindowBase):
             page.ini_button.click()
         self.assertEqual(w.session.period, 1000000)
 
+    def test_the_ini_files_configuration_is_opened(self):
+        """With no file open, choosing the INI file opens the configuration it
+        names ([ETHERCAT]CONFIG); a new one with changes only when the user says
+        so. (Watching LinuxCNC on a new configuration showed nothing, 2026-11-26.)"""
+        from ecatsetup import config
+        w = self.window()
+        d = self.dir.name
+        with open(os.path.join(d, "ethercat.yaml"), "w") as f:
+            f.write(config.dumps(w.session.cfg))
+        ini = os.path.join(d, "m.ini")
+        with open(ini, "w") as f:
+            f.write("[ETHERCAT]\nCONFIG = ethercat.yaml\n")
+        # the new configuration has changes: asked, Cancel keeps it
+        self.assertTrue(w.session.dirty)
+        with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Cancel) as q:
+            w.set_ini(ini)
+        q.assert_called_once()
+        self.assertIsNone(w.session.path)
+        with mock.patch.object(gui.QMessageBox, "question", return_value=gui.QMessageBox.Open):
+            w.set_ini(ini)
+        self.assertEqual(w.session.path, os.path.join(d, "ethercat.yaml"))
+        # a file open: left alone
+        with open(ini, "w") as f:
+            f.write("[ETHERCAT]\nCONFIG = other.yaml\n")
+        with open(os.path.join(d, "other.yaml"), "w") as f:
+            f.write(config.dumps(w.session.cfg))
+        w.set_ini(ini)
+        self.assertEqual(w.session.path, os.path.join(d, "ethercat.yaml"))
+        # an INI naming no file, or one that is not there: nothing
+        from ecatsetup import integrate
+        self.assertIsNone(integrate.ini_config(os.path.join(d, "none.ini")))
+        with open(ini, "w") as f:
+            f.write("[EMC]\n")
+        self.assertIsNone(integrate.ini_config(ini))
+
     def test_servo_period_typed_without_an_ini_file(self):
         from unittest import mock
         w = self.window()

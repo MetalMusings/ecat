@@ -1585,7 +1585,12 @@ can be seen while the machine does its work. It stops by itself when
 LinuxCNC ends.
 
 The configuration open in the window is used to name the slaves; open
-the one LinuxCNC runs (`[ETHERCAT]CONFIG` in its INI file). The
+the one LinuxCNC runs (`[ETHERCAT]CONFIG` in its INI file). With no file
+open, choosing the INI file (`--ini`, or *File > Machine INI file...*)
+opens that one by itself; a new configuration with changes is dropped only
+when you say so. If none of the open configuration's slaves has pins in
+LinuxCNC's HAL, watching does not start and says that LinuxCNC runs another
+configuration; slaves that are missing are named above the page. The
 *Diagnose* tab has a *Symptoms* guide: what is seen in LinuxCNC,
 what it usually comes from, and where to look.
 

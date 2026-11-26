@@ -145,6 +145,16 @@ def read_ini(path):
     return out
 
 
+def ini_config(ini):
+    """The configuration file the INI file names ([ETHERCAT]CONFIG, beside
+    the INI file), or None when it names none or the INI cannot be read."""
+    try:
+        name = ini_get(read_ini(ini), "ETHERCAT", "CONFIG")
+    except OSError:
+        return None
+    return os.path.join(os.path.dirname(os.path.abspath(ini)), name) if name else None
+
+
 def ini_get(entries, section, key, default=None):
     for s, k, v in entries:
         if s == section and k == key:

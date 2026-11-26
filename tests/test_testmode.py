@@ -220,6 +220,32 @@ class TestTestMode(unittest.TestCase):
         with self.assertRaisesRegex(testmode.TestError, "ecat component is not loaded"):
             testmode.WatchRun(cfg()).start()
 
+    def test_watch_says_when_linuxcnc_runs_another_configuration(self):
+        """The slaves are found by their names: a file whose slaves have no
+        pins in LinuxCNC's HAL showed empty tables (the user, 2026-11-26)."""
+        with open(self.state, "w") as f:
+            json.dump(PINS, f)
+        run = testmode.WatchRun(cfg())
+        run.start()
+        self.assertEqual(run.missing, [])
+        other = cfg()
+        other["slaves"][1]["name"] = "ek1100-1"       # a new proposal's name
+        run = testmode.WatchRun(other)
+        run.start()
+        self.assertEqual(run.missing, ["ek1100-1"])
+        other = cfg()
+        for s in other["slaves"]:
+            s["name"] += "-new"
+        with self.assertRaisesRegex(testmode.TestError, "another configuration.*x-new, io-new"):
+            testmode.WatchRun(other).start()
+        # an unused slave has no pins and is not missed
+        other = cfg()
+        other["slaves"][1]["unused"] = True
+        other["slaves"][1]["name"] = "spare"
+        run = testmode.WatchRun(other)
+        run.start()
+        self.assertEqual(run.missing, [])
+
     def hold_lock_elsewhere(self):
         """The test lock held by another process, as by a second window."""
         code = ("import fcntl,os,sys,time\n"
