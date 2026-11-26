@@ -1823,7 +1823,16 @@ class SlaveView(QWidget):
         if devicedataview.device(self.win, self.position) is None:
             self.win.status("This slave has no vendor and product")
             return None
-        dlg = devicedataview.DeviceDataDialog(self.win, self.position)
+        old = getattr(self.win, "device_dialog", None)
+        if old is not None:
+            # one at a time: the same slave's comes to the front, another's is replaced
+            if old.isVisible() and old.position == self.position:
+                old.raise_()
+                old.activateWindow()
+                return old
+            old.close()
+            old.deleteLater()
+        dlg = self.win.device_dialog = devicedataview.DeviceDataDialog(self.win, self.position)
         dlg.show()
         return dlg
 
@@ -10037,6 +10046,8 @@ class MainWindow(QMainWindow):
             return
         self.news_timer.stop()
         self.master_log.close()
+        if getattr(self, "device_dialog", None) is not None:
+            self.device_dialog.close()
         tp = self.timing_page
         if tp.worker is not None:
             # a measurement runs: stop it, so that halrun and the HAL lines it added go

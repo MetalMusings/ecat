@@ -3534,6 +3534,9 @@ class TestDeviceData(WindowBase):
         # the device's page: the facts grouped, each with where it comes from and its card
         dlg = page.device_data()
         self.addCleanup(dlg.deleteLater)
+        # a window of its own (not kept above the main window), one at a time
+        self.assertIsNone(dlg.parent())
+        self.assertIs(page.device_data(), dlg)
         html = dlg.page.toHtml()
         text = dlg.page.toPlainText()
         self.assertLess(text.index("Commands and settings"), text.index("Process data"))

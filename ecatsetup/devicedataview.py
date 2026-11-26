@@ -242,7 +242,10 @@ class DeviceDataDialog(QDialog):
     Share yours, Fetch shared ones and go through a file's facts one by one."""
 
     def __init__(self, win, position):
-        super().__init__(win)
+        # a window of its own, not kept above the main window: its card links bring a card
+        # into view there (MainWindow keeps the reference and closes it with itself)
+        super().__init__(None)
+        self.setWindowFlags(Qt.Window)
         self.win, self.position = win, position
         self.slave, self.ident, self.name, self.revision = device(win, position)
         self.setWindowTitle("Device data - %s" % TITLE)
