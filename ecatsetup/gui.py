@@ -612,10 +612,12 @@ def item(text, editable=False, tip=None, colour=None, font=None):
 
 
 def scroll(widget):
+    """A page in a scroll area. Its content shrinks to the window's width as far as it can;
+    what cannot (a page wider than a small window) scrolls sideways rather than being cut."""
     sa = QScrollArea()
     sa.setWidgetResizable(True)
     sa.setFrameShape(QFrame.NoFrame)
-    sa.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    sa.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     widget.setObjectName("page")
     sa.setWidget(widget)
     return sa
@@ -1440,17 +1442,19 @@ class SlaveView(QWidget):
         cform.addRow("Mode of operation", self.mode)
         # modes the drive may switch to while it runs (opmode-cmd), and homing by the
         # drive's own method; both are cia402.modes in the file
-        modes = QHBoxLayout()
+        # two by two: a mark such as "(own PDO mapping)" makes one row too wide for the page
+        modes = QGridLayout()
+        modes.setContentsMargins(0, 0, 0, 0)
         self.other_modes = {}
-        for m in ("csp", "csv", "pv", "pp"):
+        for i, m in enumerate(("csp", "csv", "pv", "pp")):
             cb = QCheckBox(m.upper())
             cb.setToolTip("Lets the drive switch between the mode above and %s while it runs, "
                           "with the pin opmode-cmd. The mode above is the one it starts in."
                           % m.upper())
             cb.toggled.connect(self.general_edited)
             self.other_modes[m] = cb
-            modes.addWidget(cb)
-        modes.addStretch(1)
+            modes.addWidget(cb, i // 2, i % 2)
+        modes.setColumnStretch(2, 1)
         cform.addRow("Can also switch to", modes)
         self.opmode_hint = label("", "hint", wrap=True)
         cform.addRow("", self.opmode_hint)
@@ -1829,6 +1833,11 @@ class SlaveView(QWidget):
         self.read_now_button = QPushButton("Read present values")
         self.read_now_button.setToolTip("Read each setting's object from the slave, to compare")
         self.read_now_button.clicked.connect(self.read_present_values)
+        self.hex_box = QCheckBox("Values in hex")
+        self.hex_box.setToolTip("Show the values (and what the slave has now) as 0x hex. You can "
+                                "type a value in either form: 255 or 0xFF")
+        self.hex_box.setChecked(self.win.hex_values)
+        self.hex_box.toggled.connect(self.win.set_hex_values)
         buttons.addWidget(add)
         buttons.addWidget(remove)
         buttons.addWidget(self.read_now_button)
@@ -1836,6 +1845,11 @@ class SlaveView(QWidget):
         self.init_button.setToolTip("Add the settings the device's ESI file writes at start (its InitCmds) "
                                     "and, for a drive whose 0x6060 is not in the process data, its mode")
         self.init_button.clicked.connect(self.add_device_needs)
+        # two rows, so that the card is not what makes the page wider than the window
+        buttons.addWidget(self.hex_box)
+        buttons.addStretch(1)
+        st.add(buttons)
+        buttons = QHBoxLayout()
         buttons.addWidget(self.init_button)
         self.ferror_button = QPushButton("Suggest following-error window")
         self.ferror_button.setToolTip(
@@ -1850,12 +1864,6 @@ class SlaveView(QWidget):
             "comes from, so the next one gets it and you can share it (Device data...)")
         self.remember_setting_button.clicked.connect(self.remember_setting)
         buttons.addWidget(self.remember_setting_button)
-        self.hex_box = QCheckBox("Values in hex")
-        self.hex_box.setToolTip("Show the values (and what the slave has now) as 0x hex. You can "
-                                "type a value in either form: 255 or 0xFF")
-        self.hex_box.setChecked(self.win.hex_values)
-        self.hex_box.toggled.connect(self.win.set_hex_values)
-        buttons.addWidget(self.hex_box)
         buttons.addStretch(1)
         st.add(buttons)
         lay.addWidget(st)
@@ -6864,10 +6872,8 @@ class TestPage(QWidget):
                 tile.setVisible(val is not None)
                 if val is not None:
                     if pin == "error-code":
-                        try:
-                            val = diagnose.error_text(int(val, 0), self.win.session.slave(self.position))
-                        except ValueError:
-                            pass
+                        code = self.fault_code(self.position, v)
+                        val = diagnose.error_text(code, self.win.session.slave(self.position))
                     lab.setText(val)
             try:
                 sw = int(v("statusword") or "0", 0)
@@ -6884,6 +6890,24 @@ class TestPage(QWidget):
         else:
             self.outputs.update_values(pins)
             self.inputs.update_values(pins)
+
+    def fault_code(self, position, v):
+        """The drive's error code (0x603F): the pin when the PDOs have it, otherwise read
+        once by SDO when the drive reports a fault (the ECT60 does not map 0x603F), kept
+        until the fault bit goes."""
+        codes = self.__dict__.setdefault("fault_codes", {})
+        try:
+            code = int(v("error-code") or "0", 0)
+        except ValueError:
+            code = 0
+        if v("stat-fault") != "TRUE":
+            codes.pop(position, None)
+            return code
+        if code:
+            return code
+        if position not in codes:
+            codes[position] = tool.upload(position, 0x603F, 0, "uint16") or 0
+        return codes[position]
 
     def saw_for_bringup(self, run, position, op, st, v, dt=None):
         """Tell the slave page's card Bringing it up what the workbench sees of a drive.
@@ -6903,7 +6927,7 @@ class TestPage(QWidget):
                 moved = None
         seen = self.win.bringup_seen.setdefault(position, bringup.Seen())
         before = seen.key()
-        seen.saw(getattr(run, "log_path", None) or id(run), op, st, number("error-code"),
+        seen.saw(getattr(run, "log_path", None) or id(run), op, st, self.fault_code(position, v),
                  number("drv-actual-position"), enable_asked=v("enable") == "TRUE", moved=moved)
         if seen.key() != before and self.win.slave_page.position == position:
             self.win.slave_page.show_bringup()

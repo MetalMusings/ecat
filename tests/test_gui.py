@@ -3578,6 +3578,34 @@ class TestBringup(WindowBase):
         self.assertEqual(w.bringup_seen[0].fault, 0x8611)
         self.assertEqual(w.bringup_seen[0].runs[-1][:2], [99, 99])
 
+    def test_a_fault_code_the_pdos_lack_is_read_once(self):
+        # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
+        tp = w.test_page
+        values = {"slave-state-op": "TRUE", "cia-state": "7", "error-code": "0",
+                  "stat-fault": "TRUE", "drv-actual-position": "5"}
+        run = mock.Mock(log_path="/tmp/run-3", watching=False)
+        from ecatsetup import tool
+        with mock.patch.object(tool, "upload", return_value=0x8611) as up:
+            tp.saw_for_bringup(run, 0, True, 7, values.get)
+            tp.saw_for_bringup(run, 0, True, 7, values.get)
+            self.assertEqual(up.call_count, 1)
+            self.assertEqual(up.call_args[0][:3], (0, 0x603F, 0))
+            self.assertEqual(w.bringup_seen[0].fault, 0x8611)
+            # the fault gone: read again at the next one
+            values["stat-fault"] = "FALSE"
+            tp.saw_for_bringup(run, 0, True, 4, values.get)
+            values["stat-fault"] = "TRUE"
+            tp.saw_for_bringup(run, 0, True, 7, values.get)
+            self.assertEqual(up.call_count, 2)
+        # a code in the PDOs needs no SDO
+        values["error-code"] = "0x7500"
+        with mock.patch.object(tool, "upload") as up:
+            self.assertEqual(tp.fault_code(1, values.get), 0x7500)
+            up.assert_not_called()
+
 
 class TestDeviceData(WindowBase):
     """Shared device data (prototype): remembering a fact where it is learnt,
