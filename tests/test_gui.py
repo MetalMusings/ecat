@@ -11,6 +11,7 @@ import time
 import sys
 import tempfile
 import unittest
+import types
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -3631,10 +3632,23 @@ class TestBringup(WindowBase):
         self.assertEqual(tp.show_error_code(0), "no error")
         self.assertTrue(tp.error_meaning.isHidden())
         # the profile's reason, in words: 13 is the workbench's following-error check
-        tp.show_fault_reason("13")
-        self.assertIn("ferror-max", tp.reason_meaning.text())
+        tp.last_stops = {}
         tp.show_fault_reason("0")
         self.assertTrue(tp.reason_meaning.isHidden())
+        with mock.patch.object(tp.move, "test", return_value=None):
+            tp.show_fault_reason("13")
+        self.assertIn("ferror-max", tp.reason_meaning.text())
+        # with a prepared test: the limit and the Move card's field named
+        dt = types.SimpleNamespace(settings={"following-error": 0.01})
+        with mock.patch.object(tp.move, "test", return_value=dt):
+            tp.show_fault_reason("13")
+        self.assertIn("0.01 mm", tp.reason_meaning.text())
+        self.assertIn("Stop at following error", tp.reason_meaning.text())
+        # enable dropped (the jog button let go): the reason 0, the last stop kept
+        tp.show_fault_reason("0")
+        self.assertFalse(tp.reason_meaning.isHidden())
+        self.assertIn("Last stop", tp.reason_meaning.text())
+        self.assertIn("0.01 mm", tp.reason_meaning.text())
         # a code in the PDOs needs no SDO
         values["error-code"] = "0x7500"
         with mock.patch.object(tool, "upload") as up:

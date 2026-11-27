@@ -1241,6 +1241,9 @@ Safety comes in layers, so that no single one has to be perfect:
    thread, as LinuxCNC's FERROR does in the machine. It is a coarse check
    that the drive follows at all (a wrong sign of the scale, a drive that
    does not move); the FERROR for LinuxCNC comes from the Response card.
+   The *Fault reason* tile then names the limit and the field; when you
+   let go of the jog button the reason goes back to 0, and the tile keeps
+   it as *Last stop* until another stop comes or the test ends.
 
 Defaults: 5 mm/s, 50 mm/s², ± 20 mm, stop at a following error of 2 mm.
 The scale (counts per mm) is taken from the configuration's HAL files

@@ -59,6 +59,7 @@ MON_KINDS = {
 WC_STATES = {0: "zero", 1: "incomplete", 2: "complete"}
 GUARD_STATES = {0: "the servo thread runs the bus again", 1: "the servo thread stopped; "
                 "taking the slaves to PREOP", 2: "done"}
+WHY_FOLLOWING_ERROR = 13   # the workbench's own check (ferror-max)
 FAULT_REASONS = {
     1: "drive fault", 2: "no valid process data (working counter, or the slave not in OP)",
     3: "\"Operation enabled\" not reached in time", 4: "the drive left \"Operation enabled\"",

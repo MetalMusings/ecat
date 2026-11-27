@@ -6786,6 +6786,8 @@ class TestPage(QWidget):
         win, run = self.win, self.win.test
         self.fill_slaves()
         running = run is not None and run.running
+        if not running:
+            self.last_stops = {}    # a new test starts without the old one's stops
         self.banner.setVisible(running)
         self.start_card.setVisible(not running)
         # while watching, LinuxCNC's master owns the bus: nothing is read or written from here
@@ -6920,10 +6922,26 @@ class TestPage(QWidget):
         return val
 
     def show_fault_reason(self, value):
-        """Under the profile's fault-reason number, what it means (events.FAULT_REASONS)."""
+        """Under the profile's fault-reason number, what it means (events.FAULT_REASONS).
+        The reason goes back to 0 when enable drops (the jog button let go), so the last
+        one is kept below as "Last stop" until another one comes or the test ends."""
         try:
-            text = events.FAULT_REASONS.get(int(value), "") if value else ""
+            reason = int(value) if value else 0
         except ValueError:
+            reason = 0
+        last = self.__dict__.setdefault("last_stops", {})
+        if reason:
+            text = events.FAULT_REASONS.get(reason, "")
+            dt = self.move.test()
+            if reason == events.WHY_FOLLOWING_ERROR and dt is not None:
+                text = ("following error above %g mm, the Move card's Stop at following "
+                        "error: jog slower, or raise that value and Prepare again"
+                        % abs(dt.settings["following-error"]))
+            last[self.position] = (reason, text, time.strftime("%H:%M:%S"))
+        elif self.position in last:
+            was, words, when = last[self.position]
+            text = "Last stop %s: %d, %s" % (when, was, words)
+        else:
             text = ""
         self.reason_meaning.setText(text)
         self.reason_meaning.setVisible(bool(text))
