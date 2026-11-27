@@ -415,12 +415,18 @@ class TestPropose(unittest.TestCase):
         from ecatsetup import coe, session
         has = coe.Dictionary(); has.objects = {0x607D: "Software Position Limit", 0x607F: "Max Profile Velocity"}
         hasnt = coe.Dictionary(); hasnt.objects = {0x607D: "Software Position Limit"}
-        self.assertEqual(session.pp_problems(pp["slaves"][0], hasnt), [])
-        self.assertEqual(len(session.pp_problems(pp["slaves"][0], has)), 1)
-        self.assertIn("0x607F", session.pp_problems(pp["slaves"][0], has)[0])
-        self.assertEqual(session.pp_problems(drive({"mode": "csp"})["slaves"][0], has), [])
+        self.assertEqual(session.velocity_problems(pp["slaves"][0], hasnt), [])
+        self.assertEqual(len(session.velocity_problems(pp["slaves"][0], has)), 1)
+        self.assertIn("0x607F:00", session.velocity_problems(pp["slaves"][0], has)[0])
+        self.assertEqual(session.velocity_problems(drive({"mode": "csp"})["slaves"][0], has), [])
+        # PV needs it too, also as one of the modes
+        self.assertEqual(len(session.velocity_problems(drive({"mode": "pv"})["slaves"][0], has)), 1)
+        self.assertEqual(len(session.velocity_problems(drive({"mode": "csp", "modes": ["pv"]})["slaves"][0],
+                                                       has)), 1)
+        # without a dictionary nothing can be said
+        self.assertEqual(session.velocity_problems(pp["slaves"][0], coe.Dictionary()), [])
         pp["slaves"][0]["settings"].append({"object": "0x607F:00", "type": "UDINT", "value": 500})
-        self.assertEqual(session.pp_problems(pp["slaves"][0], has), [])
+        self.assertEqual(session.velocity_problems(pp["slaves"][0], has), [])
         p = propose.Proposal(0, 0xa88, 0xa880002, 0, 0, "ECT60", profile=402, mode="pp")
         p.pp_limits = {(0x607D, 1): -1000, (0x607D, 2): 1000, (0x607F, 0): 500}
         pp["slaves"][0]["settings"] = config.slave_from_proposal(p)["settings"]

@@ -106,6 +106,39 @@ def longer_timeouts(esi_timeouts):
 MODE_NUMBERS = pdoreq.MODE_NUMBERS
 
 
+TOOL_TO_COE = {"uint32": "UDINT", "uint16": "UINT", "uint8": "USINT", "int32": "DINT",
+               "int16": "INT", "int8": "SINT"}
+
+
+def velocity_limits_missing(slave, has_object):
+    """The maximum velocity a drive in PP or PV must have as a setting, where the drive has
+    the object and the settings lack it: [(axis, index, subindex, CoE type)]. The object is
+    0x607F (each axis's), or the quirk file's `limits: max-velocity` for a drive that keeps it
+    elsewhere; none when the quirk file says why the drive's object is not used.
+    has_object(index, subindex): whether the drive's dictionary has it."""
+    c = slave.get("cia402") or {}
+    if slave.get("profile") != "cia402" or not {"pp", "pv"} & set([c.get("mode")] + list(c.get("modes") or [])):
+        return []
+    have = set()
+    for st in slave.get("settings") or []:
+        try:
+            have.add(parse_obj(st.get("object")))
+        except (ValueError, TypeError):
+            pass
+    where = quirks.limits(slave).get("max-velocity")
+    if isinstance(where, str):
+        return []
+    out = []
+    for a in range(len(c.get("axes") or []) or 1):
+        if where:
+            index, sub, t = where[0] + (a * AXIS_OFFSET if 0x6000 <= where[0] < 0x6800 else 0), where[1], where[2]
+        else:
+            index, sub, t = 0x607F + a * AXIS_OFFSET, 0, "uint32"
+        if (index, sub) not in have and has_object(index, sub):
+            out.append((a, index, sub, TOOL_TO_COE.get(t, t.upper())))
+    return out
+
+
 def mode_setting(slave, axis=0):
     """The mode a drive is put in at start (0x6060:00 for an axis): a setting's value, else
     an init-cmds row's (from: profile is cia402.mode's number); None without either."""

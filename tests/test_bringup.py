@@ -88,22 +88,37 @@ class TestRows(Base):
         s = drive(outputs=((0x6040, 0),), inputs=((0x6061, 0),))
         self.assertIn("seen in 0x6061", self.row(bringup.rows(s, proposal()), "mode").text)
 
-    def test_the_following_error_window(self):
-        # the workbench checks the following error itself: never a gap; the drive's own
-        # window is told, not written
+    def test_the_following_error_check(self):
+        # the workbench checks the following error itself (CSP): never a gap, and the
+        # drive's own window is not spoken of
         row = self.row(bringup.rows(drive(identity=ECT60), proposal()), "ferror")
         self.assertEqual(row.state, bringup.OK)
         self.assertIn("stops the drive above the Move card's value", row.text)
-        self.assertIn("own window is 0x2022:00 (quirk file), left as it is", row.text)
+        self.assertNotIn("window", row.text)
         self.assertEqual(row.card, "response")
+        self.assertNotIn("ferror", [r.key for r in bringup.rows(drive(mode="pv"), proposal())])
+
+    def test_the_velocity_limit_in_pp_and_pv(self):
         d = coe.Dictionary()
-        d.entries[(0x6065, 0)] = object()
-        self.assertIn("is 0x6065", self.row(bringup.rows(drive(), proposal(), dictionary=d), "ferror").text)
-        d = coe.Dictionary()
-        d.entries[(0x2022, 0)] = object()
-        row = self.row(bringup.rows(drive(), proposal(), dictionary=d), "ferror")
-        self.assertEqual(row.state, bringup.OK)
-        self.assertIn("is not known", row.text)
+        d.objects[0x607F] = "Max profile velocity"
+        # CSP: no row
+        self.assertNotIn("velocity", [r.key for r in bringup.rows(drive(), proposal(), dictionary=d)])
+        # PV (also as one of the modes) without the setting: missing, to the settings
+        for s in (drive(mode="pv"), drive(modes=["pp"])):
+            row = self.row(bringup.rows(s, proposal(), dictionary=d), "velocity")
+            self.assertEqual(row.state, bringup.MISSING)
+            self.assertIn("0x607F:00", row.text)
+            self.assertEqual(row.card, "settings")
+        s = drive(mode="pv")
+        s["settings"] = [{"object": "0x607F:00", "type": "UDINT", "value": 100000}]
+        self.assertEqual(self.row(bringup.rows(s, proposal(), dictionary=d), "velocity").state, bringup.OK)
+        # a drive without the object: nothing to set
+        self.assertEqual(self.row(bringup.rows(drive(mode="pv"), proposal(), dictionary=coe.Dictionary()),
+                                  "velocity").state, bringup.TRY)
+        empty = coe.Dictionary()
+        empty.objects[0x6040] = "Controlword"
+        self.assertEqual(self.row(bringup.rows(drive(mode="pv"), proposal(), dictionary=empty),
+                                  "velocity").state, bringup.OK)
 
     def test_the_servo_period_against_what_was_measured(self):
         # the shipped ECT60 results: ok down to 125 us, refused at 100 us

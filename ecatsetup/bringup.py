@@ -238,23 +238,28 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
                        "choose its DC mode", "operation"))
 
     # the following error: on the workbench the profile's own check (ferror-max, the Move
-    # card's value), as motion's FERROR in LinuxCNC; the drive's own window is left as it is
-    lim = quirks.limits(slave).get("following-error")     # (index, sub, type), or why not
-    if isinstance(lim, tuple):
-        own = "the drive's own window is 0x%04X:%02X (quirk file)" % lim[:2]
-    elif dictionary is not None and (0x6065, 0) in dictionary.entries:
-        own = "the drive's own window is 0x6065"
-    else:
-        own = "where the drive keeps its own window is not known"
+    # card's value), as motion's FERROR in LinuxCNC
     if mode == "csp":
         out.append(Row("ferror", OK, "Following error",
                        "the workbench stops the drive above the Move card's value, as LinuxCNC's "
-                       "FERROR will; %s, left as it is. The FERROR for LinuxCNC comes from the "
-                       "Response card" % own, "response"))
-    else:
-        out.append(Row("ferror", OK, "Following error",
-                       "%s: in %s the drive plans its own moves and watches its error itself"
-                       % (own[0].upper() + own[1:], mode.upper())))
+                       "FERROR will. The FERROR for LinuxCNC comes from the Response card", "response"))
+    # PP and PV: the drive plans its own moves, so its velocity limit belongs in the settings
+    c = slave.get("cia402") or {}
+    if {"pp", "pv"} & set([mode] + list(c.get("modes") or [])):
+        if dictionary is None or not dictionary.objects:
+            out.append(Row("velocity", TRY, "Velocity limit", "whether the drive has a velocity limit "
+                           "(0x607F) shows with its dictionary", "settings"))
+        else:
+            lacking = config.velocity_limits_missing(slave, lambda i, sub: i in dictionary.objects)
+            if lacking:
+                out.append(Row("velocity", MISSING, "Velocity limit",
+                               "%s is not in the settings: in PP and PV the drive plans its own moves "
+                               "with it; Add what the device needs takes its present value"
+                               % ", ".join("0x%04X:%02X" % (i, sub) for _, i, sub, _ in lacking),
+                               "settings"))
+            else:
+                out.append(Row("velocity", OK, "Velocity limit", "in the settings, or the drive has "
+                               "no such object", "settings"))
 
     # what the workbench saw
     s = seen or Seen()

@@ -430,13 +430,11 @@ def remember_inputs(win, parent, position, ask=True, dialog=None):
 
 
 class LimitsDialog(QDialog):
-    """Where a drive keeps the limits the workbench writes before it moves it (the
-    following-error window, torque, velocity), when it is not the standard's object,
-    and why one is not used (such as: it ignores 0x607D in CSP). Kept as the facts
-    limits."""
+    """Where a drive keeps the limits a drive in PP or PV needs (its maximum velocity,
+    its software position limits), when it is not the standard's object, and why one is
+    not used (such as: it ignores 0x607D in CSP). Kept as the facts limits."""
 
-    KEYS = (("following-error", "Following-error window"), ("max-torque", "Torque limit"),
-            ("max-velocity", "Velocity limit"), ("travel", "Software position limits"))
+    KEYS = (("max-velocity", "Velocity limit"), ("travel", "Software position limits"))
     TYPES = ("uint32", "uint16", "int32", "int16", "uint8")
 
     def __init__(self, parent, now=None):
@@ -447,15 +445,16 @@ class LimitsDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(label(
             "From the drive's manual: the object it keeps a limit in, when it is not the standard's "
-            "(written by the workbench before a drive moves), or why the standard's does not work "
-            "on it. Leave a row empty when the standard's object is right.", wrap=True))
+            "(asked for in the settings of a drive in PP or PV, and written by the workbench "
+            "before it moves one), or why the standard's does not work on it. Leave a row empty "
+            "when the standard's object is right.", wrap=True))
         form = QFormLayout()
         self.rows = {}
         for key, text in self.KEYS:
             std = drivetest.STANDARD_LIMITS.get(key)
             row = QHBoxLayout()
             obj = QLineEdit()
-            obj.setPlaceholderText("object, such as 0x2022:00" + (
+            obj.setPlaceholderText("object, such as 0x2008:00" + (
                 " (standard: 0x%04X:%02X)" % std[:2] if std else ""))
             typ = QComboBox()
             typ.addItems(self.TYPES)

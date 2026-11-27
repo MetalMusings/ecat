@@ -338,14 +338,17 @@ Choosing a slave shows:
   can be saved; but a setting is written at every start, so the command
   runs at every start. For a command once, use *Run command* on the
   workbench's SDO card. *Read present values* fills the *Now* column from the slave.
-  For a CiA 402 drive *Suggest following-error window* adds the drive's
-  own following-error window (the quirk file's object, such as the ECT60's
-  `0x2022`, else `0x6065`) as an ordinary setting: twice the joint's `FERROR`
-  from the INI file, in the joint's counts (the Joints card gives the
-  scale), so that LinuxCNC's own following error trips first and the drive
-  is the second line of defence. The status line says how it was worked
-  out, or why nothing was suggested (no joint, no INI file or `FERROR`, a
-  drive with several axes). A setting already there is updated.
+  A CiA 402 drive in PP or PV (as its mode or one of its modes) plans its
+  own moves, so its maximum velocity (`0x607F`, each axis's) must be a
+  setting where the drive has the object: the list under the table says so
+  in red while it is missing, and *Add what the device needs* adds it with
+  the drive's present value (check it). For a drive that keeps that limit,
+  or its software position limits, in an object of its own, or ignores the
+  standard's, *Set objects for missing limits...* (shown for PP and PV)
+  keeps the object or the reason for the device type. The drive's own
+  following-error window is not offered: LinuxCNC's `FERROR` watches the
+  error, as the workbench's own check does on the workbench. A drive window
+  can still be added as an ordinary setting.
   *Values in hex* shows the values and *Now* as `0x` hex, as wide as the
   type (the SDO card's *Hex* box is the same setting); you can type a value
   in either form, `255` or `0xFF`, and the file keeps the number;
@@ -584,7 +587,8 @@ To OP and moving:
 | Process data | The check of the PDOs against what the profile needs. |
 | Mode | Set every cycle (0x6060 mapped), once at start (0x6060:00), or only seen (0x6061). |
 | Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
-| Following error | In CSP the workbench stops the drive above the Move card's value itself, as LinuxCNC's FERROR will; the row says where the drive keeps its own window (the quirk file's object, such as the ECT60's 0x2022, or 0x6065), which is left as it is. The FERROR for LinuxCNC comes from the Response card. |
+| Following error | In CSP the workbench stops the drive above the Move card's value itself, as LinuxCNC's FERROR will. The FERROR for LinuxCNC comes from the Response card. |
+| Velocity limit | In PP or PV: the drive's maximum velocity (0x607F) is a setting, or the drive has no such object. Missing until it is: *Add what the device needs* on the Settings card adds the drive's present value. |
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
 | Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; read once by SDO when the drive's PDOs lack it, as the ECT60's do) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
 | Follows | Seen when you jog it on the Move card. A fault after "Operation enabled" (such as a following error in a fast jog) makes this row red, with the code in words, until the drive is reset and has moved again. |
@@ -1219,10 +1223,9 @@ Safety comes in layers, so that no single one has to be perfect:
    own values and writes, where the drive has the objects, software
    position limits `0x607D` at ± the travel around the position at that
    moment (and in PP and PV its maximum profile velocity). Its
-   following-error window and its torque limit (`0x6072`) are left as they
-   are, as they will be in LinuxCNC: the drive's own window is read and
-   shown in the banner. A drive homing by torque that limits it with
-   `0x6072` therefore homes as it will in LinuxCNC.
+   following-error window and its torque limit (`0x6072`) are not touched,
+   as they will not be in LinuxCNC. A drive homing by torque that limits it
+   with `0x6072` therefore homes as it will in LinuxCNC.
 
    The drive's own values are kept in
    `~/.local/state/ecatsetup/drive-limits.json` before each limit is
@@ -1574,9 +1577,7 @@ first part of tuning, the measuring.
     `pos-fb` (smoothed so that a count's step is at most 1 % of the
     acceleration measured), not the command's, which a drive that lags
     follows late;
-  - how much of the following-error windows (the workbench's check and the
-    drive's own) the error used: where a stepper drive with an encoder
-    (such as the ECT60) loses steps or stops;
+  - how much of the workbench's following-error stop the error used;
   - after a second measurement, how the numbers moved and what changed in
     between: settings being tried in the drive, and LinuxCNC's feedforward
     (`setp <drive>.ff-velocity-gain` / `ff-torque-per-accel` on the workbench's
@@ -2271,10 +2272,8 @@ yours does not have (a spindle encoder, an I/O terminal).
    slaves`, all in PREOP), and that nothing else uses the NIC (the kernel
    master stopped).
 3. Lower the joints' `MAX_VELOCITY` (for example to 5 mm/s) and keep the
-   drives' power switch, or the machine's E-stop, within reach. Drive
-   limits (settings, such as the ECT60's following-error window `0x2022`)
-   are not needed for the first run, but they are the drive's own
-   protection: see the *Settings* card.
+   drives' power switch, or the machine's E-stop, within reach. LinuxCNC's
+   `FERROR` and `MIN_FERROR` stop the machine when a drive does not follow.
 4. In a second terminal follow the event log while you test:
    `scripts/ecat-events-follow` (it reads `/dev/shm/ecat-events`).
    `ecatsetup --events` prints it afterwards. The master's own `[ERR]`
@@ -2780,9 +2779,10 @@ trajectory: for positioning that LinuxCNC does not do as a joint, such
 as a tool changer, an indexer, a stop or a loader. The drive must know
 its travel, so its software limits `0x607D:01` and `0x607D:02` must be
 settings; the maximum profile velocity `0x607F` too where the drive
-has it (the Rtelligent ECT60 has not: the check warns when the drive has
-it and the configuration does not set it). EtherCAT Setup proposes the
-drive's present values as settings rows.
+has it (the Rtelligent ECT60 has not: with the drive's dictionary, the
+check gives an error when the drive has it and the configuration does not
+set it). EtherCAT Setup proposes the drive's present values as settings
+rows. PV needs `0x607F` the same way.
 
 Acceleration and deceleration are `0x6083` and `0x6084`, also settings.
 
@@ -4345,13 +4345,11 @@ try on this machine):
   them, and what the drive's own numbers (36, 37, negatives) do; and
   *Remember how its inputs are set up...*: which object gives each input
   its function, with which codes, and how the polarity is set;
-- on the Move card, *Set objects for missing limits...*: the
-  object of a drive's own for its following-error window, torque or
-  velocity limit (the ECT60's `0x2022`), or why a standard one is not used.
-  The workbench shows the drive's own window from it (it writes only the
-  velocity limit, in PP and PV), and *Suggest following-error window* on the
-  Settings card uses it, for a drive window in LinuxCNC as a second line of
-  defence;
+- on the Settings card, for a drive in PP or PV, *Set objects for missing
+  limits...*: the object of a drive's own for its velocity limit or its
+  software position limits, or why a standard one is not used (such as the
+  ECT60 ignoring `0x607D` in CSP). The settings then ask for that object,
+  and the workbench writes it in PP and PV;
 - on the Response card, after *Look for settings in the drive*, *Remember
   for tuning...* on the chosen object: what kind it is, its range and
   factory value and what it does (not a value: that is a setting);

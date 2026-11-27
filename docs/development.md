@@ -826,8 +826,10 @@ Each step is useful on its own; the order may change as parts are tried.
    card for a CiA 402 drive (`integrate.following_error_suggestion`): the
    object from its quirk file (`limits: following-error`, such as the
    ECT60's `0x2022`) or `0x6065`, and twice the joint's `FERROR` in the
-   joint's counts, written as an ordinary setting. Not built: showing the
-   drive's present value beside it.
+   joint's counts, written as an ordinary setting. Removed 2026-11-27 (the
+   user: the drive's own window had not been used; LinuxCNC's FERROR and the
+   workbench's own check watch the error): the Settings card asks instead
+   for the maximum velocity a PP or PV drive needs (`config.velocity_limits_missing`).
 
 Where it stands (2026-11-09): steps 1-3 are done (`ecatsetup` on the
 command line, `ethercat.yaml`, the `ecat` component, which runs the

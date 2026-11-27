@@ -17,7 +17,7 @@ Safety, in layers:
   the position at the start. The drive's own values are read first and
   written back when the test ends; until then they are also kept in a
   file (RESTORE_FILE), so that they can be put back after a crash. Its
-  following-error window and torque limit are left as they are, as in
+  own following-error window and torque limit are not touched, as in
   LinuxCNC: the test is a coarse check that the drive moves at all, and
   homing by torque (which some drives limit with 0x6072) homes as it will
   in LinuxCNC.
@@ -50,12 +50,10 @@ RESTORE_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or
 DEFAULTS = {"scale": 1.0, "max-velocity": 5.0, "max-acceleration": 50.0, "travel": 20.0,
             "following-error": 2.0}
 
-# where a drive keeps a limit (the CiA 402 objects; a quirk file's `limits:` for a
-# drive that keeps one elsewhere). The workbench writes only max-velocity (PP, PV);
-# the following-error window is read, to be shown.
+# where a drive keeps a limit the workbench writes (the CiA 402 object; a quirk file's
+# `limits:` for a drive that keeps it elsewhere): the velocity limit in PP and PV. The
+# travel (0x607D) is planned apart.
 STANDARD_LIMITS = {
-    "following-error": (0x6065, 0, "uint32"),
-    "max-torque": (0x6072, 0, "uint16"),
     "max-velocity": (0x607F, 0, "uint32"),
 }
 
@@ -248,7 +246,6 @@ class DriveTest:
         else:
             self.limit3 = self.sel = None
         self.limits, self.notes = [], []
-        self.own_window = None     # the drive's own following-error window, counts (read)
         self.start = None       # machine units, at prepare()
         self.homing = False         # a homing was started and has not ended
         self.home_seen = False      # ... and the profile has been seen homing
@@ -295,24 +292,6 @@ class DriveTest:
         self.notes.append("homing by method %d, as chosen for this axis" % chosen["method"])
         return out
 
-    def _own_window(self, scale):
-        """A note on the drive's own following-error window, read and left as it is: what
-        it does in LinuxCNC too, unless the configuration sets it."""
-        where = q.limits(self.slave).get("following-error")
-        if not isinstance(where, tuple):
-            where = STANDARD_LIMITS["following-error"]
-            index = where[0] + self.axis * config.AXIS_OFFSET
-        else:
-            index = where[0]
-        value = tool.upload(self.position, index, where[1], where[2]) \
-            if self._has(index, where[1]) else None
-        self.own_window = value     # counts, for the Response card
-        if value is None:
-            return ("the drive's own following-error window is not known (no 0x6065, and no object "
-                    "of its own is known): left as it is")
-        return ("the drive's own following-error window: %d counts (%g mm, 0x%04X:%02X), left as "
-                "it is" % (value, value / scale if scale else value, index, where[1]))
-
     def pin(self, name):
         p = self.run.pins("%s.%s" % (self.name, name)).get("%s.%s" % (self.name, name))
         if p is None:
@@ -343,7 +322,6 @@ class DriveTest:
         counts = int(self.pin("drv-actual-position"))
         self.limits, self.notes = plan_limits(self.slave, self._has, s["scale"], counts, s,
                                               self.axis)
-        self.notes.append(self._own_window(s["scale"]))
         if self.homes:
             self.limits += self._homing_limits()
         # the drive's own values first, kept in a file until put back

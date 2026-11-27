@@ -5,8 +5,8 @@ This is part 1 of the tuning idea (docs/ecatsetup.md "Measuring a drive's
 response"): it measures and changes nothing in the drive. It runs in the
 drive test (drivetest.DriveTest, prepared, in CSP) while the workbench
 (testmode.TestRun) runs, so every safety layer of the drive test holds:
-hold-to-enable, the heartbeat, the drive's travel, following-error and torque
-limits, and the limit3 in front of pos-cmd.
+hold-to-enable, the heartbeat, the drive's travel, the workbench's own
+following-error check, and the limit3 in front of pos-cmd.
 
 - The test's HAL file has a sampler channel per CSP drive (sampler_hal()),
   disabled until a measurement: LinuxCNC's pos-cmd and pos-fb, whether the
@@ -25,9 +25,8 @@ limits, and the limit3 in front of pos-cmd.
   too little velocity feedforward); K the part that follows the
   acceleration. Without 0x60F4 the drive's part is not split. diagnose()
   says what each part points at in the drive (KINDS). Also: overshoot and settling at each
-  stop, torque (servo drives), the margin to the drive's following-error
-  window (stepper drives lose steps there), and FERROR / MIN_FERROR for
-  LinuxCNC from the result.
+  stop, torque (servo drives), the margin to the workbench's following-error
+  stop, and FERROR / MIN_FERROR for LinuxCNC from the result.
 """
 
 import json
@@ -448,11 +447,9 @@ class Measurement:
             text = ""
         data, lost = parse_samples(text, [c.key for c in self.cols])
         lim = {lim.name: [lim.value, lim.original] for lim in self.dt.limits}
-        # the following error: the workbench's own check (ferror-max, in counts as the
-        # drive's window), and the drive's own window, read and left as it is
+        # the following error: the workbench's own check (ferror-max), in counts
         sc = float(self.dt.settings["scale"] or 1.0)
-        lim["following-error"] = [abs(self.dt.settings["following-error"] * sc),
-                                  self.dt.own_window]
+        lim["following-error"] = [abs(self.dt.settings["following-error"] * sc), None]
         meta = {"drive": self.dt.name, "slave": self.dt.slave.get("name"),
                 "period-ns": self.run.period, "scale": self.dt.settings["scale"],
                 "spec": self.spec, "ended": self.ended, "limits": lim,
@@ -566,7 +563,7 @@ class Result:
     torque_const: dict = field(default_factory=dict)  # direction -> mean %
     torque_per_accel: float = None  # % per mm/s^2
     torque_limit: float = None  # % (the test's 0x6072)
-    window: dict = field(default_factory=dict)  # "test"/"drive" -> mm (following-error window)
+    window: dict = field(default_factory=dict)  # "test" -> mm (the workbench's stop limit)
     ferror: dict = field(default_factory=dict)  # suggestions for LinuxCNC
     findings: list = field(default_factory=list)  # [(kind, text)]: what to look at, most first
     notes: list = field(default_factory=list)
@@ -780,12 +777,10 @@ def analyse(rec, ini=None):
                              "would be; raise Max torque or lower the acceleration"
                              % res.torque_limit)
     if "following-error" in limits:
-        value, original = limits["following-error"]
+        value = limits["following-error"][0]
         sc = float(meta.get("scale") or 1.0)
         if value is not None:
             res.window["test"] = abs(value / sc)
-        if original is not None:
-            res.window["drive"] = abs(original / sc)
     if rec.lost:
         res.notes.append("%d samples were lost (the program did not read them in time): the "
                          "times around the gap are off" % rec.lost)
@@ -919,7 +914,7 @@ def report(res, rec=None):
                        "together; 0x60F4 would tell them apart)" % (res.drive_lag * ms))
     if res.drive_peak is not None:
         out.append("The drive's own following error (0x60F4): peak %.4f mm" % res.drive_peak)
-    for name, text in (("test", "the test's window"), ("drive", "the drive's own window")):
+    for name, text in (("test", "the workbench's stop limit"),):
         if name in res.window and res.window[name]:
             peak = res.drive_peak if res.drive_peak is not None else res.peak
             out.append("  %.0f %% of %s (%.3f mm)%s" % (100 * peak / res.window[name], text,

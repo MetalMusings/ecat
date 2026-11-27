@@ -49,7 +49,8 @@ from . import (config, dcinfo, helpdocs, diagnose, drivetest, esi, events, expla
                netif, pindocs, propose, quirks, response, settings, switches, symptoms, tasks, testmode, tool,
                tuning,
                update, wiring)
-from .session import Session, servo_period, _row_text as session_row_text
+from .session import Session, servo_period, _row_text as session_row_text, \
+    velocity_problems as session_velocity_problems
 
 TITLE = "EtherCAT Setup"
 RED, AMBER, GREEN, GREY = QColor("#b42318"), QColor("#9a5b00"), QColor("#1a7f37"), QColor("#6b7280")
@@ -1851,13 +1852,13 @@ class SlaveView(QWidget):
         st.add(buttons)
         buttons = QHBoxLayout()
         buttons.addWidget(self.init_button)
-        self.ferror_button = QPushButton("Suggest following-error window")
-        self.ferror_button.setToolTip(
-            "For a CiA 402 drive: add the drive's following-error window as a setting, "
-            "twice the joint's FERROR in the joint's counts, so that LinuxCNC's own "
-            "following error trips first and the drive is the second line of defence")
-        self.ferror_button.clicked.connect(self.suggest_following_error)
-        buttons.addWidget(self.ferror_button)
+        self.limits_remember = QPushButton("Set objects for missing limits...")
+        self.limits_remember.setToolTip(
+            "For a drive in PP or PV that keeps its velocity limit or its software position "
+            "limits in an object of its own, or ignores the standard's (0x607F, 0x607D): kept "
+            "for the device type, so that the settings ask for the right object")
+        self.limits_remember.clicked.connect(self.remember_limits)
+        buttons.addWidget(self.limits_remember)
         self.remember_setting_button = QPushButton("Remember for the device type...")
         self.remember_setting_button.setToolTip(
             "Keep the chosen setting in your own quirk file for this device type, with where it "
@@ -3262,9 +3263,14 @@ class SlaveView(QWidget):
         missing = [session_row_text(r) for r in self.win.session.missing_init_cmds(self.position)] + [
             "%s %d ms" % ("SDO answer timeout" if k == "sdo" else "state timeout " + k, v)
             for k, v in sorted(self.win.session.missing_state_timeouts(self.position).items())]
+        d = self.win.session.dictionary(self.position)
+        if d is not None and d.objects and self.win.session.bus.get(self.position) is not None:
+            missing += ["0x%04X:%02X (max velocity, the drive's present value)" % (i, sub) for _, i, sub, _
+                        in config.velocity_limits_missing(s, lambda i, sub_: i in d.objects)]
         self.init_button.setVisible(bool(missing))
-        self.init_button.setToolTip("Adds what the device's ESI file writes at start (init-cmds) and its "
-                                    "timeouts: %s" % ", ".join(missing) if missing else "")
+        self.init_button.setToolTip("Adds what the device's ESI file writes at start (init-cmds), its "
+                                    "timeouts and, for PP and PV, its maximum velocity: %s"
+                                    % ", ".join(missing) if missing else "")
 
     def show_settings(self, s):
         self.show_init_cmds(s)
@@ -3287,7 +3293,9 @@ class SlaveView(QWidget):
             self.st.setItem(r, 4, item(now, font=mono(), colour=GREY))
         fit_columns(self.st, stretch=1)
         fit_table(self.st, minimum=1)
-        self.ferror_button.setVisible(s.get("profile") == "cia402")
+        c = s.get("cia402") or {}
+        self.limits_remember.setVisible(s.get("profile") == "cia402" and bool(
+            {"pp", "pv"} & set([c.get("mode")] + list(c.get("modes") or []))))
         self.show_setting_problems(s)
         self.loading = False
 
@@ -3310,6 +3318,7 @@ class SlaveView(QWidget):
                     it.setForeground(QBrush(RED if level == "error" else AMBER))
                     it.setToolTip(tip)
             lines.extend("%s: %s" % (s["settings"][row].get("object"), t) for _, t in probs)
+        lines += session_velocity_problems(s, self.win.session.dictionary(self.position))
         self.st_problems.setText("\n".join(lines))
         self.st_problems.setVisible(bool(lines))
 
@@ -3599,30 +3608,13 @@ class SlaveView(QWidget):
         self.st.editItem(self.st.item(self.st.rowCount() - 1, 0))
         self.win.changed()
 
-    def suggest_following_error(self):
-        """Add (or update) the drive's following-error window as a setting."""
+    def remember_limits(self):
+        from . import devicedataview
+        r = devicedataview.remember_limits(self.win, self, self.position)
         s = self.win.session.slave(self.position)
-        if s is None:
-            return
-        got = integrate.following_error_suggestion(self.win.session.ini_path,
-                                                   self.win.session.cfg, s)
-        if "object" not in got:
-            self.win.status("No following-error window suggested: %s" % got["why"])
-            return
-        settings = s.setdefault("settings", [])
-        old = next((st for st in settings if st.get("object") == got["object"]), None)
-        if old is None:
-            old = {"object": got["object"]}
-            settings.append(old)
-        index, sub = config.parse_obj(got["object"])
-        d = self.win.session.dictionary(self.position)
-        name = d.name(index, sub)
-        if name:
-            old["name"] = name
-        old.update(type=got["type"], value=got["value"])
-        self.show_settings(s)
-        self.win.status("%s = %d (%s)" % (got["object"], got["value"], got["why"]))
-        self.win.changed()
+        if r is not None and s is not None:
+            self.show_settings(s)
+        return r
 
     def choose_settings(self):
         """Add settings chosen from the slave's dictionary."""
@@ -4867,17 +4859,8 @@ class MoveCard(Card):
                                 "disabled; its values are written back when you are done.")
         self.prepare.clicked.connect(self.do_prepare)
         form.addRow(self.prepare)
-        self.limits_remember = QPushButton("Set objects for missing limits...")
-        self.limits_remember.setToolTip(
-            "For a drive that keeps its following-error window, torque or velocity limit in an "
-            "object of its own (the ECT60's 0x2022), or ignores a standard one: kept for the device "
-            "type, so that the workbench writes the right object to the next one of these drives")
-        self.limits_remember.clicked.connect(self.remember_limits)
         self.add(self.setup)
         self.unsupported = self.add(label("", "hint", wrap=True))
-        # outside the setup: also while the limits are written, when the banner shows what
-        # could not be written
-        self.add(self.limits_remember)
 
         # then: moving
         self.moving = QWidget()
@@ -4979,7 +4962,6 @@ class MoveCard(Card):
         dt = self.test()
         mode = drivetest.mode_of(slave)
         self.setup.setVisible(ok and (dt is None or not dt.prepared))
-        self.limits_remember.setVisible(ok)
         self.moving.setVisible(dt is not None and dt.prepared)
         homes = dt is not None and dt.prepared and dt.homes
         self.home_info.setVisible(bool(homes))
@@ -5146,12 +5128,6 @@ class MoveCard(Card):
                          "the drive is disabled" if follows else
                          "; the position is the homed one and the drive is disabled") if ok else
                         " (the drive reported an error)"))
-
-    def remember_limits(self):
-        from . import devicedataview
-        if self.slave is None:
-            return None
-        return devicedataview.remember_limits(self.win, self, self.slave["position"])
 
     def offer_enable_again(self, dt):
         """The drive did not follow after homing without being enabled again: offer it as

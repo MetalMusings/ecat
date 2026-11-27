@@ -1640,33 +1640,6 @@ class TestWindow(WindowBase):
         page.remove_setting()
         self.assertEqual(len(w.session.slave(0)["settings"]), n)
 
-    def test_suggest_following_error_window(self):
-        def page_visible(w, pos):
-            w.select_slave(pos)
-            w.slave_page.show_settings(w.session.slave(pos))
-            return w.slave_page.ferror_button.isVisibleTo(w.slave_page)
-
-        w = self.window()
-        s = w.session.slave(0)
-        self.assertFalse(page_visible(w, 0))          # not a drive: no button
-        s["profile"] = "cia402"
-        s["cia402"] = {"mode": "csp"}
-        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
-        self.assertTrue(page_visible(w, 0))
-        page = w.slave_page
-        ini = os.path.join(self.dir.name, "m.ini")
-        open(ini, "w").write("[EMCMOT]\nSERVO_PERIOD = 1000000\n[JOINT_0]\nFERROR = 0.5\n")
-        w.session.ini_path = ini
-        page.suggest_following_error()                # no joint yet: says so, adds nothing
-        self.assertFalse(any(x["object"] in ("0x6065:00", "0x2022:00") for x in s.get("settings") or []))
-        from ecatsetup import integrate
-        integrate.set_joint(w.session.cfg, 0, config.axes(s)[0], 100.0)
-        page.suggest_following_error()
-        page.suggest_following_error()                # again: updates, no duplicate
-        found = [x for x in s["settings"] if x["object"] in ("0x6065:00", "0x2022:00")]
-        self.assertEqual(len(found), 1)
-        self.assertEqual(found[0]["value"], 100)
-
     def test_settings_picker_and_guidance(self):
         w = self.window()
         w.select_slave(0)
@@ -2609,6 +2582,32 @@ class TestPdoEditing(WindowBase):
         with mock.patch.object(w.session, "add_device_needs", return_value=missing) as add:
             page.add_device_needs()
         add.assert_called_once_with(1)
+
+    def test_the_velocity_limit_a_pp_or_pv_drive_needs(self):
+        w, page, s = self.page([(0x1600, 2, [(0x6040, 16), (0x6060, 8)])], [(0x1A00, 3, [(0x6041, 16)])])
+        w.session.dictionary(1).objects[0x607F] = "Max profile velocity"
+        # CSP: neither the button for the drive's own objects nor the velocity limit
+        page.show_settings(s)
+        self.assertTrue(page.limits_remember.isHidden())
+        self.assertNotIn("0x607F", page.init_button.toolTip())
+        s["cia402"]["modes"] = ["pv"]
+        with mock.patch.object(tool, "upload", return_value=5000) as up:
+            page.show_settings(s)
+            up.assert_not_called()                  # shown without asking the drive
+            self.assertFalse(page.limits_remember.isHidden())
+            self.assertFalse(page.init_button.isHidden())
+            self.assertIn("0x607F:00 (max velocity", page.init_button.toolTip())
+            self.assertIn("0x607F:00 (max profile velocity)", page.st_problems.text())
+            # added with the drive's present value
+            added = w.session.add_device_needs(1)
+        self.assertIn({"object": "0x607F:00", "type": "UDINT", "value": 5000, "name": "Max profile velocity"},
+                      s["settings"])
+        self.assertIn("0x607F:00", [r["object"] for r in added])
+        page.show_settings(s)
+        self.assertNotIn("0x607F", page.init_button.toolTip())
+        self.assertNotIn("0x607F", page.st_problems.text())
+        # the Move card no longer has the button
+        self.assertFalse(hasattr(w.test_page.move, "limits_remember"))
 
     def test_the_init_cmds_card(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])
@@ -3579,30 +3578,6 @@ class TestBringup(WindowBase):
         self.assertEqual(w.bringup_seen[0].fault, 0x8611)
         self.assertEqual(w.bringup_seen[0].runs[-1][:2], [99, 99])
 
-    def test_limits_can_be_remembered_while_they_are_written(self):
-        # the banner says what could not be written once the limits are written: the
-        # button that tells the object stays
-        from types import SimpleNamespace
-        w = self.window()
-        s = w.session.slave(0)
-        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
-        move = w.test_page.move
-        w.test = mock.Mock(watching=False)
-        move.slave = s
-        w.drive_tests[move.axis_name()] = SimpleNamespace(
-            prepared=True, homes=False, name=s["name"], mode="csp", start=0.0, restore=lambda: None)
-        self.addCleanup(w.drive_tests.clear)
-        with mock.patch.object(w.test_page, "show_limits"), \
-                mock.patch.object(w.test_page, "response", None):
-            move.show_drive(s)
-        self.assertTrue(move.setup.isHidden())
-        self.assertFalse(move.limits_remember.isHidden())
-        w.test = None
-        with mock.patch.object(w.test_page, "show_limits"), \
-                mock.patch.object(w.test_page, "response", None):
-            move.show_drive(s)
-        self.assertTrue(move.limits_remember.isHidden())
-
     def test_a_fault_code_the_pdos_lack_is_read_once(self):
         # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once
         w = self.window()
@@ -3669,10 +3644,11 @@ class TestDeviceData(WindowBase):
         env = {"ECATSETUP_DEVICES": os.path.join(self.tmp.name, "devices"),
                "ECATSETUP_SHARED_CACHE": os.path.join(self.tmp.name, "cache"),
                "ECATSETUP_SETTINGS": os.path.join(self.tmp.name, "settings.yaml")}
+        # cleanups run last first: the quirks are read again after the environment is back
+        self.addCleanup(quirks.load, True)
         p = mock.patch.dict(os.environ, env)
         p.start()
         self.addCleanup(p.stop)
-        self.addCleanup(quirks.load, True)
         quirks.load(reload=True)
         for target, kw in ((devicedataview.SourceDialog, {"exec_": mock.DEFAULT}),):
             m = mock.patch.multiple(target, **kw)
@@ -3780,12 +3756,13 @@ class TestDeviceData(WindowBase):
         ident = self.quirks.identity(s)
         dlg = self.dv.LimitsDialog(w)
         self.addCleanup(dlg.deleteLater)
-        obj, typ, why = dlg.rows["following-error"]
-        obj.setText("0x2022:00")
+        self.assertEqual(sorted(dlg.rows), ["max-velocity", "travel"])    # what PP and PV need
+        obj, typ, why = dlg.rows["max-velocity"]
+        obj.setText("0x2008:00")
         dlg.rows["travel"][2].setText("ignored in CSP")
         self.assertIsNotNone(self.dv.remember_limits(w, w, 0, ask=False, dialog=dlg))
         lim = self.quirks.limits(ident)
-        self.assertEqual(lim["following-error"], (0x2022, 0, "uint32"))
+        self.assertEqual(lim["max-velocity"], (0x2008, 0, "uint32"))
         self.assertEqual(lim["travel"], "ignored in CSP")
         # a tuning object found by Look for settings
         card = w.test_page.response

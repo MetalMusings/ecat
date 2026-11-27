@@ -224,7 +224,7 @@ file each stopped the load with their own line.
 | `device` | Device name, for people. |
 | `identity` | `vendor`, `product`, and optionally `revision`. At start the component compares them with the bus. |
 | `profile` | `cia402` (CiA 402 drive), `mdp` (modular device, ETG.5001) or `generic`. |
-| `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01` and `0x607D:02`, and `0x607F:00` where the drive has it). |
+| `cia402.mode` | For `cia402`: the mode when enabled, `csp` or `csv` (cyclic, for a joint), `pv` (profile velocity, for a spindle or conveyor) or `pp` (profile position, for a tool changer or indexer; needs the settings `0x607D:01` and `0x607D:02`, and `0x607F:00` where the drive has it; `pv` needs `0x607F:00` too). |
 | `modules` | For a modular device: the module idents it detected (`0xF050`) when it was read, to notice a change ([modular devices](ecatsetup.md#modular-devices)). The component does not read it. |
 | `cia402.axes` | For `cia402`: a drive with several axes in one slave (such as a two-axis ECT60x2): a list of 1 to 4 names, the axes' pin prefixes. Axis n uses the CiA 402 objects at index + n × 0x800 (`0x6040`, `0x6840`, `0x7040`, `0x7840`); see [cia402](ecatsetup.md#several-axes). Without it, the drive has one axis named after the slave. |
 | `cia402.home-enable-again` | For `cia402` with `hm`: `true` takes the drive down to "Switched on" and enables it again after homing, before it follows its command, for a drive that ignores its target after homing until enabled again (the ECT60 after torque homing). Written by the homing card. Default `false`. |
@@ -836,9 +836,9 @@ commands:                  # objects that are commands, not settings
     type: uint32
     confirm: Keeps every setting through a power cycle
 
-limits:                    # where the drive test finds a limit
-  following-error: {object: '0x2022:00', type: uint32}
-  travel: why the drive's own object is not used
+limits:                    # where a drive keeps a limit PP and PV need
+  max-velocity: {object: '0x2008:00', type: uint32}   # instead of 0x607F
+  travel: why the drive's own object is not used      # 0x607D
 
 tuning:                    # settings the Response card's search shows first
   '0x2009:00': {kind: command-filter, type: UINT, unit: us, min: 0, max: 25600, factory: 6400,
@@ -885,7 +885,7 @@ used, and the rest of the shipped file stays.
 | `errors` | Per error code (0x603F): what the drive means by it, from its manual. Shown with the code in Diagnose, on the workbench and on the card *Bringing it up*. |
 | `tuning` | Per object: `kind` (`command-filter`, `position-loop`, `feedforward`, `torque`, `gain-high`, `other`) and `type`, and optionally `unit`, `min`, `max`, `factory`, `note`, `tried` (what it gave on a machine), and `when` (`object` and `values`: it is used only in that mode of the drive). Shown by *Look for settings in the drive* ([Measuring a drive's response](ecatsetup.md#measuring-a-drives-response)). |
 | `measure` | `ignore`: per object index, why the response measurement does not record it (a drive's object that does not mean what the standard says). |
-| `limits` | For the drive test: `following-error`, `max-torque`, `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), or `travel` and the others as a text saying why the drive's own object is not used. |
+| `limits` | For a drive in PP or PV: `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), where the drive keeps it instead of `0x607F` (the settings then ask for it, the workbench writes it), or `travel` and `max-velocity` as a text saying why the drive's own object is not used. `following-error` and `max-torque` are still read (older files have them) but no longer used. |
 | `hal` | `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
 | `lcec.types` | lcec type names (`type=` in the XML) that `modparams` and `settings` apply to. |
 | `lcec.modparams` | Per lcec `modParam`: the `object` and `type` of the setting, and `convert` (`milli`: ×1000, `flag`: 0/1, else a number as it is) or `values` (a table). |

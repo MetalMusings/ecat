@@ -143,12 +143,11 @@ class TestDriveTest(TestTestMode):
         dt = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
         dt.prepare()
         # nothing written to an ECT60: 0x607D it ignores in CSP, and its following-error
-        # window (0x2022) is only read, to be shown
+        # window (0x2022) is not touched nor spoken of
         self.assertEqual(drivetest.pending_restores(), [])
         self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
-        self.assertIn("the drive's own following-error window: 4000 counts (40 mm, 0x2022:00), "
-                      "left as it is", dt.notes)
+        self.assertFalse(any("window" in n for n in dt.notes))
         log = self.setp_log()
         self.assertIn("x.ferror-max 2.0", log)     # the workbench's own check
         self.assertIn("x.enable FALSE", log)
@@ -184,7 +183,7 @@ class TestDriveTest(TestTestMode):
 
     def test_limits_without_the_dictionary(self):
         # the tool refuses an upload of another size than the object's: without the
-        # dictionary each size is tried, so 0x607D and the window 0x6065 (32 bit) are found
+        # dictionary each size is tried, so 0x607D (32 bit) is found
         sizes = {(0x6065, 0): "uint32", (0x6072, 0): "uint16", (0x607D, 1): "int32",
                  (0x607D, 2): "int32"}
         self.drive.sdos.update({(0x6065, 0): 100000, (0x6072, 0): 3000})
@@ -200,8 +199,8 @@ class TestDriveTest(TestTestMode):
                                      {"scale": 1000.0, "following-error": 2.0})
             dt.prepare()
         self.assertEqual(sorted(lim.name for lim in dt.limits), ["travel-max", "travel-min"])
-        self.assertTrue(any("window: 100000 counts (100 mm, 0x6065:00)" in n for n in dt.notes))
-        self.assertEqual(self.drive.sdos[(0x6072, 0)], 3000)       # not touched
+        self.assertEqual(self.drive.sdos[(0x6065, 0)], 100000)     # not touched
+        self.assertEqual(self.drive.sdos[(0x6072, 0)], 3000)
 
     def test_refused_limit_puts_the_others_back(self):
         run = self.started()

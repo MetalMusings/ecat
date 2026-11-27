@@ -105,14 +105,16 @@ def read_slave(pos, esi_devices, mode, pdo_set=None, progress=None, extra_modes=
                     p.max_velocity[n] = int(v)
     if detected is not None:
         propose.add_modules(p, detected, configured)
-    if p.profile == 402 and mode == "pp":
-        # proposed from the drive's own values; the user must check them
-        for index, sub, dtype in propose.PP_LIMITS:
+    if p.profile == 402 and mode in ("pp", "pv"):
+        # proposed from the drive's own values; the user must check them (PV: only the
+        # maximum velocity, it has no target position)
+        for index, sub, dtype in propose.PP_LIMITS if mode == "pp" else [propose.PP_MAX_VELOCITY]:
             v = tool.upload(pos, index, sub, "int32" if dtype == "DINT" else "uint32")
             if v is not None:
                 p.pp_limits[(index, sub)] = v
-        p.notes.append("PP: software limits 0x607D and max profile velocity 0x607F are the drive's "
-                       "present values (%s); check them" % (", ".join(
+        p.notes.append("%s the drive's present values (%s); check them" % (
+                           "PP: software limits 0x607D and max profile velocity 0x607F are" if mode == "pp"
+                           else "PV: max profile velocity 0x607F is", ", ".join(
                            "0x%04X:%02X=%d" % (i, s_, v) for (i, s_), v in sorted(p.pp_limits.items()))
                            or "none could be read"))
     return info, coe, p
@@ -313,6 +315,33 @@ class Session:
                 out.append(row)
         return out + rest
 
+    def missing_limits(self, position):
+        """The settings a drive in PP or PV needs and lacks (config.velocity_limits_missing),
+        with the drive's present value read from the bus: [{"object", "type", "value",
+        "name"}]. Empty without the bus, or when the value cannot be read."""
+        s, b = self.slave(position), self.bus.get(position)
+        if s is None or b is None or not same_kind(s, b.info):
+            return []
+        d = self.dictionary(position)
+        if d is None or not d.objects:
+            return []
+        read = getattr(b.proposal, "max_velocity", None) or {}
+        out = []
+        for axis, index, sub, coe in config.velocity_limits_missing(s, lambda i, sub_: i in d.objects):
+            value = read.get(axis) if index == 0x607F + axis * config.AXIS_OFFSET else None
+            if value is None:
+                try:
+                    value = tool.upload(position, index, sub, "int32" if coe.startswith("D") else "uint32")
+                except tool.ToolError:
+                    value = None
+            if value is None:
+                continue
+            row = {"object": "0x%04X:%02X" % (index, sub), "type": coe, "value": int(value)}
+            if d.name(index, sub):
+                row["name"] = d.name(index, sub)
+            out.append(row)
+        return out
+
     def missing_state_timeouts(self, position):
         """The state change timeouts the proposal from the bus has (the ESI file's, where
         longer than the master's) that the slave's entry lacks: {key: ms}; "sdo" for the
@@ -411,6 +440,9 @@ class Session:
         s = self.slave(position)
         added = self.missing_init_cmds(position)
         timeouts = self.missing_state_timeouts(position)
+        limits = self.missing_limits(position)
+        if s is not None and limits:
+            s.setdefault("settings", []).extend(limits)
         if s is not None and added:
             s.setdefault("init-cmds", []).extend(dict(r) for r in added)
         if s is not None and "sdo" in timeouts:
@@ -420,7 +452,8 @@ class Session:
             if not isinstance(s.get("state-timeouts-ms"), dict):
                 s["state-timeouts-ms"] = {}
             s["state-timeouts-ms"].update(timeouts)
-        return added + [{"object": "state-timeouts-ms.%s" % k, "value": v} for k, v in sorted(timeouts.items())]
+        return added + limits + [{"object": "state-timeouts-ms.%s" % k, "value": v}
+                                 for k, v in sorted(timeouts.items())]
 
     def check(self):
         """Errors in the configuration, and the bus compared with it:
@@ -681,8 +714,8 @@ class Session:
                 for level, text in found:
                     out.append((level, "slave %s (%s): setting %s: %s"
                                 % (s["position"], s.get("name"), st.get("object"), text)))
-            for text in pp_problems(s, self.dictionary(s["position"])):
-                out.append(("warning", "slave %s (%s): %s" % (s["position"], s.get("name"), text)))
+            for text in velocity_problems(s, self.dictionary(s["position"])):
+                out.append(("error", "slave %s (%s): %s" % (s["position"], s.get("name"), text)))
         return out
 
     def pdo_problems(self, position=None):
@@ -765,28 +798,22 @@ def _take_pdos(old, new):
             old.pop(key, None)
 
 
-def pp_problems(slave, dictionary):
-    """A cia402 drive with PP whose dictionary has the maximum profile
-    velocity (0x607F) that its settings do not set: texts. Not an error,
-    since a drive may not have the object (config.check needs 0x607D only)."""
-    c = slave.get("cia402") or {}
-    if slave.get("profile") != "cia402" or "pp" not in [c.get("mode")] + list(c.get("modes") or []):
+def velocity_problems(slave, dictionary):
+    """A cia402 drive with PP or PV whose dictionary has the maximum velocity (0x607F, or
+    the quirk file's object) that its settings do not set: texts. Needs the dictionary,
+    so it is not in config.check."""
+    if dictionary is None or not dictionary.objects:
         return []
-    have = set()
-    for st in slave.get("settings") or []:
-        try:
-            i, sub = str(st.get("object")).split(":")
-            have.add((int(i, 16), int(sub, 16)))
-        except ValueError:
-            pass
-    out = []
-    index, sub, _ = propose.PP_MAX_VELOCITY
-    for a in range(len(c.get("axes") or []) or 1):
-        o = index + a * propose.AXIS_OFFSET
-        if dictionary and o in dictionary.objects and (o, sub) not in have:
-            out.append("cia402 mode pp: the drive has 0x%04X (max profile velocity) and the settings "
-                       "do not set it; the drive plans PP moves with its present value" % o)
-    return out
+    return ["cia402 mode %s: the drive has 0x%04X:%02X (max profile velocity) and the settings "
+            "do not set it: add it (Add what the device needs), so that the drive's speed is "
+            "limited by the configuration and not by whatever value it has now"
+            % ("/".join(m.upper() for m in _pp_pv(slave)), i, sub)
+            for _, i, sub, _ in config.velocity_limits_missing(slave, lambda i, sub: i in dictionary.objects)]
+
+
+def _pp_pv(slave):
+    c = slave.get("cia402") or {}
+    return [m for m in ("pp", "pv") if m in [c.get("mode")] + list(c.get("modes") or [])]
 
 
 def load_yaml_text(text):

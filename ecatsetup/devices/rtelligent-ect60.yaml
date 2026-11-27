@@ -21,7 +21,9 @@ position: {kept: true}
 errors:
   '0x8611': Position following error too large (more than 0x2022, in pulses)
 
-# Where the drive test finds its limits (instead of the CiA 402 objects).
+# Where the drive keeps its limits (instead of the CiA 402 objects). The
+# following-error window is a property only: nothing writes or shows it (LinuxCNC's
+# FERROR and the workbench's own check watch the error).
 limits:
   # "Position trace error Limit", in pulses (drive error 0x8611 when exceeded)
   following-error: {object: '0x2022:00', type: uint32}

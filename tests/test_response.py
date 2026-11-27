@@ -269,13 +269,14 @@ class TestAnalyse(unittest.TestCase):
         self.assertAlmostEqual(res.torque_peak, 15.0, delta=0.5)
         self.assertEqual(res.torque_limit, 30.0)
         self.assertFalse(any("torque reached" in n for n in res.notes))
-        self.assertEqual(res.window, {"test": 2.0, "drive": 4.0})
+        self.assertEqual(res.window, {"test": 2.0})      # the drive's own window is not used
         text = "\n".join(response.report(res, rec))
         self.assertIn("Torque: peak 15", text)
         # what the profile's torque feedforward would need (cia402.feedforward.torque)
         line = text[text.index("cia402: {feedforward: {torque: "):]
         self.assertAlmostEqual(float(line.split("torque: ")[1].split("}")[0]), 0.02, delta=0.0005)
-        self.assertIn("of the drive's own window (4.000 mm)", text)
+        self.assertIn("of the workbench's stop limit (2.000 mm)", text)
+        self.assertNotIn("own window", text)
         # at the test's limit the result is not the drive's own
         rec.meta["limits"]["max-torque"] = [150, 1000]
         res = response.analyse(rec)
@@ -645,7 +646,7 @@ class TestMeasurement(unittest.TestCase):
         self.assertEqual(len(rec), 1 + len(recording(targets=(10, 0)).data["cmd"]) - 1)
         self.assertEqual(rec.meta["turnaround-cycles"], 2)
         self.assertEqual(rec.meta["trials"], {"0x2009:00": [25600, 2000]})
-        self.assertEqual(rec.meta["limits"]["following-error"], [200, 4000])
+        self.assertEqual(rec.meta["limits"]["following-error"], [200, None])
         self.assertTrue(os.path.exists(m.path))
         self.assertFalse(os.path.exists(m.path + ".raw"))
         res = response.analyse(response.Recording.load(m.path))
