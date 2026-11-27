@@ -188,7 +188,7 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
     warnings = [t for level, t in problems if level == "warning"]
     # an error about a setting the file lacks (such as PP's 0x607D) is the settings', not
     # the process data's
-    settings = [t for t in errors if "setting" in t]
+    settings = [t for t in errors if "needs the setting" in t]
     pd = [t for t in errors if ("PDO" in t or "process" in t or "mode" in t) and t not in settings]
     if pd:
         out.append(Row("pdo", BAD, "Process data", pd[0], "process-data"))

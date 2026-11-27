@@ -3587,6 +3587,45 @@ class TestBringup(WindowBase):
         self.assertEqual(w.bringup_seen[0].fault, 0x8611)
         self.assertEqual(w.bringup_seen[0].runs[-1][:2], [99, 99])
 
+    def test_the_card_follows_an_edit(self):
+        # PP chosen and put back to CSP: the red line and the Settings row go away at once
+        # (the user's try, 2026-11-27), not at the next choice of the slave
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
+        w.select_slave(0)
+        page = w.slave_page
+        s["cia402"]["mode"] = "pp"
+        w.changed()
+        self.assertFalse(page.problems.isHidden())
+        self.assertIn("0x607D", page.problem_text.text())
+        self.assertIn("settings", [r.key for r in page.bringup_found])
+        s["cia402"]["mode"] = "csp"
+        w.changed()
+        self.assertNotIn("0x607D", page.problem_text.text())
+        self.assertNotIn("settings", [r.key for r in page.bringup_found])
+        self.assertFalse(any("0x607D" in r.text for r in page.bringup_found))
+
+    def test_the_slave_page_fits_a_narrow_window(self):
+        # the source card and Operation and sync side by side made the page 1275 px wide:
+        # under each other when the window is narrow
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp", "modes": ["pp"]}
+        w.select_slave(0)
+        p = w.slave_page
+        row = p.source_and_op
+        self.assertLess(p.minimumSizeHint().width(),
+                        p.source.minimumSizeHint().width() + p.op_card.minimumSizeHint().width())
+        w.resize(1100, 800)
+        w.show()
+        QApplication.processEvents()
+        self.assertEqual(row.box.direction(), gui.QBoxLayout.TopToBottom)
+        w.resize(1900, 800)
+        QApplication.processEvents()
+        self.assertEqual(row.box.direction(), gui.QBoxLayout.LeftToRight)
+        w.hide()
+
     def test_a_fault_code_the_pdos_lack_is_read_once(self):
         # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once
         w = self.window()

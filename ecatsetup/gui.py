@@ -34,7 +34,7 @@ from PyQt5.QtCore import QLocale, QPointF, QSize, QThread, QTimer, Qt, pyqtSigna
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontDatabase, QKeySequence, QPainter, QPalette, QPen,
                          QPolygonF)
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QAction, QActionGroup, QApplication, QCheckBox, QComboBox, QDialog,
+    QAbstractItemView, QAction, QActionGroup, QApplication, QBoxLayout, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog,
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
@@ -468,6 +468,44 @@ def label(text="", name=None, wrap=False):
         lab.setObjectName(name)
     lab.setWordWrap(wrap)
     return lab
+
+
+class SideBySide(QWidget):
+    """Widgets side by side when there is room for them, else one under the other: its
+    minimum width is the widest one's, so that the page is never wider than the window."""
+
+    def __init__(self, spacing=16):
+        super().__init__()
+        self.box = QBoxLayout(QBoxLayout.LeftToRight, self)
+        self.box.setContentsMargins(0, 0, 0, 0)
+        self.box.setSpacing(spacing)
+        self.items = []
+
+    def addWidget(self, w, stretch=0):
+        self.items.append(w)
+        self.box.addWidget(w, stretch)
+
+    def _shown(self):
+        return [w for w in self.items if not w.isHidden()]
+
+    def wide_enough(self, width):
+        shown = self._shown()
+        need = sum(w.minimumSizeHint().width() for w in shown) + self.box.spacing() * max(len(shown) - 1, 0)
+        return width >= need
+
+    def minimumSizeHint(self):
+        shown = self._shown()
+        hint = super().minimumSizeHint()
+        if not shown:
+            return hint
+        return QSize(max(w.minimumSizeHint().width() for w in shown), hint.height())
+
+    def resizeEvent(self, event):
+        want = QBoxLayout.LeftToRight if self.wide_enough(event.size().width()) else QBoxLayout.TopToBottom
+        if self.box.direction() != want:
+            self.box.setDirection(want)
+            self.updateGeometry()
+        super().resizeEvent(event)
 
 
 class Card(QFrame):
@@ -1394,8 +1432,8 @@ class SlaveView(QWidget):
         lay.addWidget(self.problems)
 
         # where the configuration comes from, and operation and sync
-        two = QHBoxLayout()
-        two.setSpacing(16)
+        # side by side when the window is wide enough, else one under the other
+        two = self.source_and_op = SideBySide(16)
         self.source = Card("Where the configuration comes from")
         self.source_rows = []
         for _ in range(7):
@@ -1576,7 +1614,7 @@ class SlaveView(QWidget):
         self.dc_warn.setObjectName("warnText")
         op.lay.addStretch(1)
         two.addWidget(op, 1)
-        lay.addLayout(two)
+        lay.addWidget(two)
 
         # homing (CiA 402 hm)
         self.homing_card = Card("Homing by the drive",
@@ -1965,10 +2003,7 @@ class SlaveView(QWidget):
         self.where.setText("" if s and b else "not read from the bus" if s else
                            "not in the file: add it with Update from bus")
         self.name.setEnabled(s is not None)
-        problems = win.messages_by_slave.get(pos, [])
-        self.problems.setVisible(bool(problems))
-        self.problem_text.setText("\n".join(problems))
-        self.show_bringup()
+        self.show_problems()
 
         ident = (s or {}).get("identity") or {}
         info = b.info if b else {}
@@ -3692,6 +3727,14 @@ class SlaveView(QWidget):
             del s["settings"][r]
         self.show_settings(s)
         self.win.changed()
+
+    def show_problems(self):
+        """The check's messages for this slave and the card Bringing it up: again after
+        every edit (MainWindow.changed), so that what was put right goes away."""
+        problems = self.win.messages_by_slave.get(self.position, [])
+        self.problems.setVisible(bool(problems))
+        self.problem_text.setText("\n".join(problems))
+        self.show_bringup()
 
     def show_bringup(self):
         """The card Bringing it up (a CiA 402 drive only), from the file, the bus, the
@@ -9335,6 +9378,8 @@ class MainWindow(QMainWindow):
         """The configuration was edited: check it, show it, mark the list."""
         self.check(quiet=True)
         self.refresh(keep_page=True)
+        if isinstance(self.current, int) and self.current != MASTER_ITEM:
+            self.slave_page.show_problems()
 
     def refresh(self, keep_page=False):
         s = self.session
