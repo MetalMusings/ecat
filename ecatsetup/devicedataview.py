@@ -37,10 +37,17 @@ CARDS = {
              "It shows on the Live tab while something runs: the workbench, or a watched LinuxCNC."),
     "from-lcec": (lambda w: w.hal_page, lambda w: w.hal_page.lcec_card, None,
                   "It shows when the INI file's configuration is an lcec one."),
+    # the bring-up card's rows (bringup.py)
+    "operation": (lambda w: w.bus_page, lambda w: w.slave_page.op_card, None, ""),
+    "source": (lambda w: w.bus_page, lambda w: w.slave_page.source, None, ""),
+    "workbench": (lambda w: w.test_page, lambda w: w.test_page.start_card, None, ""),
+    "diagnose": (lambda w: w.trouble_page, lambda w: w.trouble_page, None, ""),
 }
 CARD_NAMES = {"settings": "Settings", "process-data": "Process data", "homing": "Homing by the drive",
               "sdo": "SDO", "switches": "Switches", "move": "Move", "response": "Response",
-              "sync": "Synchronisation", "from-lcec": "From lcec"}
+              "sync": "Synchronisation", "from-lcec": "From lcec", "operation": "Operation and sync",
+              "source": "Where the configuration comes from", "workbench": "Workbench",
+              "diagnose": "Diagnose"}
 UNKNOWNS_SETTING = "device-data-unknowns"
 NOTHING_TO_SHARE = (
     "You have no facts of your own about %s yet: what came with the program is shared already.\n\n"

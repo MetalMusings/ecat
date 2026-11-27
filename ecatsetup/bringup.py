@@ -1,0 +1,259 @@
+"""Bringing a drive up: what is known, missing, or shows only when tried, for the
+goal "to OP and moving" (docs/development.md "Device facts: properties, advice,
+and bringing up a new drive", item 3). No Qt: the slave page's card shows the rows.
+
+The rows are worked out again each time from the configuration's slave, what was
+read from the bus, the quirk files and measured results, and what the workbench saw
+in this window's session (`Seen`). What the workbench saw is not stored: it belongs
+to the session and the machine. Only properties go to a quirk file, and only when
+the user chooses so on the card that owns them.
+"""
+
+import os
+import time
+from dataclasses import dataclass, field
+
+from . import config, diagnose, measured, quirks
+
+GOAL = "To OP and moving"
+OK, MISSING, TRY, BAD = "ok", "missing", "try", "bad"
+MARKS = {OK: "✓", MISSING: "!", TRY: "?", BAD: "✗"}
+
+# a drive whose position at the start of a run is within this many counts of where
+# the run before ended kept it; one that starts within it of 0 did not
+SAME_COUNTS = 2
+
+
+@dataclass
+class Row:
+    key: str
+    state: str          # OK, MISSING, TRY or BAD
+    what: str           # the row's name
+    text: str           # what is known, or how the gap is filled
+    card: str = None    # devicedataview.CARDS: where it is filled
+
+
+@dataclass
+class Seen:
+    """What the workbench saw of one slave in this session."""
+    op: str = None              # the time it was first seen in OP
+    not_op: str = None          # why not, while the workbench ran
+    enabled: str = None         # the time "Operation enabled" was first seen
+    stuck: str = None           # held in "Switch on disabled" while enable was asked
+    fault: int = None           # 0x603F at a fault
+    moved: float = None         # mm the drive followed a move
+    runs: list = field(default_factory=list)    # [first, last, run] drv-actual-position per run
+    since: dict = field(default_factory=dict)   # how long a state has lasted (monotonic)
+
+    WAIT = 10           # s on the workbench without OP before it counts as not reaching it
+    HELD = 3            # s in "Switch on disabled" with enable on
+
+    def now(self):
+        return time.strftime("%H:%M")
+
+    def key(self):
+        """What the card shows of it: when this changes, the card is worked out again."""
+        return (self.op, self.not_op, self.enabled, self.stuck, self.fault, bool(self.moved),
+                tuple((r[0], r[2]) for r in self.runs), tuple(r[1] for r in self.runs[:-1]))
+
+    def _lasted(self, what, on, seconds, clock):
+        if not on:
+            self.since.pop(what, None)
+            return False
+        start = self.since.setdefault(what, clock)
+        return clock - start >= seconds
+
+    # what the workbench reports, cycle by cycle (gui.TestPage.update_values)
+    def saw(self, run, op, state=None, error=None, position=None, enable_asked=False,
+            moved=None, clock=None):
+        clock = time.monotonic() if clock is None else clock
+        if op and self.op is None:
+            self.op = self.now()
+        if op:
+            self.not_op = None
+        if self._lasted(("op", run), not op, self.WAIT, clock) and self.op is None:
+            self.not_op = "not in OP after %d s on the workbench" % self.WAIT
+        if state == 4 and self.enabled is None:
+            self.enabled = self.now()
+            self.stuck = None
+        if self._lasted("held", state == 1 and enable_asked, self.HELD, clock) and self.enabled is None:
+            self.stuck = self.now()
+        if state in (6, 7) and error:
+            self.fault = error
+        if moved is not None and abs(moved) > 0.01 and state == 4:
+            self.moved = max(abs(moved), self.moved or 0)
+        if op and position is not None:
+            if not self.runs or self.runs[-1][2] != run:
+                self.runs.append([position, position, run])
+            else:
+                self.runs[-1][1] = position
+
+
+def _objects(slave, direction):
+    out = set()
+    for pdo in ((slave.get("process-data") or {}).get(direction) or []):
+        for e in pdo.get("entries") or []:
+            try:
+                out.add(config.parse_obj(e.get("object")))
+            except (ValueError, TypeError):
+                pass
+    return out
+
+
+def _start_position(slave, seen):
+    c = slave.get("cia402") or {}
+    if c.get("zero-at-start"):
+        return Row("start", OK, "Start position", "counts from 0 at start (ticked)", "operation")
+    runs = [r for r in (seen.runs if seen else []) if r]
+    if len(runs) >= 2:
+        before, after = runs[-2][1], runs[-1][0]
+        if abs(after - before) <= SAME_COUNTS and abs(after) > SAME_COUNTS:
+            return Row("start", MISSING, "Start position",
+                       "the drive kept its position over a restart of the bus (%d counts at the end of "
+                       "one run, %d at the start of the next): LinuxCNC starts at 0, so it gets a "
+                       "following error at once. Tick Start position: Position counts from 0 at "
+                       "start, unless the drive homes itself or has an absolute encoder"
+                       % (before, after), "operation")
+        if abs(after) <= SAME_COUNTS and abs(before) > SAME_COUNTS:
+            return Row("start", OK, "Start position",
+                       "the drive starts from 0 by itself (it ended a run at %d counts and started "
+                       "the next at %d)" % (before, after))
+    return Row("start", TRY, "Start position",
+               "not known whether the drive keeps its position: shows over two runs of the "
+               "workbench with the drive's power on and the drive moved in the first", "workbench")
+
+
+def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionary=None):
+    """The rows for the goal, for a CiA 402 drive ([] for another slave).
+    problems: [(level, text)] the configuration check and the PDO check give for this
+    slave; seen: Seen or None; period_us: the servo period; dictionary: the slave's
+    object dictionary (coe.Dictionary) or None."""
+    if not isinstance(slave, dict) or slave.get("profile") != "cia402" or slave.get("unused"):
+        return []
+    out = []
+    p = proposal
+    # the ESI file: PDO sets, DC modes, names
+    if p is None:
+        out.append(Row("esi", TRY, "ESI file", "the slave was not read from the bus: Rescan"))
+    elif not getattr(p, "esi_path", None):
+        out.append(Row("esi", MISSING, "ESI file",
+                       "none: the PDO choice and DC modes come from one (Choose ESI files...)", "source"))
+    elif not getattr(p, "esi_exact", True):
+        out.append(Row("esi", MISSING, "ESI file",
+                       "for revision 0x%08X, the slave is 0x%08X: check what it gave"
+                       % (p.esi_revision or 0, p.revision or 0), "source"))
+    else:
+        out.append(Row("esi", OK, "ESI file", os.path.basename(p.esi_path)))
+
+    # process data and the mode
+    errors = [t for level, t in problems if level == "error"]
+    warnings = [t for level, t in problems if level == "warning"]
+    pd = [t for t in errors if "PDO" in t or "process" in t or "mode" in t]
+    if pd:
+        out.append(Row("pdo", BAD, "Process data", pd[0], "process-data"))
+    elif warnings and any("PDO" in t for t in warnings):
+        out.append(Row("pdo", MISSING, "Process data", next(t for t in warnings if "PDO" in t),
+                       "process-data"))
+    else:
+        out.append(Row("pdo", OK, "Process data",
+                       "what the profile needs is mapped" if p is not None and getattr(p, "esi_path", None)
+                       else "as proposed (not checked against an ESI file)", "process-data"))
+    outputs, inputs = _objects(slave, "outputs"), _objects(slave, "inputs")
+    mode = (slave.get("cia402") or {}).get("mode", "csp")
+    if (0x6060, 0) in outputs:
+        out.append(Row("mode", OK, "Mode", "%s, set every cycle (0x6060 mapped)" % mode.upper()))
+    elif config.mode_setting(slave) is not None:
+        out.append(Row("mode", OK, "Mode", "%s, set once at start (0x6060:00)" % mode.upper()))
+    elif (0x6061, 0) in inputs:
+        out.append(Row("mode", OK, "Mode", "%s, seen in 0x6061: the drive must be in it already" % mode.upper()))
+    else:
+        out.append(Row("mode", BAD, "Mode", "neither set nor seen: map 0x6060 or 0x6061, or set "
+                       "0x6060:00", "process-data"))
+
+    # sync
+    dc = slave.get("dc") or {}
+    if dc.get("assign-activate"):
+        res = measured.results(slave)
+        ok = [r for r in res if r.get("result") == "ok"]
+        refused = sorted(r["period-us"] for r in res if r.get("result") == "refused")
+        if period_us and any(period_us <= x for x in refused):
+            out.append(Row("sync", BAD, "Sync", "DC; the device refused SYNC0 at %g us, and your "
+                           "servo period is %g us: choose a longer one" % (max(refused), period_us),
+                           "sync"))
+        elif ok:
+            shortest = min(r["period-us"] for r in ok)
+            text = "measured: runs at %g us%s" % (shortest, " (refused %s us)" % ", ".join(
+                "%g" % x for x in refused) if refused else "")
+            if period_us and period_us < shortest:
+                out.append(Row("sync", MISSING, "Sync", "DC; your period %g us is shorter than any "
+                               "measured on this device (%s)" % (period_us, text), "sync"))
+            else:
+                out.append(Row("sync", OK, "Sync", "DC, SYNC0; " + text, "operation"))
+        else:
+            out.append(Row("sync", TRY, "Sync", "DC, SYNC0; the shortest period the device takes is not "
+                           "known: shows when the workbench runs (Remember this period)", "sync"))
+    else:
+        out.append(Row("sync", MISSING, "Sync", "free run: a CSP drive usually needs DC (SYNC0); "
+                       "choose its DC mode", "operation"))
+
+    # the following-error window
+    lim = quirks.limits(slave).get("following-error")     # (index, sub, type), or why not
+    if isinstance(lim, tuple):
+        out.append(Row("ferror", OK, "Following-error window",
+                       "the drive's own: 0x%04X:%02X (quirk file)" % lim[:2], "move"))
+    elif lim:
+        out.append(Row("ferror", MISSING, "Following-error window", "the quirk file says: %s" % lim, "move"))
+    elif dictionary is not None and (0x6065, 0) in dictionary.entries:
+        out.append(Row("ferror", OK, "Following-error window", "0x6065 (the standard object)", "move"))
+    else:
+        out.append(Row("ferror", TRY, "Following-error window",
+                       "where the drive keeps it shows when limits are written on the Move card "
+                       "(0x6065, or the drive's own object)", "move"))
+
+    # what the workbench saw
+    s = seen or Seen()
+    if s.op:
+        out.append(Row("op", OK, "Reaches OP", "seen at %s" % s.op))
+    elif s.not_op:
+        out.append(Row("op", BAD, "Reaches OP", s.not_op + ": Diagnose shows its AL status code "
+                       "and what it means", "diagnose"))
+    else:
+        out.append(Row("op", TRY, "Reaches OP", "shows when the workbench runs", "workbench"))
+    if s.enabled:
+        out.append(Row("enable", OK, "Enables", "\"Operation enabled\" seen at %s" % s.enabled))
+    elif s.fault:
+        out.append(Row("enable", BAD, "Enables",
+                       "fault %s: what the drive means by it is in its manual (Diagnose shows the "
+                       "code)" % diagnose.error_text(s.fault), "diagnose"))
+    elif s.stuck:
+        out.append(Row("enable", BAD, "Enables",
+                       "stays in \"Switch on disabled\" while enable is held: usually the hardware "
+                       "(STO, an enable input, the power stage), not the configuration", "move"))
+    else:
+        out.append(Row("enable", TRY, "Enables", "shows when you write limits and hold Enable "
+                       "on the Move card", "move"))
+    if s.moved:
+        out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm" % s.moved))
+    else:
+        out.append(Row("follows", TRY, "Follows", "shows when you jog it on the Move card", "move"))
+    out.append(_start_position(slave, s))
+    return out
+
+
+def summary(found):
+    """One line: how far the goal is."""
+    if not found:
+        return ""
+    bad = sum(r.state == BAD for r in found)
+    missing = sum(r.state == MISSING for r in found)
+    tries = sum(r.state == TRY for r in found)
+    if not (bad or missing or tries):
+        return "Ready: everything for this goal is known."
+    bits = []
+    if bad:
+        bits.append("%d to put right" % bad)
+    if missing:
+        bits.append("%d missing" % missing)
+    if tries:
+        bits.append("%d shown only when tried" % tries)
+    return ", ".join(bits) + "."

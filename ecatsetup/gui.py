@@ -1341,6 +1341,34 @@ class SlaveView(QWidget):
         self.bus_ident = head.add(label("", "hint", wrap=True))
         lay.addWidget(head)
 
+        # a drive's way to OP and its first move (bringup.py): what is known, missing, or
+        # shows only when tried, each row leading to the card where it is filled
+        self.bringup_card = Card("Bringing it up: to OP and moving")
+        self.bringup_summary = self.bringup_card.add(label("", "hint", wrap=True))
+        self.bringup_rows = []
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(4)
+        for i in range(10):
+            mark = pill()
+            mark.setFixedWidth(26)
+            mark.setAlignment(Qt.AlignCenter)
+            what = label("")
+            what.setMinimumWidth(150)
+            text = label("", wrap=True)
+            go = QPushButton()
+            go.setFlat(True)
+            go.clicked.connect(lambda _=False, n=i: self.bringup_go(n))
+            grid.addWidget(mark, i, 0, Qt.AlignTop)
+            grid.addWidget(what, i, 1, Qt.AlignTop)
+            grid.addWidget(text, i, 2)
+            grid.addWidget(go, i, 3, Qt.AlignTop)
+            self.bringup_rows.append((mark, what, text, go))
+        grid.setColumnStretch(2, 1)
+        self.bringup_card.add(grid)
+        self.bringup_found = []
+        lay.addWidget(self.bringup_card)
+
         self.problems = Card("Problems", tone="red")
         self.problem_text = self.problems.add(label(wrap=True))
         lay.addWidget(self.problems)
@@ -1897,6 +1925,7 @@ class SlaveView(QWidget):
         problems = win.messages_by_slave.get(pos, [])
         self.problems.setVisible(bool(problems))
         self.problem_text.setText("\n".join(problems))
+        self.show_bringup()
 
         ident = (s or {}).get("identity") or {}
         info = b.info if b else {}
@@ -3610,6 +3639,45 @@ class SlaveView(QWidget):
             del s["settings"][r]
         self.show_settings(s)
         self.win.changed()
+
+    def show_bringup(self):
+        """The card Bringing it up (a CiA 402 drive only), from the file, the bus, the
+        quirk files and what the workbench saw in this session."""
+        from . import bringup
+        win, pos = self.win, self.position
+        s = win.session.slave(pos) if isinstance(pos, int) else None
+        b = win.session.bus.get(pos) if isinstance(pos, int) else None
+        found = []
+        if s is not None and s.get("profile") == "cia402":
+            mine = ("slave %s:" % pos, "slave %s " % pos)
+            problems = [("error", e) for e in config.check(win.session.cfg) if e.startswith(mine)]
+            problems += win.session.pdo_problems(pos)
+            period = win.session.period
+            found = bringup.rows(s, b.proposal if b else None, problems, win.bringup_seen.get(pos),
+                                 period / 1000.0 if period else None, win.session.dictionary(pos))
+        self.bringup_found = found
+        self.bringup_card.setVisible(bool(found))
+        if not found:
+            return
+        self.bringup_summary.setText(bringup.summary(found))
+        from .devicedataview import CARD_NAMES
+        kinds = {bringup.OK: "green", bringup.MISSING: "amber", bringup.TRY: "grey", bringup.BAD: "red"}
+        for i, (mark, what, text, go) in enumerate(self.bringup_rows):
+            r = found[i] if i < len(found) else None
+            for w in (mark, what, text, go):
+                w.setVisible(r is not None)
+            if r is None:
+                continue
+            set_pill(mark, bringup.MARKS[r.state], kinds[r.state])
+            what.setText("<b>%s</b>" % r.what)
+            text.setText(r.text)
+            go.setVisible(bool(r.card))
+            go.setText("%s →" % CARD_NAMES.get(r.card, r.card or ""))
+
+    def bringup_go(self, n):
+        from . import devicedataview
+        if n < len(self.bringup_found) and self.bringup_found[n].card:
+            devicedataview.show_card(self.win, self.position, self.bringup_found[n].card)
 
     def pdo_set_chosen(self, _index):
         session = self.win.session
@@ -6605,6 +6673,8 @@ class TestPage(QWidget):
                 st = int(v("cia-state") or "-1")
             except ValueError:
                 st = -1
+            if not run.watching:
+                self.saw_for_bringup(run, op, st, v)
             for i, box in enumerate(self.chain):
                 want = "on" if i == st else "off"
                 if box.property("box") != want:
@@ -6639,6 +6709,29 @@ class TestPage(QWidget):
         else:
             self.outputs.update_values(pins)
             self.inputs.update_values(pins)
+
+    def saw_for_bringup(self, run, op, st, v):
+        """Tell the slave page's card Bringing it up what the workbench sees."""
+        from . import bringup
+
+        def number(name):
+            try:
+                return int(v(name), 0)
+            except (TypeError, ValueError):
+                return None
+        dt = self.move.test()
+        moved = None
+        if dt is not None and dt.prepared and dt.start is not None:
+            try:
+                moved = float(v("pos-fb")) - dt.start
+            except (TypeError, ValueError):
+                moved = None
+        seen = self.win.bringup_seen.setdefault(self.position, bringup.Seen())
+        before = seen.key()
+        seen.saw(getattr(run, "log_path", None) or id(run), op, st, number("error-code"), number("drv-actual-position"),
+                 enable_asked=v("enable") == "TRUE", moved=moved)
+        if seen.key() != before and self.win.slave_page.position == self.position:
+            self.win.slave_page.show_bringup()
 
     # SDOs
 
@@ -8742,6 +8835,7 @@ class MainWindow(QMainWindow):
         self.reports = {}       # position -> diagnose.Report
         self.worker = None
         self.test = None        # testmode.TestRun while the workbench runs
+        self.bringup_seen = {}  # position -> bringup.Seen: what the workbench saw (this session)
         self.current = None     # the chosen slave's position, MASTER_ITEM, or None
         self.messages_by_slave = {}
         self.master_offer_off = False       # "Don't ask again this session"

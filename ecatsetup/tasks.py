@@ -34,7 +34,8 @@ TASKS = [
      [("Give it ESI files if you have them: they add PDO sets, DC modes and names.", "esi",
        "Choose ESI files..."),
       ("Read the bus, and look at where the proposal comes from.", "scan", "Rescan the bus"),
-      ("Check its process data, pins, sync and settings.", "bus", "Bus"),
+      ("Check its process data, pins, sync and settings; for a drive the card Bringing it up "
+       "says what is known, what is missing and what shows only on the workbench.", "bus", "Bus"),
       ("Run it on the workbench.", "test", "Workbench"),
       ("Watch the synchronisation and the slaves' state.", "live", "Live"),
       ("Keep what you chose as a quirk file for the device.", "bus", "Bus"),

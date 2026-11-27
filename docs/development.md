@@ -4277,6 +4277,26 @@ Done 2026-11-27:
   and the comparison, the one-by-one step says what a difference means, and the
   source dialog asks where an experience worked and whether a list is closed.
 
+- Item 3: `ecatsetup/bringup.py` (no Qt) and the slave page's card *Bringing it up: to
+  OP and moving* (`SlaveView.show_bringup`, first under the slave's header, CiA 402
+  drives only). Rows: ESI file, process data (the configuration check's and the PDO
+  check's errors for the slave), mode (0x6060 mapped / 0x6060:00 / 0x6061 seen), sync
+  (DC; the servo period against `measured.results`: refused at or above it is ✗,
+  shorter than every ok one is !), following-error window (quirk `limits`, else
+  0x6065 in the dictionary), then from the workbench: reaches OP (not after
+  `Seen.WAIT` 10 s: ✗, to Diagnose), enables (4 seen; a fault's 0x603F; held in
+  "Switch on disabled" for `Seen.HELD` 3 s with enable on: hardware), follows (a move
+  over 0.01 mm while enabled), start position (`drv-actual-position` at the end of one
+  run and the start of the next: the same within 2 counts and not 0 is "kept", the
+  advice is the *Start position* box; from 0 is "starts from 0 by itself").
+  `bringup.Seen` per slave in `MainWindow.bringup_seen`, fed by
+  `TestPage.saw_for_bringup` from the shown drive's pins (only the slave shown on
+  the workbench is seen); not stored, the card is worked out again. Each row's button
+  goes to its card (`devicedataview.CARDS` gained operation, source, workbench,
+  diagnose). Not built: keeping "keeps its position" as a property (item 4), the
+  0x603F meaning as a fact (item 5), the next goals (homing and switches), and the
+  Device data page's "not known yet" rows are still its own. Not tried on the bus.
+
 The goal "homing" as the discussion went through it (for the card's next goal):
 
 | What is needed | Standard or manufacturer's | From |

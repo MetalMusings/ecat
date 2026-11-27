@@ -3484,6 +3484,67 @@ class TestHelp(WindowBase):
 
 
 @unittest.skipIf(gui is None, "PyQt5 is not installed")
+class TestBringup(WindowBase):
+    """The slave page's card Bringing it up: to OP and moving (bringup.py)."""
+
+    def setUp(self):
+        super().setUp()
+        from ecatsetup import quirks
+        env = {"ECATSETUP_DEVICES": os.path.join(self.dir.name, "devices"),
+               "ECATSETUP_MEASURED": os.path.join(self.dir.name, "measured")}
+        p = mock.patch.dict(os.environ, env)
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(quirks.load, True)
+        quirks.load(reload=True)
+
+    def test_a_drive_has_the_card_and_what_the_workbench_saw_comes_in(self):
+        from ecatsetup import bringup
+        w = self.window()
+        w.select_slave(1)
+        page = w.slave_page
+        self.assertTrue(page.bringup_card.isHidden())          # not a CiA 402 drive
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
+        w.select_slave(0)
+        self.assertFalse(page.bringup_card.isHidden())
+        keys = [r.key for r in page.bringup_found]
+        self.assertEqual(keys[-4:], ["op", "enable", "follows", "start"])
+        mark, what, text, go = page.bringup_rows[keys.index("op")]
+        self.assertEqual(mark.text(), "?")
+        self.assertEqual(go.text(), "Workbench →")
+        self.assertIn("shown only when tried", page.bringup_summary.text())
+        # the workbench saw it in OP and enabled
+        seen = w.bringup_seen.setdefault(0, bringup.Seen())
+        seen.saw("run", True, 4)
+        page.show_bringup()
+        mark, what, text, go = page.bringup_rows[keys.index("op")]
+        self.assertEqual(mark.text(), "✓")
+        self.assertTrue(go.isHidden())
+        # a row leads to its card
+        n = keys.index("start")
+        page.bringup_found[n].card = "operation"
+        page.bringup_go(n)
+        self.assertIs(w.tabs.currentWidget(), w.bus_page)
+
+    def test_the_workbench_tells_the_card(self):
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
+        w.select_slave(0)
+        tp = w.test_page
+        values = {"slave-state-op": "TRUE", "cia-state": "4", "error-code": "0",
+                  "drv-actual-position": "1234", "enable": "TRUE"}
+        run = mock.Mock(log_path="/tmp/run-1", watching=False)
+        tp.saw_for_bringup(run, True, 4, values.get)
+        seen = w.bringup_seen[0]
+        self.assertIsNotNone(seen.op)
+        self.assertIsNotNone(seen.enabled)
+        self.assertEqual(seen.runs[0][:2], [1234, 1234])
+        keys = [r.key for r in w.slave_page.bringup_found]
+        self.assertEqual(w.slave_page.bringup_rows[keys.index("enable")][0].text(), "✓")
+
+
 class TestDeviceData(WindowBase):
     """Shared device data (prototype): remembering a fact where it is learnt,
     the Device data dialog, Share, Fetch, the facts one by one, Report."""

@@ -173,6 +173,7 @@ TOPICS = {
     # cards that have their place in a tab's section
     "Problems": ("ecatsetup.md", "bus"),
     "Where the configuration comes from": ("ecatsetup.md", "bus"),
+    "Bringing it up: to OP and moving": ("ecatsetup.md", "bringing-a-drive-up-to-op-and-moving"),
     "What runs": ("ecatsetup.md", "live"),
     "Slaves": ("ecatsetup.md", "live"),
     "Pins (the chosen slave)": ("ecatsetup.md", "live"),

@@ -566,6 +566,32 @@ and synchronisation, and its settings. EtherCAT Setup proposes all of
 it from what it can read; this section is about seeing what the proposal
 rests on, checking it on the bus, and keeping what you chose.
 
+### Bringing a drive up: to OP and moving
+
+For a CiA 402 drive the slave's page starts with the card *Bringing it
+up: to OP and moving*: one row per thing the drive needs to reach OP and
+move, each marked ✓ (known and right), ! (missing: you can fill it in
+now), ? (shows only when tried, on the workbench) or ✗ (to put right),
+with a button to the card where it is filled in:
+
+| Row | Known from |
+|---|---|
+| ESI file | A file for this device and revision gives the PDO choice and the DC modes (*Choose ESI files...*). |
+| Process data | The check of the PDOs against what the profile needs. |
+| Mode | Set every cycle (0x6060 mapped), once at start (0x6060:00), or only seen (0x6061). |
+| Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
+| Following-error window | The quirk file's object (the ECT60's 0x2022), or the standard 0x6065. |
+| Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
+| Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; the drive's manual says what the drive means by it); a drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
+| Follows | Seen when you jog it on the Move card. |
+| Start position | Whether the drive keeps its position counter over a restart of the bus: seen over two runs of the workbench with the drive's power on (move it in the first). A drive that keeps it gets a following error in LinuxCNC at once, since LinuxCNC starts at 0: the row then advises *Start position: Position counts from 0 at start*, unless the drive homes itself or has an absolute encoder. |
+
+What the workbench saw is kept only while the window is open: the card is
+worked out again each time from the configuration, the bus, the quirk
+files and that. Nothing on it is written anywhere; what you choose, you
+choose on the cards it leads to. The line under the title says how far it
+is.
+
 ### Where the proposal comes from
 
 The slave's page on the *Bus* page has a card *Where the configuration
