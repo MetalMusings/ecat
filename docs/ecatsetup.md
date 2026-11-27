@@ -587,7 +587,7 @@ To OP and moving:
 | Following-error window | The quirk file's object (the ECT60's 0x2022), or the standard 0x6065. |
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
 | Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; read once by SDO when the drive's PDOs lack it, as the ECT60's do) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
-| Follows | Seen when you jog it on the Move card. A fault after "Operation enabled" (such as a following error in a fast jog) is shown here, in words, rather than under Enables. |
+| Follows | Seen when you jog it on the Move card. A fault after "Operation enabled" (such as a following error in a fast jog) makes this row red, with the code in words, until the drive is reset and has moved again. |
 | Start position | Whether the drive keeps its position counter over a restart of the bus: from the device's quirk file, or seen over two runs of the workbench with the drive's power on (move it in the first), and then offered with *Remember for the device type...*. Information only: either way works, since LinuxCNC takes the position as it is and the profile holds it while the drive enables (see [Zero at start](#zero-at-start)). |
 
 Homing and switches:

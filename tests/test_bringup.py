@@ -183,8 +183,16 @@ class TestSeen(Base):
         found = bringup.rows(drive(identity=ECT60), proposal(), seen=seen)
         self.assertEqual(self.row(found, "enable").state, bringup.OK)
         row = self.row(found, "follows")
+        self.assertEqual(row.state, bringup.BAD)
+        self.assertIn("fault 0x8611 Position following error too large", row.text)
+        self.assertIn("after a move of 0.66 mm", row.text)
+        # reset and enabled: not cleared until it has moved again
+        seen.saw("r", True, 4, moved=0.66)
+        self.assertEqual(self.row(bringup.rows(drive(), proposal(), seen=seen), "follows").state,
+                         bringup.BAD)
+        seen.saw("r", True, 4, moved=1.66)
+        row = self.row(bringup.rows(drive(), proposal(), seen=seen), "follows")
         self.assertEqual(row.state, bringup.OK)
-        self.assertIn("0.66 mm; then a fault 0x8611 Position following error too large", row.text)
         seen = bringup.Seen()
         seen.saw("r", True, 4)
         seen.saw("r", True, 7, error=0x8611)

@@ -52,6 +52,8 @@ class Seen:
     homed: str = None           # the Move card's last homing: "homed" or "error"
     follows_after: bool = None  # whether the drive followed its target after it
     since: dict = field(default_factory=dict)   # how long a state has lasted (monotonic)
+    fault_at: float = None      # the move's distance when the fault came: a new move clears it
+    last_moved: float = 0.0     # the move's distance last seen
 
     WAIT = 10           # s on the workbench without OP before it counts as not reaching it
     HELD = 3            # s in "Switch on disabled" with enable on
@@ -87,10 +89,17 @@ class Seen:
             self.stuck = None
         if self._lasted("held", state == 1 and enable_asked, self.HELD, clock) and self.enabled is None:
             self.stuck = self.now()
+        if moved is not None:
+            self.last_moved = moved
         if state in (6, 7) and error:
+            if self.fault != error or self.fault_at is None:
+                self.fault_at = self.last_moved
             self.fault = error
         if moved is not None and abs(moved) > 0.01 and state == 4:
             self.moved = max(abs(moved), self.moved or 0)
+            # enabled again and moved since the fault: it follows again
+            if self.fault and self.enabled and abs(moved - (self.fault_at or 0.0)) > 0.01:
+                self.fault = self.fault_at = None
         if op and position is not None:
             if not self.runs or self.runs[-1][2] != run:
                 self.runs.append([position, position, run])
@@ -279,11 +288,9 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
                        "on the Move card", "move"))
     if s.enabled and s.fault:
         text, keep = fault()
-        if s.moved:
-            out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm; then a %s"
-                           % (s.moved, text), "move", remember=keep))
-        else:
-            out.append(Row("follows", BAD, "Follows", text, "move", remember=keep))
+        out.append(Row("follows", BAD, "Follows", "%s%s: Reset fault on the Move card and jog "
+                       "again" % (text, " after a move of %.2f mm" % s.moved if s.moved else ""),
+                       "move", remember=keep))
     elif s.moved:
         out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm" % s.moved))
     else:
