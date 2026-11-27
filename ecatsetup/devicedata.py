@@ -37,7 +37,15 @@ LICENCE = "CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)"
 
 # what a shared file may hold: the device's facts, never the machine's choices
 SHARE_KEYS = (quirks.KEYS | {"format", "sources"}) - {"pins"}
-SOURCE_KINDS = ("manual", "tried", "shared", "other")
+SOURCE_KINDS = ("manual", "tried", "observed", "shared", "other")
+# what else a source may say (docs/development.md "Device facts: properties, advice, ..."):
+# a list's kind (a manual's "only these" or tests' "these worked"), what the fact does to
+# the device's own word (the drive or its ESI file says nothing, or says otherwise), and
+# for experience the machine it comes from
+SOURCE_LISTS = ("closed", "open")
+SOURCE_RELATIONS = ("completes", "corrects")
+SOURCE_KEYS = ("kind", "ref", "date", "revision", "firmware", "by", "given", "list", "relation",
+               "context")
 RESULTS = ("worked", "partly", "did not work")
 MAX_FILE = 32 * 1024
 MAX_TEXT = 2000
@@ -73,6 +81,17 @@ def _obj_key(k):
 # quirk editor), and whether it may be shared. facts(), label(), check() and the
 # Device data page read it. "*" stands for a key (an object, a method, an input).
 
+# What sort of fact a kind is (agreed 2026-11-27): a PROPERTY holds for every unit of the
+# device (perhaps for a firmware) and is what is worth sharing first; two that disagree are
+# a conflict. ADVICE is a choice made from properties and a machine's situation (a recipe:
+# HAL lines, lcec translations). EXPERIENCE is a value that worked in one machine, marked
+# with its context; two that differ can both be right. MACHINE is a machine's own choice,
+# never shared.
+PROPERTY, ADVICE, EXPERIENCE, MACHINE = "property", "advice", "experience", "machine"
+SORTS = {PROPERTY: "a property of the device", ADVICE: "advice",
+         EXPERIENCE: "experience from a machine", MACHINE: "a machine's choice"}
+
+
 @dataclass(frozen=True)
 class Kind:
     path: tuple
@@ -81,6 +100,8 @@ class Kind:
     card: str = None        # devicedataview.CARDS
     share: bool = True
     value: str = ""         # what the value is, for the reference
+    sort: str = PROPERTY
+    listing: bool = False   # a list: its source says closed (only these) or open (these worked)
 
 
 SECTIONS = ("Commands and settings", "Homing", "Drive test", "Tuning", "Process data", "HAL and lcec")
@@ -88,20 +109,23 @@ KINDS = (
     Kind(("commands", "*"), "Commands and settings", "{1} is a command, not a setting", "sdo",
          value="why (text), or note/value/type/confirm for Run command"),
     Kind(("settings", "*"), "Commands and settings", "Setting {1}", "settings",
-         value="type, value, name: written at every start"),
-    Kind(("homing", "methods"), "Homing", "Homing methods", "homing", value="list of 0x6098 values"),
+         value="type, value, name: written at every start", sort=EXPERIENCE),
+    Kind(("homing", "methods"), "Homing", "Homing methods", "homing", value="list of 0x6098 values",
+         listing=True),
     Kind(("homing", "describe", "*"), "Homing", "Method {2}: what it does", "homing"),
-    Kind(("homing", "extras", "*"), "Homing", "Method {2}: settings it needs", "homing"),
-    Kind(("homing", "enable-again"), "Homing", "Enabled again after methods", "homing"),
+    # the objects a method needs are the drive's; the values in them worked somewhere
+    Kind(("homing", "extras", "*"), "Homing", "Method {2}: settings it needs", "homing", sort=EXPERIENCE),
+    Kind(("homing", "enable-again"), "Homing", "Enabled again after methods", "homing", listing=True),
     Kind(("homing", "input-bits", "*"), "Homing", "Input {2} is 0x60FD bit", "switches"),
     Kind(("homing", "inputs"), "Homing", "How the inputs get their function and polarity", "switches"),
     Kind(("limits", "*"), "Drive test", "Limit: {1}", "move"),
+    # what an object does, its range and factory value; its `tried` text is experience
     Kind(("tuning", "*"), "Tuning", "Tuning object {1}", "response"),
     Kind(("measure", "ignore", "*"), "Tuning", "{2} is not recorded when measuring", "response"),
     Kind(("pins", "*"), "Process data", "Pin for {1}", "process-data", share=False,
-         value="a machine's choice: never shared"),
-    Kind(("hal",), "HAL and lcec", "HAL lines", None),
-    Kind(("lcec",), "HAL and lcec", "Translation of lcec's settings", "from-lcec"),
+         value="a machine's choice: never shared", sort=MACHINE),
+    Kind(("hal",), "HAL and lcec", "HAL lines", None, sort=ADVICE),
+    Kind(("lcec",), "HAL and lcec", "Translation of lcec's settings", "from-lcec", sort=ADVICE),
 )
 
 
@@ -223,10 +247,46 @@ def source_text(src):
     if not src:
         return "no source given"
     kind = src.get("kind", "other")
-    bits = {"manual": "the manual", "tried": "tried on a machine", "shared": "shared",
-            "other": ""}.get(kind, kind)
+    bits = {"manual": "the manual", "tried": "tried on a machine", "observed": "seen by the program",
+            "shared": "shared", "other": ""}.get(kind, kind)
     more = [str(src[k]) for k in ("ref", "date", "revision", "firmware", "by") if src.get(k)]
+    if src.get("context"):
+        more.append("on %s" % src["context"])
+    if src.get("list"):
+        more.append({"closed": "only these", "open": "these worked, there may be more"}.get(
+            src["list"], str(src["list"])))
+    if src.get("relation"):
+        more.append({"completes": "the drive and its ESI file say nothing",
+                     "corrects": "the drive or its ESI file says otherwise"}.get(
+            src["relation"], str(src["relation"])))
     return ", ".join([bits] + more if bits else more) or "no source given"
+
+
+def sort(path):
+    """The sort of a fact (PROPERTY, ADVICE, EXPERIENCE, MACHINE)."""
+    k = kind(path)
+    return k.sort if k else PROPERTY
+
+
+def differs(path, now, shared):
+    """How a shared fact stands to the one in use: "same", "new" (nothing in use),
+    "conflict" (two properties that disagree: one is wrong, or the firmware differs)
+    or "context" (advice or experience from another machine: both can be right)."""
+    if now == shared:
+        return "same"
+    if now is None:
+        return "new"
+    return "conflict" if sort(path) == PROPERTY else "context"
+
+
+DIFFERS = {"same": "the same as in use", "new": "new: nothing in use",
+           "conflict": "in use: {now}. Both are said to hold for every unit: one is wrong, "
+                       "or the firmware or revision differs",
+           "context": "in use: {now}. From another machine: both can be right, each in its own"}
+
+
+def differs_text(path, now, shared):
+    return DIFFERS[differs(path, now, shared)].format(now=text(now))
 
 
 def unknowns(slave, raw, measured_results):
@@ -458,6 +518,14 @@ def check(raw):
                     out.append("sources.%s: needs kind (%s)" % (k, ", ".join(SOURCE_KINDS)))
                 elif k not in have:
                     out.append("sources.%s: no such fact in the file" % k)
+                else:
+                    extra = sorted(set(v) - set(SOURCE_KEYS))
+                    if extra:
+                        out.append("sources.%s: unknown keys %s" % (k, ", ".join(extra)))
+                    if v.get("list") is not None and v["list"] not in SOURCE_LISTS:
+                        out.append("sources.%s: list is %s" % (k, " or ".join(SOURCE_LISTS)))
+                    if v.get("relation") is not None and v["relation"] not in SOURCE_RELATIONS:
+                        out.append("sources.%s: relation is %s" % (k, " or ".join(SOURCE_RELATIONS)))
     if not out:
         try:
             quirks.parse(copy.deepcopy({k: v for k, v in raw.items() if k not in ("format", "sources")}))
@@ -703,8 +771,8 @@ def shared_for(ident):
 
 def compare(ident, shared_raw):
     """A shared file's facts against what is in use, one by one:
-    [{"path", "label", "now", "shared", "same", "source"}]. Pins are not
-    offered (a machine's choice)."""
+    [{"path", "label", "now", "shared", "same", "differs", "sort", "source"}]
+    (differs: differs()). Pins are not offered (a machine's choice)."""
     now = current_raw(ident)
     srcs = (shared_raw or {}).get("sources") or {}
     out = []
@@ -713,7 +781,7 @@ def compare(ident, shared_raw):
             continue
         a, b = get(now, p), get(shared_raw, p)
         out.append({"path": p, "label": label(p), "now": a, "shared": b, "same": a == b,
-                    "source": srcs.get(key(p))})
+                    "differs": differs(p, a, b), "sort": sort(p), "source": srcs.get(key(p))})
     return out
 
 

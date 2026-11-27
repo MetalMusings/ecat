@@ -4256,6 +4256,27 @@ error codes (ECT60 0x8611); AL codes as device facts (only the SYNC0 period, via
 7. **lcec translations derived from properties** (lowest priority): `0x2010` "zeroes
    the position" -> `cia402.zero-at-start` without a hand-written row.
 
+Done 2026-11-27:
+
+- Item 1 (62ef82c): a quirk file's command as a setting is a warning
+  (`config.command_warnings`, `--check`, the Settings card), not an error, on the
+  user's choice; the setting picker offers such objects grey and they can be added.
+  A method missing only from a quirk file's homing list can be chosen, marked; one
+  the drive's own 0x60E3 does not list cannot (the drive's description is a rule).
+  *Propose again* asks first and says what is lost, so a quirk value that comes back
+  there is not silent; the other ways (PDO boxes, profile, PDO way) keep the settings.
+  Left as it is: From lcec leaves an lcec sdoConfig object that the quirk file calls a
+  command out of its suggestions (item 7 looks at the translations again), and the
+  workbench's *Write* sends a command to *Run command* (the same thing, once).
+- Item 2: `devicedata.Kind.sort` (PROPERTY, ADVICE, EXPERIENCE, MACHINE; settings and
+  homing extras are experience, hal and lcec advice, pins the machine's, the rest
+  properties) and `Kind.listing` (homing methods, enable-again); sources may say
+  `context`, `list` (closed/open), `relation` (completes/corrects), kind `observed`,
+  checked by `devicedata.check`; `devicedata.differs`: same / new / conflict (two
+  properties) / context (advice or experience). The Device data page marks the sort
+  and the comparison, the one-by-one step says what a difference means, and the
+  source dialog asks where an experience worked and whether a list is closed.
+
 The goal "homing" as the discussion went through it (for the card's next goal):
 
 | What is needed | Standard or manufacturer's | From |

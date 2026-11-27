@@ -98,6 +98,12 @@ class TestRemember(Folders):
         self.assertNotIn(0x2011, quirks.of(ECT60)["commands"])
         self.assertNotIn("commands 0x2011", devicedata.sources(ECT60))
 
+    def test_compare_tells_a_conflict_from_another_machines_value(self):
+        rows = devicedata.compare(ECT60, {"commands": {"0x2010": "other words"},
+                                          "settings": [{"object": "0x2009:00", "type": "UINT", "value": 9}]})
+        self.assertEqual([(r["differs"], r["sort"]) for r in rows],
+                         [("conflict", devicedata.PROPERTY), ("new", devicedata.EXPERIENCE)])
+
     def test_a_fact_the_quirk_reader_refuses_is_not_kept(self):
         with self.assertRaises(devicedata.Error):
             devicedata.remember(ECT60, "ECT60", ("settings", "0x2009:00"), {"value": 1}, None)
@@ -312,6 +318,39 @@ class TestKinds(unittest.TestCase):
                 self.assertTrue(k.card is None or k.card in cards, k)
                 self.assertNotIn("{", devicedata.label(p))
         self.assertEqual(devicedata.label(("homing", "input-bits", "IN5")), "Input IN5 is 0x60FD bit")
+
+    def test_every_kind_has_a_sort_and_only_machine_choices_stay_home(self):
+        for k in devicedata.KINDS:
+            self.assertIn(k.sort, devicedata.SORTS, k)
+            self.assertEqual(k.share, k.sort != devicedata.MACHINE, k)
+        self.assertEqual(devicedata.sort(("commands", "0x2010")), devicedata.PROPERTY)
+        self.assertEqual(devicedata.sort(("settings", "0x2009:00")), devicedata.EXPERIENCE)
+        self.assertTrue(devicedata.kind(("homing", "methods")).listing)
+
+    def test_a_property_that_differs_is_a_conflict_experience_is_context(self):
+        self.assertEqual(devicedata.differs(("commands", "0x2010"), "a", "a"), "same")
+        self.assertEqual(devicedata.differs(("commands", "0x2010"), None, "a"), "new")
+        self.assertEqual(devicedata.differs(("homing", "methods"), [21], [21, 35]), "conflict")
+        self.assertEqual(devicedata.differs(("settings", "0x2009:00"), {"value": 2000}, {"value": 6400}),
+                         "context")
+        self.assertIn("one is wrong", devicedata.differs_text(("homing", "methods"), [21], [35]))
+
+    def test_a_source_says_its_list_relation_and_context(self):
+        src = {"kind": "manual", "ref": "ECT manual 2.4.6", "list": "closed", "relation": "completes"}
+        text = devicedata.source_text(src)
+        self.assertIn("only these", text)
+        self.assertIn("the drive and its ESI file say nothing", text)
+        self.assertIn("on plasma cutter, CSP", devicedata.source_text(
+            {"kind": "tried", "context": "plasma cutter, CSP"}))
+        self.assertIn("seen by the program", devicedata.source_text({"kind": "observed"}))
+        raw = {"format": 1, "match": {"vendor": "0x1", "product": "0x2"},
+               "homing": {"methods": [21]}, "sources": {"homing methods": dict(src)}}
+        self.assertEqual(devicedata.check(raw), [])
+        raw["sources"]["homing methods"]["list"] = "half"
+        raw["sources"]["homing methods"]["colour"] = "red"
+        problems = devicedata.check(raw)
+        self.assertTrue(any("list is closed or open" in p for p in problems), problems)
+        self.assertTrue(any("unknown keys colour" in p for p in problems), problems)
 
     def test_what_is_not_known_yet(self):
         drive = {"profile": "cia402", "dc": {"assign-activate": "0x300"}}

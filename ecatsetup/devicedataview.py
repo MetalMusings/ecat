@@ -71,8 +71,9 @@ def device(win, position):
 class SourceDialog(QDialog):
     """Where a fact comes from (and, for a command, what it does)."""
 
-    def __init__(self, parent, what, value, revision, note=None):
+    def __init__(self, parent, what, value, revision, note=None, path=None):
         super().__init__(parent)
+        fk = devicedata.kind(path) if path else None
         self.setWindowTitle("Remember for this device type - %s" % TITLE)
         self.revision = revision
         lay = QVBoxLayout(self)
@@ -93,6 +94,24 @@ class SourceDialog(QDialog):
         self.ref = QLineEdit()
         self.ref.setPlaceholderText("the manual's name, version and section; or what you did")
         form.addRow("Reference:", self.ref)
+        # experience holds in the machine it comes from: say which (docs/development.md
+        # "Device facts: properties, advice, ..."); a list says whether it is all there is
+        self.context = None
+        if fk is not None and fk.sort == devicedata.EXPERIENCE:
+            self.context = QLineEdit()
+            self.context.setPlaceholderText("the machine: such as plasma cutter, CSP, 500 us")
+            form.addRow("Where it worked:", self.context)
+        self.listing = None
+        if fk is not None and fk.listing:
+            self.listing = QComboBox()
+            self.listing.addItem("Only these (a list such as the manual's)", "closed")
+            self.listing.addItem("These worked; there may be more", "open")
+            form.addRow("The list:", self.listing)
+        if fk is not None:
+            lay.addWidget(label("This is %s%s." % (devicedata.SORTS[fk.sort], {
+                devicedata.PROPERTY: ": it holds for every one of these devices",
+                devicedata.EXPERIENCE: ": a value that worked in a machine, not a rule for others",
+                devicedata.ADVICE: ""}.get(fk.sort, "")), "hint", wrap=True))
         lay.addLayout(form)
         ok = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         ok.button(QDialogButtonBox.Ok).setText("Remember")
@@ -101,8 +120,13 @@ class SourceDialog(QDialog):
         lay.addWidget(ok)
 
     def source(self):
-        return {"kind": self.kind.currentData(), "ref": self.ref.text().strip(),
-                "date": devicedata.today(), "revision": self.revision}
+        src = {"kind": self.kind.currentData(), "ref": self.ref.text().strip(),
+               "date": devicedata.today(), "revision": self.revision}
+        if self.context is not None:
+            src["context"] = self.context.text().strip()
+        if self.listing is not None:
+            src["list"] = self.listing.currentData()
+        return src
 
 
 def remember(win, parent, position, path, value, what, note=None, ask=True):
@@ -113,7 +137,8 @@ def remember(win, parent, position, path, value, what, note=None, ask=True):
         win.status("This slave has no vendor and product: nothing to remember it for")
         return None
     _, ident, name, rev = d
-    dlg = SourceDialog(parent, what, None if note is not None else devicedata.text(value), rev, note)
+    dlg = SourceDialog(parent, what, None if note is not None else devicedata.text(value), rev, note,
+                       path=path)
     if ask and dlg.exec_() != QDialog.Accepted:
         return None
     if note is not None:
@@ -247,15 +272,15 @@ def page_html(name, ident, revision, esi_line, now, own, unknown=(), timing=None
             if mine and not other:
                 links.append("<a href='forget:%s'>forget</a>" % _html(key))
             if other:
-                was = devicedata.get(now, p)
-                state = "same as in use" if was == v else ("new" if was is None else
-                                                          "in use now: %s" % devicedata.text(was))
+                state = devicedata.differs_text(p, devicedata.get(now, p), v)
                 mark = "%s; <i>%s</i>" % (_html(devicedata.source_text(srcs.get(key))
                                                 if srcs.get(key) else "no source given"), _html(state))
             else:
                 mark = _html(_mark(srcs.get(key), mine))
-            lines.append("<tr><td>%s</td><td><tt>%s</tt></td><td>%s</td><td>%s</td></tr>" % (
-                _html(k.label.format(*p)), _html(devicedata.text(v)), mark, " &middot; ".join(links)))
+            sort = "" if k.sort == devicedata.PROPERTY else \
+                " <span style='color:#6b7280'>(%s)</span>" % _html(devicedata.SORTS[k.sort])
+            lines.append("<tr><td>%s%s</td><td><tt>%s</tt></td><td>%s</td><td>%s</td></tr>" % (
+                _html(k.label.format(*p)), sort, _html(devicedata.text(v)), mark, " &middot; ".join(links)))
         if sec == "Timing" and timing and not other:
             lines.append("<tr><td>Measured SYNC0 periods</td><td><tt>%s</tt></td><td>%s</td><td>"
                          "<a href='card:sync'>Synchronisation card</a></td></tr>" % (_html(timing), "measured"))
@@ -581,10 +606,17 @@ class DeviceDataDialog(QDialog):
                 " Tell how it went with <b>Report...</b>." if self.used else ""))
             return
         src = devicedata.source_text(r["source"]) if r["source"] else "no source given"
+        why = {"conflict": "Both are said to hold for every one of these devices: one is wrong, or "
+                           "the firmware or revision differs. Look at both sources.",
+               "context": "From another machine: both can be right, each in its own. Its source "
+                          "says where it worked; try it if your machine is like that one.",
+               "new": "Nothing is in use for it now."}.get(r.get("differs"), "")
         self.step.setText(
-            "<b>%d of %d: %s</b><br>In use: <tt>%s</tt><br>Shared: <tt>%s</tt> &nbsp;(%s)" % (
-                self.at + 1, len(self.rows), r["label"], _html(devicedata.text(r["now"])),
-                _html(devicedata.text(r["shared"])), _html(src)))
+            "<b>%d of %d: %s</b> <span style='color:#6b7280'>(%s)</span><br>In use: <tt>%s</tt><br>"
+            "Shared: <tt>%s</tt> &nbsp;(%s)<br><i>%s</i>" % (
+                self.at + 1, len(self.rows), r["label"], _html(devicedata.SORTS.get(r.get("sort"), "")),
+                _html(devicedata.text(r["now"])), _html(devicedata.text(r["shared"])), _html(src),
+                _html(why)))
 
     def use(self):
         r = self.rows[self.at] if self.at < len(self.rows) else None

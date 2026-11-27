@@ -4286,6 +4286,23 @@ tried; the page itself changes nothing but your sources. *Show what is
 not known yet* adds, in amber, what is missing and where to learn it
 (such as: which input is which, from the switch test).
 
+What a quirk file says is advice, never a rule: you can always choose
+otherwise on the card. Facts are of three sorts, and the page says which
+(a property is not marked):
+
+- a **property** of the device holds for every one of them, perhaps for a
+  firmware: that `0x2010` is a command, which bit is IN5, which homing
+  methods there are, what a tuning object does and its range;
+- **experience from a machine** is a value that worked there, such as a
+  setting (`0x2009` = 2000 on a plasma cutter in CSP) or the values a
+  homing method needs: it says where it worked, and may not suit yours;
+- **advice** is a recipe made from properties: HAL lines, lcec translations.
+
+When you remember a fact, you say where it comes from (the manual with its
+version and section, a test, ...); for experience also where it worked,
+and for a list (homing methods) whether it is all there is (the manual's
+list) or only what worked.
+
 - **Share yours...** opens a new post in the data repository
   ([MetalMusings/ecat-devices-test](https://github.com/MetalMusings/ecat-devices-test))
   in your browser with your facts; your pin names and scales are left out.
@@ -4302,7 +4319,10 @@ not known yet* adds, in amber, what is missing and where to learn it
   reports); *Show the whole shared file* shows it grouped the same way,
   each fact marked new, the same, or with what is in use now. Its facts
   that differ from yours are then shown one at a
-  time: what is in use, what the file says and where it comes from.
+  time: what is in use, what the file says and where it comes from. A
+  property that differs is a conflict (one of them is wrong, or the
+  firmware differs: look at both sources); experience that differs is
+  another machine's, and both can be right.
   *Use it* puts the fact into your own file (with where it came from),
   *Skip* leaves it. A shared setting can be tried first: *Try it* writes
   it into the drive's RAM while the drive stands disabled, keeping the

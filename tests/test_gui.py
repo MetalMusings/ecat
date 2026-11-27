@@ -3512,6 +3512,24 @@ class TestDeviceData(WindowBase):
         o.start()
         self.addCleanup(o.stop)
 
+    def test_the_source_asks_what_the_sort_of_fact_needs(self):
+        # experience: where it worked; a list: closed or open; a property: neither
+        w = self.window()
+        d = self.dv.SourceDialog(w, "Setting 0x2009:00", "2000", None, path=("settings", "0x2009:00"))
+        self.addCleanup(d.deleteLater)
+        self.assertIsNotNone(d.context)
+        self.assertIsNone(d.listing)
+        d.context.setText("plasma cutter, CSP, 500 us")
+        self.assertEqual(d.source()["context"], "plasma cutter, CSP, 500 us")
+        d = self.dv.SourceDialog(w, "Homing methods", "[21]", None, path=("homing", "methods"))
+        self.addCleanup(d.deleteLater)
+        self.assertIsNone(d.context)
+        self.assertEqual(d.source()["list"], "closed")
+        d = self.dv.SourceDialog(w, "0x2010 is a command", None, None, note="", path=("commands", "0x2010"))
+        self.addCleanup(d.deleteLater)
+        self.assertTrue(d.context is None and d.listing is None)
+        self.assertNotIn("context", d.source())
+
     def test_remember_share_fetch_choose_and_report(self):
         import json
         import tarfile
@@ -3610,10 +3628,14 @@ class TestDeviceData(WindowBase):
         dlg.whole_button.setChecked(True)
         text = dlg.page.toPlainText()
         self.assertIn("Shared file #5 by bob", text)
-        self.assertIn("in use now: {type: USINT, value: 5", text)
+        # a setting is experience: another machine's value is context, not a conflict
+        self.assertIn("in use: {type: USINT, value: 5", text)
+        self.assertIn("From another machine: both can be right", text)
+        self.assertIn("(experience from a machine)", text)
         self.assertNotIn("Pin for", text)                            # pins are never shared
         dlg.whole_button.setChecked(False)
         self.assertIn("1 of 2: 0x2002 is a command", dlg.step.text())
+        self.assertIn("(a property of the device)", dlg.step.text())
         self.assertTrue(dlg.try_button.isHidden())
         dlg.use()
         self.assertEqual(self.quirks.of(ident)["commands"][0x2002], "another command")
