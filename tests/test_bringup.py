@@ -95,6 +95,12 @@ class TestRows(Base):
         d.entries[(0x6065, 0)] = object()
         self.assertEqual(self.row(bringup.rows(drive(), proposal(), dictionary=d), "ferror").state, bringup.OK)
         self.assertEqual(self.row(bringup.rows(drive(), proposal()), "ferror").state, bringup.TRY)
+        # a dictionary without 0x6065 and no object known: said, not needed to move
+        d = coe.Dictionary()
+        d.entries[(0x2022, 0)] = object()
+        row = self.row(bringup.rows(drive(), proposal(), dictionary=d), "ferror")
+        self.assertEqual(row.state, bringup.MISSING)
+        self.assertIn("Moving works without it", row.text)
 
     def test_the_servo_period_against_what_was_measured(self):
         # the shipped ECT60 results: ok down to 125 us, refused at 100 us

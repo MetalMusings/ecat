@@ -584,7 +584,7 @@ To OP and moving:
 | Process data | The check of the PDOs against what the profile needs. |
 | Mode | Set every cycle (0x6060 mapped), once at start (0x6060:00), or only seen (0x6061). |
 | Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
-| Following-error window | The quirk file's object (the ECT60's 0x2022), or the standard 0x6065. |
+| Following-error window | The quirk file's object (the ECT60's 0x2022), or the standard 0x6065. A drive with neither (as far as its dictionary shows) gets a ! : the workbench cannot set its window and the drive's own applies, which may be large; moving works without it. *Remember where the drive keeps its limits...* on the Move card tells the object. |
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
 | Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; read once by SDO when the drive's PDOs lack it, as the ECT60's do) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
 | Follows | Seen when you jog it on the Move card. A fault after "Operation enabled" (such as a following error in a fast jog) makes this row red, with the code in words, until the drive is reset and has moved again. |

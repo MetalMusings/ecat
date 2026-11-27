@@ -175,9 +175,10 @@ def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
             notes.append("no %s object in the drive: %s" % (
                 name.replace("-", " "),
                 "limited in HAL by the velocity and acceleration only" if name == "max-torque"
-                else "the drive keeps its own window, and the %g mm here is not written. If its "
-                "manual names an object of its own for it, tell the workbench with Remember where "
-                "the drive keeps its limits..." % settings["following-error"]))
+                else "the %g mm here cannot be written: the drive watches its following error "
+                "only with its own window, which may be large. Moving works. If its manual names "
+                "the object, tell the workbench with Remember where the drive keeps its "
+                "limits..." % settings["following-error"]))
     if mode == "csp":
         notes.append("velocity %g mm/s and acceleration %g mm/s2 are limited in HAL (limit3)"
                      % (settings["max-velocity"], settings["max-acceleration"]))

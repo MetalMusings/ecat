@@ -95,7 +95,7 @@ class TestPlan(unittest.TestCase):
         self.assertTrue(any("0x607D" in n for n in notes))
         # the window the user chose is not written: said, with the way to tell the object
         ferror = next(n for n in notes if n.startswith("no following error object"))
-        self.assertIn("%g mm here is not written" % drivetest.DEFAULTS["following-error"], ferror)
+        self.assertIn("%g mm here cannot be written" % drivetest.DEFAULTS["following-error"], ferror)
         self.assertIn("Remember where the drive keeps its limits", ferror)
 
 

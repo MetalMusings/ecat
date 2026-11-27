@@ -246,6 +246,15 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("ferror", MISSING, "Following-error window", "the quirk file says: %s" % lim, "move"))
     elif dictionary is not None and (0x6065, 0) in dictionary.entries:
         out.append(Row("ferror", OK, "Following-error window", "0x6065 (the standard object)", "move"))
+    elif dictionary is not None and dictionary.entries:
+        # not needed to move: the drive then watches its following error only with its own
+        # (factory) window, which the workbench cannot make small
+        out.append(Row("ferror", MISSING, "Following-error window",
+                       "the drive has no 0x6065, and the object it keeps its window in is not "
+                       "known: the workbench cannot set it, so the drive's own window applies "
+                       "(it may be large). Moving works without it. When the drive's manual names "
+                       "the object: Remember where the drive keeps its limits... on the Move card",
+                       "move"))
     else:
         out.append(Row("ferror", TRY, "Following-error window",
                        "the workbench writes 0x6065; a drive that keeps it in an object of its own "
