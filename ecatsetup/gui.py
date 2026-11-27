@@ -133,6 +133,10 @@ QLabel[box="on"] {{ border: 1px solid {greentext}; background: {onbg}; color: {o
 QLabel[box="fault"] {{ border: 1px solid {redborder}; color: {redtext}; }}
 QLabel[box="fault-on"] {{ border: 1px solid {redtext}; background: {redbg}; color: {redtext};
               font-weight: 600; }}
+QLineEdit {{ border: 1px solid {boxborder}; border-radius: 4px; padding: 2px 4px; }}
+QLineEdit:focus {{ border: 1px solid {accent}; }}
+QLineEdit:disabled {{ color: {disabled}; }}
+QAbstractSpinBox QLineEdit, QComboBox QLineEdit, QAbstractItemView QLineEdit {{ border: none; padding: 0px; }}
 QPushButton {{ background: {surface}; border: 1px solid {btnborder}; border-radius: 6px; padding: 5px 12px; }}
 QPushButton:hover {{ background: {hover}; }}
 QPushButton:disabled {{ color: {disabled}; }}

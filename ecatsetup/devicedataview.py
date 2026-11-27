@@ -13,7 +13,7 @@ from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                              QFormLayout, QHBoxLayout, QInputDialog, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-                             QGridLayout, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
+                             QFrame, QGridLayout, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
 
 from . import devicedata, homing, measured, quirks, settings, testmode, tool, tuning
 from .gui import TITLE, label
@@ -193,6 +193,7 @@ class MethodsDialog(QDialog):
     def __init__(self, parent, methods, described, where):
         super().__init__(parent)
         self.setWindowTitle("The drive's homing methods - %s" % TITLE)
+        self.setMinimumWidth(620)
         lay = QVBoxLayout(self)
         lay.addWidget(label(
             "Tick the methods the drive's manual lists (or those that worked). The drive %s."
@@ -296,6 +297,7 @@ class InputsDialog(QDialog):
     def __init__(self, parent, names, inputs=None):
         super().__init__(parent)
         self.setWindowTitle("The drive's inputs - %s" % TITLE)
+        self.setMinimumWidth(620)       # room for the fields' examples and the manual's names
         inputs = inputs or {}
         f, p = inputs.get("function") or {}, inputs.get("polarity") or {}
         lay = QVBoxLayout(self)
@@ -304,23 +306,27 @@ class InputsDialog(QDialog):
             "function, the codes for the functions, and the object whose bits set the polarity. "
             "Leave an input's object empty when it has none (such as an encoder input).", wrap=True))
         self.names = QLineEdit(", ".join(inputs.get("names") or names or ["IN1", "IN2", "IN3", "IN4"]))
+        self.names.setPlaceholderText("such as IN3, IN4, IN5, IN6")
+        self.names.setToolTip("The inputs, as the manual names them, separated by commas: each gets a "
+                              "row below")
         self.names.editingFinished.connect(self.fill)
         form = QFormLayout()
-        form.addRow("Inputs:", self.names)
         self.ftype = QComboBox()
         self.ftype.addItems(self.TYPES)
         self.ftype.setCurrentText(f.get("type", "UINT"))
         form.addRow("Function objects' type:", self.ftype)
         codes = f.get("codes") or {}
         self.codes = {}
-        for k, text in (("home", "Home switch"), ("negative", "Negative limit"),
-                        ("positive", "Positive limit"), ("none", "No function")):
+        for k, text, example in (("home", "Home switch", 3), ("negative", "Negative limit", 1),
+                                 ("positive", "Positive limit", 2), ("none", "No function", 0)):
             e = QLineEdit("" if codes.get(k) is None else str(codes[k]))
-            e.setPlaceholderText("the code written for it")
+            e.setPlaceholderText("such as %d" % example)
+            e.setToolTip("The value written to an input's function object for this function")
             form.addRow("Code, %s:" % text.lower(), e)
             self.codes[k] = e
         self.pobject = QLineEdit(p.get("object", ""))
         self.pobject.setPlaceholderText("such as 0x2008:00 (empty: no polarity object)")
+        self.pobject.textChanged.connect(self.name_bit_column)
         form.addRow("Polarity object:", self.pobject)
         self.ptype = QComboBox()
         self.ptype.addItems(self.TYPES)
@@ -337,6 +343,16 @@ class InputsDialog(QDialog):
         self.ref.setPlaceholderText("the manual's name, version and section")
         form.addRow("Reference:", self.ref)
         lay.addLayout(form)
+        rule = QFrame()
+        rule.setObjectName("rule")
+        rule.setFrameShape(QFrame.HLine)
+        lay.addWidget(rule)
+        lay.addWidget(label("Each input", "cardTitle"))
+        lay.addWidget(label("Name the inputs, separated by commas; each gets a row with the object that "
+                            "gives it its function and its bit in the polarity object.", "hint", wrap=True))
+        names = QFormLayout()
+        names.addRow("Inputs:", self.names)
+        lay.addLayout(names)
         self.grid = QGridLayout()
         lay.addLayout(self.grid)
         self.rows = {}
@@ -347,6 +363,12 @@ class InputsDialog(QDialog):
         ok.accepted.connect(self.accept)
         ok.rejected.connect(self.reject)
         lay.addWidget(ok)
+
+    def name_bit_column(self, *_):
+        """The polarity column says whose bit it is."""
+        if getattr(self, "bit_head", None) is not None:
+            obj = self.pobject.text().strip()
+            self.bit_head.setText("Bit in %s" % obj if obj else "Polarity bit")
 
     def input_names(self):
         return [n.strip() for n in self.names.text().split(",") if n.strip()]
@@ -361,13 +383,15 @@ class InputsDialog(QDialog):
         self.rows = {}
         self.grid.addWidget(label("Input", "fieldName"), 0, 0)
         self.grid.addWidget(label("Function object", "fieldName"), 0, 1)
-        self.grid.addWidget(label("Polarity bit", "fieldName"), 0, 2)
+        self.bit_head = label("", "fieldName")
+        self.grid.addWidget(self.bit_head, 0, 2)
+        self.name_bit_column()
         objs, bits = self.given
         for i, n in enumerate(self.input_names(), 1):
             o = QLineEdit(old.get(n, (objs.get(n, ""),))[0])
             o.setPlaceholderText("such as 0x2007:03")
             b = QLineEdit(old.get(n, (None, "" if bits.get(n) is None else str(bits[n])))[1])
-            b.setPlaceholderText("0-15")
+            b.setPlaceholderText("such as 4")
             self.grid.addWidget(label(n), i, 0)
             self.grid.addWidget(o, i, 1)
             self.grid.addWidget(b, i, 2)
@@ -441,6 +465,7 @@ class LimitsDialog(QDialog):
         super().__init__(parent)
         from . import drivetest
         self.setWindowTitle("The drive's limits - %s" % TITLE)
+        self.setMinimumWidth(620)
         now = now or {}
         lay = QVBoxLayout(self)
         lay.addWidget(label(

@@ -3733,6 +3733,11 @@ class TestDeviceData(WindowBase):
         dlg = self.dv.InputsDialog(w, ["IN1", "IN2"])
         self.addCleanup(dlg.deleteLater)
         self.assertEqual(list(dlg.rows), ["IN1", "IN2"])
+        # the bit column says whose bit it is (the user did not see it was a table, 2026-11-27)
+        self.assertEqual(dlg.bit_head.text(), "Polarity bit")
+        dlg.pobject.setText("0x2008:00")
+        self.assertEqual(dlg.bit_head.text(), "Bit in 0x2008:00")
+        dlg.pobject.setText("")
         dlg.rows["IN1"][0].setText("0x2007:01")
         dlg.rows["IN1"][1].setText("0")
         with self.assertRaisesRegex(ValueError, "no function is needed"):
