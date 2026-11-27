@@ -6594,6 +6594,11 @@ class TestPage(QWidget):
             tile.lay.setContentsMargins(12, 10, 12, 10)
             tile.add(label(text, "hint"))
             v = tile.add(label("–", "value"))
+            if pin == "error-code":
+                # the code large, its meaning small and wrapped (a long text would
+                # widen the page)
+                self.error_meaning = tile.add(label("", "hint", wrap=True))
+                self.error_meaning.hide()
             grid.addWidget(tile, i // 2, i % 2)
             self.live[pin] = (tile, v)
         live.add(grid)
@@ -6872,8 +6877,7 @@ class TestPage(QWidget):
                 tile.setVisible(val is not None)
                 if val is not None:
                     if pin == "error-code":
-                        code = self.fault_code(self.position, v)
-                        val = diagnose.error_text(code, self.win.session.slave(self.position))
+                        val = self.show_error_code(self.fault_code(self.position, v))
                     lab.setText(val)
             try:
                 sw = int(v("statusword") or "0", 0)
@@ -6890,6 +6894,16 @@ class TestPage(QWidget):
         else:
             self.outputs.update_values(pins)
             self.inputs.update_values(pins)
+
+    def show_error_code(self, code):
+        """The error code tile: the code, and under it, small, what it means. Gives the
+        value line's text."""
+        words = diagnose.error_text(code, self.win.session.slave(self.position))
+        val = "0x%04X" % code if code else words
+        meaning = words[len(val):].strip() if code else ""
+        self.error_meaning.setText(meaning)
+        self.error_meaning.setVisible(bool(meaning))
+        return val
 
     def fault_code(self, position, v):
         """The drive's error code (0x603F): the pin when the PDOs have it, otherwise read

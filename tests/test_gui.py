@@ -3600,6 +3600,12 @@ class TestBringup(WindowBase):
             values["stat-fault"] = "TRUE"
             tp.saw_for_bringup(run, 0, True, 7, values.get)
             self.assertEqual(up.call_count, 2)
+        # the tile: the code large, the meaning small under it
+        self.assertEqual(tp.show_error_code(0x8611), "0x8611")
+        self.assertTrue(tp.error_meaning.text())
+        self.assertTrue(tp.error_meaning.wordWrap())
+        self.assertEqual(tp.show_error_code(0), "no error")
+        self.assertTrue(tp.error_meaning.isHidden())
         # a code in the PDOs needs no SDO
         values["error-code"] = "0x7500"
         with mock.patch.object(tool, "upload") as up:
