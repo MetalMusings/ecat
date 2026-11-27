@@ -3485,7 +3485,7 @@ class TestHelp(WindowBase):
 
 @unittest.skipIf(gui is None, "PyQt5 is not installed")
 class TestBringup(WindowBase):
-    """The slave page's card Bringing it up: to OP and moving (bringup.py)."""
+    """The slave page's card Bringing it up (bringup.py)."""
 
     def setUp(self):
         super().setUp()
@@ -3527,6 +3527,32 @@ class TestBringup(WindowBase):
         page.bringup_go(n)
         self.assertIs(w.tabs.currentWidget(), w.bus_page)
 
+    def test_the_homing_goal_and_what_the_cards_tell(self):
+        from ecatsetup import bringup
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp", "modes": ["hm"]}
+        s["homing"] = {"method": 21}
+        w.select_slave(0)
+        page = w.slave_page
+        page.bringup_goal.setCurrentIndex(page.bringup_goal.findData(bringup.HOMING))
+        page.show_bringup()
+        keys = [r.key for r in page.bringup_found]
+        self.assertEqual(keys[:3], ["hm", "methods", "method"])
+        self.assertIn("switch-home", keys)
+        # the Switches card's test result comes to the card
+        card = w.test_page.switches
+        card.slave = s
+        card.test = {"kind": "home"}
+        card.finish(("ok", "Set up right"))
+        row = page.bringup_found[[r.key for r in page.bringup_found].index("switch-home")]
+        self.assertEqual(row.state, bringup.OK)
+        # and the Move card's homing
+        from types import SimpleNamespace
+        w.test_page.move.home_finished(SimpleNamespace(slave=s, name="x", axis=0), "homed", True)
+        found = {r.key: r.state for r in page.bringup_found}
+        self.assertEqual((found["homed"], found["after"]), (bringup.OK, bringup.OK))
+
     def test_the_workbench_tells_the_card(self):
         w = self.window()
         s = w.session.slave(0)
@@ -3536,13 +3562,20 @@ class TestBringup(WindowBase):
         values = {"slave-state-op": "TRUE", "cia-state": "4", "error-code": "0",
                   "drv-actual-position": "1234", "enable": "TRUE"}
         run = mock.Mock(log_path="/tmp/run-1", watching=False)
-        tp.saw_for_bringup(run, True, 4, values.get)
+        tp.saw_for_bringup(run, 0, True, 4, values.get)
         seen = w.bringup_seen[0]
         self.assertIsNotNone(seen.op)
         self.assertIsNotNone(seen.enabled)
         self.assertEqual(seen.runs[0][:2], [1234, 1234])
         keys = [r.key for r in w.slave_page.bringup_found]
         self.assertEqual(w.slave_page.bringup_rows[keys.index("enable")][0].text(), "✓")
+        # every drive, from all pins, not only the one shown
+        name = s["name"]
+        tp.saw_every_drive(mock.Mock(log_path="/tmp/run-2", watching=False),
+                           {name + ".cia-state": "7", name + ".slave-state-op": "TRUE",
+                            name + ".error-code": "0x8611", name + ".drv-actual-position": "99"})
+        self.assertEqual(w.bringup_seen[0].fault, 0x8611)
+        self.assertEqual(w.bringup_seen[0].runs[-1][:2], [99, 99])
 
 
 class TestDeviceData(WindowBase):
@@ -3660,6 +3693,34 @@ class TestDeviceData(WindowBase):
         # known now: not asked again
         with mock.patch.object(gui.QMessageBox, "question", side_effect=AssertionError):
             self.assertIsNone(w.test_page.move.offer_enable_again(dt))
+
+    def test_limits_and_tuning_objects_from_the_window(self):
+        from types import SimpleNamespace
+        from ecatsetup import tuning
+        w = self.window()
+        s = w.session.slave(0)
+        ident = self.quirks.identity(s)
+        dlg = self.dv.LimitsDialog(w)
+        self.addCleanup(dlg.deleteLater)
+        obj, typ, why = dlg.rows["following-error"]
+        obj.setText("0x2022:00")
+        dlg.rows["travel"][2].setText("ignored in CSP")
+        self.assertIsNotNone(self.dv.remember_limits(w, w, 0, ask=False, dialog=dlg))
+        lim = self.quirks.limits(ident)
+        self.assertEqual(lim["following-error"], (0x2022, 0, "uint32"))
+        self.assertEqual(lim["travel"], "ignored in CSP")
+        # a tuning object found by Look for settings
+        card = w.test_page.response
+        c = tuning.Candidate(0x2009, 0, "Filter Time", "command-filter", "uint16", value=2000,
+                             minimum=0, maximum=25600, factory=6400, unit="us")
+        dt = SimpleNamespace(slave=s)
+        with mock.patch.object(card, "drive", lambda: dt), mock.patch.object(card, "chosen", lambda: c), \
+                mock.patch.object(self.dv.SourceDialog, "exec_",
+                                  lambda d: (d.note.setText("sliding average"), QDialog.Accepted)[1]):
+            card.remember_tuning()
+        t = next(x for x in self.quirks.tuning(ident) if x["index"] == 0x2009)
+        self.assertEqual((t["kind"], t["type"], t["max"], t["factory"], t["note"]),
+                         ("command-filter", "UINT", 25600, 6400, "sliding average"))
 
     def test_the_source_asks_what_the_sort_of_fact_needs(self):
         # experience: where it worked; a list: closed or open; a property: neither

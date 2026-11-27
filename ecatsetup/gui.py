@@ -1343,13 +1343,25 @@ class SlaveView(QWidget):
 
         # a drive's way to OP and its first move (bringup.py): what is known, missing, or
         # shows only when tried, each row leading to the card where it is filled
-        self.bringup_card = Card("Bringing it up: to OP and moving")
-        self.bringup_summary = self.bringup_card.add(label("", "hint", wrap=True))
+        self.bringup_card = Card("Bringing it up")
+        grow = QHBoxLayout()
+        grow.addWidget(label("Goal:"))
+        self.bringup_goal = QuietCombo()
+        from . import bringup as _bringup
+        for g in _bringup.GOALS:
+            self.bringup_goal.addItem(g, g)
+        self.bringup_goal.setToolTip("What to bring the drive to: first to OP and moving, then "
+                                     "homing by the drive and its switches")
+        self.bringup_goal.activated.connect(lambda _i: self.show_bringup())
+        grow.addWidget(self.bringup_goal)
+        self.bringup_summary = label("", "hint", wrap=True)
+        grow.addWidget(self.bringup_summary, 1)
+        self.bringup_card.add(grow)
         self.bringup_rows = []
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(4)
-        for i in range(10):
+        for i in range(14):
             mark = pill()
             mark.setFixedWidth(26)
             mark.setAlignment(Qt.AlignCenter)
@@ -2420,6 +2432,8 @@ class SlaveView(QWidget):
         self.loading = False
         self.home_support = (nums, where)
         self.show_homing_text(s, chosen, nums, where)
+        if self.bringup_goal.currentData() != self.bringup_goal.itemData(0):
+            self.show_bringup()
 
     def remember_inputs(self):
         from . import devicedataview
@@ -3690,8 +3704,11 @@ class SlaveView(QWidget):
             problems = [("error", e) for e in config.check(win.session.cfg) if e.startswith(mine)]
             problems += win.session.pdo_problems(pos)
             period = win.session.period
-            found = bringup.rows(s, b.proposal if b else None, problems, win.bringup_seen.get(pos),
-                                 period / 1000.0 if period else None, win.session.dictionary(pos))
+            if self.bringup_goal.currentData() == bringup.HOMING:
+                found = bringup.homing_rows(s, win.bringup_seen.get(pos), self.home_support)
+            else:
+                found = bringup.rows(s, b.proposal if b else None, problems, win.bringup_seen.get(pos),
+                                     period / 1000.0 if period else None, win.session.dictionary(pos))
         self.bringup_found = found
         self.bringup_card.setVisible(bool(found))
         if not found:
@@ -4837,6 +4854,13 @@ class MoveCard(Card):
                                 "disabled; its values are written back when you are done.")
         self.prepare.clicked.connect(self.do_prepare)
         form.addRow(self.prepare)
+        self.limits_remember = QPushButton("Remember where the drive keeps its limits...")
+        self.limits_remember.setToolTip(
+            "For a drive that keeps its following-error window, torque or velocity limit in an "
+            "object of its own (the ECT60's 0x2022), or ignores a standard one: kept for the device "
+            "type, so that the workbench writes the right object to the next one of these drives")
+        self.limits_remember.clicked.connect(self.remember_limits)
+        form.addRow(self.limits_remember)
         self.add(self.setup)
         self.unsupported = self.add(label("", "hint", wrap=True))
 
@@ -5080,6 +5104,14 @@ class MoveCard(Card):
         one. follows: whether the drive followed its target afterwards (None:
         not checked)."""
         ok = result == "homed"
+        from . import bringup
+        pos = (getattr(dt, "slave", None) or {}).get("position")
+        if isinstance(pos, int) and hasattr(self.win, "bringup_seen"):
+            seen = self.win.bringup_seen.setdefault(pos, bringup.Seen())
+            seen.homed = "homed" if ok else "error"
+            seen.follows_after = follows if ok else None
+            if self.win.slave_page.position == pos:
+                self.win.slave_page.show_bringup()
         if ok and follows is False:
             if self.test() is dt:
                 self.home_state("home-failed", "⚠ Homed, but the drive did not follow")
@@ -5098,6 +5130,12 @@ class MoveCard(Card):
                          "the drive is disabled" if follows else
                          "; the position is the homed one and the drive is disabled") if ok else
                         " (the drive reported an error)"))
+
+    def remember_limits(self):
+        from . import devicedataview
+        if self.slave is None:
+            return None
+        return devicedataview.remember_limits(self.win, self, self.slave["position"])
 
     def offer_enable_again(self, dt):
         """The drive did not follow after homing without being enabled again: offer it as
@@ -5440,6 +5478,13 @@ class SwitchCard(Card):
 
     def finish(self, found, changed=0):
         level, text = found
+        kind = (self.test or {}).get("kind")
+        if kind and self.slave is not None:
+            from . import bringup
+            seen = self.win.bringup_seen.setdefault(self.slave.get("position"), bringup.Seen())
+            seen.switches[kind] = (level, text)
+            if self.win.slave_page.position == self.slave.get("position"):
+                self.win.slave_page.show_bringup()
         # one physical input changed: it can be named for the device type
         bits = [b for b in range(16, 32) if changed >> b & 1]
         self.found_bit = bits[0] if len(bits) == 1 else None
@@ -5595,6 +5640,13 @@ class ResponseCard(Card):
                                    "value is kept and put back by Undo, or when the workbench stops")
         self.try_button.clicked.connect(self.try_setting)
         tr.addWidget(self.try_button)
+        self.tuning_remember = QPushButton("Remember for tuning...")
+        self.tuning_remember.setToolTip(
+            "Keep for the device type that this object matters for tuning: what kind it is, its "
+            "range and factory value, and what it does. The next one of these drives lists it first "
+            "under Look for settings")
+        self.tuning_remember.clicked.connect(self.remember_tuning)
+        tr.addWidget(self.tuning_remember)
         tr.addStretch(1)
         self.try_row.hide()
         self.add(self.try_row)
@@ -5842,6 +5894,24 @@ class ResponseCard(Card):
                 "" if c.minimum is None else c.minimum, "" if c.maximum is None else c.maximum)
             self.try_label.setText("New value for %s %s%s:" % (c.obj, c.name, rng))
             self.try_value.setText("" if c.value is None else str(c.value))
+
+    def remember_tuning(self):
+        """The chosen object as the device's tuning fact (what it is; not a value)."""
+        from . import devicedataview
+        dt, c = self.drive(), self.chosen()
+        if dt is None or c is None:
+            return None
+        types = {v: k for k, v in tuning.TOOL_TYPES.items()}
+        value = {"kind": c.kind, "type": types.get(c.data_type, "UDINT")}
+        for key, v in (("min", c.minimum), ("max", c.maximum), ("factory", c.factory)):
+            if v is not None:
+                value[key] = int(v)
+        if c.unit:
+            value["unit"] = c.unit
+        got = devicedataview.remember(self.win, self, dt.slave["position"], ("tuning", c.obj), value,
+                                      "Tuning object %s (%s)" % (c.obj, c.name),
+                                      note=c.note or c.name or "")
+        return got
 
     def try_setting(self):
         dt, c = self.drive(), self.chosen()
@@ -6779,7 +6849,7 @@ class TestPage(QWidget):
             except ValueError:
                 st = -1
             if not run.watching:
-                self.saw_for_bringup(run, op, st, v)
+                self.saw_for_bringup(run, self.position, op, st, v, self.move.test())
             for i, box in enumerate(self.chain):
                 want = "on" if i == st else "off"
                 if box.property("box") != want:
@@ -6815,8 +6885,9 @@ class TestPage(QWidget):
             self.outputs.update_values(pins)
             self.inputs.update_values(pins)
 
-    def saw_for_bringup(self, run, op, st, v):
-        """Tell the slave page's card Bringing it up what the workbench sees."""
+    def saw_for_bringup(self, run, position, op, st, v, dt=None):
+        """Tell the slave page's card Bringing it up what the workbench sees of a drive.
+        v(pin) gives a pin's value without the slave's prefix; dt: its drive test."""
         from . import bringup
 
         def number(name):
@@ -6824,19 +6895,37 @@ class TestPage(QWidget):
                 return int(v(name), 0)
             except (TypeError, ValueError):
                 return None
-        dt = self.move.test()
         moved = None
         if dt is not None and dt.prepared and dt.start is not None:
             try:
                 moved = float(v("pos-fb")) - dt.start
             except (TypeError, ValueError):
                 moved = None
-        seen = self.win.bringup_seen.setdefault(self.position, bringup.Seen())
+        seen = self.win.bringup_seen.setdefault(position, bringup.Seen())
         before = seen.key()
-        seen.saw(getattr(run, "log_path", None) or id(run), op, st, number("error-code"), number("drv-actual-position"),
-                 enable_asked=v("enable") == "TRUE", moved=moved)
-        if seen.key() != before and self.win.slave_page.position == self.position:
+        seen.saw(getattr(run, "log_path", None) or id(run), op, st, number("error-code"),
+                 number("drv-actual-position"), enable_asked=v("enable") == "TRUE", moved=moved)
+        if seen.key() != before and self.win.slave_page.position == position:
             self.win.slave_page.show_bringup()
+
+    def saw_every_drive(self, run, every):
+        """What the workbench sees of every CiA 402 drive (not only the one shown), from
+        all pins: every = {pin name: value}."""
+        for s in (self.win.session.cfg or {}).get("slaves") or []:
+            if s.get("profile") != "cia402" or s.get("unused") or not s.get("name"):
+                continue
+            prefix = s["name"] + "."
+
+            def v(n, prefix=prefix):
+                return every.get(prefix + n)
+            if v("cia-state") is None:
+                continue
+            try:
+                st = int(v("cia-state"))
+            except ValueError:
+                st = -1
+            self.saw_for_bringup(run, s["position"], v("slave-state-op") == "TRUE", st, v,
+                                 self.win.drive_tests.get(s["name"]))
 
     # SDOs
 
@@ -10011,6 +10100,14 @@ class MainWindow(QMainWindow):
         except testmode.TestError:
             return
         self.service_pending()
+        # every drive's way to OP and its first move, for the card Bringing it up: once a second
+        self.bringup_polls = getattr(self, "bringup_polls", 0) + 1
+        if not run.watching and self.bringup_polls % 5 == 1:
+            try:
+                every = {n: p.value for n, p in run.pins("").items()}
+            except testmode.TestError:
+                every = {}
+            self.test_page.saw_every_drive(run, every)
 
         def get(n):
             return m["ecat.0." + n].value if "ecat.0." + n in m else "?"

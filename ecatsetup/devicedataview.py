@@ -144,22 +144,29 @@ class SourceDialog(QDialog):
 
 
 # the typed value of a fact that is text the user gives (remember(note=...)), by kind
-NOTE_LABELS = {"errors": ("What it means:", "from the drive's manual, such as: following error too large")}
+NOTE_LABELS = {"errors": ("What it means:", "from the drive's manual, such as: following error too large"),
+               "tuning": ("What it does:", "such as: sliding average on the command before the position loop")}
 
 
 def remember(win, parent, position, path, value, what, note=None, ask=True, kind=None):
     """Remember one fact of a slave's device type, asking where it comes from.
-    For a command, value None takes the note typed. Returns the file or None."""
+    With note (the text field's start): value None takes the text typed (a command,
+    what an error code means); a mapping value gets it as its note (a tuning object).
+    Returns the file or None."""
     d = device(win, position)
     if d is None:
         win.status("This slave has no vendor and product: nothing to remember it for")
         return None
     _, ident, name, rev = d
-    dlg = SourceDialog(parent, what, None if note is not None else devicedata.text(value), rev, note,
-                       path=path, kind=kind, note_label=NOTE_LABELS.get(path[0]))
+    shown = None if note is not None and not isinstance(value, dict) else devicedata.text(value)
+    dlg = SourceDialog(parent, what, shown, rev, note, path=path, kind=kind,
+                       note_label=NOTE_LABELS.get(path[0]))
     if ask and dlg.exec_() != QDialog.Accepted:
         return None
-    if note is not None:
+    if note is not None and isinstance(value, dict):
+        typed = dlg.note.text().strip() or note
+        value = dict(value, note=typed) if typed else value
+    elif note is not None:
         value = dlg.note.text().strip() or note
         if not value:
             if path[0] != "commands":
@@ -419,6 +426,99 @@ def remember_inputs(win, parent, position, ask=True, dialog=None):
         QMessageBox.warning(parent, TITLE, str(e))
         return None
     win.status("Remembered for %s: how its inputs are set up (%s)" % (name, path))
+    return path
+
+
+class LimitsDialog(QDialog):
+    """Where a drive keeps the limits the workbench writes before it moves it (the
+    following-error window, torque, velocity), when it is not the standard's object,
+    and why one is not used (such as: it ignores 0x607D in CSP). Kept as the facts
+    limits."""
+
+    KEYS = (("following-error", "Following-error window"), ("max-torque", "Torque limit"),
+            ("max-velocity", "Velocity limit"), ("travel", "Software position limits"))
+    TYPES = ("uint32", "uint16", "int32", "int16", "uint8")
+
+    def __init__(self, parent, now=None):
+        super().__init__(parent)
+        from . import drivetest
+        self.setWindowTitle("The drive's limits - %s" % TITLE)
+        now = now or {}
+        lay = QVBoxLayout(self)
+        lay.addWidget(label(
+            "From the drive's manual: the object it keeps a limit in, when it is not the standard's "
+            "(written by the workbench before a drive moves), or why the standard's does not work "
+            "on it. Leave a row empty when the standard's object is right.", wrap=True))
+        form = QFormLayout()
+        self.rows = {}
+        for key, text in self.KEYS:
+            std = drivetest.STANDARD_LIMITS.get(key)
+            row = QHBoxLayout()
+            obj = QLineEdit()
+            obj.setPlaceholderText("object, such as 0x2022:00" + (
+                " (standard: 0x%04X:%02X)" % std[:2] if std else ""))
+            typ = QComboBox()
+            typ.addItems(self.TYPES)
+            why = QLineEdit()
+            why.setPlaceholderText("or why the standard's is not used")
+            v = now.get(key)
+            if isinstance(v, tuple):
+                obj.setText("0x%04X:%02X" % v[:2])
+                typ.setCurrentText(v[2])
+            elif isinstance(v, str):
+                why.setText(v)
+            if key == "travel":
+                obj.hide()
+                typ.hide()
+            row.addWidget(obj, 2)
+            row.addWidget(typ)
+            row.addWidget(why, 3)
+            form.addRow(text + ":", row)
+            self.rows[key] = (obj, typ, why)
+        self.ref = QLineEdit()
+        self.ref.setPlaceholderText("the manual's name, version and section; or the test")
+        form.addRow("Reference:", self.ref)
+        lay.addLayout(form)
+        ok = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        ok.button(QDialogButtonBox.Ok).setText("Remember")
+        ok.accepted.connect(self.accept)
+        ok.rejected.connect(self.reject)
+        lay.addWidget(ok)
+
+    def limits(self):
+        """{key: {object, type} or why} of the rows filled in."""
+        out = {}
+        for key, (obj, typ, why) in self.rows.items():
+            if obj.text().strip():
+                out[key] = {"object": obj.text().strip(), "type": typ.currentText()}
+            elif why.text().strip():
+                out[key] = why.text().strip()
+        return out
+
+
+def remember_limits(win, parent, position, ask=True, dialog=None):
+    """Ask for and keep where a drive keeps its limits, for its device type."""
+    d = device(win, position)
+    if d is None:
+        win.status("This slave has no vendor and product: nothing to remember it for")
+        return None
+    _, ident, name, rev = d
+    dlg = dialog or LimitsDialog(parent, quirks.limits(ident))
+    if ask and dlg.exec_() != QDialog.Accepted:
+        return None
+    got = dlg.limits()
+    if not got:
+        win.status("Nothing filled in: nothing kept")
+        return None
+    src = {"kind": "manual", "ref": dlg.ref.text().strip(), "date": devicedata.today(), "revision": rev}
+    path = None
+    try:
+        for key, value in got.items():
+            path = devicedata.remember(ident, name, ("limits", key), value, src)
+    except devicedata.Error as e:
+        QMessageBox.warning(parent, TITLE, str(e))
+        return None
+    win.status("Remembered for %s: where it keeps %s (%s)" % (name, ", ".join(got), path))
     return path
 
 

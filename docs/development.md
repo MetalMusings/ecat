@@ -4293,9 +4293,13 @@ Done 2026-11-27:
   `TestPage.saw_for_bringup` from the shown drive's pins (only the slave shown on
   the workbench is seen); not stored, the card is worked out again. Each row's button
   goes to its card (`devicedataview.CARDS` gained operation, source, workbench,
-  diagnose). Not built: keeping "keeps its position" as a property (item 4), the
-  0x603F meaning as a fact (item 5), the next goals (homing and switches), and the
-  Device data page's "not known yet" rows are still its own. Not tried on the bus.
+  diagnose). Later the same day: the goal *Homing and switches* (`bringup.homing_rows`,
+  the card's Goal box, title now *Bringing it up*), fed by the Switches card's test
+  (`Seen.switches`) and the Move card's homing and follow check (`Seen.homed`,
+  `follows_after`); every drive is seen, not only the one shown
+  (`TestPage.saw_every_drive`, all pins once a second). The Device data page keeps its
+  own "not known yet" rows: they are about the device type, the card about this drive.
+  Not tried on the bus.
 
 - Items 4-7 (2026-11-27):
   - Quirk format: `commands` rich form `purpose` (`quirks.COMMAND_PURPOSES`,
@@ -4312,7 +4316,10 @@ Done 2026-11-27:
     input, checked with `quirks._inputs`); the bring-up card's *Remember for the device
     type...* (`Row.remember`, `SlaveView.bringup_remember`) for "keeps its position"
     (source observed) and an error code's meaning (typed; `SourceDialog` note label by
-    kind, `devicedataview.NOTE_LABELS`). Not built: limits and tuning from the window.
+    kind, `devicedataview.NOTE_LABELS`). Later: `LimitsDialog`/`remember_limits` on the
+    Move card (`limits`), and the Response card's *Remember for tuning...*
+    (`ResponseCard.remember_tuning`: kind, type, range, factory, unit and a typed note;
+    `remember()` gives a mapping value its note).
   - Item 5: `diagnose.error_text(code, key)` gives the quirk file's meaning (Diagnose,
     the workbench's tiles, Live's line, the card); the event log's texts do not (no slave
     identity there). AL codes: the card's "Reaches OP" row points a DC slave that does
@@ -4329,6 +4336,27 @@ Done 2026-11-27:
     "command": the import keeps it with a note, From lcec lists it grey
     (`SettingHint.command`) and *Add all* leaves it out.
   - None of it tried on the bus.
+
+Machine test, with the user (not done yet). On the plasma cutter's bus, a copy of
+QtPlasma; the user's own quirk file (~/.config/ecatsetup/devices/00000a88-0a880002.yaml)
+moved aside first, so that the shipped ECT60 file is what is known, and a scratch folder
+as ECATSETUP_DEVICES for the parts that make facts:
+
+1. The card on X: *To OP and moving*, rows from data; start the workbench: Reaches OP,
+   Enables (hold Enable), Follows (jog); Start position: the ECT60 file says it keeps it.
+   With an empty ECATSETUP_DEVICES: two runs of the workbench, X jogged in the first:
+   the row says it kept it and offers Remember.
+2. Another drive not shown on the workbench (Y): its rows fill too (all pins, once a
+   second).
+3. A fault (FERROR small on the Move card, a fast jog): Enables shows 0x8611 in words
+   (the ECT60 file); with an empty folder, Remember what it means.
+4. *Homing and switches* on X (hm, method 21, IN5): inputs known from the ECT60 file,
+   the Switches card's test of the home switch, Home (hold), the follow check.
+5. The homing card's two Remember dialogs and the Move card's limits dialog, against the
+   ECT60 manual (scratch folder), read back in Device data.
+6. Response on X: 0x6077 constant on the ECT60 (it reads -1998 / 0): the button offers
+   measure: ignore; Look for settings, choose 0x2009, Remember for tuning.
+7. From lcec on a copy of the original lcec QtPlasma: 0x2010 becomes Start position.
 
 The goal "homing" as the discussion went through it (for the card's next goal):
 

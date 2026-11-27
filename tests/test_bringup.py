@@ -103,6 +103,50 @@ class TestRows(Base):
         self.assertEqual(self.row(bringup.rows(drive(), proposal(), period_us=500), "sync").state, bringup.TRY)
 
 
+class TestHoming(Base):
+    def test_without_hm_the_goal_starts_there(self):
+        found = bringup.homing_rows(drive())
+        self.assertEqual([(r.key, r.state, r.card) for r in found], [("hm", bringup.MISSING, "operation")])
+        self.assertEqual(bringup.homing_rows({"profile": "generic"}), [])
+
+    def test_a_switch_method_without_known_inputs(self):
+        s = drive(modes=["hm"])
+        s["homing"] = {"method": 21}
+        found = {r.key: r for r in bringup.homing_rows(s)}
+        self.assertEqual(found["methods"].state, bringup.TRY)
+        self.assertEqual(found["method"].state, bringup.OK)
+        self.assertEqual(found["inputs"].state, bringup.MISSING)
+        self.assertIn("may not be wired to homing", found["inputs"].text)
+        self.assertEqual(found["switch-home"].state, bringup.TRY)
+        self.assertEqual(found["switch-home"].card, "switches")
+        self.assertNotIn("extras", found)                      # a standard method
+        # the Switches card and the Move card tell
+        seen = bringup.Seen()
+        seen.switches["home"] = ("warning", "the polarity is the other way round")
+        seen.homed, seen.follows_after = "homed", False
+        found = {r.key: r for r in bringup.homing_rows(s, seen, ([17, 18, 19, 20, 21, 22], "quirk file"))}
+        self.assertEqual(found["methods"].text, "17-22 (from the quirk file)")
+        self.assertEqual(found["switch-home"].state, bringup.BAD)
+        self.assertEqual(found["homed"].state, bringup.OK)
+        self.assertEqual(found["after"].state, bringup.BAD)
+
+    def test_the_drives_own_numbers(self):
+        s = drive(modes=["hm"])
+        s["homing"] = {"method": 36}
+        found = {r.key: r for r in bringup.homing_rows(s)}
+        self.assertEqual(found["method"].state, bringup.MISSING)
+        self.assertEqual(found["extras"].state, bringup.TRY)
+        self.assertEqual(found["switches"].state, bringup.OK)      # 36 needs no switch here
+        # the ECT60's quirk file says what 36 does and the settings it needs
+        s = drive(identity=ECT60, modes=["hm"])
+        s["homing"] = {"method": 36}
+        found = {r.key: r for r in bringup.homing_rows(s)}
+        self.assertEqual(found["method"].state, bringup.OK)
+        self.assertIn("Torque homing", found["method"].text)
+        self.assertEqual(found["extras"].state, bringup.OK)
+        self.assertIn("0x2030:01", found["extras"].text)
+
+
 class TestSeen(Base):
     def test_op_enable_follows(self):
         seen = bringup.Seen()

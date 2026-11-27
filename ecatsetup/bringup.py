@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from . import config, diagnose, measured, quirks
 
 GOAL = "To OP and moving"
+HOMING = "Homing and switches"
+GOALS = (GOAL, HOMING)
 OK, MISSING, TRY, BAD = "ok", "missing", "try", "bad"
 MARKS = {OK: "✓", MISSING: "!", TRY: "?", BAD: "✗"}
 
@@ -46,6 +48,9 @@ class Seen:
     fault: int = None           # 0x603F at a fault
     moved: float = None         # mm the drive followed a move
     runs: list = field(default_factory=list)    # [first, last, run] drv-actual-position per run
+    switches: dict = field(default_factory=dict)    # kind -> (level, text) of the Switches card's test
+    homed: str = None           # the Move card's last homing: "homed" or "error"
+    follows_after: bool = None  # whether the drive followed its target after it
     since: dict = field(default_factory=dict)   # how long a state has lasted (monotonic)
 
     WAIT = 10           # s on the workbench without OP before it counts as not reaching it
@@ -57,7 +62,8 @@ class Seen:
     def key(self):
         """What the card shows of it: when this changes, the card is worked out again."""
         return (self.op, self.not_op, self.enabled, self.stuck, self.fault, bool(self.moved),
-                tuple((r[0], r[2]) for r in self.runs), tuple(r[1] for r in self.runs[:-1]))
+                tuple((r[0], r[2]) for r in self.runs), tuple(r[1] for r in self.runs[:-1]),
+                tuple(sorted(self.switches.items())), self.homed, self.follows_after)
 
     def _lasted(self, what, on, seconds, clock):
         if not on:
@@ -229,8 +235,9 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("ferror", OK, "Following-error window", "0x6065 (the standard object)", "move"))
     else:
         out.append(Row("ferror", TRY, "Following-error window",
-                       "where the drive keeps it shows when limits are written on the Move card "
-                       "(0x6065, or the drive's own object)", "move"))
+                       "the workbench writes 0x6065; a drive that keeps it in an object of its own "
+                       "shows that when it moves past it: Remember where the drive keeps its "
+                       "limits... on the Move card", "move"))
 
     # what the workbench saw
     s = seen or Seen()
@@ -272,6 +279,112 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("follows", TRY, "Follows", "shows when you jog it on the Move card", "move"))
     out.append(_start_position(slave, s))
     return out
+
+
+def homing_rows(slave, seen=None, support=(None, None), axis=0):
+    """The rows for the goal "homing and switches", for a CiA 402 drive ([] for another
+    slave). support: (methods, where) as homing.supported gives them (the window reads
+    0x60E3); seen: Seen or None."""
+    from . import homing, switches
+    if not isinstance(slave, dict) or slave.get("profile") != "cia402" or slave.get("unused"):
+        return []
+    out = []
+    c = slave.get("cia402") or {}
+    if "hm" not in (c.get("modes") or []):
+        return [Row("hm", MISSING, "Homing by the drive",
+                    "not among the drive's modes: tick Homing (hm) under Operation and sync for the "
+                    "homing card", "operation")]
+    out.append(Row("hm", OK, "Homing by the drive", "among the drive's modes"))
+    nums, where = support or (None, None)
+    if nums:
+        out.append(Row("methods", OK, "Methods", "%s (from the %s)" % (_numbers(nums), where), "homing"))
+    else:
+        out.append(Row("methods", TRY, "Methods",
+                       "not known: every method of the standard may be tried. The manual lists them: "
+                       "Remember the drive's methods... on the homing card", "homing"))
+    chosen = homing.choice(slave, axis)
+    if not chosen:
+        out.append(Row("method", MISSING, "Method", "none chosen: choose one on the homing card", "homing"))
+        return out
+    n = chosen["method"]
+    m = homing.method(n, slave)
+    own = n not in homing.CATALOG or n in (36, 37)
+    described = n in ((quirks.of(slave).get("homing") or {}).get("describe") or {})
+    if own and not described:
+        out.append(Row("method", MISSING, "Method",
+                       "%d: the standard leaves its meaning to the drive. What it does is in the "
+                       "drive's manual: Remember the drive's methods... says it for the next one" % n,
+                       "homing"))
+    else:
+        out.append(Row("method", OK, "Method", "%d: %s" % (n, m.text), "homing"))
+    if own:
+        extras = ((quirks.of(slave).get("homing") or {}).get("extras") or {}).get(n)
+        if extras:
+            out.append(Row("extras", OK, "Settings it needs", "%d from the quirk file (%s)" % (
+                len(extras), ", ".join(st["object"] for st in extras)), "settings"))
+        else:
+            out.append(Row("extras", TRY, "Settings it needs",
+                           "a method of the drive's own may need settings of the drive's own (such as "
+                           "torque limits for torque homing): see its manual, and add them under "
+                           "Settings", "settings"))
+    need = switches.needed(slave, axis)
+    if not need:
+        out.append(Row("switches", OK, "Switches", "the method needs none"))
+    else:
+        if switches.setup(slave) is not None:
+            out.append(Row("inputs", OK, "Which input is which",
+                           "the quirk file says how the inputs get their function: set them on the "
+                           "homing card", "homing"))
+        else:
+            out.append(Row("inputs", MISSING, "Which input is which",
+                           "set in the drive's own objects, not known: without it the %s may not "
+                           "be wired to homing at all. Look for the drive's input settings, or "
+                           "Remember how its inputs are set up... from its manual"
+                           % " and the ".join(switches.TEXT[k] for k in need), "homing"))
+        s = seen or Seen()
+        for kind in need:
+            got = s.switches.get(kind)
+            what = switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:]
+            if got is None:
+                out.append(Row("switch-" + kind, TRY, what, "test it on the Switches card: press it "
+                               "while the workbench runs (nothing moves)", "switches"))
+            else:
+                out.append(Row("switch-" + kind, OK if got[0] == "ok" else BAD, what, got[1], "switches"))
+    if m.uses_index:
+        out.append(Row("index", TRY, "Index pulse", "the method needs the encoder's index pulse: "
+                       "shows when it homes", "move"))
+    s = seen or Seen()
+    if s.homed == "homed":
+        out.append(Row("homed", OK, "Homes", "homed on the workbench"))
+    elif s.homed:
+        out.append(Row("homed", BAD, "Homes", "homing failed on the workbench: Diagnose shows the "
+                       "drive's error code", "diagnose"))
+    else:
+        out.append(Row("homed", TRY, "Homes", "Home (hold) on the Move card, with the emergency stop "
+                       "within reach", "move"))
+    if s.follows_after is True:
+        out.append(Row("after", OK, "Follows after homing", "it followed its target after homing"))
+    elif s.follows_after is False:
+        out.append(Row("after", BAD, "Follows after homing",
+                       "it did not follow its target after homing: tick Enable the drive again "
+                       "after homing on the homing card, save and home again", "homing"))
+    else:
+        out.append(Row("after", TRY, "Follows after homing", "the Move card checks it after a homing",
+                       "move"))
+    return out
+
+
+def _numbers(nums):
+    """17, 18, 19 ... as 17-19."""
+    nums = sorted(nums)
+    out, start = [], None
+    for i, n in enumerate(nums):
+        if start is None:
+            start = n
+        if i + 1 == len(nums) or nums[i + 1] != n + 1:
+            out.append(str(start) if start == n else "%d-%d" % (start, n))
+            start = None
+    return ", ".join(out)
 
 
 def summary(found):

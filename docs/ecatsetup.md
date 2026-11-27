@@ -566,13 +566,17 @@ and synchronisation, and its settings. EtherCAT Setup proposes all of
 it from what it can read; this section is about seeing what the proposal
 rests on, checking it on the bus, and keeping what you chose.
 
-### Bringing a drive up: to OP and moving
+### Bringing a drive up
 
 For a CiA 402 drive the slave's page starts with the card *Bringing it
-up: to OP and moving*: one row per thing the drive needs to reach OP and
-move, each marked ✓ (known and right), ! (missing: you can fill it in
-now), ? (shows only when tried, on the workbench) or ✗ (to put right),
-with a button to the card where it is filled in:
+up*. Choose the goal: first *To OP and moving*, then *Homing and
+switches*. For the goal there is one row per thing the drive needs, each
+marked ✓ (known and right), ! (missing: you can fill it in now), ? (shows
+only when tried, on the workbench) or ✗ (to put right), with a button to
+the card where it is filled in. The workbench tells the card what it sees
+of every drive, not only the one it shows.
+
+To OP and moving:
 
 | Row | Known from |
 |---|---|
@@ -585,6 +589,20 @@ with a button to the card where it is filled in:
 | Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
 | Follows | Seen when you jog it on the Move card. |
 | Start position | Whether the drive keeps its position counter over a restart of the bus: from the device's quirk file, or seen over two runs of the workbench with the drive's power on (move it in the first), and then offered with *Remember for the device type...*. A drive that keeps it gets a following error in LinuxCNC at once, since LinuxCNC starts at 0: the row then advises *Start position: Position counts from 0 at start*, unless the drive homes itself or has an absolute encoder. |
+
+Homing and switches:
+
+| Row | Known from |
+|---|---|
+| Homing by the drive | Homing (hm) among the drive's modes (*Operation and sync*). |
+| Methods | The drive (0x60E3) or its quirk file; else every method may be tried, and *Remember the drive's methods...* on the homing card keeps the manual's list. |
+| Method | The one chosen on the homing card; for a number the standard leaves to the drive (36, 37, negatives), what it does, from the quirk file. |
+| Settings it needs | For a method of the drive's own: the quirk file's settings for it, or the manual. |
+| Which input is which | How the drive's inputs get their function (home switch, limits): the quirk file, or *Remember how its inputs are set up...*. Without it the switch may not be wired to homing at all. |
+| Home switch, limit switches | The Switches card's test of each switch the method needs. |
+| Index pulse | For a method that needs it: shows when it homes. |
+| Homes | Home (hold) on the Move card. |
+| Follows after homing | The Move card's check after a homing; a drive that does not follow needs *Enable the drive again after homing*. |
 
 What the workbench saw is kept only while the window is open: the card is
 worked out again each time from the configuration, the bus, the quirk
@@ -4303,6 +4321,12 @@ try on this machine):
   them, and what the drive's own numbers (36, 37, negatives) do; and
   *Remember how its inputs are set up...*: which object gives each input
   its function, with which codes, and how the polarity is set;
+- on the Move card, *Remember where the drive keeps its limits...*: the
+  object of a drive's own for its following-error window, torque or
+  velocity limit (the ECT60's `0x2022`), or why a standard one is not used;
+- on the Response card, after *Look for settings in the drive*, *Remember
+  for tuning...* on the chosen object: what kind it is, its range and
+  factory value and what it does (not a value: that is a setting);
 - on the card *Bringing it up*: that the drive keeps its position over a
   restart of the bus (seen over two runs of the workbench), and what an
   error code the drive reported means (typed from its manual);
