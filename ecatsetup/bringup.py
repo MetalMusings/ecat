@@ -256,20 +256,20 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
                        "diagnose"))
     else:
         out.append(Row("op", TRY, "Reaches OP", "shows when the workbench runs", "workbench"))
+    def fault():
+        """(text, remember) of the fault seen: in words, or offered to be remembered."""
+        if quirks.error_meaning(slave, s.fault):
+            return "fault %s" % diagnose.error_text(s.fault, slave), None
+        code = "0x%04X" % s.fault
+        return ("fault %s: what the drive means by it is in its manual; remember it for the "
+                "device type, so that it is said in words next time" % diagnose.error_text(s.fault),
+                (("errors", code), None, "Error code %s: what it means" % code, "", "manual"))
+    # a fault before "Operation enabled" was seen is the enable's; one after it, the move's
     if s.enabled:
         out.append(Row("enable", OK, "Enables", "\"Operation enabled\" seen at %s" % s.enabled))
     elif s.fault:
-        if quirks.error_meaning(slave, s.fault):
-            out.append(Row("enable", BAD, "Enables", "fault %s" % diagnose.error_text(s.fault, slave),
-                           "diagnose"))
-        else:
-            code = "0x%04X" % s.fault
-            out.append(Row("enable", BAD, "Enables",
-                           "fault %s: what the drive means by it is in its manual; remember it "
-                           "for the device type, so that it is said in words next time"
-                           % diagnose.error_text(s.fault), "diagnose",
-                           remember=(("errors", code), None, "Error code %s: what it means" % code,
-                                     "", "manual")))
+        text, keep = fault()
+        out.append(Row("enable", BAD, "Enables", text, "diagnose", remember=keep))
     elif s.stuck:
         out.append(Row("enable", BAD, "Enables",
                        "stays in \"Switch on disabled\" while enable is held: usually the hardware "
@@ -277,7 +277,14 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
     else:
         out.append(Row("enable", TRY, "Enables", "shows when you write limits and hold Enable "
                        "on the Move card", "move"))
-    if s.moved:
+    if s.enabled and s.fault:
+        text, keep = fault()
+        if s.moved:
+            out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm; then a %s"
+                           % (s.moved, text), "move", remember=keep))
+        else:
+            out.append(Row("follows", BAD, "Follows", text, "move", remember=keep))
+    elif s.moved:
         out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm" % s.moved))
     else:
         out.append(Row("follows", TRY, "Follows", "shows when you jog it on the Move card", "move"))
