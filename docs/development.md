@@ -4383,6 +4383,23 @@ as ECATSETUP_DEVICES for the parts that make facts:
 7. From lcec on a copy of the original lcec QtPlasma: 0x2010 is offered as Start
    position, grey, optional, not taken by Add all.
 
+Done 2026-11-27 with the user, on a copy of QtPlasma without zero-at-start
+(QtPlasma-nozero), the shipped ECT60 file stripped to its name and the 0x2010 command
+(the drive "as new"), the dev component with `ferror-max`:
+
+- 1-3 (and the bare window): rows from data, Reaches OP, Enables, Follows; a fault after
+  enable shown on Follows; the workbench's own following-error stop (`ferror-max`,
+  0.01 mm and a fast jog: fault-reason 13, kept as "Last stop" after the jog button).
+- 4 without the inputs known: the Switches card found the home switch on IN5 (0x60FD
+  bit 2 "Set up right", bit 20 the input, named IN5 with *Name this input...*: it
+  crashed first, fixed ac5a871); method 21 homed X (stopped at the switch, backed off to
+  its edge), the follow check green. "Which input is which" stayed amber although the
+  switch worked (to be changed).
+- Fixes from it: the drive's own window dropped from the window, PP/PV velocity limit
+  as a setting (2236afa), the Settings row (d92156e), the card follows edits and a
+  narrow page (43d771b), input fields with a border, the inputs dialog (7808254).
+- Not done: 5 (the inputs and methods dialogs against the manual), 6 (Response), 7.
+
 The goal "homing" as the discussion went through it (for the card's next goal):
 
 | What is needed | Standard or manufacturer's | From |
