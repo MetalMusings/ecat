@@ -4352,9 +4352,12 @@ either way (information, `position: kept` still remembered as a property),
 From lcec offers *Start position* for an lcec `0x2010` only as an option (grey,
 not in *Add all*: `fromlcec.for_add_all`), the import leaves the command out
 without ticking it, and the symptom guide names the scale sign and FERROR against
-the drive's lag. Still to confirm at the machine (bus busy): X without
-zero-at-start, LinuxCNC restarted with X moved, the machine switched on at once:
-no error.
+the drive's lag. Confirmed at the machine the same day (LinuxCNC 2.10, ecat 0.26,
+copy ~/linuxcnc/configs/QtPlasma-nozero = QtPlasma without zero-at-start and
+without 0x2010): first start with the drives' kept counts (X 296, Y 6696, Z 823;
+`pos-fb` 2.96 / 100.44 / 3.88 mm), switched on at once, homed, X jogged; second
+start with X at 5771 counts (57.71 mm), switched on as soon as the window was up:
+no error either time, no drive fault in the event log.
 
 Machine test, with the user (not done yet). On the plasma cutter's bus, a copy of
 QtPlasma; the user's own quirk file (~/.config/ecatsetup/devices/00000a88-0a880002.yaml)
