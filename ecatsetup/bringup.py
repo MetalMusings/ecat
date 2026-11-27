@@ -365,10 +365,15 @@ def homing_rows(slave, seen=None, support=(None, None), axis=0):
     if not need:
         out.append(Row("switches", OK, "Switches", "the method needs none"))
     else:
+        tried = all(((seen or Seen()).switches.get(k) or ("",))[0] == "ok" for k in need)
         if switches.setup(slave) is not None:
             out.append(Row("inputs", OK, "Which input is which",
                            "the quirk file says how the inputs get their function: set them on the "
                            "homing card", "homing"))
+        elif tried:
+            out.append(Row("inputs", OK, "Which input is which",
+                           "works as the drive is set up now (tried on the Switches card); how its "
+                           "inputs are set is not known, and only needed to change them", "homing"))
         else:
             out.append(Row("inputs", MISSING, "Which input is which",
                            "set in the drive's own objects, not known: without it the %s may not "

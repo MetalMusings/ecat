@@ -431,6 +431,17 @@ class QuietCombo(QComboBox):
     def wheelEvent(self, ev):
         ev.ignore()
 
+    # keys that step through the choices with the list closed: they scroll the page
+    # instead (arrow up once paged through the homing methods, 2026-11-27); open the
+    # list (click, Space, Alt+Down, F4) to choose with them
+    STEP_KEYS = (Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End)
+
+    def keyPressEvent(self, ev):
+        if ev.key() in self.STEP_KEYS and not ev.modifiers() & Qt.AltModifier and not self.isEditable():
+            ev.ignore()
+            return
+        super().keyPressEvent(ev)
+
 
 class CpuBox(QuietCombo):
     """A CPU, or none (-1), as a choice: value() and setValue() as a spin box.
@@ -2515,11 +2526,14 @@ class SlaveView(QWidget):
         self.home_text.setText(" ".join(parts))
         need = switches.needed(s, self.home_axis_number())
         known = switches.setup(s) is not None
+        tried = self.switches_tried(need)
         self.home_switch_text.setText(
-            ("Switches: this method needs the %s. Set which input is which below; the Workbench's "
-             "Switches card tells whether the drive sees it." if known else
-             "Switches: this method needs the %s. " + switches.GUIDE)
-            % " and the ".join(switches.TEXT[k] for k in need) if need else "")
+            ("Switches: this method needs the %s. " % " and the ".join(switches.TEXT[k] for k in need) + (
+                "The Workbench's Switches card found %s set up right as the drive is now: nothing to "
+                "change (function and polarity are only needed to change them)."
+                % " and ".join(switches.TEXT[k] for k in need) if tried else
+                "Set which input is which below; the Workbench's Switches card tells whether the "
+                "drive sees it." if known else switches.GUIDE)) if need else "")
         self.show_input_rows(s, need if known else [])
         for w in (self.home_switch_text, self.home_switch_look, self.home_inputs_remember):
             w.setVisible(bool(need))
@@ -2561,6 +2575,13 @@ class SlaveView(QWidget):
             self.home_hform.labelForField(box).setVisible(key in used)
             box.setVisible(key in used)
 
+    def switches_tried(self, kinds):
+        """Whether the Switches card's test found every one of these switches set up
+        right in this window (bringup.Seen.switches)."""
+        seen = self.win.bringup_seen.get(self.position) if isinstance(self.position, int) else None
+        got = getattr(seen, "switches", None) or {}
+        return bool(kinds) and all((got.get(k) or ("",))[0] == "ok" for k in kinds)
+
     def show_input_rows(self, s, kinds):
         """A row per switch the method needs: the input that is that switch,
         and its polarity, as the drive will have them (the file's settings,
@@ -2587,7 +2608,8 @@ class SlaveView(QWidget):
             if setup.get("polarity"):
                 pbox = QuietCombo()
                 if pol is None:
-                    pbox.addItem("polarity not known", None)
+                    pbox.addItem("as it is: right (tried)" if self.switches_tried([kind])
+                                 else "polarity not known", None)
                 for c in setup["polarity"]["choices"]:
                     pbox.addItem(c, c)
                 pbox.setCurrentIndex(max(pbox.findData(pol), 0))
@@ -2680,10 +2702,13 @@ class SlaveView(QWidget):
             out.append("%s  %s%s" % (config.obj(index, sub), name,
                                      "" if value is None else "  = %s" % value))
         self.home_switch_for = self.position
-        self.home_switch_found.setText(
+        need = switches.needed(s, self.home_axis_number())
+        first = ("The switches are set up right as the drive is now (Switches card): these are only "
+                 "needed to change them.\n" if self.switches_tried(need) else "")
+        self.home_switch_found.setText(first + (
             ("Found by name (a guess; change them under Settings, the drive's manual says which "
              "values mean what):\n" + "\n".join(out)) if out else
-            "Nothing found by name: see the drive's manual under digital inputs.")
+            "Nothing found by name: see the drive's manual under digital inputs."))
         self.home_switch_found.setVisible(True)
 
     def home_ini_toggled(self, *_):
@@ -5527,6 +5552,9 @@ class SwitchCard(Card):
             seen.switches[kind] = (level, text)
             if self.win.slave_page.position == self.slave.get("position"):
                 self.win.slave_page.show_bringup()
+                s = self.win.session.slave(self.slave.get("position"))
+                if s is not None and s.get("profile") == "cia402":
+                    self.win.slave_page.show_homing(s)    # the homing card: nothing to change
         # one physical input changed: it can be named for the device type
         bits = [b for b in range(16, 32) if changed >> b & 1]
         self.found_bit = bits[0] if len(bits) == 1 else None

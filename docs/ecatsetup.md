@@ -80,6 +80,10 @@ at once and is kept in `~/.config/ecatsetup/settings.yaml` (`theme: light`
 or `theme: dark`) for the next start. Light is the default, and the
 screenshots in this document show it.
 
+A choice box changes only when you open it (a click, Space, Alt+Down):
+the mouse wheel and the arrow keys over a closed one scroll the page, so
+that scrolling never picks a homing method or connects a pin by itself.
+
 Six tabs, in the order you normally use them: **Start**, **Bus**,
 **Workbench**, **Live**, **Diagnose**, **HAL & LinuxCNC**; and a seventh,
 **Timing**, for the computer itself ([The computer's timing](#the-computers-timing)).
@@ -604,7 +608,7 @@ Homing and switches:
 | Methods | The drive (0x60E3) or its quirk file; else every method may be tried, and *Remember the drive's methods...* on the homing card keeps the manual's list. |
 | Method | The one chosen on the homing card; for a number the standard leaves to the drive (36, 37, negatives), what it does, from the quirk file. |
 | Settings it needs | For a method of the drive's own: the quirk file's settings for it, or the manual. |
-| Which input is which | How the drive's inputs get their function (home switch, limits): the quirk file, or *Remember how its inputs are set up...*. Without it the switch may not be wired to homing at all. |
+| Which input is which | How the drive's inputs get their function (home switch, limits): the quirk file, or *Remember how its inputs are set up...*. Without it the switch may not be wired to homing at all, unless the Switches card found every switch the method needs set up right: then the drive works as it is set up now, and how its inputs are set is only needed to change them. The homing card then says the same, and asks for no polarity. |
 | Home switch, limit switches | The Switches card's test of each switch the method needs. |
 | Index pulse | For a method that needs it: shows when it homes. |
 | Homes | Home (hold) on the Move card. |
@@ -1328,8 +1332,14 @@ as an encoder's, are left out), then press and hold it. It says what it
 found:
 
 - **Set up right**: the drive sees the switch as it should.
-- **The polarity is the other way round**: on while released, off when
-  pressed: set the input normally closed instead of open, or the other way.
+- **Read the other way round**: on while released, off when pressed. It
+  says what that would do (homing would find the switch at once and home
+  where the axis stands; a limit would act while the switch is free) and the
+  two ways out: set the input's polarity the other way (the object and bit
+  when the quirk file knows them, else where the drive's manual gives them:
+  no need to try bits one by one), or wire the switch's other contact
+  (normally closed instead of open, or the other way) and leave the drive as
+  it is.
 - **The switch reaches the drive, but that input is not the home switch**:
   the input has no function or another one; set it in the drive's input
   settings (the homing card helps find them).

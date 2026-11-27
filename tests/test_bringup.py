@@ -172,6 +172,12 @@ class TestHoming(Base):
         self.assertEqual(found["switch-home"].state, bringup.BAD)
         self.assertEqual(found["homed"].state, bringup.OK)
         self.assertEqual(found["after"].state, bringup.BAD)
+        self.assertEqual(found["inputs"].state, bringup.MISSING)    # a test that failed: no
+        # a test that found it right: the inputs work as they are (the machine test, 2026-11-27)
+        seen.switches["home"] = ("ok", "Set up right")
+        found = {r.key: r for r in bringup.homing_rows(s, seen)}
+        self.assertEqual(found["inputs"].state, bringup.OK)
+        self.assertIn("works as the drive is set up now", found["inputs"].text)
 
     def test_the_drives_own_numbers(self):
         s = drive(modes=["hm"])

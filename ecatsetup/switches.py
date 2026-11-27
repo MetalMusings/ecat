@@ -77,6 +77,31 @@ def state(value, slave):
     return out
 
 
+# what a switch read the other way round does, for the switch test's warning
+CONSEQUENCE = {
+    "home": "homing would find the switch at once, wherever the axis stands, and home there",
+    "negative": "the drive would act as if at its negative limit while the switch is free, "
+                "and not stop when it is reached",
+    "positive": "the drive would act as if at its positive limit while the switch is free, "
+                "and not stop when it is reached",
+}
+
+
+def _polarity_where(slave, changed):
+    """Where the input's polarity is set: the object and bit when the quirk file knows
+    them (and which input it is), else where in the manual to look."""
+    names = [bit_name(b, slave) for b in range(16, 32) if changed >> b & 1]
+    p = (setup(slave) or {}).get("polarity") or {}
+    for n in names:
+        if n in (p.get("bits") or {}):
+            return ("set %s's polarity the other way: bit %d of %s (%s), on the homing card"
+                    % (n, p["bits"][n], p["object"], " or ".join(p.get("choices") or {}) or "its choices"))
+    which = (" (%s)" % ", ".join(names)) if names else ""
+    return ("set the input's polarity the other way%s: the drive's manual, under digital inputs, "
+            "names the object that holds the inputs' polarity and this input's bit in it (no need "
+            "to try bits one by one)" % which)
+
+
 def verdict(kind, released, pressed, slave):
     """What a switch test found, from 0x60FD with the switch released and
     pressed: (level, text), level "ok", "warning" or "error"."""
@@ -94,9 +119,10 @@ def verdict(kind, released, pressed, slave):
                 % (what, bit))
     if on_released and not on_pressed:
         return ("warning", "The %s is on while the switch is released and goes off when it is "
-                "pressed: the polarity is the other way round. Set the input normally closed "
-                "instead of open (or the other way), or use a switch of the other kind."
-                % what)
+                "pressed: the drive reads it the other way round. As it is, %s. Two ways to put "
+                "it right: %s; or wire the switch's other contact (normally closed instead of "
+                "open, or the other way), and the drive needs no change."
+                % (what, CONSEQUENCE[kind], _polarity_where(slave, changed)))
     others = [b for b in range(32) if changed >> b & 1]
     functions = [TEXT[k] for k, b, _ in FUNCTIONS if b in others]
     physical = [bit_name(b, slave) for b in others if b >= 16]

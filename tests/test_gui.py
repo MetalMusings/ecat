@@ -470,6 +470,23 @@ class TestWindow(WindowBase):
             self.assertEqual(b.currentText(), before)
         self.assertEqual(integrate.nets(w.session.cfg), [])
 
+    def test_arrow_keys_do_not_step_a_closed_choice(self):
+        # arrow up to scroll the page paged through the homing methods (2026-11-27)
+        from PyQt5.QtGui import QKeyEvent
+        from PyQt5.QtCore import QEvent
+        box = gui.QuietCombo()
+        self.addCleanup(box.deleteLater)
+        box.addItems(["17", "19", "21", "35"])
+        box.setCurrentIndex(2)
+        for key in (gui.Qt.Key_Up, gui.Qt.Key_Down, gui.Qt.Key_PageUp, gui.Qt.Key_End):
+            ev = QKeyEvent(QEvent.KeyPress, key, gui.Qt.NoModifier)
+            QApplication.sendEvent(box, ev)
+            self.assertEqual(box.currentText(), "21")
+            self.assertFalse(ev.isAccepted())      # it goes on to the page, which scrolls
+        # typing a choice's first letters still works
+        QApplication.sendEvent(box, QKeyEvent(QEvent.KeyPress, gui.Qt.Key_3, gui.Qt.NoModifier, "3"))
+        self.assertEqual(box.currentText(), "35")
+
     def test_bit_pins_are_edited_in_a_column_of_sane_width(self):
         w = self.window()
         w.select_slave(0)
@@ -3625,6 +3642,28 @@ class TestBringup(WindowBase):
         QApplication.processEvents()
         self.assertEqual(row.box.direction(), gui.QBoxLayout.LeftToRight)
         w.hide()
+
+    def test_a_switch_found_right_needs_no_input_setup(self):
+        # no quirk file knows the inputs, the Switches card found the home switch right: the
+        # homing card asks for nothing (the machine test, 2026-11-27)
+        from ecatsetup import bringup
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp", "modes": ["hm"]}
+        s["homing"] = {"method": 21}
+        w.select_slave(0)
+        page = w.slave_page
+        page.show_homing(s)
+        self.assertIn(gui.switches.GUIDE[:40], page.home_switch_text.text())
+        seen = w.bringup_seen.setdefault(0, bringup.Seen())
+        seen.switches["home"] = ("ok", "Set up right")
+        page.show_homing(s)
+        self.assertIn("found home switch set up right as the drive is now: nothing to change",
+                      page.home_switch_text.text())
+        with mock.patch.object(gui.switches, "input_settings", return_value=[]):
+            page.look_for_input_settings()
+        self.assertTrue(page.home_switch_found.text().startswith("The switches are set up right"))
+        w.bringup_seen.clear()
 
     def test_a_fault_code_the_pdos_lack_is_read_once(self):
         # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once

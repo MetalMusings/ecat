@@ -83,6 +83,21 @@ class TestVerdict(unittest.TestCase):
         self.check(0x30000, 0x30000, "error", "Nothing changed")
         self.check(0x0, 0x1, "ok", "negative limit switch", kind="negative")
 
+    def test_the_polarity_the_other_way_round_is_explained(self):
+        # what it does, and the two ways out; never "try bits" (the user, 2026-11-27)
+        _, text = switches.verdict("home", 0x30004, 0x130000, ECT60)
+        self.assertIn("homing would find the switch at once", text)
+        self.assertIn("bit 4 of 0x2008:00", text)        # the ECT60's quirk file knows it
+        self.assertIn("IN5", text)
+        self.assertIn("wire the switch's other contact", text)
+        _, text = switches.verdict("home", 0x30004, 0x130000, OTHER)
+        self.assertIn("the drive's manual, under digital inputs", text)
+        self.assertIn("input bit 20", text)
+        self.assertIn("no need to try bits", text)
+        self.assertIn("wire the switch's other contact", text)
+        _, text = switches.verdict("negative", 0x1, 0x0, OTHER)
+        self.assertIn("as if at its negative limit while the switch is free", text)
+
 
 class TestInputSettings(unittest.TestCase):
     def test_found_by_name(self):
