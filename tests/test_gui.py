@@ -2608,6 +2608,15 @@ class TestPdoEditing(WindowBase):
         self.assertNotIn("0x607F", page.st_problems.text())
         # the Move card no longer has the button
         self.assertFalse(hasattr(w.test_page.move, "limits_remember"))
+        # PP also needs its software position limits, with the drive's present values
+        s["cia402"]["modes"] = ["pp"]
+        page.show_settings(s)
+        self.assertIn("0x607D:01 (software position limit", page.init_button.toolTip())
+        with mock.patch.object(tool, "upload", side_effect=lambda pos, i, sub, t: {1: -2000, 2: 3000}[sub]):
+            w.session.add_device_needs(1)
+        got = {st["object"]: st["value"] for st in s["settings"]}
+        self.assertEqual((got["0x607D:01"], got["0x607D:02"]), (-2000, 3000))
+        self.assertEqual([e for e in config.check({"slaves": [s]}) if "0x607D" in e], [])
 
     def test_the_init_cmds_card(self):
         w, page, s = self.page([(0x1600, 2, [(0x6040, 16)])], [(0x1A00, 3, [(0x6041, 16)])])

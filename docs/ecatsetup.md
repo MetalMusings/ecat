@@ -342,7 +342,8 @@ Choosing a slave shows:
   own moves, so its maximum velocity (`0x607F`, each axis's) must be a
   setting where the drive has the object: the list under the table says so
   in red while it is missing, and *Add what the device needs* adds it with
-  the drive's present value (check it). For a drive that keeps that limit,
+  the drive's present value (check it); in PP it adds the software position
+  limits `0x607D:01` and `:02` the same way. For a drive that keeps that limit,
   or its software position limits, in an object of its own, or ignores the
   standard's, *Set objects for missing limits...* (shown for PP and PV)
   keeps the object or the reason for the device type. The drive's own
@@ -585,6 +586,7 @@ To OP and moving:
 |---|---|
 | ESI file | A file for this device and revision gives the PDO choice and the DC modes (*Choose ESI files...*). |
 | Process data | The check of the PDOs against what the profile needs. |
+| Settings | Shown when the file lacks a setting the drive's mode needs, such as PP's software position limits `0x607D:01` and `:02`: the PDOs can be right and the file still refused. *Add what the device needs* on the Settings card adds the drive's present values (check them). |
 | Mode | Set every cycle (0x6060 mapped), once at start (0x6060:00), or only seen (0x6061). |
 | Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
 | Following error | In CSP the workbench stops the drive above the Move card's value itself, as LinuxCNC's FERROR will. The FERROR for LinuxCNC comes from the Response card. |

@@ -139,6 +139,23 @@ def velocity_limits_missing(slave, has_object):
     return out
 
 
+def travel_limits_missing(slave):
+    """The software position limits a drive in PP must have as settings (config.check
+    refuses the file without them): [(axis, 0x607D (+ axis offset), 1 or 2, "DINT")] of
+    those the settings lack."""
+    c = slave.get("cia402") or {}
+    if slave.get("profile") != "cia402" or "pp" not in [c.get("mode")] + list(c.get("modes") or []):
+        return []
+    have = set()
+    for st in slave.get("settings") or []:
+        try:
+            have.add(parse_obj(st.get("object")))
+        except (ValueError, TypeError):
+            pass
+    return [(a, 0x607D + a * AXIS_OFFSET, sub, "DINT") for a in range(len(c.get("axes") or []) or 1)
+            for sub in (1, 2) if (0x607D + a * AXIS_OFFSET, sub) not in have]
+
+
 def mode_setting(slave, axis=0):
     """The mode a drive is put in at start (0x6060:00 for an axis): a setting's value, else
     an init-cmds row's (from: profile is cia402.mode's number); None without either."""

@@ -88,6 +88,22 @@ class TestRows(Base):
         s = drive(outputs=((0x6040, 0),), inputs=((0x6061, 0),))
         self.assertIn("seen in 0x6061", self.row(bringup.rows(s, proposal()), "mode").text)
 
+    def test_a_missing_setting_is_not_the_process_datas(self):
+        # PP's 0x607D: the PDOs are fine, the settings lack it (the user's try, 2026-11-27)
+        s = drive(mode="pp")
+        text = ("slave 1 (x): cia402 mode pp needs the setting 0x607D:01: add it to the settings, type "
+                "DINT, with the lowest position")
+        found = bringup.rows(s, proposal(), problems=[("error", text)])
+        self.assertEqual(self.row(found, "pdo").state, bringup.OK)
+        row = self.row(found, "settings")
+        self.assertEqual(row.state, bringup.BAD)
+        self.assertEqual(row.card, "settings")
+        self.assertIn("0x607D:01", row.text)
+        self.assertIn("Add what the device needs", row.text)
+        keys = [r.key for r in found]
+        self.assertEqual(keys.index("settings"), keys.index("pdo") + 1)
+        self.assertNotIn("settings", [r.key for r in bringup.rows(drive(), proposal())])
+
     def test_the_following_error_check(self):
         # the workbench checks the following error itself (CSP): never a gap, and the
         # drive's own window is not spoken of

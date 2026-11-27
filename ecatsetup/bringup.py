@@ -186,7 +186,10 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
     # process data and the mode
     errors = [t for level, t in problems if level == "error"]
     warnings = [t for level, t in problems if level == "warning"]
-    pd = [t for t in errors if "PDO" in t or "process" in t or "mode" in t]
+    # an error about a setting the file lacks (such as PP's 0x607D) is the settings', not
+    # the process data's
+    settings = [t for t in errors if "setting" in t]
+    pd = [t for t in errors if ("PDO" in t or "process" in t or "mode" in t) and t not in settings]
     if pd:
         out.append(Row("pdo", BAD, "Process data", pd[0], "process-data"))
     elif warnings and any("PDO" in t for t in warnings):
@@ -196,6 +199,10 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("pdo", OK, "Process data",
                        "what the profile needs is mapped" if p is not None and getattr(p, "esi_path", None)
                        else "as proposed (not checked against an ESI file)", "process-data"))
+    if settings:
+        out.append(Row("settings", BAD, "Settings", settings[0].split(": ", 1)[-1] + (
+            "; Add what the device needs on the Settings card takes the drive's present values"
+            if "0x607D" in settings[0] else ""), "settings"))
     outputs, inputs = _objects(slave, "outputs"), _objects(slave, "inputs")
     mode = (slave.get("cia402") or {}).get("mode", "csp")
     if (0x6060, 0) in outputs:

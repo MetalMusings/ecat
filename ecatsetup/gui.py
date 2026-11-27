@@ -3265,11 +3265,13 @@ class SlaveView(QWidget):
             for k, v in sorted(self.win.session.missing_state_timeouts(self.position).items())]
         d = self.win.session.dictionary(self.position)
         if d is not None and d.objects and self.win.session.bus.get(self.position) is not None:
-            missing += ["0x%04X:%02X (max velocity, the drive's present value)" % (i, sub) for _, i, sub, _
-                        in config.velocity_limits_missing(s, lambda i, sub_: i in d.objects)]
+            missing += ["0x%04X:%02X (%s, the drive's present value)" % (i, sub, "max velocity" if i & 0xFF == 0x7F
+                                                                         else "software position limit")
+                        for _, i, sub, _ in config.travel_limits_missing(s) +
+                        config.velocity_limits_missing(s, lambda i, sub_: i in d.objects)]
         self.init_button.setVisible(bool(missing))
         self.init_button.setToolTip("Adds what the device's ESI file writes at start (init-cmds), its "
-                                    "timeouts and, for PP and PV, its maximum velocity: %s"
+                                    "timeouts and, for PP and PV, its limits: %s"
                                     % ", ".join(missing) if missing else "")
 
     def show_settings(self, s):

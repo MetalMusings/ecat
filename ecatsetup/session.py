@@ -316,9 +316,10 @@ class Session:
         return out + rest
 
     def missing_limits(self, position):
-        """The settings a drive in PP or PV needs and lacks (config.velocity_limits_missing),
-        with the drive's present value read from the bus: [{"object", "type", "value",
-        "name"}]. Empty without the bus, or when the value cannot be read."""
+        """The settings a drive in PP or PV needs and lacks (config.velocity_limits_missing,
+        config.travel_limits_missing), with the drive's present value read from the bus:
+        [{"object", "type", "value", "name"}]. Empty without the bus, or when the value
+        cannot be read."""
         s, b = self.slave(position), self.bus.get(position)
         if s is None or b is None or not same_kind(s, b.info):
             return []
@@ -327,7 +328,8 @@ class Session:
             return []
         read = getattr(b.proposal, "max_velocity", None) or {}
         out = []
-        for axis, index, sub, coe in config.velocity_limits_missing(s, lambda i, sub_: i in d.objects):
+        for axis, index, sub, coe in config.travel_limits_missing(s) + \
+                config.velocity_limits_missing(s, lambda i, sub_: i in d.objects):
             value = read.get(axis) if index == 0x607F + axis * config.AXIS_OFFSET else None
             if value is None:
                 try:
