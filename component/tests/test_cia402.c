@@ -471,6 +471,39 @@ static void test_command_not_a_number(void) {
   CHECK_EQ(PIN_S32("x.fault-reason"), 7);
 }
 
+static void test_following_error_check(void) {
+  csp_drive();
+  PIN_FLOAT("x.pos-scale") = 100;
+  CHECK_NEAR(PIN_FLOAT("x.ferror-max"), 0, 0);   // off by default
+  PIN_FLOAT("x.pos-cmd") = 0;
+  fake_set(S, 0x6064, 0, 0);
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(5);
+  CHECK_EQ(sw_now, SW_ENABLED);
+  // off: a drive far behind is not shut down by the profile
+  PIN_FLOAT("x.pos-cmd") = 50;
+  run(3);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  // on: 2 units allowed; 1.5 behind is fine, 2.5 shuts it down (13)
+  PIN_FLOAT("x.ferror-max") = 2;
+  PIN_FLOAT("x.pos-cmd") = 1.5;
+  run(3);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+  PIN_FLOAT("x.pos-cmd") = -2.5;
+  CHECK_EQ(cycle(SW_ENABLED), 0x06);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 1);
+  CHECK_EQ(PIN_S32("x.fault-reason"), 13);
+  // not before "Operation enabled": the target holds the actual position then
+  PIN_BIT("x.enable") = 0;
+  cycle(SW_READY);
+  PIN_FLOAT("x.pos-cmd") = 40;
+  PIN_BIT("x.enable") = 1;
+  start(SW_READY);
+  run(2);
+  CHECK_EQ(PIN_BIT("x.drv-fault"), 0);
+}
+
 static void test_csv(void) {
   static const fake_entry_t e[] = {
       {0x6040, 0, 16}, {0x60FF, 0, 32}, {0x6041, 0, 16}, {0x606C, 0, 32}, FAKE_END,
@@ -2724,7 +2757,7 @@ RUN_TESTS("cia402", test_ff_pins_only_with_the_objects, test_ff_velocity, test_f
     test_fault_while_enabled_shuts_down_until_enable_drops, test_fault_reset_on_enable,
     test_no_fault_reset_on_enable_without_auto, test_fault_reset_is_held_at_most_100_ms,
     test_fault_reset_pin_without_enable, test_drive_leaving_enabled, test_bus_loss, DC_SYNC_TESTS test_watchdog,
-    test_command_not_a_number, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
+    test_command_not_a_number, test_following_error_check, test_csv, test_homing_pins_only_with_hm, test_homing_needs_the_mode_objects,
     test_homing_by_index_enable, test_homing_by_the_home_pin, test_homing_travel_and_actual_position,
     test_homing_travel_limit, test_homing_travel_both_ways, test_homing_error, test_homing_timeout,
     test_homing_abandoned_by_motion, test_homing_module_request, test_homing_module_failures, test_homing_module_abort, test_homing_pulse_without_hold, test_homing_mode_not_taken, test_homing_slow_way_back, test_homing_stopped_by_disable,

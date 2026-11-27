@@ -14,11 +14,16 @@ Safety, in layers:
   (testmode.WATCHDOG_MS); if this program hangs or dies, the servo thread
   shuts the drive down by itself.
 - Limits in the drive, where it has the objects: travel (0x607D) around
-  the position at the start, a tight following-error window (0x6065, or
-  the vendor's object), and the maximum torque (0x6072). The drive's own
-  values are read first and written back when the test ends; until then
-  they are also kept in a file (RESTORE_FILE), so that they can be put
-  back after a crash.
+  the position at the start. The drive's own values are read first and
+  written back when the test ends; until then they are also kept in a
+  file (RESTORE_FILE), so that they can be put back after a crash. Its
+  following-error window and torque limit are left as they are, as in
+  LinuxCNC: the test is a coarse check that the drive moves at all, and
+  homing by torque (which some drives limit with 0x6072) homes as it will
+  in LinuxCNC.
+- A following-error check of its own (CSP): the profile shuts the drive
+  down when |pos-cmd - pos-fb| exceeds ferror-max (fault-reason 13), in
+  the servo thread, like motion's FERROR in LinuxCNC.
 - Limits in HAL, in the servo thread: the limit3 in front of pos-cmd
   keeps velocity, acceleration and travel low, whatever the drive has
   (CSP). In PP and PV the drive plans the motion itself: this program
@@ -43,8 +48,11 @@ RESTORE_FILE = os.path.join(os.environ.get("XDG_STATE_HOME") or
 
 # Defaults, in machine units (mm) and seconds.
 DEFAULTS = {"scale": 1.0, "max-velocity": 5.0, "max-acceleration": 50.0, "travel": 20.0,
-            "following-error": 2.0, "max-torque": 30.0}
+            "following-error": 2.0}
 
+# where a drive keeps a limit (the CiA 402 objects; a quirk file's `limits:` for a
+# drive that keeps one elsewhere). The workbench writes only max-velocity (PP, PV);
+# the following-error window is read, to be shown.
 STANDARD_LIMITS = {
     "following-error": (0x6065, 0, "uint32"),
     "max-torque": (0x6072, 0, "uint16"),
@@ -162,23 +170,9 @@ def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
         limits.append(Limit("profile-velocity", 0x6081, 0, "uint32",
                             int(round(abs(settings["max-velocity"] * scale))),
                             "profile velocity %g mm/s (0x6081)" % settings["max-velocity"]))
-    for name, value, text in (
-            ("following-error", int(round(abs(settings["following-error"] * scale))),
-             "following error %g mm" % settings["following-error"]),
-            ("max-torque", int(round(settings["max-torque"] * 10)),
-             "max torque %g %%" % settings["max-torque"])):
-        where = quirks.get(name) or STANDARD_LIMITS[name]
-        if has_object(where[0], where[1]):
-            limits.append(Limit(name, where[0], where[1], where[2], value,
-                                "%s (0x%04X:%02X)" % (text, where[0], where[1])))
-        else:
-            notes.append("no %s object in the drive: %s" % (
-                name.replace("-", " "),
-                "limited in HAL by the velocity and acceleration only" if name == "max-torque"
-                else "the %g mm here cannot be written: the drive watches its following error "
-                "only with its own window, which may be large. Moving works. If its manual names "
-                "the object, tell the workbench with Set objects for missing limits..."
-                % settings["following-error"]))
+    if mode == "csp":
+        notes.append("following error over %g mm stops the drive (the workbench's own check, "
+                     "in the servo thread, as LinuxCNC's FERROR)" % abs(settings["following-error"]))
     if mode == "csp":
         notes.append("velocity %g mm/s and acceleration %g mm/s2 are limited in HAL (limit3)"
                      % (settings["max-velocity"], settings["max-acceleration"]))
@@ -254,6 +248,7 @@ class DriveTest:
         else:
             self.limit3 = self.sel = None
         self.limits, self.notes = [], []
+        self.own_window = None     # the drive's own following-error window, counts (read)
         self.start = None       # machine units, at prepare()
         self.homing = False         # a homing was started and has not ended
         self.home_seen = False      # ... and the profile has been seen homing
@@ -300,6 +295,24 @@ class DriveTest:
         self.notes.append("homing by method %d, as chosen for this axis" % chosen["method"])
         return out
 
+    def _own_window(self, scale):
+        """A note on the drive's own following-error window, read and left as it is: what
+        it does in LinuxCNC too, unless the configuration sets it."""
+        where = q.limits(self.slave).get("following-error")
+        if not isinstance(where, tuple):
+            where = STANDARD_LIMITS["following-error"]
+            index = where[0] + self.axis * config.AXIS_OFFSET
+        else:
+            index = where[0]
+        value = tool.upload(self.position, index, where[1], where[2]) \
+            if self._has(index, where[1]) else None
+        self.own_window = value     # counts, for the Response card
+        if value is None:
+            return ("the drive's own following-error window is not known (no 0x6065, and no object "
+                    "of its own is known): left as it is")
+        return ("the drive's own following-error window: %d counts (%g mm, 0x%04X:%02X), left as "
+                "it is" % (value, value / scale if scale else value, index, where[1]))
+
     def pin(self, name):
         p = self.run.pins("%s.%s" % (self.name, name)).get("%s.%s" % (self.name, name))
         if p is None:
@@ -324,10 +337,13 @@ class DriveTest:
         if self.homes:
             first["%s.home" % self.name] = "FALSE"
             first["%s.home-hold" % self.name] = "TRUE" if self.home_hold else "FALSE"
+        if self.mode == "csp":
+            first["%s.ferror-max" % self.name] = repr(float(abs(s["following-error"])))
         self.run.setp_many(first)
         counts = int(self.pin("drv-actual-position"))
         self.limits, self.notes = plan_limits(self.slave, self._has, s["scale"], counts, s,
                                               self.axis)
+        self.notes.append(self._own_window(s["scale"]))
         if self.homes:
             self.limits += self._homing_limits()
         # the drive's own values first, kept in a file until put back
@@ -553,6 +569,8 @@ class DriveTest:
         failed = []
         try:
             values = {"%s.enable" % self.name: "FALSE"}
+            if self.mode == "csp":
+                values["%s.ferror-max" % self.name] = "0"
             if self.limit3:
                 values["%s.maxv" % self.limit3] = "0"
             if self.mode == "pv":

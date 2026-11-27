@@ -89,18 +89,21 @@ class TestRows(Base):
         self.assertIn("seen in 0x6061", self.row(bringup.rows(s, proposal()), "mode").text)
 
     def test_the_following_error_window(self):
-        self.assertEqual(self.row(bringup.rows(drive(identity=ECT60), proposal()), "ferror").text,
-                         "the drive's own: 0x2022:00 (quirk file)")
+        # the workbench checks the following error itself: never a gap; the drive's own
+        # window is told, not written
+        row = self.row(bringup.rows(drive(identity=ECT60), proposal()), "ferror")
+        self.assertEqual(row.state, bringup.OK)
+        self.assertIn("stops the drive above the Move card's value", row.text)
+        self.assertIn("own window is 0x2022:00 (quirk file), left as it is", row.text)
+        self.assertEqual(row.card, "response")
         d = coe.Dictionary()
         d.entries[(0x6065, 0)] = object()
-        self.assertEqual(self.row(bringup.rows(drive(), proposal(), dictionary=d), "ferror").state, bringup.OK)
-        self.assertEqual(self.row(bringup.rows(drive(), proposal()), "ferror").state, bringup.TRY)
-        # a dictionary without 0x6065 and no object known: said, not needed to move
+        self.assertIn("is 0x6065", self.row(bringup.rows(drive(), proposal(), dictionary=d), "ferror").text)
         d = coe.Dictionary()
         d.entries[(0x2022, 0)] = object()
         row = self.row(bringup.rows(drive(), proposal(), dictionary=d), "ferror")
-        self.assertEqual(row.state, bringup.MISSING)
-        self.assertIn("Moving works without it", row.text)
+        self.assertEqual(row.state, bringup.OK)
+        self.assertIn("is not known", row.text)
 
     def test_the_servo_period_against_what_was_measured(self):
         # the shipped ECT60 results: ok down to 125 us, refused at 100 us

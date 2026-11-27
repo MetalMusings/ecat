@@ -6,7 +6,9 @@ Run with: python3 -m unittest discover -s tests
 
 import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -56,12 +58,11 @@ class TestPlan(unittest.TestCase):
         s = dict(drivetest.DEFAULTS, scale=100.0)
         limits, notes = drivetest.plan_limits(ECT60, lambda i, sub: (i, sub) in {
             (0x607D, 1), (0x607D, 2), (0x2022, 0)}, 100.0, 5000, s)
-        got = {lim.name: (lim.index, lim.subindex, lim.value) for lim in limits}
-        # the ECT60 keeps its following error in 0x2022, and ignores 0x607D
-        # in CSP, so its travel is limited in HAL only
-        self.assertEqual(got, {"following-error": (0x2022, 0, 200)})
+        # the ECT60 ignores 0x607D in CSP, so its travel is limited in HAL only; its
+        # following-error window (0x2022) is not written: the workbench checks itself
+        self.assertEqual(limits, [])
         self.assertTrue(any("ignores its software position limits" in n for n in notes))
-        self.assertTrue(any("max torque" in n for n in notes))
+        self.assertTrue(any("following error over 2 mm stops the drive" in n for n in notes))
         self.assertTrue(any("limit3" in n for n in notes))
 
     def test_travel_in_the_drive(self):
@@ -76,9 +77,9 @@ class TestPlan(unittest.TestCase):
         other = dict(ECT60, identity={"vendor": "0x00000002", "product": "0x00001234"})
         s = dict(drivetest.DEFAULTS, scale=10.0)
         limits, _ = drivetest.plan_limits(other, lambda i, sub: True, 10.0, 0, s)
-        got = {lim.name: (lim.index, lim.value) for lim in limits}
-        self.assertEqual(got["following-error"], (0x6065, 20))
-        self.assertEqual(got["max-torque"], (0x6072, 300))
+        # neither the following-error window (0x6065) nor the torque limit (0x6072)
+        # is written: left as in LinuxCNC
+        self.assertEqual(sorted(lim.name for lim in limits), ["travel-max", "travel-min"])
 
     def test_second_axis(self):
         s = dict(drivetest.DEFAULTS, scale=10.0)
@@ -86,17 +87,12 @@ class TestPlan(unittest.TestCase):
         has = {(0x687D, 1), (0x687D, 2), (0x6865, 0), (0x6872, 0), (0x2022, 0)}
         limits, _ = drivetest.plan_limits(other, lambda i, sub: (i, sub) in has, 10.0, 0, s, axis=1)
         got = {lim.name: (lim.index, lim.subindex) for lim in limits}
-        self.assertEqual(got, {"travel-min": (0x687D, 1), "travel-max": (0x687D, 2),
-                               "following-error": (0x6865, 0), "max-torque": (0x6872, 0)})
-        self.assertIn("0x6865", next(lim.text for lim in limits if lim.name == "following-error"))
+        self.assertEqual(got, {"travel-min": (0x687D, 1), "travel-max": (0x687D, 2)})
 
     def test_no_limits_in_drive(self):
         _, notes = drivetest.plan_limits(ECT60, lambda i, sub: False, 1.0, 0, drivetest.DEFAULTS)
         self.assertTrue(any("0x607D" in n for n in notes))
-        # the window the user chose is not written: said, with the way to tell the object
-        ferror = next(n for n in notes if n.startswith("no following error object"))
-        self.assertIn("%g mm here cannot be written" % drivetest.DEFAULTS["following-error"], ferror)
-        self.assertIn("Set objects for missing limits", ferror)
+        self.assertTrue(any("following error over" in n for n in notes))
 
 
 class TestDriveTest(TestTestMode):
@@ -146,13 +142,15 @@ class TestDriveTest(TestTestMode):
         run = self.started()
         dt = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
         dt.prepare()
-        # the drive's own values are kept in a file until they are back
-        self.assertEqual({(e["index"], e["subindex"], e["original"])
-                          for e in drivetest.pending_restores()},
-                         {(0x2022, 0, 4000)})
-        self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)     # not written to an ECT60
-        self.assertEqual(self.drive.sdos[(0x2022, 0)], 200)
+        # nothing written to an ECT60: 0x607D it ignores in CSP, and its following-error
+        # window (0x2022) is only read, to be shown
+        self.assertEqual(drivetest.pending_restores(), [])
+        self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)
+        self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
+        self.assertIn("the drive's own following-error window: 4000 counts (40 mm, 0x2022:00), "
+                      "left as it is", dt.notes)
         log = self.setp_log()
+        self.assertIn("x.ferror-max 2.0", log)     # the workbench's own check
         self.assertIn("x.enable FALSE", log)
         self.assertIn("ecatjog0.maxv 5.0", log)
         self.assertIn("x.velo-scale 100.0", log)   # velocity-fb, and 0x60B1 in counts/s
@@ -174,6 +172,7 @@ class TestDriveTest(TestTestMode):
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
         self.assertEqual(drivetest.pending_restores(), [])
         self.assertIn("ecatjog0.maxv 0", self.setp_log())
+        self.assertIn("x.ferror-max 0", self.setp_log())
 
     def test_nothing_moves_before_prepare(self):
         run = self.started()
@@ -185,7 +184,7 @@ class TestDriveTest(TestTestMode):
 
     def test_limits_without_the_dictionary(self):
         # the tool refuses an upload of another size than the object's: without the
-        # dictionary each size is tried, so 0x6065 (32 bit) and 0x6072 (16 bit) are found
+        # dictionary each size is tried, so 0x607D and the window 0x6065 (32 bit) are found
         sizes = {(0x6065, 0): "uint32", (0x6072, 0): "uint16", (0x607D, 1): "int32",
                  (0x607D, 2): "int32"}
         self.drive.sdos.update({(0x6065, 0): 100000, (0x6072, 0): 3000})
@@ -198,39 +197,37 @@ class TestDriveTest(TestTestMode):
         with mock.patch.object(tool, "upload", strict):
             run = self.started()
             dt = drivetest.DriveTest(run, dict(ECT60, identity=OTHER["identity"]), None,
-                                     {"scale": 1000.0, "following-error": 2.0, "max-torque": 30.0})
+                                     {"scale": 1000.0, "following-error": 2.0})
             dt.prepare()
-        self.assertEqual(sorted(lim.name for lim in dt.limits),
-                         ["following-error", "max-torque", "travel-max", "travel-min"])
+        self.assertEqual(sorted(lim.name for lim in dt.limits), ["travel-max", "travel-min"])
+        self.assertTrue(any("window: 100000 counts (100 mm, 0x6065:00)" in n for n in dt.notes))
+        self.assertEqual(self.drive.sdos[(0x6072, 0)], 3000)       # not touched
 
     def test_refused_limit_puts_the_others_back(self):
         run = self.started()
         other = dict(ECT60, identity={"vendor": "0x00000002", "product": "0x00001234"})
-        self.drive.sdos[(0x6065, 0)] = 1000
-        self.drive.refuse.add((0x6065, 0))
-        c = self.coe()
-        c.entries = dict(c.entries); c.entries[(0x6065, 0)] = 1
-        dt = drivetest.DriveTest(run, other, c, {"scale": 100.0})
+        self.drive.refuse.add((0x607D, 2))
+        dt = drivetest.DriveTest(run, other, self.coe(), {"scale": 100.0})
         with self.assertRaises(testmode.TestError):
             dt.prepare()
-        # 0x607D was written before the refusal, and is back
+        # 0x607D:01 was written before the refusal, and is back
         self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)
         self.assertEqual(self.drive.sdos[(0x607D, 2)], -1)
         self.assertFalse(dt.prepared)
 
     def test_restore_after_a_crash(self):
         run = self.started()
-        dt = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
+        dt = drivetest.DriveTest(run, OTHER, self.coe(), {"scale": 100.0})
         dt.prepare()
         # the program dies here; the next one finds the file
         done, failed = drivetest.restore_pending()
-        self.assertEqual((len(done), failed), (1, []))
-        self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
+        self.assertEqual((len(done), failed), (2, []))
+        self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)
         self.assertFalse(os.path.exists(drivetest.RESTORE_FILE))
 
     def test_no_restore_while_another_window_runs_a_test(self):
         run = self.started()
-        dt = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
+        dt = drivetest.DriveTest(run, OTHER, self.coe(), {"scale": 100.0})
         dt.prepare()
         written = dict(self.drive.sdos)
         with mock.patch.object(drivetest.testmode, "test_holder", lambda: 4242):
@@ -358,6 +355,33 @@ class TestDriveTest(TestTestMode):
         dt.restore()
         self.assertEqual(self.drive.sdos[(0x6098, 0)], 35)
         self.assertEqual(self.drive.sdos[(0x6099, 1)], 7)
+
+    def test_torque_homing_keeps_its_own_torque_limit(self):
+        # a drive that limits torque homing with 0x6072 (its quirk file's extras): the
+        # test writes the method's value, as LinuxCNC's settings will, never a limit of
+        # its own on top
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        with open(os.path.join(d, "t.yaml"), "w") as f:
+            f.write("name: t\nmatch: {vendor: '0x2', product: '0x1234'}\nhoming:\n  extras:\n"
+                    "    37: [{object: '0x6072:00', type: UINT, value: 400, name: Max torque}]\n")
+        p = mock.patch.dict(os.environ, {"ECATSETUP_DEVICES": d})
+        p.start()
+        self.addCleanup(p.stop)
+        from ecatsetup import quirks
+        quirks.load(reload=True)
+        self.addCleanup(quirks.load, True)
+        run = self.started()
+        self.drive.sdos.update({(0x6098, 0): 35, (0x6072, 0): 1000})
+        slave = dict(OTHER, cia402={"mode": "csp", "modes": ["hm"]}, homing={"method": 37})
+        coe = self.coe()
+        coe.entries.update({(0x6098, 0): 1, (0x6072, 0): 1})
+        dt = drivetest.DriveTest(run, slave, coe, {"scale": 100.0})
+        dt.prepare()
+        self.assertEqual(self.drive.sdos[(0x6072, 0)], 400)
+        self.assertEqual([lim.name for lim in dt.limits if lim.index == 0x6072], ["homing"])
+        dt.restore()
+        self.assertEqual(self.drive.sdos[(0x6072, 0)], 1000)
 
     def test_home_result(self):
         run = self.started()

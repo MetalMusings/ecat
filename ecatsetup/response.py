@@ -448,6 +448,11 @@ class Measurement:
             text = ""
         data, lost = parse_samples(text, [c.key for c in self.cols])
         lim = {lim.name: [lim.value, lim.original] for lim in self.dt.limits}
+        # the following error: the workbench's own check (ferror-max, in counts as the
+        # drive's window), and the drive's own window, read and left as it is
+        sc = float(self.dt.settings["scale"] or 1.0)
+        lim["following-error"] = [abs(self.dt.settings["following-error"] * sc),
+                                  self.dt.own_window]
         meta = {"drive": self.dt.name, "slave": self.dt.slave.get("name"),
                 "period-ns": self.run.period, "scale": self.dt.settings["scale"],
                 "spec": self.spec, "ended": self.ended, "limits": lim,

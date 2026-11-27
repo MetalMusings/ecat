@@ -237,29 +237,24 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("sync", MISSING, "Sync", "free run: a CSP drive usually needs DC (SYNC0); "
                        "choose its DC mode", "operation"))
 
-    # the following-error window
+    # the following error: on the workbench the profile's own check (ferror-max, the Move
+    # card's value), as motion's FERROR in LinuxCNC; the drive's own window is left as it is
     lim = quirks.limits(slave).get("following-error")     # (index, sub, type), or why not
     if isinstance(lim, tuple):
-        out.append(Row("ferror", OK, "Following-error window",
-                       "the drive's own: 0x%04X:%02X (quirk file)" % lim[:2], "move"))
-    elif lim:
-        out.append(Row("ferror", MISSING, "Following-error window", "the quirk file says: %s" % lim, "move"))
+        own = "the drive's own window is 0x%04X:%02X (quirk file)" % lim[:2]
     elif dictionary is not None and (0x6065, 0) in dictionary.entries:
-        out.append(Row("ferror", OK, "Following-error window", "0x6065 (the standard object)", "move"))
-    elif dictionary is not None and dictionary.entries:
-        # not needed to move: the drive then watches its following error only with its own
-        # (factory) window, which the workbench cannot make small
-        out.append(Row("ferror", MISSING, "Following-error window",
-                       "the drive has no 0x6065, and the object it keeps its window in is not "
-                       "known: the workbench cannot set it, so the drive's own window applies "
-                       "(it may be large). Moving works without it. When the drive's manual names "
-                       "the object: Set objects for missing limits... on the Move card",
-                       "move"))
+        own = "the drive's own window is 0x6065"
     else:
-        out.append(Row("ferror", TRY, "Following-error window",
-                       "the workbench writes 0x6065; a drive that keeps it in an object of its own "
-                       "shows that when it moves past it: Set objects for missing limits... on "
-                       "the Move card", "move"))
+        own = "where the drive keeps its own window is not known"
+    if mode == "csp":
+        out.append(Row("ferror", OK, "Following error",
+                       "the workbench stops the drive above the Move card's value, as LinuxCNC's "
+                       "FERROR will; %s, left as it is. The FERROR for LinuxCNC comes from the "
+                       "Response card" % own, "response"))
+    else:
+        out.append(Row("ferror", OK, "Following error",
+                       "%s: in %s the drive plans its own moves and watches its error itself"
+                       % (own[0].upper() + own[1:], mode.upper())))
 
     # what the workbench saw
     s = seen or Seen()

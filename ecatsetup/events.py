@@ -66,7 +66,8 @@ FAULT_REASONS = {
     7: "a command that is not a number (NaN, infinite) or a mode not in the file",
     8: "homing error", 9: "homing not done in time", 10: "PP move not done in time",
     11: "the master's DC sync check timed out",
-    12: "moved more than home-max-travel while homing"}
+    12: "moved more than home-max-travel while homing",
+    13: "following error above ferror-max (the workbench's check)"}
 
 
 class EventsError(Exception):

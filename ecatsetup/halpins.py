@@ -51,6 +51,7 @@ CIA402 = [
     ("pos-scale", "real", "rw"), ("velo-scale", "real", "rw"),
     ("auto-fault-reset", "bool", "rw"), ("enable-timeout-ms", "uint", "rw"),
     ("watchdog-ms", "uint", "rw"), ("mode", "sint", "ro"),
+    ("ferror-max", "real", "rw"),
 ]
 CIA402_HOMING = [
     ("index-enable", "bool", "io"), ("home", "bool", "in"), ("stat-homing", "bool", "out"),
@@ -91,7 +92,7 @@ FUNCTIONS = ["ecat.read-all", "ecat.write-all"]
 # not listed has no default shown.
 DEFAULTS = {
     "pos-scale": 1.0, "velo-scale": 1.0, "auto-fault-reset": True,
-    "enable-timeout-ms": 2000, "watchdog-ms": 0, "stop-timeout-ms": 10000,
+    "enable-timeout-ms": 2000, "watchdog-ms": 0, "ferror-max": 0.0, "stop-timeout-ms": 10000,
     "pp-timeout-ms": 60000, "pp-immediate": False, "home-timeout-ms": 60000, "home-max-travel": 0.0,
     "home-hold": False, "home-again-ms": 200,
     "velocity-window-ms": 10,

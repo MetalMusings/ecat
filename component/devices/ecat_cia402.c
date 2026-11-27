@@ -179,6 +179,7 @@ enum {
   WHY_PP_TIMEOUT,        // a PP move not done within pp-timeout-ms
   WHY_DC_SYNC,           // the master's DC sync check timed out: SYNC0 on an unsynchronized clock
   WHY_HOMING_TRAVEL,     // the drive moved more than home-max-travel while homing
+  WHY_FOLLOWING_ERROR,   // CSP: |pos-cmd - pos-fb| above ferror-max (the workbench's check)
 };
 
 // Profile position (PP): the set-point handshake.
@@ -292,6 +293,7 @@ typedef struct {
   hal_uint_t enable_timeout_ms;
   hal_uint_t watchdog_ms;
   hal_sint_t mode;  // read only: 8 CSP, 9 CSV
+  hal_real_t ferror_max;  // CSP: shut down when |pos-cmd - pos-fb| is larger; 0: off
   hal_uint_t home_timeout_ms;
   hal_real_t home_max_travel;  // 0: no limit
   hal_bool_t home_hold;
@@ -491,6 +493,7 @@ static const lcec_paramdesc_t params[] = {
     {HAL_UINT, HAL_RW, offsetof(cia402_t, enable_timeout_ms), "%s.enable-timeout-ms"},
     {HAL_UINT, HAL_RW, offsetof(cia402_t, watchdog_ms), "%s.watchdog-ms"},
     {HAL_SINT, HAL_RO, offsetof(cia402_t, mode), "%s.mode"},
+    {HAL_REAL, HAL_RW, offsetof(cia402_t, ferror_max), "%s.ferror-max"},
     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
 };
 
@@ -619,6 +622,7 @@ static int axis_init(lcec_slave_t *slave, cia402_t *d, const char *name, uint16_
   hal_set_bool(d->auto_fault_reset, 1);
   hal_set_uint(d->enable_timeout_ms, 2000);
   hal_set_uint(d->watchdog_ms, 0);
+  hal_set_real(d->ferror_max, 0.0);
   if (d->ff_velocity_gain) hal_set_real(d->ff_velocity_gain, d->ff_v0);
   if (d->ff_torque_per_accel) hal_set_real(d->ff_torque_per_accel, d->ff_t0);
   if (d->ff_torque_max) hal_set_real(d->ff_torque_max, d->ff_tmax);
@@ -1193,6 +1197,12 @@ static void axis_write(lcec_slave_t *slave, cia402_t *d, long period) {
       block(d, WHY_BAD_COMMAND);
     } else if (faulted && d->reset_ns <= 0) {
       block(d, WHY_DRIVE_FAULT);
+    } else if (d->active == MODE_CSP && d->state == ST_OPERATION_ENABLED && d->was_enabled && !homing_now &&
+               d->mc == MC_RUN && !d->sync && hal_get_real(d->ferror_max) > 0 &&
+               fabs(cmd - hal_get_real(d->pos_fb)) > hal_get_real(d->ferror_max)) {
+      // a coarse check that the drive follows at all (the workbench sets it;
+      // LinuxCNC has its own FERROR and leaves it 0)
+      block(d, WHY_FOLLOWING_ERROR);
     } else if (d->was_enabled && d->state != ST_OPERATION_ENABLED && d->hs != HS_AGAIN) {
       block(d, faulted ? WHY_DRIVE_FAULT : WHY_LEFT_ENABLED);
     } else if (d->state != ST_OPERATION_ENABLED && d->hs != HS_AGAIN) {

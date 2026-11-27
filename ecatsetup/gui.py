@@ -4830,8 +4830,7 @@ class MoveCard(Card):
                 ("max-velocity", "Max velocity (mm/s)", 0.01, 100, 2),
                 ("max-acceleration", "Max acceleration (mm/s²)", 0.1, 5000, 1),
                 ("travel", "Travel from start (± mm)", 0.1, 500, 1),
-                ("following-error", "Following error (mm)", 0.01, 100, 2),
-                ("max-torque", "Max torque (%)", 1, 300, 0)]
+                ("following-error", "Stop at following error (mm)", 0.01, 100, 2)]
 
     def __init__(self, win):
         super().__init__("Move")
@@ -4853,6 +4852,12 @@ class MoveCard(Card):
             box.setRange(lo, hi)
             box.setDecimals(dec)
             box.setValue(drivetest.DEFAULTS[key])
+            if key == "following-error":
+                box.setToolTip("A coarse check that the drive follows at all (CSP): the drive is "
+                               "stopped when |pos-cmd - pos-fb| is larger, in the servo thread, as "
+                               "LinuxCNC's FERROR does. Nothing is written to the drive; its own "
+                               "window is left as it is. The exact FERROR comes from the Response "
+                               "card.")
             form.addRow(text, box)
             self.fields[key] = box
         self.prepare = QPushButton("Write limits to the drive")
@@ -6602,6 +6607,9 @@ class TestPage(QWidget):
                 # widen the page)
                 self.error_meaning = tile.add(label("", "hint", wrap=True))
                 self.error_meaning.hide()
+            if pin == "fault-reason":
+                self.reason_meaning = tile.add(label("", "hint", wrap=True))
+                self.reason_meaning.hide()
             grid.addWidget(tile, i // 2, i % 2)
             self.live[pin] = (tile, v)
         live.add(grid)
@@ -6713,10 +6721,11 @@ class TestPage(QWidget):
             self.limits_banner.hide()
             return
         self.limits_banner.show()
+        written = " &nbsp; ".join(lim.text for lim in dt.limits)
         self.limits_text.setText(
-            "<b>Safety limits written to the drive</b> &nbsp; " +
-            " &nbsp; ".join(lim.text for lim in dt.limits) +
-            "<br>heartbeat %d ms: the drive is disabled if this program stops answering. %s"
+            "<b>Safety limits</b> &nbsp; " +
+            ("written to the drive: %s<br>" % written if written else "nothing written to the drive<br>") +
+            "heartbeat %d ms: the drive is disabled if this program stops answering. %s"
             % (testmode.WATCHDOG_MS, " ".join(n[:1].upper() + n[1:] + "." for n in dt.notes)))
 
     def _pin_sources(self):
@@ -6881,6 +6890,8 @@ class TestPage(QWidget):
                 if val is not None:
                     if pin == "error-code":
                         val = self.show_error_code(self.fault_code(self.position, v))
+                    elif pin == "fault-reason":
+                        self.show_fault_reason(val)
                     lab.setText(val)
             try:
                 sw = int(v("statusword") or "0", 0)
@@ -6907,6 +6918,15 @@ class TestPage(QWidget):
         self.error_meaning.setText(meaning)
         self.error_meaning.setVisible(bool(meaning))
         return val
+
+    def show_fault_reason(self, value):
+        """Under the profile's fault-reason number, what it means (events.FAULT_REASONS)."""
+        try:
+            text = events.FAULT_REASONS.get(int(value), "") if value else ""
+        except ValueError:
+            text = ""
+        self.reason_meaning.setText(text)
+        self.reason_meaning.setVisible(bool(text))
 
     def fault_code(self, position, v):
         """The drive's error code (0x603F): the pin when the PDOs have it, otherwise read

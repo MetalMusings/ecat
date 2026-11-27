@@ -3630,6 +3630,11 @@ class TestBringup(WindowBase):
         self.assertTrue(tp.error_meaning.wordWrap())
         self.assertEqual(tp.show_error_code(0), "no error")
         self.assertTrue(tp.error_meaning.isHidden())
+        # the profile's reason, in words: 13 is the workbench's following-error check
+        tp.show_fault_reason("13")
+        self.assertIn("ferror-max", tp.reason_meaning.text())
+        tp.show_fault_reason("0")
+        self.assertTrue(tp.reason_meaning.isHidden())
         # a code in the PDOs needs no SDO
         values["error-code"] = "0x7500"
         with mock.patch.object(tool, "upload") as up:

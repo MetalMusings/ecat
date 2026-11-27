@@ -584,7 +584,7 @@ To OP and moving:
 | Process data | The check of the PDOs against what the profile needs. |
 | Mode | Set every cycle (0x6060 mapped), once at start (0x6060:00), or only seen (0x6061). |
 | Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
-| Following-error window | The quirk file's object (the ECT60's 0x2022), or the standard 0x6065. A drive with neither (as far as its dictionary shows) gets a ! : the workbench cannot set its window and the drive's own applies, which may be large; moving works without it. *Set objects for missing limits...* on the Move card tells the object. |
+| Following error | In CSP the workbench stops the drive above the Move card's value itself, as LinuxCNC's FERROR will; the row says where the drive keeps its own window (the quirk file's object, such as the ECT60's 0x2022, or 0x6065), which is left as it is. The FERROR for LinuxCNC comes from the Response card. |
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
 | Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; read once by SDO when the drive's PDOs lack it, as the ECT60's do) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
 | Follows | Seen when you jog it on the Move card. A fault after "Operation enabled" (such as a following error in a fast jog) makes this row red, with the code in words, until the drive is reset and has moved again. |
@@ -1216,12 +1216,13 @@ Safety comes in layers, so that no single one has to be perfect:
    100 ms. If the window hangs or dies, the servo thread shuts the drive
    down by itself (`fault-reason` 5).
 3. **Limits in the drive.** *Write limits to the drive* reads the drive's
-   own values and writes, where the drive has the objects:
-   - software position limits `0x607D` at ± the travel around the
-     position at that moment;
-   - a tight following-error window: `0x6065`, or the vendor's object
-     (on the Rtelligent ECT60, `0x2022` "Position trace error Limit");
-   - the maximum torque `0x6072`.
+   own values and writes, where the drive has the objects, software
+   position limits `0x607D` at ± the travel around the position at that
+   moment (and in PP and PV its maximum profile velocity). Its
+   following-error window and its torque limit (`0x6072`) are left as they
+   are, as they will be in LinuxCNC: the drive's own window is read and
+   shown in the banner. A drive homing by torque that limits it with
+   `0x6072` therefore homes as it will in LinuxCNC.
 
    The drive's own values are kept in
    `~/.local/state/ecatsetup/drive-limits.json` before each limit is
@@ -1234,15 +1235,22 @@ Safety comes in layers, so that no single one has to be perfect:
    the drive is in "Operation enabled", the `limit3` follows `pos-fb`, so
    enabling never makes a jump; a jog moves its target by one step, never
    past the travel.
+5. **A following-error check of the workbench's own** (CSP): the profile
+   shuts the drive down when |`pos-cmd` − `pos-fb`| is larger than *Stop at
+   following error* (`ferror-max`, `fault-reason` 13), in the servo
+   thread, as LinuxCNC's FERROR does in the machine. It is a coarse check
+   that the drive follows at all (a wrong sign of the scale, a drive that
+   does not move); the FERROR for LinuxCNC comes from the Response card.
 
-Defaults: 5 mm/s, 50 mm/s², ± 20 mm, following error 2 mm, torque 30 %.
+Defaults: 5 mm/s, 50 mm/s², ± 20 mm, stop at a following error of 2 mm.
 The scale (counts per mm) is taken from the configuration's HAL files
 (`setp <drive>.pos-scale ...`) when they have it.
 
-What the ECT60 has: `0x607D` and `0x2022`, no `0x6080`, `0x6072` or
-`0x6065`. It ignores `0x607D` in CSP (tried: it moved 4.6 mm past a
-limit of 1 mm, without an error or a status bit), so the workbench writes only
-`0x2022` to it, and its travel, velocity and torque are limited in HAL.
+What the ECT60 has: `0x607D` and `0x2022` (its following-error window),
+no `0x6080`, `0x6072` or `0x6065`. It ignores `0x607D` in CSP (tried: it
+moved 4.6 mm past a limit of 1 mm, without an error or a status bit), so
+the workbench writes nothing to it in CSP: its travel and velocity are
+limited in HAL, and its following error by the workbench's own check.
 
 #### PP, PV and homing
 
@@ -1389,7 +1397,7 @@ first.*
   at it with the emergency stop within reach, and the drive is a `cia402`
   slave in CSP. The drive moves only while *Measure (hold)* is held.
 - Start the workbench (*Workbench*), choose the drive on the *Move* card, give
-  its scale (counts per mm), travel, following error and max torque, and
+  its scale (counts per mm), travel and the following error to stop at, and
   press *Write limits to the drive*. The Response card appears.
 - Record what the drive can tell: its own following error `0x60F4` and its
   torque `0x6077`. When the drive has them but they are not in the process
@@ -1417,7 +1425,6 @@ The first lines say where most of the error comes from. What to do:
 | part of the error follows the acceleration | inertia not made up for | torque feedforward or the inertia ratio in the drive, or torque feedforward from LinuxCNC |
 | overshoot at the stops, a long settling | a gain too high, or a resonance | a lower gain, a notch filter |
 | an offset that stays at standstill | no integral, or friction | the position loop's integral |
-| the torque reached the workbench's limit | the workbench's max torque | raise *Max torque* on the Move card, or a lower acceleration |
 
 **3. Try one setting at a time**
 
@@ -1516,11 +1523,10 @@ first part of tuning, the measuring.
   by the distance and back, *Back and forth* times, with the dwell at
   each end. Releasing the button stops it at once; what was recorded is
   still shown, marked as ended early. The Move card's safety holds: the
-  heartbeat, the travel (the distance is cut to it), and the following
-  error and torque written to the drive. For a fast move, raise *Following
-  error* and *Max torque* on the Move card first, or the drive stops
-  itself: that is the window doing its work, not a fault of the
-  measurement.
+  heartbeat, the travel (the distance is cut to it), and the workbench's
+  following-error check. For a fast move, raise *Stop at following error*
+  on the Move card first, or the drive is stopped: that is the check doing
+  its work, not a fault of the measurement.
 - **What is recorded**: LinuxCNC's `pos-cmd` and `pos-fb`, whether the
   drive is in "Operation enabled", and where the drive has them in its
   process data, its own following error (`0x60F4`) and torque (`0x6077`).
@@ -1561,13 +1567,11 @@ first part of tuning, the measuring.
   - at each stop, the overshoot and the time until the position stays
     within a band (3 counts, at least 0.002 mm);
   - the torque at constant speed (friction) and per acceleration, when
-    `0x6077` is recorded, with the feedforward value for it; whether
-    it reached the workbench's torque limit (then the result is the limit's, not
-    the drive's). The torque is set against the motor's acceleration, from
+    `0x6077` is recorded, with the feedforward value for it. The torque is set against the motor's acceleration, from
     `pos-fb` (smoothed so that a count's step is at most 1 % of the
     acceleration measured), not the command's, which a drive that lags
     follows late;
-  - how much of the drive's following-error window (the workbench's and the
+  - how much of the following-error windows (the workbench's check and the
     drive's own) the error used: where a stepper drive with an encoder
     (such as the ECT60) loses steps or stops;
   - after a second measurement, how the numbers moved and what changed in
@@ -2581,6 +2585,7 @@ Parameters:
 | `enable-timeout-ms` | 2000 | Time allowed to reach "Operation enabled"; 0 for no limit. |
 | `watchdog-ms` | 0 | Watchdog time for the `watchdog` pin; 0 for off. |
 | `mode` | | The configured mode, 8 (CSP), 9 (CSV), 3 (PV) or 1 (PP); read only. |
+| `ferror-max` | 0 | CSP: shut the drive down when \|`pos-cmd` − `pos-fb`\| is larger, in machine units; 0 for off. The workbench's coarse check that the drive follows; in LinuxCNC, motion's FERROR does this. |
 | `ff-velocity-gain` | the kept feedforward, else 0 | With `0x60B1`: the share of the velocity fed forward. |
 | `ff-torque-per-accel` | the kept feedforward, else 0 | With `0x60B2`: % of rated torque per machine unit/s². |
 | `ff-torque-max` | the kept limit, else 30 | With `0x60B2`: the torque offset's limit, % (never above 300). |
@@ -2600,7 +2605,8 @@ for a mode that is not configured,
 8 the drive reports a homing error, 9 homing not done within
 `home-timeout-ms`, 10 a PP move not done within `pp-timeout-ms`, 11 the
 master's DC sync check for the drive timed out (see Behaviour), 12 the
-drive moved more than `home-max-travel` while homing.
+drive moved more than `home-max-travel` while homing, 13 in CSP the
+following error |`pos-cmd` − `pos-fb`| was above `ferror-max`.
 
 #### Behaviour (CiA 402)
 
@@ -4338,7 +4344,11 @@ try on this machine):
   its function, with which codes, and how the polarity is set;
 - on the Move card, *Set objects for missing limits...*: the
   object of a drive's own for its following-error window, torque or
-  velocity limit (the ECT60's `0x2022`), or why a standard one is not used;
+  velocity limit (the ECT60's `0x2022`), or why a standard one is not used.
+  The workbench shows the drive's own window from it (it writes only the
+  velocity limit, in PP and PV), and *Suggest following-error window* on the
+  Settings card uses it, for a drive window in LinuxCNC as a second line of
+  defence;
 - on the Response card, after *Look for settings in the drive*, *Remember
   for tuning...* on the chosen object: what kind it is, its range and
   factory value and what it does (not a value: that is a setting);
