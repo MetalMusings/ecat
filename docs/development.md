@@ -4129,3 +4129,149 @@ First inventory (what exists on 2026-11-26):
 
 To decide with the user: the order, and per kind what the user is asked and how it is
 checked before it is kept.
+
+## Device facts: properties, advice, and bringing up a new drive (assignment 2026-11-27, given, NOT started)
+
+From a discussion with the user (2026-11-27) on what a quirk file holds, where its
+facts come from, and how a user alone with a new drive and the window makes them.
+The assignment above ("how each card makes its facts") is part of this one: its
+inventory table is the starting point for item 4 below.
+
+### Principles (agreed in the discussion)
+
+1. **`ethercat.yaml` stands alone; quirk data is advice.** The component never reads
+   quirk files; they are used when a configuration is made and checked. The user may
+   always do otherwise. Rules come only from the standard and the device's own
+   description (ESI, SII, dictionary): the profile's rules and `config.check`.
+2. **Property, advice, experience.**
+   - A *property* holds for every unit of a device, perhaps for a firmware: "keeps its
+     position counter while powered", "0x2010 zeroes the position (a command)", "IN5
+     is 0x60FD bit 20", which settings matter for tuning, their range and factory value.
+   - *Advice* is a property together with the machine's situation ("tick Start position
+     unless the drive homes itself or has an absolute encoder"). The program derives
+     it; the quirk file holds the property. The link property -> advice is general
+     code, valid for every device.
+   - *Experience* is a value that worked in one machine (0x2009 = 2000 on a plasma
+     cutter in CSP at 500 us; the `tried` texts in `tuning`). It is marked with its
+     context and never looks like a property.
+   - Properties are what is worth sharing first. Two properties that disagree are a
+     conflict (one is wrong, or firmware differs); two pieces of advice or experience
+     that differ can both be right, each in its machine: show the context, not a
+     conflict.
+   - The property explains; the advice is shown where the choice is made, with the
+     property as its reason, so that the user can choose otherwise knowingly. Advice
+     the user declined does not come back silently.
+3. **Sources have weight**: the drive itself (dictionary, 0x60E3, SII), the ESI file,
+   the manual (name, version, section), a test on the bus, other users, an old lcec
+   configuration. The quirk file only fills in where the others are silent or wrong,
+   and its source says which it completes or corrects ("the drive has no 0x60E3;
+   manual 2.4.6"), whether a list is *closed* (a manual: only these) or *open* (tests:
+   these worked), and for which firmware or revision.
+4. **The program owns the questions, the quirk file the answers.** Which gaps and
+   which surprises can exist is general knowledge; the answers belong to a device. A
+   question is asked when it becomes relevant (homing methods when homing is chosen,
+   the start position at start, a command when the object is written), not all at once.
+   A surprise found on one drive becomes a question for every drive.
+5. **The goal sets the map.** First: to OP and moving. Then homing and switches. Then
+   tuning, sync and timing.
+6. **A failure with a code becomes a fact.** AL status codes and 0x603F point at a kind
+   of fact (0x001D the mapping, 0x0030 the DC mode, 0x0036 the shortest SYNC0 period).
+7. **Keep the device's gaps apart from the computer's and the machine's.** Late frames,
+   STO and enable wiring, scale and direction are not facts about the device and do not
+   go into a quirk file.
+8. **Facts arise as a side effect** of what the user does anyway: a homing that worked
+   with method 21 already is the fact "21 works".
+
+How the kinds in the shipped files sort (first look): mostly properties `commands`,
+`input-bits`, `limits`, `enable-again`, `homing methods`/`describe`, `inputs`, and in
+`tuning` what an object does, its range and factory value; mostly experience
+`settings` and `tuning: tried`; `homing extras` mixes a property (what 0x2030 is) with
+experience (values that worked); `lcec` translations are hand-written advice that could
+follow from a property ("0x2010 zeroes the position" -> `cia402.zero-at-start`).
+
+Facts seen in the discussion that have no kind yet: "keeps its position" (today only
+the yaml's `cia402.zero-at-start` and the ECT60's `lcec` row); the meaning of 0x603F
+error codes (ECT60 0x8611); AL codes as device facts (only the SYNC0 period, via
+*Remember this period*).
+
+### The list (the user's order: 1 and 2 first, then 3, then 4 and 5 together)
+
+1. **Put right what goes against "advice, not a rule".** Check first, then decide with
+   the user:
+   - `config.check` gives an *error* for a setting the quirk file calls a command
+     (`config.py`, `quirks.command`), and the test mode does not write it: a rule
+     today. Rule, or advice confirmed by the user?
+   - *Propose again* (and a new proposal after a PDO set or profile change) may put a
+     quirk value back over the user's own different choice.
+   - A closed homing method list may hide the other methods on the homing card; they
+     should stay reachable, marked "not in the list".
+2. **The fact model.** Mark each kind in `devicedata.KINDS` as property, advice or
+   experience; sources gain closed/open, completes/corrects, firmware/revision. Share
+   and the comparison treat the sorts differently (conflict vs context).
+3. **The bring-up card on the slave page** (the user's choice of place, 2026-11-27): a
+   card at the top of the slave page for the goal "to OP and moving", rows *known /
+   missing / shows only when tried*, each with how the gap is filled and a link to the
+   card that fills it (slave page cards, Workbench cards, Diagnose). It is the existing
+   Start page task *Bringing up a new slave* with the state of the slave at hand, and
+   replaces and extends the "not known yet" rows of the Device data page.
+   - Rows worked out from data (no test): ESI file (missing or another version than
+     the SII), process data verdict (the PDO steps), the mode set or seen
+     (0x6060/0x6061), DC mode, the shortest SYNC0 period (measured results), the
+     following-error window (0x6065 or the drive's own, `limits`), open or closed loop
+     where known.
+   - Rows answered on the Workbench, the results coming back into the card:
+     *Reaches OP* (or the AL code with "What this means"; a code that points at a
+     device fact offers it); *Enables* (stuck in "Switch on disabled": probably
+     hardware, STO or an enable input, said so and no device fact; a 0x603F fault:
+     what the code means, from the manual, kept as a fact); *Follows* (jog; a
+     following error at once leads to the start position question).
+   - Start position: the program can compare the drive's position at OP over two starts
+     of ecat with no motion and offer the property "keeps its position", with the
+     *Start position* box as the advice.
+   - Done when every row is known or its "?" accepted; the card then offers Share for
+     the new facts and the next goal: homing and switches (table below), later tuning
+     and sync.
+   - What is kept: results of tries ("reached OP at 12:04") belong to the session and
+     the machine and are not stored; the card is worked out again each time from data,
+     facts and the session. Properties go to the user's own quirk file with source
+     `tried` or `observed`; the yaml gets only what the user chooses on the cards.
+   - The verdict is honest: more rows are "can be tried" than "ready", unlike the PDO
+     steps, which judge from data alone.
+4. **Facts made on the card that owns them** (with the inventory of "how each card
+   makes its facts" above):
+   - Homing card: the method list from the manual (ticked against the catalogue's
+     texts, with the reference; closed list), and what the manufacturer-specific
+     numbers do (36, 37, negatives: `describe`, part of the fact, not decoration). A
+     method that homed is evidence for a listed one, or shows that a closed list lacks
+     it. Where the drive answers 0x60E3, the user's list is a correction and says so.
+   - *Start position*: the property "keeps its position" with the box as the advice.
+   - Switches card: partly there (*Name input bit...*); function and polarity of the
+     inputs.
+5. **Failures become facts.** 0x603F codes as a new kind, filled in on Diagnose when a
+   code shows (meaning from the manual, with the reference); AL codes such as 0x0036
+   offered as facts, not only events.
+6. **The program observes by itself** (later): the position at OP after a restart of
+   ecat, a 0x6077 that never moves, whether the drive follows its target after homing;
+   each offered as a fact with source `observed`.
+7. **lcec translations derived from properties** (lowest priority): `0x2010` "zeroes
+   the position" -> `cia402.zero-at-start` without a hand-written row.
+
+The goal "homing" as the discussion went through it (for the card's next goal):
+
+| What is needed | Standard or manufacturer's | From |
+|---|---|---|
+| Which methods exist | standard 0x60E3, often missing | the drive, the manual, the quirk file |
+| What 36, 37, negatives do | manufacturer's | the manual, the quirk file |
+| Speeds, acceleration, offset (0x6099, 0x609A, 0x607C) | standard | the drive, ESI: mostly known |
+| Which input is the home switch, how it gets its function | manufacturer's (ECT60 0x2007) | the manual, the quirk file |
+| Its polarity | manufacturer's (ECT60 0x2008) | the manual, a test |
+| The switch seen live, 0x60FD bits 0-2 | standard | the drive, once the function is set |
+| Which 0x60FD bit is which input (16 up) | manufacturer's | the manual, or the Switches card finding the bit |
+| Whether the method needs an index pulse, and the encoder has one | standard + the machine | the machine |
+| Settings a method needs (ECT60 0x2030) | manufacturer's | the manual, a test |
+| Whether the drive follows its target after homing | behaviour | a test only (Move card's follow check) |
+
+A gap that stops (unknown input function: the home switch may not be wired to homing
+at all) is told apart from one that only leaves doubt (unknown methods: all may be
+tried). Switch rows belong to the Switches card also when the goal is limit switches
+without homing.
