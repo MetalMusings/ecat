@@ -419,9 +419,11 @@ def lcec_replacement(key, index, subindex):
     if not why:
         return None
     if command_purpose(key, index) == "zero-position":
-        return ZERO_AT_START, ("0x%04X:%02X (%s) zeroes the drive's position: replaced by "
-                               "cia402.zero-at-start, the drive's position at start counts as 0 "
-                               "without writing to it" % (index, subindex, why))
+        return ZERO_AT_START, ("0x%04X:%02X (%s) zeroes the drive's position, a command: not "
+                               "needed with ecat, which holds the drive's position while it "
+                               "enables. cia402.zero-at-start (Start position) gives the same 0 "
+                               "at start without writing to the drive, if the machine should "
+                               "read 0 at start" % (index, subindex, why))
     return "command", ("0x%04X:%02X is a command, says the device's quirk file (%s): as a "
                        "setting it would run at every start" % (index, subindex, why))
 

@@ -588,7 +588,7 @@ To OP and moving:
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
 | Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
 | Follows | Seen when you jog it on the Move card. |
-| Start position | Whether the drive keeps its position counter over a restart of the bus: from the device's quirk file, or seen over two runs of the workbench with the drive's power on (move it in the first), and then offered with *Remember for the device type...*. A drive that keeps it gets a following error in LinuxCNC at once, since LinuxCNC starts at 0: the row then advises *Start position: Position counts from 0 at start*, unless the drive homes itself or has an absolute encoder. |
+| Start position | Whether the drive keeps its position counter over a restart of the bus: from the device's quirk file, or seen over two runs of the workbench with the drive's power on (move it in the first), and then offered with *Remember for the device type...*. Information only: either way works, since LinuxCNC takes the position as it is and the profile holds it while the drive enables (see [Zero at start](#zero-at-start)). |
 
 Homing and switches:
 
@@ -2036,8 +2036,10 @@ than one master is refused: ecat drives one.
   not keep a value has its own again after a power cycle, so check the list.
   A command lcec wrote as a setting is not offered as one: a command that
   zeroes the position (the ECT60's `0x2010` Zero Position, as its quirk file
-  says) is offered as what replaces it (*Start position: Position counts
-  from 0 at start*); another command the quirk file names is listed grey,
+  says) is not needed with ecat (see [Zero at start](#zero-at-start)): *Start
+  position: Position counts from 0 at start* is offered in its place, grey,
+  for a machine that should read 0 at start, and only with its own *Add*;
+  another command the quirk file names is listed grey,
   marked as a command, and is added only with its own *Add*, not with *Add
   all these settings*.
 
@@ -2879,9 +2881,22 @@ Built and unit-tested, not tried on a drive with several axes.
 #### Zero at start
 
 Some drives keep their position counter from an earlier run as long as
-they have power; the Rtelligent ECT60 does. A machine configuration that
-needs the position to start at 0 when LinuxCNC starts ticks *Start
-position: Position counts from 0 at start* on the drive's page.
+they have power; the Rtelligent ECT60 does. That is normal, and nothing is
+needed for it: while the machine is off LinuxCNC's command follows the
+feedback (LinuxCNC 2.9 and 2.10 alike), so it starts from wherever the
+drive stands, and the cia402 profile holds the drive's own position as its
+target until the drive is in "Operation enabled". Homing gives the machine
+its coordinates as usual.
+
+With lcec such a drive could give a following error as soon as the machine
+was switched on: lcec's cia402 component sends the command to the drive
+while it enables, so a target that does not match the kept position
+reached the drive. Writing the drive's Zero Position command at every
+start (the ECT60's `0x2010`) hid that; it is not needed with ecat.
+
+A machine that should read 0 at start (no homing, or a DRO that should
+start at 0) ticks *Start position: Position counts from 0 at start* on the
+drive's page.
 
 When the bus first reaches OP after `ecat` is loaded, the drive's
 position is taken as 0: it is kept in the pin `pos-zero` (counts), taken
@@ -4337,9 +4352,9 @@ try on this machine):
   it must be enabled again after that method).
 
 The window acts on some of these: a command whose purpose is to zero the
-position is replaced by *Start position* when an lcec configuration is
-moved; an error code is shown in words wherever it is shown; a drive that
-keeps its position gets the advice to tick *Start position*.
+position is not imported when an lcec configuration is moved, and *Start
+position* is offered as an option in its place; an error code is shown in
+words wherever it is shown.
 
 A file that cannot be read is skipped, with a warning in the window and
 from `ecatsetup --check`.
@@ -4413,7 +4428,8 @@ program under development, and may change.
 
 - `rtelligent-ect60.yaml`: `0x2010` is a command (Zero Position); the
   drive test's following error is `0x2022`; the ECT60 ignores `0x607D` in
-  CSP; lcec's `0x2010` sdoConfig becomes *Start position*; its
+  CSP; lcec's `0x2010` sdoConfig is not imported (*Start position* offered); it
+  keeps its position over a restart of the bus; its
   tuning settings (`0x2009` the command filter, `0x2023` servo mode 1,
   `0x2026` FOC); its `0x6077` is not recorded (it does not report torque).
 - `beckhoff-el7041.yaml`: pin names and the velocity scale; HAL lines

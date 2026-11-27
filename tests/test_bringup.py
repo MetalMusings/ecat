@@ -63,8 +63,10 @@ class TestRows(Base):
         self.assertEqual(self.row(found, "pdo").state, bringup.OK)
         self.assertIn("set every cycle", self.row(found, "mode").text)
         # nothing seen yet: the workbench rows wait for a try
-        for key in ("op", "enable", "follows", "start"):
+        for key in ("op", "enable", "follows"):
             self.assertEqual(self.row(found, key).state, bringup.TRY, key)
+        # the start position is a property only: either way works with ecat
+        self.assertEqual(self.row(found, "start").state, bringup.OK)
         self.assertIn("shown only when tried", bringup.summary(found))
 
     def test_gaps(self):
@@ -187,11 +189,15 @@ class TestSeen(Base):
         seen = bringup.Seen()
         seen.saw("r1", True, position=1000)
         seen.saw("r1", True, position=51234)       # moved in the first run
-        self.assertEqual(self.row(bringup.rows(drive(), proposal(), seen=seen), "start").state, bringup.TRY)
+        row = self.row(bringup.rows(drive(), proposal(), seen=seen), "start")
+        self.assertIn("not known", row.text)
+        self.assertIsNone(row.remember)
         seen.saw("r2", True, position=51235)       # started where it ended: kept
         row = self.row(bringup.rows(drive(), proposal(), seen=seen), "start")
-        self.assertEqual(row.state, bringup.MISSING)
+        # a property, not a gap: ecat holds the drive's position while it enables
+        self.assertEqual(row.state, bringup.OK)
         self.assertIn("keeps its position", row.text)
+        self.assertIn("Nothing is needed", row.text)
         self.assertEqual(row.card, "operation")
         # offered as the property, seen by the program
         self.assertEqual(row.remember[:2], (("position", "kept"), True))
@@ -210,7 +216,7 @@ class TestSeen(Base):
     def test_the_quirk_files_facts(self):
         # the ECT60's file says it keeps its position and what 0x8611 means
         row = self.row(bringup.rows(drive(identity=ECT60), proposal()), "start")
-        self.assertEqual(row.state, bringup.MISSING)
+        self.assertEqual(row.state, bringup.OK)
         self.assertIn("the device's quirk file says so", row.text)
         self.assertIsNone(row.remember)                 # known already: nothing to keep
         seen = bringup.Seen()
@@ -233,7 +239,9 @@ class TestSeen(Base):
 
     def test_lcec_translation_follows_from_the_commands_purpose(self):
         ect = (0xA88, 0xA880002)
-        self.assertEqual(quirks.lcec_replacement(ect, 0x2010, 0)[0], quirks.ZERO_AT_START)
+        what, why = quirks.lcec_replacement(ect, 0x2010, 0)
+        self.assertEqual(what, quirks.ZERO_AT_START)
+        self.assertIn("not needed with ecat", why)
         self.assertIsNone(quirks.lcec_replacement(ect, 0x2009, 0))
         d = os.environ["ECATSETUP_DEVICES"]
         os.makedirs(d, exist_ok=True)

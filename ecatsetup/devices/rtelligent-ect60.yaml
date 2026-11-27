@@ -7,13 +7,14 @@ match: {vendor: '0x00000A88', product: '0x0A880002'}
 # Objects that are commands, not settings: the test mode does not write
 # them, and a configuration should not set them at every start.
 commands:
-  # purpose zero-position: cia402.zero-at-start does the same without writing to the
-  # drive (From lcec and the lcec import replace an lcec sdoConfig of it by that)
+  # purpose zero-position: cia402.zero-at-start gives the same 0 at start without
+  # writing to the drive (From lcec offers it, optional, for an lcec sdoConfig of it)
   '0x2010': {note: 'Zero Position on the ECT60, a command, not a setting', purpose: zero-position}
 
 # The drive keeps its position counter from an earlier run while it has power (a
-# plasma cutter, 2026-11-09): LinuxCNC starts at 0 and gets a following error at once
-# unless Start position (cia402.zero-at-start) is ticked or the drive homes itself.
+# plasma cutter, 2026-11-09). A property, nothing to do with ecat: LinuxCNC takes the
+# position as it is and the profile holds it while the drive enables. With lcec the
+# drive gave a following error at enable, which writing 0x2010 at start hid.
 position: {kept: true}
 
 # What the drive means by its error codes (0x603F; ECT Series User Manual).
@@ -28,9 +29,9 @@ limits:
   # 0x607D limit of 1 mm, without an error
   travel: the ECT60 ignores its software position limits (0x607D) in CSP
 
-# Importing lcec XML files: lcec's sdoConfig of 0x2010 becomes cia402.zero-at-start
-# from the command's purpose above (tried as a start-up SDO on a plasma cutter,
-# 2026-11-10: it did not work).
+# Importing lcec XML files: lcec's sdoConfig of 0x2010 is not imported (a command,
+# from its purpose above; tried as a start-up SDO on a plasma cutter, 2026-11-10: it
+# did not work); Start position is offered as an option.
 
 # Homing (0x6098). The manual (ECT Series User Manual 2.4.6) lists 17 to 30,
 # 35, 36 and 37; the drive has no 0x60E3. 36 and 37 are torque homing:

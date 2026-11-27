@@ -5,9 +5,12 @@ from real machines; the causes are the common ones, not the only ones."""
 # (symptom, usually, where to look)
 SYMPTOMS = [
     ("A following error as soon as a drive is enabled",
-     "The drive keeps its position from the last run and LinuxCNC starts at 0.",
-     "Slave page, Start position: Position counts from 0 at start (cia402.zero-at-start). "
-     "Do not write a drive's own Zero Position command."),
+     "The scale has the wrong sign (the drive runs away from the command), or FERROR is "
+     "smaller than the drive's lag (a long command filter). With lcec it was often a drive "
+     "that kept its position from the last run: lcec sends the command to the drive while it "
+     "enables, ecat holds the drive's own position until it is enabled.",
+     "Workbench: the Move card shows the direction of a jog, the Response card measures the "
+     "lag and suggests FERROR. Do not write a drive's own Zero Position command."),
     ("A drive switches itself off, or will not enable",
      "The profile shut it down: the heartbeat (watchdog) stopped, the enable timed out, or the "
      "process data was not valid.",

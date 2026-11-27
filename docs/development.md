@@ -780,7 +780,8 @@ but by the time the user looks, the fault has often passed.
 - **Watching while LinuxCNC runs**: the pins live, read only, the same
   view as test mode without changing anything.
 - **A symptom guide** on the Troubleshoot page, from what has been
-  learnt: following error at enable (`zero-at-start`), a varying
+  learnt: following error at enable (scale sign, FERROR against the
+  drive's lag; with lcec a drive that kept its position), a varying
   turn-around (`sync0-shift-ns`), working counter drops (cables, port
   error counters).
 
@@ -4337,6 +4338,24 @@ Done 2026-11-27:
     (`SettingHint.command`) and *Add all* leaves it out.
   - None of it tried on the bus.
 
+Corrected 2026-11-27 (with the user): a drive that keeps its position is not a
+gap. LinuxCNC's motion sets `pos_cmd = pos_fb` while disabled (control.c,
+EMCMOT_MOTION_DISABLED, the same in 2.9 and 2.10), and the cia402 profile holds
+the drive's own position as its target until "Operation enabled". The following
+error the user saw at power-on was with lcec (hal-cia402 sends `pos-cmd` to
+0x607A while the drive enables; message not remembered, most likely the ECT60's
+own 0x8611); never seen with ecat. The same pattern as a forum user's GeRui
+EC1 on lcec (2026-11-22): its own 0x8403 "pulse increment per PWM cycle too
+large", sometimes, at F2. In both what the drive gets as its target while it
+enables is the open point, and that is where ecat holds the drive's position. So the card's *Start position* row is OK
+either way (information, `position: kept` still remembered as a property),
+From lcec offers *Start position* for an lcec `0x2010` only as an option (grey,
+not in *Add all*: `fromlcec.for_add_all`), the import leaves the command out
+without ticking it, and the symptom guide names the scale sign and FERROR against
+the drive's lag. Still to confirm at the machine (bus busy): X without
+zero-at-start, LinuxCNC restarted with X moved, the machine switched on at once:
+no error.
+
 Machine test, with the user (not done yet). On the plasma cutter's bus, a copy of
 QtPlasma; the user's own quirk file (~/.config/ecatsetup/devices/00000a88-0a880002.yaml)
 moved aside first, so that the shipped ECT60 file is what is known, and a scratch folder
@@ -4356,7 +4375,8 @@ as ECATSETUP_DEVICES for the parts that make facts:
    ECT60 manual (scratch folder), read back in Device data.
 6. Response on X: 0x6077 constant on the ECT60 (it reads -1998 / 0): the button offers
    measure: ignore; Look for settings, choose 0x2009, Remember for tuning.
-7. From lcec on a copy of the original lcec QtPlasma: 0x2010 becomes Start position.
+7. From lcec on a copy of the original lcec QtPlasma: 0x2010 is offered as Start
+   position, grey, optional, not taken by Add all.
 
 The goal "homing" as the discussion went through it (for the card's next goal):
 

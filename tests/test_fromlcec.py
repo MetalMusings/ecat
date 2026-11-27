@@ -448,8 +448,9 @@ class TestSettings(Folder):
                          [{"object": "0x2000:00", "type": "UINT", "value": 4000},
                           {"object": "0x2003:00", "type": "UINT", "value": 100}])
 
-    def test_zero_position_becomes_zero_at_start(self):
-        # the ECT60's quirk file: lcec's 0x2010 is a command, ecat's zero-at-start
+    def test_zero_position_offers_zero_at_start(self):
+        # the ECT60's quirk file: lcec's 0x2010 is a command; zero-at-start is offered as an
+        # option (not needed with ecat), added only on its own Add
         self.write("ethercat-conf.xml", XML.replace(
             '<sdoConfig idx="2000"', '<sdoConfig idx="2010" subIdx="0"><sdoDataRaw data="01 00"/>'
             '</sdoConfig><sdoConfig idx="2000"'))
@@ -457,6 +458,9 @@ class TestSettings(Folder):
         hints = fromlcec.setting_hints(fromlcec.find(self.ini), c)
         z = [h for h in hints if h.zero_at_start]
         self.assertEqual(len(z), 1)
+        self.assertIn("not needed with ecat", z[0].what)
+        self.assertNotIn(z[0], fromlcec.for_add_all(hints))
+        self.assertTrue(fromlcec.for_add_all(hints))
         self.assertNotIn("0x2010:00", [h.setting["object"] for h in hints if h.setting])
         fromlcec.add_setting(c, z[0])
         self.assertTrue(c["slaves"][0]["cia402"]["zero-at-start"])
@@ -473,6 +477,7 @@ class TestSettings(Folder):
         self.assertEqual(len(h), 1)
         self.assertIn("a command, says the device's quirk file", h[0].command)
         self.assertFalse(any(x.zero_at_start for x in hints))
+        self.assertNotIn(h[0], fromlcec.for_add_all(hints))
 
 
 try:

@@ -134,11 +134,11 @@ def _start_position(slave, seen):
     if known is True or kept is True:
         where = "the device's quirk file says so" if known is True else \
             "%d counts at the end of one run, %d at the start of the next" % (before, after)
-        return Row("start", MISSING, "Start position",
-                   "the drive keeps its position over a restart of the bus (%s): LinuxCNC starts "
-                   "at 0, so it gets a following error at once. Tick Start position: Position "
-                   "counts from 0 at start, unless the drive homes itself or has an absolute "
-                   "encoder" % where, "operation", remember=keep)
+        return Row("start", OK, "Start position",
+                   "the drive keeps its position over a restart of the bus (%s). Nothing is "
+                   "needed: LinuxCNC takes the position as it is, and the profile holds it while "
+                   "the drive enables. Tick Start position: Position counts from 0 at start only "
+                   "if the machine should read 0 at start" % where, "operation", remember=keep)
     if known is False:
         return Row("start", OK, "Start position", "the drive starts from 0 by itself (the device's "
                    "quirk file)")
@@ -146,9 +146,10 @@ def _start_position(slave, seen):
         return Row("start", OK, "Start position",
                    "the drive starts from 0 by itself (it ended a run at %d counts and started "
                    "the next at %d)" % (before, after), remember=keep)
-    return Row("start", TRY, "Start position",
-               "not known whether the drive keeps its position: shows over two runs of the "
-               "workbench with the drive's power on and the drive moved in the first", "workbench")
+    return Row("start", OK, "Start position",
+               "not known whether the drive keeps its position; either works. It shows over two "
+               "runs of the workbench with the drive's power on and the drive moved in the first",
+               "workbench")
 
 
 def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionary=None):

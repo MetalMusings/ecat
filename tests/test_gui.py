@@ -2715,7 +2715,8 @@ class TestCards(unittest.TestCase):
     def test_symptoms(self):
         from ecatsetup import symptoms
         self.assertTrue(all(len(x) == 3 and all(x) for x in symptoms.SYMPTOMS))
-        self.assertIn("zero-at-start", symptoms.html())
+        self.assertIn("Zero Position command", symptoms.html())
+        self.assertNotIn("zero-at-start", symptoms.html())
         flow = symptoms.flow_html()
         self.assertTrue(flow.index("Save a report") < flow.index("Watch LinuxCNC"))
         self.assertIn("Watch LinuxCNC shows", symptoms.html())

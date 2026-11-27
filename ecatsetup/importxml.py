@@ -199,13 +199,13 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
                 if what == "command":
                     notes.append("%s: %s; imported as lcec had it" % (where, why))
                 if what == "cia402.zero-at-start" and s.get("profile") == "cia402":
-                    s.setdefault("cia402", {})["zero-at-start"] = True
-                    notes.append("%s: %s" % (where, why))
+                    # not imported: a command; zero-at-start is the user's choice
+                    notes.append("%s: not imported: %s" % (where, why))
                     continue
                 if what == "cia402.zero-at-start":
-                    notes.append("%s: 0x%04X:%02X kept; with the cia402 profile it would be "
-                                 "replaced by cia402.zero-at-start (read the slave from the bus "
-                                 "to get the profile)" % (where, index, sub))
+                    notes.append("%s: 0x%04X:%02X kept; with the cia402 profile it is not "
+                                 "needed (read the slave from the bus to get the profile): "
+                                 "%s" % (where, index, sub, why))
             settings.append(_setting(index, sub, data, coe))
         if x.modparams:
             rows, mp_notes = quirks.lcec_modparams(x.type, x.modparams)

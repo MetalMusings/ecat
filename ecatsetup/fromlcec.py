@@ -559,7 +559,7 @@ class SettingHint:
     setting: dict = None        # as in the slave's settings; None for zero-at-start
     now: object = None          # the configuration's value of that object, or None
     what: str = ""              # where it comes from
-    zero_at_start: bool = False
+    zero_at_start: bool = False  # optional (not needed with ecat): not added by Add all
     command: str = ""           # why the object is a command (the quirk file): not added by Add all
 
 
@@ -645,6 +645,11 @@ def setting_hints(f, cfg, dictionaries=None):
             out.append(SettingHint(x.idx, s["name"], st, None if cur is None else _value(cur),
                                    what, command=commands.get(obj, "")))
     return out
+
+
+def for_add_all(hints):
+    """The hints Add all takes: not a command, and not the optional zero-at-start."""
+    return [h for h in hints if not h.command and not h.zero_at_start]
 
 
 def add_setting(cfg, hint):

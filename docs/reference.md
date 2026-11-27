@@ -405,9 +405,10 @@ the bus instead and see [from an lcec configuration](ecatsetup.md#from-an-lcec-c
 
 Some lcec settings are replaced by what ecat does instead (in
 [quirk files](ecatsetup.md#quirk-files)): an Rtelligent ECT60's `sdoConfig` of `0x2010`
-(Zero Position) becomes `cia402: {zero-at-start: true}` when the slave
-gets the cia402 profile (read from the bus); as a `generic` slave the
-setting is kept, with a note.
+(Zero Position) is not imported when the slave gets the cia402 profile
+(read from the bus): it is a command and not needed with ecat, and a note
+says that `cia402: {zero-at-start: true}` does the same if wanted; as a
+`generic` slave the setting is kept, with a note.
 
 lcec's `initCmds`, `idnConfig` and `watchdog` are not imported yet.
 `modParam`s become settings where a [quirk file](ecatsetup.md#quirk-files) translates
@@ -879,8 +880,8 @@ used, and the rest of the shipped file stays.
 | `match` | `vendor` and `product` of the device. |
 | `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [the configuration file](#pdos-and-entries); or `split`, a list of bit pin names from bit 0 (`null` for a bit without a pin) for an object that holds several bits. Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. *Save as quirk file* keeps bit pins too. |
 | `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [the configuration file](#pdos-and-entries). |
-| `commands` | Per object index: why it is a command, or the longer form `note` (why), `value`, `type`, `confirm` (what *Run command* writes) and `purpose` (`zero-position`, `store-parameters`, `clear-fault`, `other`: what it is for, when the program can act on it). The workbench's *Write* does not write it (*Run command* does); as a setting it is warned about, in the window and by `--check`, not refused. An lcec `sdoConfig` of a `zero-position` command becomes `cia402.zero-at-start` (From lcec, the import); one of another command is offered marked, and not by *Add all*. |
-| `position` | `kept: true` when the drive keeps its position counter over a restart of the bus while it has power (then LinuxCNC, starting at 0, gets a following error at once unless *Start position* is ticked), `false` when it starts from 0. |
+| `commands` | Per object index: why it is a command, or the longer form `note` (why), `value`, `type`, `confirm` (what *Run command* writes) and `purpose` (`zero-position`, `store-parameters`, `clear-fault`, `other`: what it is for, when the program can act on it). The workbench's *Write* does not write it (*Run command* does); as a setting it is warned about, in the window and by `--check`, not refused. An lcec `sdoConfig` of a `zero-position` command is not imported; `cia402.zero-at-start` is offered as an option in its place (From lcec, the import's note); one of another command is offered marked, and not by *Add all*. |
+| `position` | `kept: true` when the drive keeps its position counter over a restart of the bus while it has power, `false` when it starts from 0. A property only: with ecat neither needs anything (*Start position* is an option). |
 | `errors` | Per error code (0x603F): what the drive means by it, from its manual. Shown with the code in Diagnose, on the workbench and on the card *Bringing it up*. |
 | `tuning` | Per object: `kind` (`command-filter`, `position-loop`, `feedforward`, `torque`, `gain-high`, `other`) and `type`, and optionally `unit`, `min`, `max`, `factory`, `note`, `tried` (what it gave on a machine), and `when` (`object` and `values`: it is used only in that mode of the drive). Shown by *Look for settings in the drive* ([Measuring a drive's response](ecatsetup.md#measuring-a-drives-response)). |
 | `measure` | `ignore`: per object index, why the response measurement does not record it (a drive's object that does not mean what the standard says). |
@@ -889,7 +890,7 @@ used, and the rest of the shipped file stays.
 | `lcec.types` | lcec type names (`type=` in the XML) that `modparams` and `settings` apply to. |
 | `lcec.modparams` | Per lcec `modParam`: the `object` and `type` of the setting, and `convert` (`milli`: ×1000, `flag`: 0/1, else a number as it is) or `values` (a table). |
 | `lcec.settings` | Settings always added for those types (what the lcec driver always wrote). |
-| `lcec.sdo` | An lcec `sdoConfig` that ecat does differently: `replace` with `cia402.zero-at-start` (when the slave gets the cia402 profile). Not needed for a command whose `purpose` is `zero-position`. |
+| `lcec.sdo` | An lcec `sdoConfig` that ecat does differently: `replace` with `cia402.zero-at-start` (when the slave gets the cia402 profile: the setting is not imported and zero-at-start is offered as an option). Not needed for a command whose `purpose` is `zero-position`. |
 
 ### HAL lines
 

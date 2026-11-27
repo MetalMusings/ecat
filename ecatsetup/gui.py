@@ -7318,7 +7318,7 @@ class HalPage(QWidget):
         row = QHBoxLayout()
         self.lcec_add_all = QPushButton("Add all these settings")
         self.lcec_add_all.clicked.connect(lambda: self.add_lcec_settings(
-            [h for h in self.lcec_hints if not h.command]))
+            fromlcec.for_add_all(self.lcec_hints)))
         row.addWidget(self.lcec_add_all)
         row.addStretch(1)
         self.lcec_card.lay.addLayout(row)
@@ -7770,8 +7770,9 @@ class HalPage(QWidget):
         for i, h in enumerate(hints):
             st.setItem(i, 0, item(h.slave, font=mono()))
             if h.zero_at_start:
-                st.setItem(i, 1, item("cia402.zero-at-start", font=mono()))
-                st.setItem(i, 2, item(h.what, tip=h.what))
+                st.setItem(i, 1, item("cia402.zero-at-start", font=mono(), colour=GREY, tip=h.what))
+                st.setItem(i, 2, item("Start position (optional, not needed with ecat: not added "
+                                      "by Add all)", tip=h.what, colour=GREY))
                 st.setItem(i, 3, item("true"))
                 st.setItem(i, 4, item("false"))
             else:
