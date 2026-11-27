@@ -362,6 +362,27 @@ def dc_warnings(cfg):
     return out + _master_dc_warnings(cfg)
 
 
+def command_warnings(cfg):
+    """Settings that a quirk file calls commands: advice, not a rule (the user,
+    2026-11-27): the file is valid, the user is told that the object does
+    something each time it is written, and at every start it will be."""
+    out = []
+    for s in (cfg or {}).get("slaves") or []:
+        if not isinstance(s, dict):
+            continue
+        for st in s.get("settings") or []:
+            try:
+                index = parse_obj(st.get("object"))[0]
+            except (ValueError, AttributeError):
+                continue
+            why = quirks.command(s, index)
+            if why:
+                out.append("slave %s (%s): setting %s is a command, not a setting, says the device's "
+                           "quirk file (%s): it is written, and so run, at every start"
+                           % (s.get("position"), s.get("name"), st.get("object"), why))
+    return out
+
+
 def _master_dc_warnings(cfg):
     mdc = ((cfg or {}).get("master") or {}).get("dc")
     if not isinstance(mdc, dict) or mdc.get("servo-thread-follows-ref-clock") is True:
@@ -1060,10 +1081,6 @@ def check(cfg, series=None):
                         err("%s: setting %s: the baud rate, data frame and send continuous of serial "
                             "channel %s are its baud, frame and send-continuous"
                             % (where, st.get("object"), cname))
-                why = quirks.command(s, parse_obj(st.get("object"))[0])
-                if why:
-                    err("%s: setting %s is a command, not a setting: %s"
-                        % (where, st.get("object"), why))
             except ValueError as x:
                 err("%s: setting: %s" % (where, x))
             if "value" in st:

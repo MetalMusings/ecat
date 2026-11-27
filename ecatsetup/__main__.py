@@ -842,6 +842,10 @@ def check_file(path, esi_paths=()):
         print("DC reference clock: slave %s (%s), the first with dc: (ETG.1020)" % (ref["position"], ref.get("name")))
     for text in config.dc_warnings(cfg):
         print("Warning: %s" % text)
+    if not esi_paths:
+        # with ESI files the setting check below says it, with the dictionary's view
+        for text in config.command_warnings(cfg):
+            print("Warning: %s" % text)
     for text in config.serial_notes(cfg):
         print("Note: %s" % text)
     for text in config.eoe_warnings(cfg):

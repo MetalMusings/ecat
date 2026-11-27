@@ -326,14 +326,18 @@ Choosing a slave shows:
   (0x2000-0x5FFF) in bold, with type, size, access and, from the ESI file,
   range and default. Select one or more and *Add*: each gets its name and
   type and the value the slave has now (else the ESI default, else 0).
-  PDO mapping objects and commands are not offered. You can also type an
+  PDO mapping objects are not offered; a command is offered grey, with
+  why under the table, and can still be added. You can also type an
   object; it completes from the dictionary. A row with a problem is
   coloured and explained under the table: not in the dictionary, not
   writable in PREOP, a value that does not fit the type or the ESI's
-  range, another type than the dictionary's, or a command (a quirk file's
-  command is an error and `--check` refuses it; one that only looks like a
-  command, by its name, write-only access or 0x1010/0x1011, is a
-  warning). *Read present values* fills the *Now* column from the slave.
+  range, another type than the dictionary's, or a command: one the
+  device's quirk file names, or one that looks like a command by its name,
+  write-only access or 0x1010/0x1011. A command is a warning, also in
+  `--check`, not an error: what a quirk file says is advice, and the file
+  can be saved; but a setting is written at every start, so the command
+  runs at every start. For a command once, use *Run command* on the
+  workbench's SDO card. *Read present values* fills the *Now* column from the slave.
   For a CiA 402 drive *Suggest following-error window* adds the drive's
   own following-error window (the quirk file's object, such as the ECT60's
   `0x2022`, else `0x6065`) as an ordinary setting: twice the joint's `FERROR`
@@ -3032,8 +3036,11 @@ net x-index-enable  joint.0.index-enable <=> x-drive.index-enable
 ```
 
 In EtherCAT Setup the homing card on the slave's page (*Homing by the
-drive*) lists the methods the drive supports, writes the choice and the
-objects it needs as settings, and shows the INI lines above for the
+drive*) lists the methods of the standard and marks those the drive
+supports: a method the drive itself does not list (`0x60E3`) cannot be
+chosen, one that is only missing from its quirk file's list can, marked
+*not in the quirk file's list* (the list may be incomplete). It writes the
+choice and the objects it needs as settings, and shows the INI lines above for the
 joint that uses the drive, and the HAL lines (the `index-enable` net, and
 `home-max-travel` and `home-timeout-ms`), ready to copy. Apply writes the
 net; it does not change the INI file or write the other HAL lines.

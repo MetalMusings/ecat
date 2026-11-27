@@ -111,14 +111,16 @@ class TestCheckSetting(unittest.TestCase):
         found = self.check(object="0x8000:01", type="UDINT")
         self.assertTrue(any("the dictionary says UINT" in t for _, t in found))
 
-    def test_a_quirk_command_is_an_error_and_a_name_a_suspicion(self):
+    def test_a_quirk_command_is_a_warning_and_a_name_a_suspicion(self):
         d = os.environ["ECATSETUP_DEVICES"]
         with open(os.path.join(d, "t.yaml"), "w") as f:
             f.write("name: t\nmatch: {vendor: '0x2', product: '0x1234'}\n"
                     "commands: {'0x9000': Mode is a command here}\n")
         quirks.load(reload=True)
         (level, text), = self.check(object="0x9000:00", type="USINT", value=1)
-        self.assertEqual((level, text), ("error", "Mode is a command here"))
+        # advice, not a rule (the user, 2026-11-27): a warning, with where it comes from
+        self.assertEqual(level, "warning")
+        self.assertIn("quirk file: Mode is a command here", text)
         found = self.check(object="0x8000:02", type="DINT", value=0)    # "Zero position"
         self.assertEqual(found[0][0], "warning")
         self.assertIn("sounds like a command", found[0][1])
@@ -179,15 +181,19 @@ class TestSessionDictionary(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("slave 0 (s): setting 0x8000:01", found[0][1])
 
-    def test_config_check_refuses_a_quirk_command_as_a_setting(self):
+    def test_config_check_warns_of_a_quirk_command_as_a_setting(self):
         from ecatsetup import config, propose  # noqa: F401
-        os.environ.pop("ECATSETUP_DEVICES", None)
+        # the shipped files only: an empty folder of one's own (not the user's real one)
+        os.environ["ECATSETUP_DEVICES"] = tempfile.mkdtemp()
         quirks.load(reload=True)
         cfg = config.from_proposals([], None, "raw", None)
         cfg["slaves"] = [{"position": 0, "name": "d", "profile": "generic",
                           "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
                           "settings": [{"object": "0x2010:00", "type": "UINT", "value": 1}]}]
-        self.assertTrue(any("is a command, not a setting" in e for e in config.check(cfg)))
+        self.assertFalse(any("command" in e for e in config.check(cfg)))
+        found = config.command_warnings(cfg)
+        self.assertEqual(len(found), 1)
+        self.assertIn("setting 0x2010:00 is a command, not a setting, says the device's quirk file", found[0])
 
 
 if __name__ == "__main__":

@@ -1243,8 +1243,6 @@ class SettingPicker(QDialog):
                     f = it.font()
                     f.setBold(True)
                     it.setFont(f)
-                if cmd and cmd[0] == "error":
-                    it.setFlags(it.flags() & ~(Qt.ItemIsSelectable | Qt.ItemIsEnabled))
                 t.setItem(r, c, it)
         t.resizeColumnsToContents()
         t.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -1261,7 +1259,7 @@ class SettingPicker(QDialog):
         self.detail.setText("%s%s" % (guidance.describe(e), "\n" + cmd[1] if cmd else ""))
 
     def chosen(self):
-        """The selected entries, commands left out."""
+        """The selected entries (a command among them is the user's choice: its warning shows)."""
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
         return [self.rows[r] for r in rows]
 
@@ -2351,10 +2349,14 @@ class SlaveView(QWidget):
         self.home_method.addItem("Not set here (the drive's own 0x6098, or a setting of yours)", None)
         for m, ok in homing.choices(s, axis, read):
             text = "%d  %s" % (m.number, m.text)
+            # the drive's own list (0x60E3) is its description: a rule; a quirk file's list
+            # is advice (the user, 2026-11-27): the others stay choosable, marked
+            listed_by_drive = where == "drive (0x60E3)"
             if ok is False:
-                text += "  (the drive does not support it)"
+                text += "  (the drive does not support it)" if listed_by_drive else \
+                    "  (not in the quirk file's list)"
             self.home_method.addItem(text, m.number)
-            if ok is False:
+            if ok is False and listed_by_drive:
                 self.home_method.model().item(self.home_method.count() - 1).setEnabled(False)
         i = self.home_method.findData(chosen["method"]) if chosen else 0
         self.home_method.setCurrentIndex(max(i, 0))
@@ -2379,8 +2381,9 @@ class SlaveView(QWidget):
         else:
             used = []
         parts.append("Supported methods: %s." % (
-            "%s (from the %s)" % (", ".join(map(str, nums)), where) if nums
-            else "not known for this drive, every method of the standard is offered"))
+            "%s (from the %s%s)" % (", ".join(map(str, nums)), where,
+                                     "; the others can still be chosen" if where == "quirk file" else "")
+            if nums else "not known for this drive, every method of the standard is offered"))
         self.home_text.setText(" ".join(parts))
         need = switches.needed(s, self.home_axis_number())
         known = switches.setup(s) is not None
@@ -3561,8 +3564,6 @@ class SlaveView(QWidget):
         d = self.win.session.dictionary(self.position)
         present = self.win.session.bus.get(self.position) is not None
         for e in entries:
-            if guidance.command_reason(s, e.index, e) and guidance.command_reason(s, e.index, e)[0] == "error":
-                continue
             ctype = guidance.config_type(e) or "UDINT"
             value = None
             if from_slave and present and e.data_type != "string":

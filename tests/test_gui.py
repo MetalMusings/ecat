@@ -1350,7 +1350,9 @@ class TestWindow(WindowBase):
         self.assertFalse(page.homing_card.isHidden())
         self.assertEqual(page.home_method.itemData(0), None)
         i = page.home_method.findData(1)
-        self.assertFalse(page.home_method.model().item(i).isEnabled())   # the ECT60 has no 1
+        # the ECT60's quirk file does not list 1: advice, so it can still be chosen, marked
+        self.assertTrue(page.home_method.model().item(i).isEnabled())
+        self.assertIn("not in the quirk file's list", page.home_method.itemText(i))
         page.home_method.setCurrentIndex(page.home_method.findData(17))
         page.homing_edited()
         self.assertEqual(s["homing"]["method"], 17)
@@ -1710,19 +1712,21 @@ class TestWindow(WindowBase):
             page.read_present_values()
         self.assertEqual(page.st.item(n, 4).text(), "7")
 
-    def test_commands_are_not_offered_as_settings(self):
+    def test_commands_are_offered_grey_and_can_be_added(self):
+        # a quirk file's command is advice, not a rule (the user, 2026-11-27)
         w = self.window()
         w.select_slave(0)
         s = w.session.slave(0)
         with mock.patch.object(guidance, "command_reason",
-                               lambda slave, index, entry=None: ("error", "a command")
+                               lambda slave, index, entry=None: ("warning", "a command")
                                if index == 0x2000 else None):
             dlg = gui.SettingPicker(w.slave_page, s, w.session.dictionary(0), set())
             row = [dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount())].index("0x2000:02")
-            self.assertFalse(dlg.table.item(row, 0).flags() & gui.Qt.ItemIsSelectable)
+            self.assertTrue(dlg.table.item(row, 0).flags() & gui.Qt.ItemIsSelectable)
+            self.assertEqual(dlg.table.item(row, 0).toolTip(), "a command")
             n = len(s.get("settings") or [])
             w.slave_page.add_entries(s, [w.session.dictionary(0).entries[(0x2000, 2)]])
-            self.assertEqual(len(s.get("settings") or []), n)       # refused
+            self.assertEqual(len(s.get("settings") or []), n + 1)   # the user's choice
 
     def test_run_command_is_confirmed_and_not_with_a_drive_enabled(self):
         from ecatsetup import testmode

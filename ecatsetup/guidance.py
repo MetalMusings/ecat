@@ -30,12 +30,12 @@ def config_type(entry):
 
 
 def command_reason(slave, index, entry=None):
-    """(level, why) when an object is a command, not a setting: "error"
-    for a quirk file's commands, "warning" for a suspicion from the
-    dictionary; None if it looks like a setting."""
+    """(level, why) when an object is a command, not a setting: "warning", both
+    for a quirk file's commands (advice, not a rule: the user may still set it)
+    and for a suspicion from the dictionary; None if it looks like a setting."""
     why = quirks.command(slave, index)
     if why:
-        return "error", why
+        return "warning", "a command, says the device's quirk file: %s" % why
     if index in _STORE_OBJECTS:
         return "warning", "store/restore parameters run when written: a command, not a setting"
     if entry is not None:
