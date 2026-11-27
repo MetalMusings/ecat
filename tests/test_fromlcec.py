@@ -25,7 +25,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ecatsetup import config, fromlcec, halcheck, integrate, lcecxml, wiring  # noqa: E402
+from ecatsetup import config, fromlcec, halcheck, integrate, lcecxml, quirks, wiring  # noqa: E402
 
 INI = """\
 [EMCMOT]
@@ -460,6 +460,19 @@ class TestSettings(Folder):
         self.assertNotIn("0x2010:00", [h.setting["object"] for h in hints if h.setting])
         fromlcec.add_setting(c, z[0])
         self.assertTrue(c["slaves"][0]["cia402"]["zero-at-start"])
+
+    def test_another_command_is_shown_not_dropped(self):
+        # a quirk command without a purpose the program acts on: offered, marked, its own Add only
+        from unittest import mock
+        self.write("ethercat-conf.xml", XML.replace(
+            '<sdoConfig idx="2000"', '<sdoConfig idx="2010" subIdx="0"><sdoDataRaw data="01 00"/>'
+            '</sdoConfig><sdoConfig idx="2000"'))
+        with mock.patch.object(quirks, "command_purpose", lambda *a: None):
+            hints = fromlcec.setting_hints(fromlcec.find(self.ini), cfg())
+        h = [h for h in hints if h.setting and h.setting["object"] == "0x2010:00"]
+        self.assertEqual(len(h), 1)
+        self.assertIn("a command, says the device's quirk file", h[0].command)
+        self.assertFalse(any(x.zero_at_start for x in hints))
 
 
 try:

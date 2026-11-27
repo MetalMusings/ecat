@@ -3510,7 +3510,7 @@ class TestBringup(WindowBase):
         self.assertFalse(page.bringup_card.isHidden())
         keys = [r.key for r in page.bringup_found]
         self.assertEqual(keys[-4:], ["op", "enable", "follows", "start"])
-        mark, what, text, go = page.bringup_rows[keys.index("op")]
+        mark, what, text, go, _keep = page.bringup_rows[keys.index("op")]
         self.assertEqual(mark.text(), "?")
         self.assertEqual(go.text(), "Workbench →")
         self.assertIn("shown only when tried", page.bringup_summary.text())
@@ -3518,7 +3518,7 @@ class TestBringup(WindowBase):
         seen = w.bringup_seen.setdefault(0, bringup.Seen())
         seen.saw("run", True, 4)
         page.show_bringup()
-        mark, what, text, go = page.bringup_rows[keys.index("op")]
+        mark, what, text, go, _keep = page.bringup_rows[keys.index("op")]
         self.assertEqual(mark.text(), "✓")
         self.assertTrue(go.isHidden())
         # a row leads to its card
@@ -3572,6 +3572,94 @@ class TestDeviceData(WindowBase):
         o = mock.patch.object(devicedataview, "open_url", self.opened.append)
         o.start()
         self.addCleanup(o.stop)
+
+    def test_homing_methods_and_inputs_from_the_manual(self):
+        from ecatsetup import devicedata, homing
+        w = self.window()
+        w.select_slave(0)
+        ident = self.quirks.identity(w.session.slave(0))
+        dlg = self.dv.MethodsDialog(w, None, {}, None)
+        self.addCleanup(dlg.deleteLater)
+        for n in (19, 20, 21, 22, 35, 36, 37):
+            dlg.boxes[n].setChecked(True)
+        dlg.more.setText("-1")
+        dlg.texts[36].setText("torque homing towards CCW")
+        dlg.ref.setText("manual 2.4.6")
+        self.assertEqual(dlg.methods(), [-1, 19, 20, 21, 22, 35, 36, 37])
+        path = self.dv.remember_methods(w, w, 0, None, None, ask=False, dialog=dlg)
+        self.assertTrue(path.startswith(self.tmp.name))
+        self.assertEqual(homing.supported(w.session.slave(0), read=lambda *a: None)[0],
+                         [-1, 19, 20, 21, 22, 35, 36, 37])
+        self.assertEqual(homing.method(36, w.session.slave(0)).text, "torque homing towards CCW")
+        src = devicedata.sources(ident)["homing methods"]
+        self.assertEqual((src["kind"], src["list"], src["relation"], src["ref"]),
+                         ("manual", "closed", "completes", "manual 2.4.6"))
+        # the inputs: a function object per input, its codes, the polarity bits
+        dlg = self.dv.InputsDialog(w, ["IN1", "IN2"])
+        self.addCleanup(dlg.deleteLater)
+        self.assertEqual(list(dlg.rows), ["IN1", "IN2"])
+        dlg.rows["IN1"][0].setText("0x2007:01")
+        dlg.rows["IN1"][1].setText("0")
+        with self.assertRaisesRegex(ValueError, "no function is needed"):
+            dlg.inputs()
+        for k, v in (("home", "3"), ("negative", "1"), ("positive", "2"), ("none", "0")):
+            dlg.codes[k].setText(v)
+        dlg.pobject.setText("0x2008:00")
+        self.assertIsNotNone(self.dv.remember_inputs(w, w, 0, ask=False, dialog=dlg))
+        got = self.quirks.of(ident)["homing"]["inputs"]
+        self.assertEqual(got["function"]["objects"], {"IN1": "0x2007:01"})
+        self.assertEqual(got["polarity"]["choices"], {"normally open": 1, "normally closed": 0})
+
+    def test_the_bringup_card_keeps_what_it_saw(self):
+        from ecatsetup import bringup
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
+        w.select_slave(0)
+        page = w.slave_page
+        seen = w.bringup_seen.setdefault(0, bringup.Seen())
+        seen.saw("r1", True, 7, error=0x8123, position=5000)
+        seen.saw("r2", True, 7, error=0x8123, position=5001)
+        page.show_bringup()
+        keys = [r.key for r in page.bringup_found]
+        n = keys.index("start")
+        self.assertFalse(page.bringup_rows[n][4].isHidden())         # Remember...
+        page.bringup_remember(n)
+        ident = self.quirks.identity(s)
+        self.assertIs(self.quirks.keeps_position(ident), True)
+        self.assertIsNone(page.bringup_found[keys.index("start")].remember)   # known now
+        # an error code: the meaning typed in the source dialog's text
+        n = keys.index("enable")
+        with mock.patch.object(self.dv.SourceDialog, "exec_",
+                               lambda d: (d.note.setText("overcurrent"), QDialog.Accepted)[1]):
+            page.bringup_remember(n)
+        self.assertEqual(self.quirks.error_meaning(ident, 0x8123), "overcurrent")
+        self.assertIn("overcurrent", page.bringup_found[n].text)
+
+    def test_what_the_workbench_saw_is_offered_as_facts(self):
+        from types import SimpleNamespace
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp", "modes": ["hm"]}
+        s["homing"] = {"method": 21}
+        ident = self.quirks.identity(s)
+        dt = SimpleNamespace(slave=s, axis=0, name="x")
+        # a torque that never moved during a measurement
+        card = w.test_page.response
+        with mock.patch.object(card, "drive", lambda: dt):
+            card.show_constant(SimpleNamespace(constant={0x6077: "it stayed at 0"}))
+            self.assertFalse(card.ignore_button.isHidden())
+            card.remember_constant()
+        self.assertIn(0x6077, self.quirks.measure_ignore(ident))
+        # a drive that did not follow after homing by 21
+        with mock.patch.object(gui.QMessageBox, "question", lambda *a, **k: gui.QMessageBox.Yes):
+            w.test_page.move.offer_enable_again(dt)
+        self.assertEqual(self.quirks.of(ident)["homing"]["enable-again"], [21])
+        from ecatsetup import devicedata
+        self.assertEqual(devicedata.sources(ident)["homing enable-again"]["kind"], "observed")
+        # known now: not asked again
+        with mock.patch.object(gui.QMessageBox, "question", side_effect=AssertionError):
+            self.assertIsNone(w.test_page.move.offer_enable_again(dt))
 
     def test_the_source_asks_what_the_sort_of_fact_needs(self):
         # experience: where it worked; a list: closed or open; a property: neither

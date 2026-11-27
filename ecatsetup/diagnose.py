@@ -176,9 +176,17 @@ def cia402_state(sw):
     return "unknown", ""
 
 
-def error_text(code):
+def error_text(code, key=None):
+    """An error code (0x603F) in words: what the device's quirk file says the drive
+    means by it, else the standard's name or class. key: a (vendor, product) or a
+    configuration's slave, or None."""
     if code == 0:
         return "no error"
+    if key:
+        from . import quirks
+        meaning = quirks.error_meaning(key, code)
+        if meaning:
+            return "0x%04X %s (the device's quirk file)" % (code, meaning)
     name = ERROR_CODES.get(code)
     cls = next((n for base, n in reversed(ERROR_CLASSES) if code >= base), "")
     return "0x%04X %s" % (code, name or ("(%s)" % cls if cls else ""))
@@ -263,6 +271,7 @@ class Report:
     cia402: Cia402 = None
     processor: Processor = None
     sync: list = field(default_factory=list)    # [SyncInfo]
+    identity: tuple = None          # (vendor, product)
 
     @property
     def state_name(self):
@@ -287,6 +296,8 @@ def examine(positions, seconds=2.0):
         state, err, code = al_status(pos)
         r = Report(pos, name, flagged, state, err, code, seconds=seconds)
         info = infos[pos]
+        if info.get("vendor_id") is not None and info.get("product_code") is not None:
+            r.identity = (info["vendor_id"], info["product_code"])
         if flagged and not err and state != 8:
             r.last_code = info.get("al_status_code")
         dl, now, then = dl_status(pos), counters(pos), first[pos]
@@ -441,8 +452,9 @@ def sync_findings(s, state, seconds):
     return problems, lines
 
 
-def cia402_findings(c):
-    """(problems, lines) about a drive."""
+def cia402_findings(c, key=None):
+    """(problems, lines) about a drive; key: its (vendor, product), for what its quirk
+    file says about its error codes."""
     if c.statusword is None:
         return 1, ["CiA 402: the status word 0x6041 cannot be read"]
     sw, lines, problems = c.statusword, [], 0
@@ -453,7 +465,7 @@ def cia402_findings(c):
         lines.append("  -> %s" % c.hint)
     if c.error_code:
         problems += 1
-        lines.append("Error code 0x603F: %s" % error_text(c.error_code))
+        lines.append("Error code 0x603F: %s" % error_text(c.error_code, key))
     if not sw & (1 << 4) and c.state in ("Switched on", "Operation enabled"):
         problems += 1
         lines.append("  -> no voltage on the power stage (status word bit 4): check the main power")
@@ -541,7 +553,7 @@ def diagnose(positions, seconds=2.0, out=print):
             out("  Error register 0x1001: 0x%02X" % r.error_register)
 
         if r.cia402 is not None:
-            n, lines = cia402_findings(r.cia402)
+            n, lines = cia402_findings(r.cia402, r.identity)
             problems += n
             for line in lines:
                 out("  " + line)

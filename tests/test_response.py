@@ -243,6 +243,16 @@ class TestAnalyse(unittest.TestCase):
             res = response.analyse(rec)
             self.assertAlmostEqual(res.torque_per_accel, 0.02, delta=0.0006, msg="%g counts/mm" % counts)
 
+    def test_a_torque_that_never_moves_means_nothing(self):
+        # the ECT60's 0x6077: constant through the move; offered as measure: ignore
+        rec = recording(kp=200.0, ff=1.0, with_de=False)
+        rec.data["torque"] = [-1998.0] * len(rec.data["cmd"])
+        res = response.analyse(rec)
+        self.assertIn(0x6077, res.constant)
+        self.assertIsNone(res.torque_peak)
+        rec.data["torque"] = [float(n % 7) for n in range(len(rec.data["cmd"]))]
+        self.assertEqual(response.analyse(rec).constant, {})
+
     def test_torque(self):
         rec = recording(kp=200.0, ff=1.0, with_de=False,
                         limits={"max-torque": [300, 1000], "following-error": [2000, 4000]})

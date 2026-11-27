@@ -4297,6 +4297,39 @@ Done 2026-11-27:
   0x603F meaning as a fact (item 5), the next goals (homing and switches), and the
   Device data page's "not known yet" rows are still its own. Not tried on the bus.
 
+- Items 4-7 (2026-11-27):
+  - Quirk format: `commands` rich form `purpose` (`quirks.COMMAND_PURPOSES`,
+    `command_purpose`), `position: {kept}` (`keeps_position`), `errors` per 0x603F code
+    (`error_meaning`); fact kinds `position kept` and `errors *` (section Drive test),
+    and the Device data page's "not known yet" rows for them. The ECT60 file has
+    `position: {kept: true}`, `errors 0x8611` and 0x2010 with `purpose: zero-position`;
+    its hand-written `lcec.sdo` row is gone.
+  - Item 4: homing card *Remember the drive's methods...* (`devicedataview.MethodsDialog`,
+    `remember_methods`: the catalogue's numbers ticked plus others typed, what 36/37 and
+    other own numbers do as `homing describe`, list closed/open, relation completes or
+    corrects (0x60E3)) and *Remember how its inputs are set up...* (`InputsDialog`,
+    `remember_inputs`: an object per input, the codes, one polarity object with a bit per
+    input, checked with `quirks._inputs`); the bring-up card's *Remember for the device
+    type...* (`Row.remember`, `SlaveView.bringup_remember`) for "keeps its position"
+    (source observed) and an error code's meaning (typed; `SourceDialog` note label by
+    kind, `devicedataview.NOTE_LABELS`). Not built: limits and tuning from the window.
+  - Item 5: `diagnose.error_text(code, key)` gives the quirk file's meaning (Diagnose,
+    the workbench's tiles, Live's line, the card); the event log's texts do not (no slave
+    identity there). AL codes: the card's "Reaches OP" row points a DC slave that does
+    not reach OP to *Remember this period* (the measured SYNC0 results, where AL 0x0036
+    already becomes a device fact); other AL codes are not kept as facts (they are the
+    file's or the computer's more often than the device's).
+  - Item 6: `response.Result.constant` (0x6077 that stays the same through the move: the
+    torque results are left out) and the Response card's *Remember: 0x6077 means nothing
+    here...* (`measure ignore`, observed); the Move card's `offer_enable_again` when the
+    follow check after homing fails and nothing says to enable again (`homing
+    enable-again`, observed, an open list); the start position on the card (item 3).
+  - Item 7: `quirks.lcec_replacement`: the file's own `lcec.sdo` first, else a
+    `zero-position` command becomes `cia402.zero-at-start`, another command is
+    "command": the import keeps it with a note, From lcec lists it grey
+    (`SettingHint.command`) and *Add all* leaves it out.
+  - None of it tried on the bus.
+
 The goal "homing" as the discussion went through it (for the card's next goal):
 
 | What is needed | Standard or manufacturer's | From |

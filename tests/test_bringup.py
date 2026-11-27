@@ -147,8 +147,11 @@ class TestSeen(Base):
         seen.saw("r2", True, position=51235)       # started where it ended: kept
         row = self.row(bringup.rows(drive(), proposal(), seen=seen), "start")
         self.assertEqual(row.state, bringup.MISSING)
-        self.assertIn("kept its position", row.text)
+        self.assertIn("keeps its position", row.text)
         self.assertEqual(row.card, "operation")
+        # offered as the property, seen by the program
+        self.assertEqual(row.remember[:2], (("position", "kept"), True))
+        self.assertEqual(row.remember[4], "observed")
         # ticked: known
         self.assertEqual(self.row(bringup.rows(drive(**{"zero-at-start": True}), proposal(), seen=seen),
                                   "start").state, bringup.OK)
@@ -159,6 +162,45 @@ class TestSeen(Base):
         row = self.row(bringup.rows(drive(), proposal(), seen=seen), "start")
         self.assertEqual(row.state, bringup.OK)
         self.assertIn("starts from 0 by itself", row.text)
+
+    def test_the_quirk_files_facts(self):
+        # the ECT60's file says it keeps its position and what 0x8611 means
+        row = self.row(bringup.rows(drive(identity=ECT60), proposal()), "start")
+        self.assertEqual(row.state, bringup.MISSING)
+        self.assertIn("the device's quirk file says so", row.text)
+        self.assertIsNone(row.remember)                 # known already: nothing to keep
+        seen = bringup.Seen()
+        seen.saw("r", True, 7, error=0x8611)
+        row = self.row(bringup.rows(drive(identity=ECT60), proposal(), seen=seen), "enable")
+        self.assertIn("Position following error too large", row.text)
+        self.assertIsNone(row.remember)
+        # an unknown code is offered to be kept, the meaning typed from the manual
+        row = self.row(bringup.rows(drive(), proposal(), seen=seen), "enable")
+        self.assertEqual(row.remember[0], ("errors", "0x8611"))
+        self.assertEqual(row.remember[3], "")
+        self.assertEqual(row.remember[4], "manual")
+
+    def test_an_error_code_in_words(self):
+        from ecatsetup import diagnose
+        self.assertIn("0x8611 Position following error too large (more than 0x2022, in pulses) (the device's quirk file)",
+                      diagnose.error_text(0x8611, (0xA88, 0xA880002)))
+        self.assertNotIn("quirk file", diagnose.error_text(0x8611))
+        self.assertNotIn("quirk file", diagnose.error_text(0x8611, (2, 0x1234)))
+
+    def test_lcec_translation_follows_from_the_commands_purpose(self):
+        ect = (0xA88, 0xA880002)
+        self.assertEqual(quirks.lcec_replacement(ect, 0x2010, 0)[0], quirks.ZERO_AT_START)
+        self.assertIsNone(quirks.lcec_replacement(ect, 0x2009, 0))
+        d = os.environ["ECATSETUP_DEVICES"]
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "t.yaml"), "w") as f:
+            f.write("name: t\nmatch: {vendor: '0x2', product: '0x1234'}\n"
+                    "commands: {'0x3000': Store, '0x3001': {note: Zero it, purpose: zero-position}}\n")
+        quirks.load(reload=True)
+        what, why = quirks.lcec_replacement((2, 0x1234), 0x3000, 0)
+        self.assertEqual(what, "command")
+        self.assertIn("run at every start", why)
+        self.assertEqual(quirks.lcec_replacement((2, 0x1234), 0x3001, 0)[0], quirks.ZERO_AT_START)
 
     def test_the_key_changes_only_with_what_the_card_shows(self):
         seen = bringup.Seen()

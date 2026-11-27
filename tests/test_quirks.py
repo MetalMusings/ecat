@@ -62,7 +62,12 @@ class TestFiles(unittest.TestCase):
         self.assertEqual(ect["commands"], {0x2010: "Zero Position on the ECT60, a command, not a setting"})
         self.assertEqual(ect["limits"]["following-error"], (0x2022, 0, "uint32"))
         self.assertIn("ignores", ect["limits"]["travel"])
-        self.assertEqual(quirks.lcec_sdo((0xA88, 0xA880002))[(0x2010, 0)][0], "cia402.zero-at-start")
+        # the translation follows from the command's purpose (no hand-written lcec row)
+        self.assertEqual(quirks.lcec_sdo((0xA88, 0xA880002)), {})
+        self.assertEqual(quirks.command_purpose((0xA88, 0xA880002), 0x2010), "zero-position")
+        self.assertEqual(quirks.lcec_replacement((0xA88, 0xA880002), 0x2010, 0)[0], "cia402.zero-at-start")
+        self.assertIs(quirks.keeps_position((0xA88, 0xA880002)), True)
+        self.assertIn("following error", quirks.error_meaning((0xA88, 0xA880002), 0x8611))
         self.assertEqual(quirks.pins((2, 0x1B813052))[(0x7010, 0x21)]["scale"], 32767)
         self.assertEqual(quirks.for_lcec_type("EL7031")["name"],
                          "Beckhoff EL70x1, position interface (lcec el70x1)")
@@ -99,7 +104,11 @@ class TestFiles(unittest.TestCase):
                           ({"limits": {"travel": 3}}, "limits.travel needs object and type"),
                           ({"commands": {"x": "y"}}, "object 'x' is not a hex number"),
                           ({"settings": [{"object": "0x2000:01"}]},
-                           "settings need object, type and value")):
+                           "settings need object, type and value"),
+                          ({"commands": {"0x2010": {"note": "z", "purpose": "fly"}}}, "purpose is one of"),
+                          ({"position": {"kept": "yes"}}, "position needs kept"),
+                          ({"errors": {"0x8611": ""}}, "a code of 16 bits and a text"),
+                          ({"errors": {"0x18611": "x"}}, "a code of 16 bits and a text")):
             with self.assertRaisesRegex(quirks.QuirkError, msg):
                 quirks.parse(data)
 

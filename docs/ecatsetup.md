@@ -582,9 +582,9 @@ with a button to the card where it is filled in:
 | Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
 | Following-error window | The quirk file's object (the ECT60's 0x2022), or the standard 0x6065. |
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
-| Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; the drive's manual says what the drive means by it); a drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
+| Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
 | Follows | Seen when you jog it on the Move card. |
-| Start position | Whether the drive keeps its position counter over a restart of the bus: seen over two runs of the workbench with the drive's power on (move it in the first). A drive that keeps it gets a following error in LinuxCNC at once, since LinuxCNC starts at 0: the row then advises *Start position: Position counts from 0 at start*, unless the drive homes itself or has an absolute encoder. |
+| Start position | Whether the drive keeps its position counter over a restart of the bus: from the device's quirk file, or seen over two runs of the workbench with the drive's power on (move it in the first), and then offered with *Remember for the device type...*. A drive that keeps it gets a following error in LinuxCNC at once, since LinuxCNC starts at 0: the row then advises *Start position: Position counts from 0 at start*, unless the drive homes itself or has an absolute encoder. |
 
 What the workbench saw is kept only while the window is open: the card is
 worked out again each time from the configuration, the bus, the quirk
@@ -2016,8 +2016,12 @@ than one master is refused: ecat drives one.
   have, or has with another value, are listed under the pins with *Add* (and
   *Add all these settings*); nothing is added unasked. A drive that does
   not keep a value has its own again after a power cycle, so check the list.
-  A command lcec wrote as a setting (the ECT60's `0x2010` Zero Position) is
-  offered as what replaces it (*Start position: Position counts from 0 at start*).
+  A command lcec wrote as a setting is not offered as one: a command that
+  zeroes the position (the ECT60's `0x2010` Zero Position, as its quirk file
+  says) is offered as what replaces it (*Start position: Position counts
+  from 0 at start*); another command the quirk file names is listed grey,
+  marked as a command, and is added only with its own *Add*, not with *Add
+  all these settings*.
 
 Tried on a copy of the plasma cutter's lcec configuration (three ECT60
 through the cia402 component, an EaserCAT 7000 with bit pins), against
@@ -4293,7 +4297,25 @@ try on this machine):
 - *Run command...* on the SDO card, for an object that is not known as a
   command: *Remember it as a command...*;
 - after a switch test on the Switches card that reached one input:
-  *Name input bit ...* (such as IN5 or DI3, as the manual names it).
+  *Name input bit ...* (such as IN5 or DI3, as the manual names it);
+- on the homing card, *Remember the drive's methods...*: the methods the
+  manual lists, ticked against the standard's, whether that is all of
+  them, and what the drive's own numbers (36, 37, negatives) do; and
+  *Remember how its inputs are set up...*: which object gives each input
+  its function, with which codes, and how the polarity is set;
+- on the card *Bringing it up*: that the drive keeps its position over a
+  restart of the bus (seen over two runs of the workbench), and what an
+  error code the drive reported means (typed from its manual);
+- what the program sees by itself, offered as it is seen: a torque
+  (0x6077) that did not move during a measurement on the Response card
+  (*Remember: 0x6077 means nothing here...*), and a drive that did not
+  follow its target after homing by a method (the Move card asks whether
+  it must be enabled again after that method).
+
+The window acts on some of these: a command whose purpose is to zero the
+position is replaced by *Start position* when an lcec configuration is
+moved; an error code is shown in words wherever it is shown; a drive that
+keeps its position gets the advice to tick *Start position*.
 
 A file that cannot be read is skipped, with a warning in the window and
 from `ecatsetup --check`.

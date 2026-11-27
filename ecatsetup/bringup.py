@@ -31,6 +31,9 @@ class Row:
     what: str           # the row's name
     text: str           # what is known, or how the gap is filled
     card: str = None    # devicedataview.CARDS: where it is filled
+    # a fact the row can keep for the device type: (path, value, what, note, source kind);
+    # note not None: the user types the value (what an error code means)
+    remember: tuple = None
 
 
 @dataclass
@@ -101,23 +104,42 @@ def _objects(slave, direction):
 
 
 def _start_position(slave, seen):
+    """The start position row: the quirk file's property first, then what two runs of
+    the workbench showed (offered as the property, source observed)."""
     c = slave.get("cia402") or {}
-    if c.get("zero-at-start"):
-        return Row("start", OK, "Start position", "counts from 0 at start (ticked)", "operation")
+    known = quirks.keeps_position(slave)
+    ticked = bool(c.get("zero-at-start"))
     runs = [r for r in (seen.runs if seen else []) if r]
+    kept = None
+    before = after = None
     if len(runs) >= 2:
         before, after = runs[-2][1], runs[-1][0]
         if abs(after - before) <= SAME_COUNTS and abs(after) > SAME_COUNTS:
-            return Row("start", MISSING, "Start position",
-                       "the drive kept its position over a restart of the bus (%d counts at the end of "
-                       "one run, %d at the start of the next): LinuxCNC starts at 0, so it gets a "
-                       "following error at once. Tick Start position: Position counts from 0 at "
-                       "start, unless the drive homes itself or has an absolute encoder"
-                       % (before, after), "operation")
-        if abs(after) <= SAME_COUNTS and abs(before) > SAME_COUNTS:
-            return Row("start", OK, "Start position",
-                       "the drive starts from 0 by itself (it ended a run at %d counts and started "
-                       "the next at %d)" % (before, after))
+            kept = True
+        elif abs(after) <= SAME_COUNTS and abs(before) > SAME_COUNTS:
+            kept = False
+    keep = None
+    if known is None and kept is not None:
+        keep = (("position", "kept"), kept, "The drive %s its position over a restart of the bus"
+                % ("keeps" if kept else "does not keep"), None, "observed")
+    if ticked:
+        return Row("start", OK, "Start position", "counts from 0 at start (ticked)", "operation",
+                   remember=keep)
+    if known is True or kept is True:
+        where = "the device's quirk file says so" if known is True else \
+            "%d counts at the end of one run, %d at the start of the next" % (before, after)
+        return Row("start", MISSING, "Start position",
+                   "the drive keeps its position over a restart of the bus (%s): LinuxCNC starts "
+                   "at 0, so it gets a following error at once. Tick Start position: Position "
+                   "counts from 0 at start, unless the drive homes itself or has an absolute "
+                   "encoder" % where, "operation", remember=keep)
+    if known is False:
+        return Row("start", OK, "Start position", "the drive starts from 0 by itself (the device's "
+                   "quirk file)")
+    if kept is False:
+        return Row("start", OK, "Start position",
+                   "the drive starts from 0 by itself (it ended a run at %d counts and started "
+                   "the next at %d)" % (before, after), remember=keep)
     return Row("start", TRY, "Start position",
                "not known whether the drive keeps its position: shows over two runs of the "
                "workbench with the drive's power on and the drive moved in the first", "workbench")
@@ -216,15 +238,27 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("op", OK, "Reaches OP", "seen at %s" % s.op))
     elif s.not_op:
         out.append(Row("op", BAD, "Reaches OP", s.not_op + ": Diagnose shows its AL status code "
-                       "and what it means", "diagnose"))
+                       "and what it means%s" % (
+                           "; when it is 0x0036 (SYNC0 cycle time), the device refused this servo "
+                           "period: remember that on the Live tab's Synchronisation card, so "
+                           "that it is known for the device" if dc.get("assign-activate") else ""),
+                       "diagnose"))
     else:
         out.append(Row("op", TRY, "Reaches OP", "shows when the workbench runs", "workbench"))
     if s.enabled:
         out.append(Row("enable", OK, "Enables", "\"Operation enabled\" seen at %s" % s.enabled))
     elif s.fault:
-        out.append(Row("enable", BAD, "Enables",
-                       "fault %s: what the drive means by it is in its manual (Diagnose shows the "
-                       "code)" % diagnose.error_text(s.fault), "diagnose"))
+        if quirks.error_meaning(slave, s.fault):
+            out.append(Row("enable", BAD, "Enables", "fault %s" % diagnose.error_text(s.fault, slave),
+                           "diagnose"))
+        else:
+            code = "0x%04X" % s.fault
+            out.append(Row("enable", BAD, "Enables",
+                           "fault %s: what the drive means by it is in its manual; remember it "
+                           "for the device type, so that it is said in words next time"
+                           % diagnose.error_text(s.fault), "diagnose",
+                           remember=(("errors", code), None, "Error code %s: what it means" % code,
+                                     "", "manual")))
     elif s.stuck:
         out.append(Row("enable", BAD, "Enables",
                        "stays in \"Switch on disabled\" while enable is held: usually the hardware "

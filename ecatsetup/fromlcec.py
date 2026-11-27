@@ -560,6 +560,7 @@ class SettingHint:
     now: object = None          # the configuration's value of that object, or None
     what: str = ""              # where it comes from
     zero_at_start: bool = False
+    command: str = ""           # why the object is a command (the quirk file): not added by Add all
 
 
 _SIZES = {"SINT": 1, "USINT": 1, "INT": 2, "UINT": 2, "DINT": 4, "UDINT": 4, "LINT": 8,
@@ -611,19 +612,21 @@ def setting_hints(f, cfg, dictionaries=None):
                 have[config.parse_obj(st.get("object"))] = st
             except ValueError:
                 pass
-        replace = quirks.lcec_sdo((x.vendor_id, x.product_code))
         rows_ = []
+        commands = {}
         for index, sub, data in x.sdos:
             if sub == "complete":
                 continue
-            if (index, sub) in replace:
-                what, why = replace[(index, sub)]
-                if what == "cia402.zero-at-start" and s.get("profile") == "cia402" \
-                        and not (s.get("cia402") or {}).get("zero-at-start"):
+            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub)
+            if got and got[0] == quirks.ZERO_AT_START:
+                if s.get("profile") == "cia402" and not (s.get("cia402") or {}).get("zero-at-start"):
                     out.append(SettingHint(x.idx, s["name"], what="lcec's sdoConfig 0x%04X:%02X: "
-                                           "%s" % (index, sub, why), zero_at_start=True))
+                                           "%s" % (index, sub, got[1]), zero_at_start=True))
                 continue
-            if quirks.command(s, index):
+            if got and got[0] == "command":
+                # advice, not a rule: shown, and added only on its own Add
+                commands[(index, sub)] = got[1]
+            elif got:
                 continue
             rows_.append((importxml._setting(index, sub, data, coe), "lcec's sdoConfig"))
         if x.modparams:
@@ -640,7 +643,7 @@ def setting_hints(f, cfg, dictionaries=None):
             if cur is not None and _value(cur) == _value(st):
                 continue
             out.append(SettingHint(x.idx, s["name"], st, None if cur is None else _value(cur),
-                                   what))
+                                   what, command=commands.get(obj, "")))
     return out
 
 

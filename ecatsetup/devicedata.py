@@ -119,6 +119,10 @@ KINDS = (
     Kind(("homing", "input-bits", "*"), "Homing", "Input {2} is 0x60FD bit", "switches"),
     Kind(("homing", "inputs"), "Homing", "How the inputs get their function and polarity", "switches"),
     Kind(("limits", "*"), "Drive test", "Limit: {1}", "move"),
+    Kind(("position", "kept"), "Drive test", "Keeps its position over a restart of the bus", "operation",
+         value="true or false; the advice (Start position) is the window's"),
+    Kind(("errors", "*"), "Drive test", "Error code {1}: what it means", "diagnose",
+         value="text, from the drive's manual"),
     # what an object does, its range and factory value; its `tried` text is experience
     Kind(("tuning", "*"), "Tuning", "Tuning object {1}", "response"),
     Kind(("measure", "ignore", "*"), "Tuning", "{2} is not recorded when measuring", "response"),
@@ -139,7 +143,7 @@ def _keys(raw, head):
         d = d.get(p) if isinstance(d, dict) else None
     if not isinstance(d, dict):
         return []
-    obj = head[0] in ("commands", "pins", "tuning", "measure")
+    obj = head[0] in ("commands", "pins", "tuning", "measure", "errors")
     return [_obj_key(k) if obj else str(k) for k in d]
 
 
@@ -306,6 +310,13 @@ def unknowns(slave, raw, measured_results):
         if not raw.get("tuning"):
             out.append(("Tuning", "No tuning objects known: Look for settings in the drive on the Response "
                         "card, and remember what helps.", "response"))
+        if not isinstance(raw.get("position"), dict):
+            out.append(("Drive test", "Not known whether the drive keeps its position over a restart of "
+                        "the bus: the card Bringing it up sees it over two runs of the workbench.",
+                        "operation"))
+        if not raw.get("errors"):
+            out.append(("Drive test", "No error codes known: when the drive reports one, the card "
+                        "Bringing it up offers to remember what it means.", "operation"))
     if (slave or {}).get("dc") and not measured_results:
         out.append(("Timing", "No SYNC0 period measured for this device: after a run, Remember this period "
                     "on the Live tab.", "sync"))

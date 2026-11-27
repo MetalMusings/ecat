@@ -189,13 +189,15 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
         elif x.type != "generic" and prop and "dc" in s:
             pass   # from the slave's own data
         settings = []
-        replace = quirks.lcec_sdo((x.vendor_id, x.product_code))
         for index, sub, data in x.sdos:
             if sub == "complete":
                 notes.append("%s: SDO 0x%04X complete access not imported" % (where, index))
                 continue
-            if (index, sub) in replace:
-                what, why = replace[(index, sub)]
+            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub)
+            if got:
+                what, why = got
+                if what == "command":
+                    notes.append("%s: %s; imported as lcec had it" % (where, why))
                 if what == "cia402.zero-at-start" and s.get("profile") == "cia402":
                     s.setdefault("cia402", {})["zero-at-start"] = True
                     notes.append("%s: %s" % (where, why))

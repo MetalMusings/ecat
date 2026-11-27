@@ -62,7 +62,7 @@ class TestFacts(unittest.TestCase):
                "settings": [{"object": "0x2009:00", "type": "UINT", "value": 2000}]}
         m = devicedata.merge(base, top)
         self.assertEqual(devicedata.get(m, ("commands", "0x2011")), "mine")
-        self.assertEqual(devicedata.get(m, ("commands", "0x2010")),
+        self.assertEqual(devicedata.get(m, ("commands", "0x2010"))["note"],
                          "Zero Position on the ECT60, a command, not a setting")
         self.assertEqual(devicedata.get(m, ("homing", "input-bits", "IN5")), 21)
         self.assertEqual(devicedata.get(m, ("homing", "input-bits", "IN4")), 19)
@@ -306,8 +306,9 @@ class TestKinds(unittest.TestCase):
         self.assertEqual(quirks.KEYS - {"name", "match", "format", "sources"}, heads)
 
     def test_every_shipped_fact_has_a_kind_a_section_and_a_known_card(self):
+        # devicedataview.CARDS (not imported here: no Qt in this module's tests)
         cards = {"settings", "process-data", "homing", "sdo", "switches", "move", "response", "sync",
-                 "from-lcec"}
+                 "from-lcec", "operation", "source", "workbench", "diagnose"}
         for path in glob.glob(os.path.join(quirks.SHIPPED, "*.yaml")):
             with open(path) as f:
                 raw = yaml.safe_load(f)
@@ -355,7 +356,8 @@ class TestKinds(unittest.TestCase):
     def test_what_is_not_known_yet(self):
         drive = {"profile": "cia402", "dc": {"assign-activate": "0x300"}}
         found = devicedata.unknowns(drive, {}, [])
-        self.assertEqual([c for _, _, c in found], ["sdo", "switches", "response", "sync"])
+        self.assertEqual([c for _, _, c in found], ["sdo", "switches", "response", "operation", "operation",
+                                                    "sync"])
         self.assertEqual(devicedata.unknowns(drive, shipped("rtelligent-ect60.yaml"), [{"period-us": 500}]), [])
         self.assertEqual(devicedata.unknowns({"profile": "generic"}, {}, []), [])
 

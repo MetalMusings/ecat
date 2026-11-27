@@ -1359,11 +1359,16 @@ class SlaveView(QWidget):
             go = QPushButton()
             go.setFlat(True)
             go.clicked.connect(lambda _=False, n=i: self.bringup_go(n))
+            keep = QPushButton("Remember for the device type...")
+            keep.setToolTip("Keep this fact in your own quirk file for the device, with where it "
+                            "comes from, so that the next one of these devices starts from it")
+            keep.clicked.connect(lambda _=False, n=i: self.bringup_remember(n))
             grid.addWidget(mark, i, 0, Qt.AlignTop)
             grid.addWidget(what, i, 1, Qt.AlignTop)
             grid.addWidget(text, i, 2)
-            grid.addWidget(go, i, 3, Qt.AlignTop)
-            self.bringup_rows.append((mark, what, text, go))
+            grid.addWidget(keep, i, 3, Qt.AlignTop)
+            grid.addWidget(go, i, 4, Qt.AlignTop)
+            self.bringup_rows.append((mark, what, text, go, keep))
         grid.setColumnStretch(2, 1)
         self.bringup_card.add(grid)
         self.bringup_found = []
@@ -1600,6 +1605,16 @@ class SlaveView(QWidget):
             hform.addRow(text[0].upper() + text[1:], box)
         self.home_hform = hform
         self.homing_card.add(self.home_text)
+        hrow = QHBoxLayout()
+        self.home_remember = QPushButton("Remember the drive's methods...")
+        self.home_remember.setToolTip(
+            "Tick the homing methods the drive's manual lists, and say what its own numbers "
+            "(36, 37, negatives) do: kept for the device type, so that the next one of these "
+            "drives offers them, here or wherever you share it")
+        self.home_remember.clicked.connect(self.remember_methods)
+        hrow.addWidget(self.home_remember)
+        hrow.addStretch(1)
+        self.homing_card.add(hrow)
         self.homing_card.add(hform)
         # a method that needs switches: how a drive is told which input is which
         self.home_switch_text = label("", "hint", wrap=True)
@@ -1618,6 +1633,13 @@ class SlaveView(QWidget):
         self.home_switch_look.setCheckable(True)
         self.home_switch_look.toggled.connect(self.input_settings_toggled)
         srow.addWidget(self.home_switch_look)
+        self.home_inputs_remember = QPushButton("Remember how its inputs are set up...")
+        self.home_inputs_remember.setToolTip(
+            "From the drive's manual: which object gives each input its function and with which "
+            "codes, and how its polarity is set. Kept for the device type: the homing card then "
+            "offers a row per switch, and the Switches card can name the inputs")
+        self.home_inputs_remember.clicked.connect(self.remember_inputs)
+        srow.addWidget(self.home_inputs_remember)
         srow.addStretch(1)
         self.homing_card.add(srow)
         self.home_switch_found = label("", "mono", wrap=True)
@@ -2399,6 +2421,21 @@ class SlaveView(QWidget):
         self.home_support = (nums, where)
         self.show_homing_text(s, chosen, nums, where)
 
+    def remember_inputs(self):
+        from . import devicedataview
+        got = devicedataview.remember_inputs(self.win, self, self.position)
+        if got:
+            self.show_homing(self.win.session.slave(self.position))
+        return got
+
+    def remember_methods(self):
+        from . import devicedataview
+        nums, where = self.home_support
+        got = devicedataview.remember_methods(self.win, self, self.position, nums, where)
+        if got:
+            self.show_homing(self.win.session.slave(self.position))
+        return got
+
     def show_homing_text(self, s, chosen, nums, where):
         parts = []
         if chosen:
@@ -2422,7 +2459,7 @@ class SlaveView(QWidget):
              "Switches: this method needs the %s. " + switches.GUIDE)
             % " and the ".join(switches.TEXT[k] for k in need) if need else "")
         self.show_input_rows(s, need if known else [])
-        for w in (self.home_switch_text, self.home_switch_look):
+        for w in (self.home_switch_text, self.home_switch_look, self.home_inputs_remember):
             w.setVisible(bool(need))
         if not need or getattr(self, "home_switch_for", None) != self.position:
             self.home_switch_found.setText("")
@@ -3662,9 +3699,9 @@ class SlaveView(QWidget):
         self.bringup_summary.setText(bringup.summary(found))
         from .devicedataview import CARD_NAMES
         kinds = {bringup.OK: "green", bringup.MISSING: "amber", bringup.TRY: "grey", bringup.BAD: "red"}
-        for i, (mark, what, text, go) in enumerate(self.bringup_rows):
+        for i, (mark, what, text, go, keep) in enumerate(self.bringup_rows):
             r = found[i] if i < len(found) else None
-            for w in (mark, what, text, go):
+            for w in (mark, what, text, go, keep):
                 w.setVisible(r is not None)
             if r is None:
                 continue
@@ -3673,6 +3710,19 @@ class SlaveView(QWidget):
             text.setText(r.text)
             go.setVisible(bool(r.card))
             go.setText("%s →" % CARD_NAMES.get(r.card, r.card or ""))
+            keep.setVisible(bool(r.remember))
+
+    def bringup_remember(self, n):
+        """Keep the fact a row found (the drive keeps its position, what a code means)."""
+        from . import devicedataview
+        if n >= len(self.bringup_found) or not self.bringup_found[n].remember:
+            return None
+        path, value, what, note, kind = self.bringup_found[n].remember
+        got = devicedataview.remember(self.win, self, self.position, path, value, what, note=note,
+                                      kind=kind)
+        if got:
+            self.show_bringup()
+        return got
 
     def bringup_go(self, n):
         from . import devicedataview
@@ -3939,7 +3989,7 @@ class LivePage(QWidget):
             except ValueError:
                 code = 0
             line = "<b>CiA 402:</b> %s &nbsp; status word %s%s" % (
-                state, sw, " &nbsp; error %s" % diagnose.error_text(code) if code else "")
+                state, sw, " &nbsp; error %s" % diagnose.error_text(code, s) if code else "")
         self.pins_drive.setText(line)
         self.pins_drive.setVisible(bool(line))
         self.pins_card.show()
@@ -4455,7 +4505,7 @@ class TroubleshootPage(QWidget):
         self.explain.setVisible(bool(self.explain.text()))
         lines = []
         if r.cia402 is not None:
-            _, lines = diagnose.cia402_findings(r.cia402)
+            _, lines = diagnose.cia402_findings(r.cia402, r.identity)
         if r.error_register:
             lines.append("Error register 0x1001: 0x%02X" % r.error_register)
         self.drive_title.setVisible(r.cia402 is not None)
@@ -5038,6 +5088,7 @@ class MoveCard(Card):
                 "ways): it may need enabling again after this homing method. Tick \"Enable the "
                 "drive again after homing\" on its page (Homing by the drive), save, and home "
                 "again." % (dt.name, drivetest.FOLLOW_STEP))
+            self.offer_enable_again(dt)
             return
         if self.test() is dt:
             self.home_state("home-ok" if ok else "home-failed",
@@ -5047,6 +5098,26 @@ class MoveCard(Card):
                          "the drive is disabled" if follows else
                          "; the position is the homed one and the drive is disabled") if ok else
                         " (the drive reported an error)"))
+
+    def offer_enable_again(self, dt):
+        """The drive did not follow after homing without being enabled again: offer it as
+        the device's property (homing: enable-again, seen by the program)."""
+        from . import devicedataview, homing
+        c = dt.slave.get("cia402") or {}
+        chosen = homing.choice(dt.slave, getattr(dt, "axis", 0) or 0)
+        if not chosen or c.get("home-enable-again") or homing.enable_again(chosen["method"], dt.slave):
+            return None
+        n = chosen["method"]
+        if QMessageBox.question(
+                self, TITLE, "After homing by method %d the drive did not follow its target. Remember "
+                "for the device type that it must be enabled again after method %d? The homing card "
+                "then ticks \"Enable the drive again after homing\" for it, here and wherever you "
+                "share it." % (n, n), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) != QMessageBox.Yes:
+            return None
+        now = (quirks.of(dt.slave).get("homing") or {}).get("enable-again") or []
+        return devicedataview.remember(self.win, self, dt.slave["position"], ("homing", "enable-again"),
+                                       sorted(set(now) | {n}), "Enabled again after methods",
+                                       kind="observed")
 
     def home_state(self, name, text):
         self.home_button.setObjectName(name)
@@ -5497,6 +5568,15 @@ class ResponseCard(Card):
                              "at comes first. Nothing is written.")
         self.look.clicked.connect(self.look_for_settings)
         row.addWidget(self.look)
+        # an object that did not move while the drive did (the measurement saw it): offered
+        # as the device's "not recorded when measuring"
+        self.ignore_button = QPushButton()
+        self.ignore_button.setToolTip("Keep for the device type that this object means nothing "
+                                      "here: the next measurement of one of these drives leaves "
+                                      "it out (seen by the program)")
+        self.ignore_button.clicked.connect(self.remember_constant)
+        self.ignore_button.hide()
+        row.addWidget(self.ignore_button)
         row.addStretch(1)
         self.add(row)
         # trying the chosen one: written in RAM, the drive's own value kept;
@@ -5917,6 +5997,31 @@ class ResponseCard(Card):
         self.last_res = res
         self.saved.setText("Samples: %s (ecatsetup --response FILE shows this again)" % m.path)
         self.last = rec
+        self.show_constant(res)
+
+    def show_constant(self, res):
+        dt = self.drive()
+        known = quirks.measure_ignore(dt.slave) if dt is not None else {}
+        todo = {i: why for i, why in (res.constant or {}).items() if i not in known}
+        self.constant = todo
+        self.ignore_button.setVisible(bool(todo))
+        if todo:
+            self.ignore_button.setText("Remember: %s means nothing here..." % ", ".join(
+                "0x%04X" % i for i in sorted(todo)))
+
+    def remember_constant(self):
+        from . import devicedataview
+        dt = self.drive()
+        if dt is None or not getattr(self, "constant", None):
+            return None
+        got = None
+        for index, why in sorted(self.constant.items()):
+            got = devicedataview.remember(
+                self.win, self, dt.slave["position"], ("measure", "ignore", "0x%04X" % index),
+                "on this drive %s" % why, "0x%04X is not recorded when measuring" % index, kind="observed")
+        if got:
+            self.ignore_button.hide()
+        return got
 
 
 def _writer(position):
@@ -6690,7 +6795,7 @@ class TestPage(QWidget):
                 if val is not None:
                     if pin == "error-code":
                         try:
-                            val = diagnose.error_text(int(val, 0))
+                            val = diagnose.error_text(int(val, 0), self.win.session.slave(self.position))
                         except ValueError:
                             pass
                     lab.setText(val)
@@ -7123,7 +7228,8 @@ class HalPage(QWidget):
         self.lcec_card.add(self.lcec_settings)
         row = QHBoxLayout()
         self.lcec_add_all = QPushButton("Add all these settings")
-        self.lcec_add_all.clicked.connect(lambda: self.add_lcec_settings(self.lcec_hints))
+        self.lcec_add_all.clicked.connect(lambda: self.add_lcec_settings(
+            [h for h in self.lcec_hints if not h.command]))
         row.addWidget(self.lcec_add_all)
         row.addStretch(1)
         self.lcec_card.lay.addLayout(row)
@@ -7580,8 +7686,12 @@ class HalPage(QWidget):
                 st.setItem(i, 3, item("true"))
                 st.setItem(i, 4, item("false"))
             else:
-                st.setItem(i, 1, item(h.setting["object"], font=mono()))
-                st.setItem(i, 2, item(h.setting.get("name", ""), tip=h.what))
+                grey = GREY if h.command else None
+                st.setItem(i, 1, item(h.setting["object"], font=mono(), colour=grey,
+                                      tip=h.command or None))
+                st.setItem(i, 2, item(("%s (a command: not added by Add all)" % h.setting.get("name", "")
+                                       if h.command else h.setting.get("name", "")),
+                                      tip=h.command or h.what, colour=grey))
                 v = h.setting.get("value", h.setting.get("data"))
                 ttype = h.setting.get("type")
                 st.setItem(i, 3, item(show_value(v, ttype, self.win.hex_values), font=mono(),

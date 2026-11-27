@@ -565,6 +565,9 @@ class Result:
     ferror: dict = field(default_factory=dict)  # suggestions for LinuxCNC
     findings: list = field(default_factory=list)  # [(kind, text)]: what to look at, most first
     notes: list = field(default_factory=list)
+    # objects whose value did not move while the drive did: {index: why}, offered as the
+    # device's measure: ignore (seen by the program)
+    constant: dict = field(default_factory=dict)
 
 
 def _diff(x, p):
@@ -731,8 +734,15 @@ def analyse(rec, ini=None):
         else:
             n += 1
     # torque (servo drives)
-    if "torque" in rec.data:
-        tq = [x / 10.0 for x in rec.data["torque"]]
+    tq = [x / 10.0 for x in rec.data["torque"]] if "torque" in rec.data else None
+    if tq and hi - lo > 2 and len(set(tq[lo:hi])) == 1 and res.vmax > 0:
+        # a drive whose torque never moves while it accelerates and stops: the value
+        # means nothing (the ECT60's 0x6077, an open loop stepper)
+        res.constant[0x6077] = ("it stayed at %g %% of rated torque through the whole move: the "
+                                "drive does not report its torque there" % tq[lo])
+        res.notes.append("0x6077 (torque) stayed at %g %% through the move: not used" % tq[lo])
+        tq = None
+    if tq:
         res.torque_peak = max(abs(tq[n]) for n in range(lo, hi))
         for sign in (1, -1):
             cs = [tq[n] for n in idx if sign * v[n] > res.vmax * 0.98 and abs(a[n]) < res.amax * 0.01]

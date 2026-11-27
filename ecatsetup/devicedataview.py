@@ -4,6 +4,7 @@ Device data dialog (what is in use and where it comes from, Share, Fetch,
 going through a shared file's facts one by one, Try / Undo for a setting,
 Report)."""
 
+import copy
 import html
 import os
 import urllib.parse
@@ -12,9 +13,9 @@ from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                              QFormLayout, QHBoxLayout, QInputDialog, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-                             QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
+                             QGridLayout, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
 
-from . import devicedata, measured, quirks, settings, testmode, tool, tuning
+from . import devicedata, homing, measured, quirks, settings, testmode, tool, tuning
 from .gui import TITLE, label
 
 # where each card is, from the main window: (the tab's page, the card, the card shown
@@ -58,7 +59,7 @@ NOTHING_TO_SHARE = (
     "Your pin names and scales are never shared.")
 
 KINDS = [("tried", "Tried on this machine"), ("manual", "The device's manual"),
-         ("other", "Somewhere else")]
+         ("observed", "Seen by the program on this machine"), ("other", "Somewhere else")]
 URL_MAX = 7000      # longer prefilled links are cut by browsers: the post is copied instead
 
 
@@ -78,7 +79,8 @@ def device(win, position):
 class SourceDialog(QDialog):
     """Where a fact comes from (and, for a command, what it does)."""
 
-    def __init__(self, parent, what, value, revision, note=None, path=None):
+    def __init__(self, parent, what, value, revision, note=None, path=None, kind=None,
+                 note_label=None):
         super().__init__(parent)
         fk = devicedata.kind(path) if path else None
         self.setWindowTitle("Remember for this device type - %s" % TITLE)
@@ -92,11 +94,14 @@ class SourceDialog(QDialog):
         self.note = None
         if note is not None:
             self.note = QLineEdit(note)
-            self.note.setPlaceholderText("what it does, such as: sets the position to zero")
-            form.addRow("What it does:", self.note)
+            label_, hint = note_label or ("What it does:", "what it does, such as: sets the position to zero")
+            self.note.setPlaceholderText(hint)
+            form.addRow(label_, self.note)
         self.kind = QComboBox()
         for k, text in KINDS:
             self.kind.addItem(text, k)
+        if kind is not None and self.kind.findData(kind) >= 0:
+            self.kind.setCurrentIndex(self.kind.findData(kind))
         form.addRow("Where it comes from:", self.kind)
         self.ref = QLineEdit()
         self.ref.setPlaceholderText("the manual's name, version and section; or what you did")
@@ -113,6 +118,8 @@ class SourceDialog(QDialog):
             self.listing = QComboBox()
             self.listing.addItem("Only these (a list such as the manual's)", "closed")
             self.listing.addItem("These worked; there may be more", "open")
+            if kind in ("observed", "tried"):
+                self.listing.setCurrentIndex(1)
             form.addRow("The list:", self.listing)
         if fk is not None:
             lay.addWidget(label("This is %s%s." % (devicedata.SORTS[fk.sort], {
@@ -136,7 +143,11 @@ class SourceDialog(QDialog):
         return src
 
 
-def remember(win, parent, position, path, value, what, note=None, ask=True):
+# the typed value of a fact that is text the user gives (remember(note=...)), by kind
+NOTE_LABELS = {"errors": ("What it means:", "from the drive's manual, such as: following error too large")}
+
+
+def remember(win, parent, position, path, value, what, note=None, ask=True, kind=None):
     """Remember one fact of a slave's device type, asking where it comes from.
     For a command, value None takes the note typed. Returns the file or None."""
     d = device(win, position)
@@ -145,11 +156,16 @@ def remember(win, parent, position, path, value, what, note=None, ask=True):
         return None
     _, ident, name, rev = d
     dlg = SourceDialog(parent, what, None if note is not None else devicedata.text(value), rev, note,
-                       path=path)
+                       path=path, kind=kind, note_label=NOTE_LABELS.get(path[0]))
     if ask and dlg.exec_() != QDialog.Accepted:
         return None
     if note is not None:
-        value = dlg.note.text().strip() or note or "a command"
+        value = dlg.note.text().strip() or note
+        if not value:
+            if path[0] != "commands":
+                win.status("Nothing kept: no text was given")
+                return None
+            value = "a command"
     try:
         path_ = devicedata.remember(ident, name, path, value, dlg.source())
     except devicedata.Error as e:
@@ -157,6 +173,253 @@ def remember(win, parent, position, path, value, what, note=None, ask=True):
         return None
     win.status("Remembered for %s: %s (%s)" % (name, devicedata.label(path), path_))
     return path_
+
+
+class MethodsDialog(QDialog):
+    """The homing methods a drive has, from its manual: ticked against the standard's
+    catalogue, with what the drive's own numbers (36, 37, negatives) do. Kept as the
+    facts homing methods (a closed list, or open: these worked) and homing describe."""
+
+    # numbers whose meaning the standard leaves to the drive
+    OWN = (36, 37)
+
+    def __init__(self, parent, methods, described, where):
+        super().__init__(parent)
+        self.setWindowTitle("The drive's homing methods - %s" % TITLE)
+        lay = QVBoxLayout(self)
+        lay.addWidget(label(
+            "Tick the methods the drive's manual lists (or those that worked). The drive %s."
+            % ("lists its own in 0x60E3: this corrects it" if where == "drive (0x60E3)" else
+               "does not say which it has (no 0x60E3)"), wrap=True))
+        grid = QGridLayout()
+        self.boxes = {}
+        numbers = sorted(set(homing.CATALOG) | set(methods or ()))
+        for i, n in enumerate(numbers):
+            box = QCheckBox(str(n))
+            box.setToolTip(homing.method(n).text)
+            box.setChecked(n in (methods or ()))
+            grid.addWidget(box, i // 9, i % 9)
+            self.boxes[n] = box
+        lay.addLayout(grid)
+        form = QFormLayout()
+        self.more = QLineEdit(", ".join(str(n) for n in methods or () if n not in homing.CATALOG))
+        self.more.setPlaceholderText("other numbers the manual lists, such as -1, -2")
+        form.addRow("Other numbers:", self.more)
+        self.texts = {}
+        for n in sorted(set(self.OWN) | {n for n in methods or () if n not in homing.CATALOG}):
+            t = QLineEdit((described.get(n) or {}).get("text", ""))
+            t.setPlaceholderText("what the drive does, from its manual, such as: torque homing "
+                                 "towards CCW, against a stop")
+            form.addRow("Method %d does:" % n, t)
+            self.texts[n] = t
+        self.closed = QComboBox()
+        self.closed.addItem("Only these (the manual's list)", "closed")
+        self.closed.addItem("These worked; there may be more", "open")
+        form.addRow("The list:", self.closed)
+        self.ref = QLineEdit()
+        self.ref.setPlaceholderText("the manual's name, version and section")
+        form.addRow("Reference:", self.ref)
+        lay.addLayout(form)
+        self.relation = "corrects" if where == "drive (0x60E3)" else "completes"
+        ok = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        ok.button(QDialogButtonBox.Ok).setText("Remember")
+        ok.accepted.connect(self.accept)
+        ok.rejected.connect(self.reject)
+        lay.addWidget(ok)
+
+    def methods(self):
+        """The ticked and typed numbers; raises ValueError for a word that is not one."""
+        out = {n for n, b in self.boxes.items() if b.isChecked()}
+        for w in self.more.text().replace(",", " ").split():
+            out.add(int(w))
+        return sorted(out)
+
+    def descriptions(self):
+        """{method: text} for the drive's own numbers that are ticked and described."""
+        chosen = set(self.methods())
+        return {n: t.text().strip() for n, t in self.texts.items() if n in chosen and t.text().strip()}
+
+    def source(self):
+        return {"kind": "manual" if self.closed.currentData() == "closed" else "tried",
+                "ref": self.ref.text().strip(), "date": devicedata.today(),
+                "list": self.closed.currentData(), "relation": self.relation}
+
+
+def remember_methods(win, parent, position, methods, where, ask=True, dialog=None):
+    """Ask for and keep a drive's homing methods (and what its own numbers do) for its
+    device type. Returns the quirk file, or None."""
+    d = device(win, position)
+    if d is None:
+        win.status("This slave has no vendor and product: nothing to remember it for")
+        return None
+    _, ident, name, rev = d
+    described = ((quirks.of(ident).get("homing") or {}).get("describe") or {})
+    dlg = dialog or MethodsDialog(parent, methods, described, where)
+    if ask and dlg.exec_() != QDialog.Accepted:
+        return None
+    try:
+        nums = dlg.methods()
+    except ValueError:
+        QMessageBox.warning(parent, TITLE, "Other numbers: only numbers, such as -1, -2")
+        return None
+    if not nums:
+        win.status("No method ticked: nothing kept")
+        return None
+    src = dict(dlg.source(), revision=rev)
+    try:
+        path = devicedata.remember(ident, name, ("homing", "methods"), nums, src)
+        for n, text in dlg.descriptions().items():
+            old = described.get(n) or {}
+            devicedata.remember(ident, name, ("homing", "describe", str(n)), dict(old, text=text),
+                                {"kind": "manual", "ref": src["ref"], "date": src["date"], "revision": rev})
+    except devicedata.Error as e:
+        QMessageBox.warning(parent, TITLE, str(e))
+        return None
+    win.status("Remembered for %s: homing methods %s (%s)" % (name, ", ".join(map(str, nums)), path))
+    return path
+
+
+class InputsDialog(QDialog):
+    """How a drive's inputs get their function (home switch, limits) and polarity,
+    from its manual: kept as the fact homing inputs. One function object per input
+    and its codes; the polarity as one bit per input of one object."""
+
+    TYPES = ("UINT", "USINT", "UDINT", "INT", "SINT", "DINT")
+
+    def __init__(self, parent, names, inputs=None):
+        super().__init__(parent)
+        self.setWindowTitle("The drive's inputs - %s" % TITLE)
+        inputs = inputs or {}
+        f, p = inputs.get("function") or {}, inputs.get("polarity") or {}
+        lay = QVBoxLayout(self)
+        lay.addWidget(label(
+            "From the drive's manual, under digital inputs: the object that gives each input its "
+            "function, the codes for the functions, and the object whose bits set the polarity. "
+            "Leave an input's object empty when it has none (such as an encoder input).", wrap=True))
+        self.names = QLineEdit(", ".join(inputs.get("names") or names or ["IN1", "IN2", "IN3", "IN4"]))
+        self.names.editingFinished.connect(self.fill)
+        form = QFormLayout()
+        form.addRow("Inputs:", self.names)
+        self.ftype = QComboBox()
+        self.ftype.addItems(self.TYPES)
+        self.ftype.setCurrentText(f.get("type", "UINT"))
+        form.addRow("Function objects' type:", self.ftype)
+        codes = f.get("codes") or {}
+        self.codes = {}
+        for k, text in (("home", "Home switch"), ("negative", "Negative limit"),
+                        ("positive", "Positive limit"), ("none", "No function")):
+            e = QLineEdit("" if codes.get(k) is None else str(codes[k]))
+            e.setPlaceholderText("the code written for it")
+            form.addRow("Code, %s:" % text.lower(), e)
+            self.codes[k] = e
+        self.pobject = QLineEdit(p.get("object", ""))
+        self.pobject.setPlaceholderText("such as 0x2008:00 (empty: no polarity object)")
+        form.addRow("Polarity object:", self.pobject)
+        self.ptype = QComboBox()
+        self.ptype.addItems(self.TYPES)
+        self.ptype.setCurrentText(p.get("type", "UINT"))
+        form.addRow("Its type:", self.ptype)
+        choices = p.get("choices") or {}
+        self.set_means = QComboBox()
+        self.set_means.addItem("normally open", "normally open")
+        self.set_means.addItem("normally closed", "normally closed")
+        if choices.get("normally closed") == 1:
+            self.set_means.setCurrentIndex(1)
+        form.addRow("A set bit means:", self.set_means)
+        self.ref = QLineEdit()
+        self.ref.setPlaceholderText("the manual's name, version and section")
+        form.addRow("Reference:", self.ref)
+        lay.addLayout(form)
+        self.grid = QGridLayout()
+        lay.addLayout(self.grid)
+        self.rows = {}
+        self.given = (f.get("objects") or {}, p.get("bits") or {})
+        self.fill()
+        ok = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        ok.button(QDialogButtonBox.Ok).setText("Remember")
+        ok.accepted.connect(self.accept)
+        ok.rejected.connect(self.reject)
+        lay.addWidget(ok)
+
+    def input_names(self):
+        return [n.strip() for n in self.names.text().split(",") if n.strip()]
+
+    def fill(self):
+        """A row per input: its function object and its polarity bit."""
+        old = {n: (o.text(), b.text()) for n, (o, b) in self.rows.items()}
+        while self.grid.count():
+            w = self.grid.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        self.rows = {}
+        self.grid.addWidget(label("Input", "fieldName"), 0, 0)
+        self.grid.addWidget(label("Function object", "fieldName"), 0, 1)
+        self.grid.addWidget(label("Polarity bit", "fieldName"), 0, 2)
+        objs, bits = self.given
+        for i, n in enumerate(self.input_names(), 1):
+            o = QLineEdit(old.get(n, (objs.get(n, ""),))[0])
+            o.setPlaceholderText("such as 0x2007:03")
+            b = QLineEdit(old.get(n, (None, "" if bits.get(n) is None else str(bits[n])))[1])
+            b.setPlaceholderText("0-15")
+            self.grid.addWidget(label(n), i, 0)
+            self.grid.addWidget(o, i, 1)
+            self.grid.addWidget(b, i, 2)
+            self.rows[n] = (o, b)
+
+    def inputs(self):
+        """The fact's value (quirk homing: inputs); raises ValueError with why."""
+        objects = {n: o.text().strip() for n, (o, _b) in self.rows.items() if o.text().strip()}
+        if not objects:
+            raise ValueError("give the function object of at least one input")
+        codes = {}
+        for k, e in self.codes.items():
+            if e.text().strip():
+                codes[k] = int(e.text().strip(), 0)
+        if "none" not in codes:
+            raise ValueError("the code for no function is needed (it is how an input is freed)")
+        out = {"function": {"objects": objects, "type": self.ftype.currentText(), "codes": codes}}
+        if self.pobject.text().strip():
+            bits = {n: int(b.text().strip(), 0) for n, (_o, b) in self.rows.items() if b.text().strip()}
+            if not bits:
+                raise ValueError("give the polarity bit of the inputs (or no polarity object)")
+            closed = self.set_means.currentData() == "normally closed"
+            out["polarity"] = {"object": self.pobject.text().strip(), "type": self.ptype.currentText(),
+                               "bits": bits,
+                               "choices": {"normally open": 0 if closed else 1,
+                                           "normally closed": 1 if closed else 0}}
+        quirks._inputs(copy.deepcopy(out))          # the same check as the file's
+        return out
+
+    def source(self):
+        return {"kind": "manual", "ref": self.ref.text().strip(), "date": devicedata.today()}
+
+
+def remember_inputs(win, parent, position, ask=True, dialog=None):
+    """Ask for and keep how a drive's inputs get their function and polarity."""
+    d = device(win, position)
+    if d is None:
+        win.status("This slave has no vendor and product: nothing to remember it for")
+        return None
+    _, ident, name, rev = d
+    h = quirks.of(ident).get("homing") or {}
+    dlg = dialog or InputsDialog(parent, list(h.get("input-bits") or {}), h.get("inputs"))
+    while True:
+        if ask and dlg.exec_() != QDialog.Accepted:
+            return None
+        try:
+            value = dlg.inputs()
+            break
+        except (ValueError, quirks.QuirkError) as e:
+            QMessageBox.warning(parent, TITLE, "Not kept: %s" % e)
+            if not ask:
+                return None
+    try:
+        path = devicedata.remember(ident, name, ("homing", "inputs"), value, dict(dlg.source(), revision=rev))
+    except devicedata.Error as e:
+        QMessageBox.warning(parent, TITLE, str(e))
+        return None
+    win.status("Remembered for %s: how its inputs are set up (%s)" % (name, path))
+    return path
 
 
 class ReportDialog(QDialog):

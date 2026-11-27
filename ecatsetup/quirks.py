@@ -20,7 +20,10 @@ from . import config
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
 KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec", "homing",
-        "tuning", "measure", "format", "sources"}
+        "tuning", "measure", "format", "sources", "position", "errors"}
+# what a command does, when the program can act on it (commands' rich form, `purpose`):
+# a drive's "zero position" command is what cia402.zero-at-start replaces
+COMMAND_PURPOSES = {"zero-position", "store-parameters", "clear-fault", "other"}
 # the newest file format this program reads (devicedata.FORMAT); a file of a newer
 # format may hold keys this one does not know: they are skipped, not refused
 FORMAT = 1
@@ -75,13 +78,19 @@ def parse(data, path="<quirk>"):
         vendor = _hex(m["vendor"], "vendor")
         q["matches"] = [(vendor, _hex(p, "product")) for p in products]
         q["match"] = q["matches"][0]
-    q["commands"], q["command-runs"] = {}, {}
+    q["commands"], q["command-runs"], q["command-purposes"] = {}, {}, {}
     for k, v in (data.get("commands") or {}).items():
         index, sub = _obj(k)
         if isinstance(v, dict):
-            # note, and optionally what "Run command" writes: value, type, confirm
+            # note, and optionally what "Run command" writes: value, type, confirm; and
+            # what it is for (purpose), when the program can act on it
             if "note" not in v:
                 raise QuirkError("commands.%s needs a note" % k)
+            if v.get("purpose") is not None:
+                if v["purpose"] not in COMMAND_PURPOSES:
+                    raise QuirkError("commands.%s: purpose is one of %s"
+                                     % (k, ", ".join(sorted(COMMAND_PURPOSES))))
+                q["command-purposes"][index] = v["purpose"]
             q["commands"][index] = str(v["note"])
             q["command-runs"][(index, sub or 0)] = {
                 "value": v.get("value"), "type": v.get("type"),
@@ -158,6 +167,27 @@ def parse(data, path="<quirk>"):
     if not isinstance(measure, dict):
         raise QuirkError("measure needs a mapping (ignore: {object: why})")
     q["measure-ignore"] = {_obj(k)[0]: str(v) for k, v in (measure.get("ignore") or {}).items()}
+    # the drive's position counter at start: kept from an earlier run while it has power
+    # (a property; the advice, cia402.zero-at-start, is the window's)
+    position = data.get("position")
+    q["position"] = {}
+    if position is not None:
+        if not isinstance(position, dict) or not isinstance(position.get("kept"), bool):
+            raise QuirkError("position needs kept: true or false")
+        q["position"] = {"kept": position["kept"]}
+    # what the drive means by its error codes (0x603F)
+    errors = data.get("errors") or {}
+    if not isinstance(errors, dict):
+        raise QuirkError("errors needs a mapping of codes (0x603F) to what they mean")
+    q["errors"] = {}
+    for k, v in errors.items():
+        try:
+            code = _hex(k, "error code") if isinstance(k, str) else int(k)
+        except (QuirkError, ValueError, TypeError):
+            raise QuirkError("errors: %r is not a code" % (k,))
+        if not 0 <= code <= 0xFFFF or not isinstance(v, str) or not v.strip():
+            raise QuirkError("errors.%s: a code of 16 bits and a text" % k)
+        q["errors"][code] = v.strip()
     lcec = data.get("lcec") or {}
     q["lcec"] = {"types": [str(t) for t in lcec.get("types") or []],
                  "sdo": {}, "modparams": {}, "settings": []}
@@ -320,6 +350,21 @@ def command(slave, index):
     return of(slave).get("commands", {}).get(index)
 
 
+def command_purpose(slave, index):
+    """What a command is for (COMMAND_PURPOSES), or None."""
+    return of(slave).get("command-purposes", {}).get(index)
+
+
+def keeps_position(slave):
+    """True, False, or None when the quirk file does not say."""
+    return (of(slave).get("position") or {}).get("kept")
+
+
+def error_meaning(slave, code):
+    """What the drive means by an error code (0x603F), or None."""
+    return (of(slave).get("errors") or {}).get(code)
+
+
 def command_run(slave, index, subindex):
     """What "Run command" writes for a quirk file's command: {"value", "type",
     "confirm"} (each may be None), or None if the file does not say."""
@@ -356,6 +401,29 @@ def settings(key):
 def lcec_sdo(key):
     """{(index, subindex): (replacement, note)} for an lcec sdoConfig."""
     return of(key).get("lcec", {}).get("sdo", {})
+
+
+ZERO_AT_START = "cia402.zero-at-start"
+
+
+def lcec_replacement(key, index, subindex):
+    """What an lcec sdoConfig of this object becomes: (what, why), what being
+    ZERO_AT_START or "command"; None for an ordinary setting. The quirk file's own
+    lcec translation first; otherwise it follows from the object's properties: a
+    command whose purpose is zero-position is what cia402.zero-at-start does
+    without writing to the drive, and any other command is not a setting."""
+    given = lcec_sdo(key).get((index, subindex))
+    if given:
+        return given
+    why = command(key, index)
+    if not why:
+        return None
+    if command_purpose(key, index) == "zero-position":
+        return ZERO_AT_START, ("0x%04X:%02X (%s) zeroes the drive's position: replaced by "
+                               "cia402.zero-at-start, the drive's position at start counts as 0 "
+                               "without writing to it" % (index, subindex, why))
+    return "command", ("0x%04X:%02X is a command, says the device's quirk file (%s): as a "
+                       "setting it would run at every start" % (index, subindex, why))
 
 
 def for_lcec_type(lcec_type):
