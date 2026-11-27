@@ -253,13 +253,13 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
                        "the drive has no 0x6065, and the object it keeps its window in is not "
                        "known: the workbench cannot set it, so the drive's own window applies "
                        "(it may be large). Moving works without it. When the drive's manual names "
-                       "the object: Remember where the drive keeps its limits... on the Move card",
+                       "the object: Set objects for missing limits... on the Move card",
                        "move"))
     else:
         out.append(Row("ferror", TRY, "Following-error window",
                        "the workbench writes 0x6065; a drive that keeps it in an object of its own "
-                       "shows that when it moves past it: Remember where the drive keeps its "
-                       "limits... on the Move card", "move"))
+                       "shows that when it moves past it: Set objects for missing limits... on "
+                       "the Move card", "move"))
 
     # what the workbench saw
     s = seen or Seen()

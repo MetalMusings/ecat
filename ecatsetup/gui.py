@@ -4862,7 +4862,7 @@ class MoveCard(Card):
                                 "disabled; its values are written back when you are done.")
         self.prepare.clicked.connect(self.do_prepare)
         form.addRow(self.prepare)
-        self.limits_remember = QPushButton("Remember where the drive keeps its limits...")
+        self.limits_remember = QPushButton("Set objects for missing limits...")
         self.limits_remember.setToolTip(
             "For a drive that keeps its following-error window, torque or velocity limit in an "
             "object of its own (the ECT60's 0x2022), or ignores a standard one: kept for the device "
