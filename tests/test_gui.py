@@ -3578,6 +3578,30 @@ class TestBringup(WindowBase):
         self.assertEqual(w.bringup_seen[0].fault, 0x8611)
         self.assertEqual(w.bringup_seen[0].runs[-1][:2], [99, 99])
 
+    def test_limits_can_be_remembered_while_they_are_written(self):
+        # the banner says what could not be written once the limits are written: the
+        # button that tells the object stays
+        from types import SimpleNamespace
+        w = self.window()
+        s = w.session.slave(0)
+        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
+        move = w.test_page.move
+        w.test = mock.Mock(watching=False)
+        move.slave = s
+        w.drive_tests[move.axis_name()] = SimpleNamespace(
+            prepared=True, homes=False, name=s["name"], mode="csp", start=0.0, restore=lambda: None)
+        self.addCleanup(w.drive_tests.clear)
+        with mock.patch.object(w.test_page, "show_limits"), \
+                mock.patch.object(w.test_page, "response", None):
+            move.show_drive(s)
+        self.assertTrue(move.setup.isHidden())
+        self.assertFalse(move.limits_remember.isHidden())
+        w.test = None
+        with mock.patch.object(w.test_page, "show_limits"), \
+                mock.patch.object(w.test_page, "response", None):
+            move.show_drive(s)
+        self.assertTrue(move.limits_remember.isHidden())
+
     def test_a_fault_code_the_pdos_lack_is_read_once(self):
         # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once
         w = self.window()

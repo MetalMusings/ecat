@@ -4868,9 +4868,11 @@ class MoveCard(Card):
             "object of its own (the ECT60's 0x2022), or ignores a standard one: kept for the device "
             "type, so that the workbench writes the right object to the next one of these drives")
         self.limits_remember.clicked.connect(self.remember_limits)
-        form.addRow(self.limits_remember)
         self.add(self.setup)
         self.unsupported = self.add(label("", "hint", wrap=True))
+        # outside the setup: also while the limits are written, when the banner shows what
+        # could not be written
+        self.add(self.limits_remember)
 
         # then: moving
         self.moving = QWidget()
@@ -4972,6 +4974,7 @@ class MoveCard(Card):
         dt = self.test()
         mode = drivetest.mode_of(slave)
         self.setup.setVisible(ok and (dt is None or not dt.prepared))
+        self.limits_remember.setVisible(ok)
         self.moving.setVisible(dt is not None and dt.prepared)
         homes = dt is not None and dt.prepared and dt.homes
         self.home_info.setVisible(bool(homes))
