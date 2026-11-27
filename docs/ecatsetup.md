@@ -389,7 +389,7 @@ the chosen slave:
   Outputs are set
   here and go back to 0 when the workbench stops;
 - **SDO**: read and write a CoE object while a master runs (the workbench or the
-  free master; not while LinuxCNC is watched);
+  free master; not while LinuxCNC is watched), and *Watch* objects live;
 - for a drive: the **CiA 402 state chain**, live values, the status word,
   and **Move**, which can move the axis. It writes limits to the drive,
   needs *Hold to enable* held down (a heartbeat shuts the drive down if
@@ -608,8 +608,7 @@ Homing and switches:
 | Methods | The drive (0x60E3) or its quirk file; else every method may be tried, and *Remember the drive's methods...* on the homing card keeps the manual's list. |
 | Method | The one chosen on the homing card; for a number the standard leaves to the drive (36, 37, negatives), what it does, from the quirk file. |
 | Settings it needs | For a method of the drive's own: the quirk file's settings for it, or the manual. |
-| Which input is which | How the drive's inputs get their function (home switch, limits): the quirk file, or *Remember how its inputs are set up...*. Without it the switch may not be wired to homing at all, unless the Switches card found every switch the method needs set up right: then the drive works as it is set up now, and how its inputs are set is only needed to change them. The homing card then says the same, and asks for no polarity. |
-| Home switch, limit switches | The Switches card's test of each switch the method needs. |
+| Switches | For a method that needs switches: OK once it homes (homing found the switch). Before that, the Switches card on the Workbench shows whether the drive sees each one; which input is which, and its polarity, the drive's manual says (set under Settings). |
 | Index pulse | For a method that needs it: shows when it homes. |
 | Homes | Home (hold) on the Move card. |
 | Follows after homing | The Move card's check after a homing; a drive that does not follow needs *Enable the drive again after homing*. |
@@ -1204,6 +1203,20 @@ the quirk file says it does, and is refused while a CiA 402 drive is in
 commands (a quirk file's `commands:`, or suspected from the dictionary)
 can be run this way; the value is the quirk's, else the one typed.
 
+#### Watching SDOs
+
+*Watch* on the SDO card puts the object typed into a list under it, read
+again about once a second from whatever master runs (the workbench or the
+free master). Nothing is written. Each row shows the slave, the object, its
+name, the value (in hex with the card's *Hex* box) and which bits are on; a
+value that changed is marked for a moment, so that you can press a switch
+and see which bit it is. It is for what the process data does not carry:
+a drive's physical inputs (most drives give them in `0x60FD` from bit 16),
+a maker's own status object, a setting you are trying. An object the slave
+does not answer shows a dash, with the slave's answer in its tooltip.
+*Remove* takes a row out. The list is read only while the Workbench is
+shown, at most 16 objects, and is kept until the window closes.
+
 When the workbench stops, every drive is disabled, the outputs go to zero, and
 the slaves are taken to PREOP while process data still flows
 (`ecat.take-down`; the component's stop guard would do it too), so that
@@ -1318,68 +1331,37 @@ axis drives into its end stop.
 
 For a drive with `0x60FD` (Digital inputs) in its process data, the
 *Switches* card shows, live during the workbench, what the drive sees of its
-switches, as a box each that is grey when off and green when on: the home
-switch, the negative and the positive limit switch (`0x60FD` bits 2, 0 and
-1, the same on every CiA 402 drive), and a row of the drive's inputs (bits
-16 and up; named, such as IN5, where the drive's quirk file names them,
-else bits 16 to 23 and any other that is on). On the ECT60, IN1 and IN2 are
-the encoder's A and B, and are on or off as the motor stands. It says which switches the homing method chosen
-needs. Nothing moves: the drive is not enabled.
+switches as the standard has them: the home switch, the negative and the
+positive limit switch (`0x60FD` bits 2, 0 and 1, the same on every CiA 402
+drive), as a box each that is grey when off and green when on. It says which
+switches the homing method chosen needs. Nothing moves: the drive is not
+enabled.
 
-Clicking a switch's box tests that switch, in two steps: leave
-the switch released (for a second; inputs that change on their own, such
-as an encoder's, are left out), then press and hold it. It says what it
-found:
+Press a switch: its box lights while the drive sees it. If it does not
+light, or it is lit while the switch is free, the drive's own input
+settings decide, and they are the maker's: which input is the home switch
+(its function) and how it is read (its polarity). The drive's manual says
+where, under digital inputs; set them under Settings. A switch read the
+other way round can also be put right by wiring its other contact
+(normally closed instead of open, or the other way).
 
-- **Set up right**: the drive sees the switch as it should.
-- **Read the other way round**: on while released, off when pressed. It
-  says what that would do (homing would find the switch at once and home
-  where the axis stands; a limit would act while the switch is free) and the
-  two ways out: set the input's polarity the other way (the object and bit
-  when the quirk file knows them, else where the drive's manual gives them:
-  no need to try bits one by one), or wire the switch's other contact
-  (normally closed instead of open, or the other way) and leave the drive as
-  it is.
-- **The switch reaches the drive, but that input is not the home switch**:
-  the input has no function or another one; set it in the drive's input
-  settings (the homing card helps find them).
-- **Works as another switch** (a limit instead of home, say): the input has
-  that function.
-- **Nothing changed**: the switch does not reach the drive (wiring, the
-  inputs' supply, the wrong input).
-
-Without `0x60FD` in the process data the card says so: add it on the
-drive's page (Process data).
+To see the inputs themselves (bits 16 and up of `0x60FD` on most drives:
+IN1, IN2 ... as the manual numbers them), look at the pin's value (the
+*All pins* card, or the Live tab), or watch an object on the SDO card (see
+[Watching SDOs](#watching-sdos)): it lists which bits are on and marks a
+change. Without `0x60FD` in the process data the card says so, with a
+button that watches it on the SDO card instead.
 
 On the drive's page, for a homing method that needs switches, the homing
-card has a row per switch for a drive whose quirk file says how its inputs
-are set up (the ECT60, the StepperOnline A6-EC and the GeRui EC1 series):
-which input is the switch and its polarity (*normally open* or *closed* on
-the ECT60, *active low* or *high* on the A6, *as wired* or *reversed* on the
-EC1), as the drive will have them, from the configuration's settings or the
-factory's. A change is written as settings, only for the inputs that
-change, and the input that had the function before loses it (the status
-line says so: "IN3 was the negative limit switch; it is the home switch
-now"). Where a polarity is a bit of an object whose other bits are not
-known (the EC1), the drive is read first, so the bus must be read. With
-the bus read, a row also says when the drive has another choice now than
-the configuration gives: a test writes the configuration's settings into
-the drive, also a choice that was not saved, and the drive keeps it until
-it is switched off (or another tool set it). *Write ... as settings* then
-writes the configuration's choice, so that the drive gets it at every
-start. For other
-drives the card says how a drive is told which input is which, and *Look
-for the drive's input settings* (pressed again, the list goes) searches the
-drive's objects for names that set up inputs (input or DI functions, polarity, logic), with their values when the
-bus is read: a guess, nothing is written. Every maker does it its own way
-(the ECT60: `0x2007:03`-`06` the function of IN3 to IN6, 3 for the home
-switch, and `0x2008` a polarity bit for each input); change them under
-Settings, as the drive's manual says.
+card names the switch, its bit in `0x60FD`, and sends you to the manual
+for which input it is.
 
-Tried on the plasma cutter's X before the card existed, by hand
-(2026-11-24): `digital-inputs` 196608 released and 1245188 pressed, that
-is IN5 (bit 20) and the home switch (bit 2): set up right. The card itself
-is not yet tried on a drive.
+Tried on the plasma cutter's X by hand (2026-11-24): `digital-inputs`
+196608 released and 1245188 pressed, that is IN5 (bit 20) and the home
+switch (bit 2). Until 2026-11-27 the card had a test of its own and the
+window could keep how a drive's inputs are set up; the machine test showed
+that a layer of its own over the drive's settings was harder to follow than
+the settings themselves, and it was taken out.
 
 #### The plot
 
@@ -4350,13 +4332,9 @@ try on this machine):
   setting;
 - *Run command...* on the SDO card, for an object that is not known as a
   command: *Remember it as a command...*;
-- after a switch test on the Switches card that reached one input:
-  *Name input bit ...* (such as IN5 or DI3, as the manual names it);
 - on the homing card, *Remember the drive's methods...*: the methods the
   manual lists, ticked against the standard's, whether that is all of
-  them, and what the drive's own numbers (36, 37, negatives) do; and
-  *Remember how its inputs are set up...*: which object gives each input
-  its function, with which codes, and how the polarity is set;
+  them, and what the drive's own numbers (36, 37, negatives) do;
 - on the Settings card, for a drive in PP or PV, *Set objects for missing
   limits...*: the object of a drive's own for its velocity limit or its
   software position limits, or why a standard one is not used (such as the
@@ -4394,7 +4372,7 @@ machine, shared), a link to **the card that owns it** and, for yours,
 *forget*. A fact is changed on its card, where it is used and can be
 tried; the page itself changes nothing but your sources. *Show what is
 not known yet* adds, in amber, what is missing and where to learn it
-(such as: which input is which, from the switch test).
+(such as: which commands it has, from Run command on the SDO card).
 
 What a quirk file says is advice, never a rule: you can always choose
 otherwise on the card. Facts are of three sorts, and the page says which

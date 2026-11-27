@@ -938,32 +938,15 @@ homing:
     36:
       - {object: '0x2030:01', type: UINT, value: 70, name: Max torque output}
   enable-again: [36, 37]             # methods after which the drive follows only once enabled again
-  input-bits: {IN1: 16, IN5: 20}     # names of the physical inputs in 0x60FD (bit 16 and up)
-  inputs:                            # how the drive's inputs become the home and limit switches
-    function:                        # an object per input with a code for its function
-      objects: {IN3: '0x2007:03', IN5: '0x2007:05'}
-      type: UINT
-      codes: {home: 3, negative: 1, positive: 2, none: 0}   # none is needed
-      factory: {IN3: 1, IN5: 3}
-    polarity:                        # either one object, a bit per input ...
-      object: '0x2008:00'
-      type: UINT
-      bits: {IN3: 2, IN5: 4}
-      choices: {normally open: 1, normally closed: 0}       # two names, the bit's values
-      factory: 0x3F                  # the whole object; without it the bus is read first
-    # ... or an object per input:
-    #   objects: {DI1: '0x2004:02'}, choices: {active low: 0, active high: 1}, factory: {DI1: 0}
 ```
 
 `match` may give a list of products for a family with the same objects
 (`product: ['0x00000980', '0x00000990']`).
 
-With `inputs`, the homing card has a row per switch the chosen method needs:
-the input and its polarity. A change is written as settings, only for the
-inputs that change; an input that had the function before gets `none` (two
-inputs with one function is an error on some drives). Shipped: the ECT60
-(tried), the StepperOnline A6-EC and the GeRui EC1 series (from their
-manuals, not tried).
+`input-bits` and `inputs` (how the drive's inputs got their function and
+polarity) were read until 2026-11-27 and are no longer: a file that has them
+is taken without them. The shipped files keep what the manuals say about the
+inputs as comments, for a reader.
 
 Without `methods`, EtherCAT Setup reads the drive's 0x60E3 (supported homing
 methods); if the drive has neither, every method of the standard is offered.

@@ -60,26 +60,15 @@ homing:
   # stop (a plasma cutter's X, 2026-11-24, method 36; 37 assumed alike). After
   # methods 21 and 35 it follows at once.
   enable-again: [36, 37]
-  # The physical inputs in 0x60FD (manual 2.3.23): bit 16 is IN1 ... IN1 and IN2
-  # are the encoder's A and B. Bits 0-2 are the functions (CW and CCW limit,
-  # HOME) that 0x2007 gives the inputs; 0x2008 their polarity.
-  input-bits: {IN1 (encoder A): 16, IN2 (encoder B): 17, IN3: 18, IN4: 19, IN5: 20, IN6: 21}
-  # How IN3-IN6 get their function and polarity (manual 2.2.7, 2.2.8; IN1 and
-  # IN2 are the encoder's). The limits as 0x60FD shows them: bit 0 "CW limit"
-  # is the negative limit switch of CiA 402, bit 1 "CCW" the positive. IN5 as
-  # the home switch, normally open, tried on a plasma cutter's X (2026-11-24).
-  inputs:
-    function:
-      objects: {IN3: '0x2007:03', IN4: '0x2007:04', IN5: '0x2007:05', IN6: '0x2007:06'}
-      type: UINT
-      codes: {home: 3, negative: 1, positive: 2, none: 0}
-      factory: {IN3: 1, IN4: 2, IN5: 3, IN6: 6}
-    polarity:
-      object: '0x2008:00'
-      type: UINT
-      bits: {IN3: 2, IN4: 3, IN5: 4, IN6: 5}
-      choices: {normally open: 1, normally closed: 0}
-      factory: 0x3F
+
+# The inputs, for a reader (the program knows only 0x60FD bits 0-2 of the
+# standard: CW limit = bit 0, the negative limit switch; CCW = bit 1, the
+# positive; HOME = bit 2). From the ECT Series User Manual 2.2.7, 2.2.8, 2.3.23:
+# 0x60FD bit 16 is IN1 ... bit 21 IN6 (IN1, IN2 are the encoder's A and B).
+# 0x2007:03-06 give IN3-IN6 their function (0 none, 1 CW limit, 2 CCW limit,
+# 3 home; factory IN3 1, IN4 2, IN5 3, IN6 6); 0x2008 their polarity, IN3-IN6
+# at bits 2-5 (1 normally open, 0 normally closed; factory 0x3F). IN5 as the
+# home switch, normally open, tried on a plasma cutter's X (2026-11-24).
 
 # Tuning (the Response card, docs/ecatsetup.md "Measuring a drive's response"):
 # the settings that set how closely the drive follows pos-cmd in CSP. From the

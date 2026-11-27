@@ -11,18 +11,7 @@ commands:
   '0x2708': Clear the fault record (write 1), a command, not a setting
   '0x2709': Clear the current fault (write 1), a command, not a setting
 
-homing:
-  # X0-X2: function in 0x2702:01-03 (1 home, 2 positive limit, 4 negative
-  # limit), polarity in 0x2701, a bit per input (1 reverses). The manual gives
-  # no factory value for 0x2701: read the bus before changing a polarity.
-  inputs:
-    function:
-      objects: {X0: '0x2702:01', X1: '0x2702:02', X2: '0x2702:03'}
-      type: UINT
-      codes: {home: 1, positive: 2, negative: 4, none: 0}
-      factory: {X0: 4, X1: 2, X2: 1}
-    polarity:
-      object: '0x2701:00'
-      type: UINT
-      bits: {X0: 0, X1: 1, X2: 2}
-      choices: {as wired: 0, reversed: 1}
+# The inputs, for a reader (the program knows only 0x60FD bits 0-2 of the
+# standard): X0-X2 get their function in 0x2702:01-03 (1 home, 2 positive
+# limit, 4 negative limit; factory X0 4, X1 2, X2 1), their polarity in 0x2701,
+# a bit per input (1 reverses). The manual gives no factory value for 0x2701.

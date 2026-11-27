@@ -4400,6 +4400,18 @@ Done 2026-11-27 with the user, on a copy of QtPlasma without zero-at-start
   narrow page (43d771b), input fields with a border, the inputs dialog (7808254).
 - Not done: 5 (the inputs and methods dialogs against the manual), 6 (Response), 7.
 
+Decided after it (the user, 2026-11-27): the switch layer goes. The test, the input
+names, the inputs dialog, the quirk keys `homing: input-bits` and `inputs`, the
+polarity advice and the search for input settings duplicated what the drive's settings
+(Settings card) and process data (pins) already show, could never be general (every
+maker sets up inputs its own way), and the links between switch, function and setting
+were hard to follow. For a new device the manual decides. Kept: the three boxes of
+0x60FD bits 0-2, which the standard gives. New in its place: *Watch* on the SDO card
+(`sdowatch.py`), any object read again about once a second with its bits shown, for
+what the process data does not carry. Next, for the manual itself: memory
+`idea-manual-excerpts` (parts of the user's own manual by object number). In the table
+below, the rows of the manufacturer's input objects are now the manual's only.
+
 The goal "homing" as the discussion went through it (for the card's next goal):
 
 | What is needed | Standard or manufacturer's | From |

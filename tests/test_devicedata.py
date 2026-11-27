@@ -49,28 +49,28 @@ class TestFacts(unittest.TestCase):
         raw = shipped("rtelligent-ect60.yaml")
         paths = devicedata.facts(raw)
         self.assertIn(("commands", "0x2010"), paths)
-        self.assertIn(("homing", "input-bits", "IN5"), paths)
+        self.assertIn(("errors", "0x8611"), paths)
         self.assertIn(("homing", "extras", "36"), paths)
         self.assertIn(("tuning", "0x2009:00"), paths)
         self.assertIn(("measure", "ignore", "0x6077"), paths)
-        self.assertEqual(devicedata.get(raw, ("homing", "input-bits", "IN5")), 20)
+        self.assertTrue(devicedata.get(raw, ("errors", "0x8611")).startswith("Position following"))
         self.assertIsNone(devicedata.get(raw, ("commands", "0x2011")))
 
     def test_put_and_merge_go_fact_by_fact(self):
         base = shipped("rtelligent-ect60.yaml")
-        top = {"commands": {"0x2011": "mine"}, "homing": {"input-bits": {"IN5": 21}},
+        top = {"commands": {"0x2011": "mine"}, "errors": {"0x8611": "mine", "0x8612": "new"},
                "settings": [{"object": "0x2009:00", "type": "UINT", "value": 2000}]}
         m = devicedata.merge(base, top)
         self.assertEqual(devicedata.get(m, ("commands", "0x2011")), "mine")
         self.assertEqual(devicedata.get(m, ("commands", "0x2010"))["note"],
                          "Zero Position on the ECT60, a command, not a setting")
-        self.assertEqual(devicedata.get(m, ("homing", "input-bits", "IN5")), 21)
-        self.assertEqual(devicedata.get(m, ("homing", "input-bits", "IN4")), 19)
+        self.assertEqual(devicedata.get(m, ("errors", "0x8611")), "mine")
+        self.assertEqual(devicedata.get(m, ("errors", "0x8612")), "new")
         self.assertEqual(devicedata.get(m, ("settings", "0x2009:00"))["value"], 2000)
         self.assertEqual(len(m["homing"]["methods"]), 17)
         devicedata.put(m, ("settings", "0x2009:00"), None)
         self.assertNotIn("settings", m)
-        self.assertEqual(devicedata.get(base, ("homing", "input-bits", "IN5")), 20)   # base untouched
+        self.assertTrue(devicedata.get(base, ("errors", "0x8611")).startswith("Position"))   # base untouched
 
     def test_object_keys_in_any_form_are_one_fact(self):
         raw = {"commands": {"0x2010": "a"}}
@@ -223,8 +223,8 @@ def archive(path, files):
 class TestFetch(Folders):
     def test_fetched_files_are_checked_again_and_chosen_one_by_one(self):
         good = devicedata.strip(shipped("rtelligent-ect60.yaml"))
-        devicedata.put(good, ("homing", "input-bits", "IN5"), 22)
-        good["sources"] = {"homing input-bits IN5": {"kind": "tried", "date": "2026-11-20"}}
+        devicedata.put(good, ("errors", "0x8611"), "shared words")
+        good["sources"] = {"errors 0x8611": {"kind": "tried", "date": "2026-11-20"}}
         evil = dict(good, hal={"lines": ["loadusr -w rm -rf /"]})
         index = {"format": 1, "files": [
             {"path": "devices/00000a88-0a880002/3.yaml", "discussion": 3, "url": "https://x/3",
@@ -247,13 +247,14 @@ class TestFetch(Folders):
         self.assertEqual(found[0]["problems"], [])
         self.assertTrue(found[1]["problems"])
         diff = devicedata.compare(ECT60, found[0]["raw"])
-        row = next(r for r in diff if r["path"] == ("homing", "input-bits", "IN5"))
-        self.assertEqual((row["now"], row["shared"], row["same"]), (20, 22, False))
+        row = next(r for r in diff if r["path"] == ("errors", "0x8611"))
+        self.assertEqual((row["shared"], row["same"]), ("shared words", False))
+        self.assertTrue(row["now"].startswith("Position following"))
         self.assertEqual(row["source"]["kind"], "tried")
         self.assertTrue(next(r for r in diff if r["path"] == ("commands", "0x2010"))["same"])
-        devicedata.take(ECT60, "ECT60", found[0], ("homing", "input-bits", "IN5"))
-        self.assertEqual(quirks.of(ECT60)["homing"]["input-bits"]["IN5"], 22)
-        src = devicedata.sources(ECT60)["homing input-bits IN5"]
+        devicedata.take(ECT60, "ECT60", found[0], ("errors", "0x8611"))
+        self.assertEqual(quirks.of(ECT60)["errors"][0x8611], "shared words")
+        src = devicedata.sources(ECT60)["errors 0x8611"]
         self.assertEqual((src["kind"], src["ref"], src["by"]), ("shared", "https://x/3", "a"))
         self.assertIn("tried on a machine", src["given"])
 
@@ -318,7 +319,7 @@ class TestKinds(unittest.TestCase):
                 self.assertIn(k.section, devicedata.SECTIONS)
                 self.assertTrue(k.card is None or k.card in cards, k)
                 self.assertNotIn("{", devicedata.label(p))
-        self.assertEqual(devicedata.label(("homing", "input-bits", "IN5")), "Input IN5 is 0x60FD bit")
+        self.assertEqual(devicedata.label(("errors", "0x8611")), "Error code 0x8611: what it means")
 
     def test_every_kind_has_a_sort_and_only_machine_choices_stay_home(self):
         for k in devicedata.KINDS:
@@ -356,8 +357,7 @@ class TestKinds(unittest.TestCase):
     def test_what_is_not_known_yet(self):
         drive = {"profile": "cia402", "dc": {"assign-activate": "0x300"}}
         found = devicedata.unknowns(drive, {}, [])
-        self.assertEqual([c for _, _, c in found], ["sdo", "switches", "response", "operation", "operation",
-                                                    "sync"])
+        self.assertEqual([c for _, _, c in found], ["sdo", "response", "operation", "operation", "sync"])
         self.assertEqual(devicedata.unknowns(drive, shipped("rtelligent-ect60.yaml"), [{"period-us": 500}]), [])
         self.assertEqual(devicedata.unknowns({"profile": "generic"}, {}, []), [])
 

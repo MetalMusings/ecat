@@ -4,7 +4,6 @@ Device data dialog (what is in use and where it comes from, Share, Fetch,
 going through a shared file's facts one by one, Try / Undo for a setting,
 Report)."""
 
-import copy
 import html
 import os
 import urllib.parse
@@ -13,7 +12,7 @@ from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                              QFormLayout, QHBoxLayout, QInputDialog, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-                             QFrame, QGridLayout, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
+                             QGridLayout, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
 
 from . import devicedata, homing, measured, quirks, settings, testmode, tool, tuning
 from .gui import TITLE, label
@@ -55,7 +54,7 @@ NOTHING_TO_SHARE = (
     "Remember what you learn about the device where you learn it, then share it here:\n"
     "- a setting: choose it on the Settings card, then Remember for the device type...\n"
     "- a command: Run command... on the Workbench's SDO card, for an object not known as one\n"
-    "- which input is which: test a switch on the Switches card, then Name input bit...\n\n"
+    "- homing methods: Remember the drive's methods... on the homing card\n\n"
     "Your pin names and scales are never shared.")
 
 KINDS = [("tried", "Tried on this machine"), ("manual", "The device's manual"),
@@ -284,172 +283,6 @@ def remember_methods(win, parent, position, methods, where, ask=True, dialog=Non
         QMessageBox.warning(parent, TITLE, str(e))
         return None
     win.status("Remembered for %s: homing methods %s (%s)" % (name, ", ".join(map(str, nums)), path))
-    return path
-
-
-class InputsDialog(QDialog):
-    """How a drive's inputs get their function (home switch, limits) and polarity,
-    from its manual: kept as the fact homing inputs. One function object per input
-    and its codes; the polarity as one bit per input of one object."""
-
-    TYPES = ("UINT", "USINT", "UDINT", "INT", "SINT", "DINT")
-
-    def __init__(self, parent, names, inputs=None):
-        super().__init__(parent)
-        self.setWindowTitle("The drive's inputs - %s" % TITLE)
-        self.setMinimumWidth(620)       # room for the fields' examples and the manual's names
-        inputs = inputs or {}
-        f, p = inputs.get("function") or {}, inputs.get("polarity") or {}
-        lay = QVBoxLayout(self)
-        lay.addWidget(label(
-            "From the drive's manual, under digital inputs: the object that gives each input its "
-            "function, the codes for the functions, and the object whose bits set the polarity. "
-            "Leave an input's object empty when it has none (such as an encoder input).", wrap=True))
-        self.names = QLineEdit(", ".join(inputs.get("names") or names or ["IN1", "IN2", "IN3", "IN4"]))
-        self.names.setPlaceholderText("such as IN3, IN4, IN5, IN6")
-        self.names.setToolTip("The inputs, as the manual names them, separated by commas: each gets a "
-                              "row below")
-        self.names.editingFinished.connect(self.fill)
-        form = QFormLayout()
-        self.ftype = QComboBox()
-        self.ftype.addItems(self.TYPES)
-        self.ftype.setCurrentText(f.get("type", "UINT"))
-        form.addRow("Function objects' type:", self.ftype)
-        codes = f.get("codes") or {}
-        self.codes = {}
-        for k, text, example in (("home", "Home switch", 3), ("negative", "Negative limit", 1),
-                                 ("positive", "Positive limit", 2), ("none", "No function", 0)):
-            e = QLineEdit("" if codes.get(k) is None else str(codes[k]))
-            e.setPlaceholderText("such as %d" % example)
-            e.setToolTip("The value written to an input's function object for this function")
-            form.addRow("Code, %s:" % text.lower(), e)
-            self.codes[k] = e
-        self.pobject = QLineEdit(p.get("object", ""))
-        self.pobject.setPlaceholderText("such as 0x2008:00 (empty: no polarity object)")
-        self.pobject.textChanged.connect(self.name_bit_column)
-        form.addRow("Polarity object:", self.pobject)
-        self.ptype = QComboBox()
-        self.ptype.addItems(self.TYPES)
-        self.ptype.setCurrentText(p.get("type", "UINT"))
-        form.addRow("Its type:", self.ptype)
-        choices = p.get("choices") or {}
-        self.set_means = QComboBox()
-        self.set_means.addItem("normally open", "normally open")
-        self.set_means.addItem("normally closed", "normally closed")
-        if choices.get("normally closed") == 1:
-            self.set_means.setCurrentIndex(1)
-        form.addRow("A set bit means:", self.set_means)
-        self.ref = QLineEdit()
-        self.ref.setPlaceholderText("the manual's name, version and section")
-        form.addRow("Reference:", self.ref)
-        lay.addLayout(form)
-        rule = QFrame()
-        rule.setObjectName("rule")
-        rule.setFrameShape(QFrame.HLine)
-        lay.addWidget(rule)
-        lay.addWidget(label("Each input", "cardTitle"))
-        lay.addWidget(label("Name the inputs, separated by commas; each gets a row with the object that "
-                            "gives it its function and its bit in the polarity object.", "hint", wrap=True))
-        names = QFormLayout()
-        names.addRow("Inputs:", self.names)
-        lay.addLayout(names)
-        self.grid = QGridLayout()
-        lay.addLayout(self.grid)
-        self.rows = {}
-        self.given = (f.get("objects") or {}, p.get("bits") or {})
-        self.fill()
-        ok = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        ok.button(QDialogButtonBox.Ok).setText("Remember")
-        ok.accepted.connect(self.accept)
-        ok.rejected.connect(self.reject)
-        lay.addWidget(ok)
-
-    def name_bit_column(self, *_):
-        """The polarity column says whose bit it is."""
-        if getattr(self, "bit_head", None) is not None:
-            obj = self.pobject.text().strip()
-            self.bit_head.setText("Bit in %s" % obj if obj else "Polarity bit")
-
-    def input_names(self):
-        return [n.strip() for n in self.names.text().split(",") if n.strip()]
-
-    def fill(self):
-        """A row per input: its function object and its polarity bit."""
-        old = {n: (o.text(), b.text()) for n, (o, b) in self.rows.items()}
-        while self.grid.count():
-            w = self.grid.takeAt(0).widget()
-            if w is not None:
-                w.deleteLater()
-        self.rows = {}
-        self.grid.addWidget(label("Input", "fieldName"), 0, 0)
-        self.grid.addWidget(label("Function object", "fieldName"), 0, 1)
-        self.bit_head = label("", "fieldName")
-        self.grid.addWidget(self.bit_head, 0, 2)
-        self.name_bit_column()
-        objs, bits = self.given
-        for i, n in enumerate(self.input_names(), 1):
-            o = QLineEdit(old.get(n, (objs.get(n, ""),))[0])
-            o.setPlaceholderText("such as 0x2007:03")
-            b = QLineEdit(old.get(n, (None, "" if bits.get(n) is None else str(bits[n])))[1])
-            b.setPlaceholderText("such as 4")
-            self.grid.addWidget(label(n), i, 0)
-            self.grid.addWidget(o, i, 1)
-            self.grid.addWidget(b, i, 2)
-            self.rows[n] = (o, b)
-
-    def inputs(self):
-        """The fact's value (quirk homing: inputs); raises ValueError with why."""
-        objects = {n: o.text().strip() for n, (o, _b) in self.rows.items() if o.text().strip()}
-        if not objects:
-            raise ValueError("give the function object of at least one input")
-        codes = {}
-        for k, e in self.codes.items():
-            if e.text().strip():
-                codes[k] = int(e.text().strip(), 0)
-        if "none" not in codes:
-            raise ValueError("the code for no function is needed (it is how an input is freed)")
-        out = {"function": {"objects": objects, "type": self.ftype.currentText(), "codes": codes}}
-        if self.pobject.text().strip():
-            bits = {n: int(b.text().strip(), 0) for n, (_o, b) in self.rows.items() if b.text().strip()}
-            if not bits:
-                raise ValueError("give the polarity bit of the inputs (or no polarity object)")
-            closed = self.set_means.currentData() == "normally closed"
-            out["polarity"] = {"object": self.pobject.text().strip(), "type": self.ptype.currentText(),
-                               "bits": bits,
-                               "choices": {"normally open": 0 if closed else 1,
-                                           "normally closed": 1 if closed else 0}}
-        quirks._inputs(copy.deepcopy(out))          # the same check as the file's
-        return out
-
-    def source(self):
-        return {"kind": "manual", "ref": self.ref.text().strip(), "date": devicedata.today()}
-
-
-def remember_inputs(win, parent, position, ask=True, dialog=None):
-    """Ask for and keep how a drive's inputs get their function and polarity."""
-    d = device(win, position)
-    if d is None:
-        win.status("This slave has no vendor and product: nothing to remember it for")
-        return None
-    _, ident, name, rev = d
-    h = quirks.of(ident).get("homing") or {}
-    dlg = dialog or InputsDialog(parent, list(h.get("input-bits") or {}), h.get("inputs"))
-    while True:
-        if ask and dlg.exec_() != QDialog.Accepted:
-            return None
-        try:
-            value = dlg.inputs()
-            break
-        except (ValueError, quirks.QuirkError) as e:
-            QMessageBox.warning(parent, TITLE, "Not kept: %s" % e)
-            if not ask:
-                return None
-    try:
-        path = devicedata.remember(ident, name, ("homing", "inputs"), value, dict(dlg.source(), revision=rev))
-    except devicedata.Error as e:
-        QMessageBox.warning(parent, TITLE, str(e))
-        return None
-    win.status("Remembered for %s: how its inputs are set up (%s)" % (name, path))
     return path
 
 

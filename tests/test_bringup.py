@@ -152,32 +152,30 @@ class TestHoming(Base):
         self.assertEqual([(r.key, r.state, r.card) for r in found], [("hm", bringup.MISSING, "operation")])
         self.assertEqual(bringup.homing_rows({"profile": "generic"}), [])
 
-    def test_a_switch_method_without_known_inputs(self):
+    def test_a_switch_method(self):
         s = drive(modes=["hm"])
         s["homing"] = {"method": 21}
         found = {r.key: r for r in bringup.homing_rows(s)}
         self.assertEqual(found["methods"].state, bringup.TRY)
         self.assertEqual(found["method"].state, bringup.OK)
-        self.assertEqual(found["inputs"].state, bringup.MISSING)
-        self.assertIn("may not be wired to homing", found["inputs"].text)
-        self.assertEqual(found["switch-home"].state, bringup.TRY)
-        self.assertEqual(found["switch-home"].card, "switches")
+        # which input is which is the drive's own: the card sends to its box and the manual
+        self.assertEqual((found["switches"].state, found["switches"].card), (bringup.TRY, "switches"))
+        self.assertIn("home switch", found["switches"].text)
+        self.assertIn("manual", found["switches"].text)
+        self.assertNotIn("inputs", found)
         self.assertNotIn("extras", found)                      # a standard method
-        # the Switches card and the Move card tell
+        # homing that found the switch proves it; the Move card tells
         seen = bringup.Seen()
-        seen.switches["home"] = ("warning", "the polarity is the other way round")
         seen.homed, seen.follows_after = "homed", False
         found = {r.key: r for r in bringup.homing_rows(s, seen, ([17, 18, 19, 20, 21, 22], "quirk file"))}
         self.assertEqual(found["methods"].text, "17-22 (from the quirk file)")
-        self.assertEqual(found["switch-home"].state, bringup.BAD)
+        self.assertEqual(found["switches"].state, bringup.OK)
+        self.assertIn("homing found it", found["switches"].text)
         self.assertEqual(found["homed"].state, bringup.OK)
         self.assertEqual(found["after"].state, bringup.BAD)
-        self.assertEqual(found["inputs"].state, bringup.MISSING)    # a test that failed: no
-        # a test that found it right: the inputs work as they are (the machine test, 2026-11-27)
-        seen.switches["home"] = ("ok", "Set up right")
+        seen.homed = "error"
         found = {r.key: r for r in bringup.homing_rows(s, seen)}
-        self.assertEqual(found["inputs"].state, bringup.OK)
-        self.assertIn("works as the drive is set up now", found["inputs"].text)
+        self.assertEqual(found["switches"].state, bringup.TRY)
 
     def test_the_drives_own_numbers(self):
         s = drive(modes=["hm"])

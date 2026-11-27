@@ -46,7 +46,7 @@ from PyQt5.QtWidgets import (
 from . import (config, dcinfo, helpdocs, diagnose, drivetest, esi, events, explain, fromlcec, guidance, halcheck, halpins, pdoedit, pdoreq,
                homing,
                integrate, lcnc_env, masterlog, masterstart, measured,
-               netif, pindocs, propose, quirks, response, settings, switches, symptoms, tasks, testmode, tool,
+               netif, pindocs, propose, quirks, response, sdowatch, settings, switches, symptoms, tasks, testmode, tool,
                tuning,
                update, wiring)
 from .session import Session, servo_period, _row_text as session_row_text, \
@@ -1689,33 +1689,6 @@ class SlaveView(QWidget):
         # a method that needs switches: how a drive is told which input is which
         self.home_switch_text = label("", "hint", wrap=True)
         self.homing_card.add(self.home_switch_text)
-        # the drive's quirk file says how its inputs are set up: a row per switch
-        self.home_inputs = QWidget()
-        self.home_inputs_form = QFormLayout(self.home_inputs)
-        self.home_inputs_form.setContentsMargins(0, 0, 0, 0)
-        self.homing_card.add(self.home_inputs)
-        srow = QHBoxLayout()
-        self.home_switch_look = QPushButton("Look for the drive's input settings")
-        self.home_switch_look.setToolTip("Searches the drive's objects (its ESI file or what it "
-                                         "reports) for names that set up inputs: a guess, nothing "
-                                         "is written. Change them under Settings.")
-        # a toggle: pressed again, the list goes
-        self.home_switch_look.setCheckable(True)
-        self.home_switch_look.toggled.connect(self.input_settings_toggled)
-        srow.addWidget(self.home_switch_look)
-        self.home_inputs_remember = QPushButton("Remember how its inputs are set up...")
-        self.home_inputs_remember.setToolTip(
-            "From the drive's manual: which object gives each input its function and with which "
-            "codes, and how its polarity is set. Kept for the device type: the homing card then "
-            "offers a row per switch, and the Switches card can name the inputs")
-        self.home_inputs_remember.clicked.connect(self.remember_inputs)
-        srow.addWidget(self.home_inputs_remember)
-        srow.addStretch(1)
-        self.homing_card.add(srow)
-        self.home_switch_found = label("", "mono", wrap=True)
-        self.home_switch_found.setFont(mono())
-        self.home_switch_found.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.homing_card.add(self.home_switch_found)
         self.home_ini_title = QCheckBox("Show the lines for LinuxCNC (INI and HAL)")
         self.home_ini_title.setToolTip("The [JOINT_n] lines for a joint that homes through the drive, "
                                        "and the HAL lines: the index-enable net Apply writes, and the "
@@ -2494,13 +2467,6 @@ class SlaveView(QWidget):
         if self.bringup_goal.currentData() != self.bringup_goal.itemData(0):
             self.show_bringup()
 
-    def remember_inputs(self):
-        from . import devicedataview
-        got = devicedataview.remember_inputs(self.win, self, self.position)
-        if got:
-            self.show_homing(self.win.session.slave(self.position))
-        return got
-
     def remember_methods(self):
         from . import devicedataview
         nums, where = self.home_support
@@ -2525,24 +2491,8 @@ class SlaveView(QWidget):
             if nums else "not known for this drive, every method of the standard is offered"))
         self.home_text.setText(" ".join(parts))
         need = switches.needed(s, self.home_axis_number())
-        known = switches.setup(s) is not None
-        tried = self.switches_tried(need)
-        self.home_switch_text.setText(
-            ("Switches: this method needs the %s. " % " and the ".join(switches.TEXT[k] for k in need) + (
-                "The Workbench's Switches card found %s set up right as the drive is now: nothing to "
-                "change (function and polarity are only needed to change them)."
-                % " and ".join(switches.TEXT[k] for k in need) if tried else
-                "Set which input is which below; the Workbench's Switches card tells whether the "
-                "drive sees it." if known else switches.GUIDE)) if need else "")
-        self.show_input_rows(s, need if known else [])
-        for w in (self.home_switch_text, self.home_switch_look, self.home_inputs_remember):
-            w.setVisible(bool(need))
-        if not need or getattr(self, "home_switch_for", None) != self.position:
-            self.home_switch_found.setText("")
-            self.home_switch_look.blockSignals(True)
-            self.home_switch_look.setChecked(False)
-            self.home_switch_look.blockSignals(False)
-        self.home_switch_found.setVisible(bool(need) and bool(self.home_switch_found.text()))
+        self.home_switch_text.setText(switches.guide(need) if need else "")
+        self.home_switch_text.setVisible(bool(need))
         lines = homing.ini_help(self.win.session.cfg, s, self.home_axis_number())
         hal = homing.hal_help(self.win.session.cfg, s, self.home_axis_number(),
                               self.win.session.ini_path)
@@ -2574,142 +2524,6 @@ class SlaveView(QWidget):
             self.home_hform.labelForField(box).setText("%s%s (%s)" % (text[0].upper(), text[1:], where(i, sub)))
             self.home_hform.labelForField(box).setVisible(key in used)
             box.setVisible(key in used)
-
-    def switches_tried(self, kinds):
-        """Whether the Switches card's test found every one of these switches set up
-        right in this window (bringup.Seen.switches)."""
-        seen = self.win.bringup_seen.get(self.position) if isinstance(self.position, int) else None
-        got = getattr(seen, "switches", None) or {}
-        return bool(kinds) and all((got.get(k) or ("",))[0] == "ok" for k in kinds)
-
-    def show_input_rows(self, s, kinds):
-        """A row per switch the method needs: the input that is that switch,
-        and its polarity, as the drive will have them (the file's settings,
-        else the factory's); a change is written as settings (switches.assign)."""
-        form = self.home_inputs_form
-        while form.rowCount():
-            form.removeRow(0)
-        self.home_inputs.setVisible(bool(kinds))
-        setup = switches.setup(s) if kinds else None
-        read = self._drive_read() if kinds else None
-        for kind in kinds:
-            name, pol = switches.current(s, kind)
-            # what the drive has now can differ: a test wrote another choice that
-            # was not saved, and the drive keeps it until it is switched off
-            now = switches.current(s, kind, read) if read else (name, pol)
-            row = QHBoxLayout()
-            box = QuietCombo()
-            box.addItem("(no input)", None)
-            for n in setup["names"]:
-                box.addItem(n, n)
-            box.setCurrentIndex(max(box.findData(name), 0))
-            row.addWidget(box)
-            pbox = None
-            if setup.get("polarity"):
-                pbox = QuietCombo()
-                if pol is None:
-                    pbox.addItem("as it is: right (tried)" if self.switches_tried([kind])
-                                 else "polarity not known", None)
-                for c in setup["polarity"]["choices"]:
-                    pbox.addItem(c, c)
-                pbox.setCurrentIndex(max(pbox.findData(pol), 0))
-                row.addWidget(pbox)
-            row.addStretch(1)
-
-            def changed(*_, k=kind, b=box, pb=pbox):
-                self.input_row_changed(k, b.currentData(), pb.currentData() if pb else None)
-            box.activated.connect(changed)
-            if pbox:
-                pbox.activated.connect(changed)
-            form.addRow(switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:], row)
-            if now != (name, pol) and (now[0] is not None or name is not None):
-                warn = QHBoxLayout()
-                text = label("The drive has %s now (from a test, until it is switched off; or set "
-                             "by another tool), the configuration %s." % (
-                                 self._input_text(*now), self._input_text(name, pol)), "warnText", wrap=True)
-                warn.addWidget(text, 1)
-                fix = QPushButton("Write %s as settings" % (name or "no input"))
-                fix.setToolTip("So that the drive gets the configuration's choice at every start, "
-                               "whatever it has now")
-                fix.clicked.connect(lambda _c=False, k=kind, n=name, p=pol: self.input_row_changed(k, n, p))
-                warn.addWidget(fix)
-                form.addRow("", warn)
-
-    @staticmethod
-    def _input_text(name, pol):
-        return "%s%s" % (name or "no input", " (%s)" % pol if name and pol else "")
-
-    def _drive_read(self):
-        """read(index, sub, type) of the drive, when the bus was read; else None."""
-        if self.win.session.bus.get(self.position) is None:
-            return None
-
-        def read(index, sub, typ):
-            try:
-                return tool.upload(self.position, index, sub, {"UINT": "uint16", "UDINT": "uint32",
-                                                             "USINT": "uint8"}.get(typ, "uint16"))
-            except (tool.ToolError, ValueError):
-                return None
-        return read
-
-    def _homing_again(self):
-        s = self.win.session.slave(self.position)
-        if s is not None:
-            self.show_homing(s)
-
-    def input_row_changed(self, kind, name, choice):
-        s = self.win.session.slave(self.position)
-        if s is None:
-            return
-        read = self._drive_read()
-        # the rows are made again after this call, not while their box sends it;
-        # a bound method of this page: not called once the page is gone
-        try:
-            notes = switches.assign(s, kind, name, choice, read)
-        except switches.SetupError as e:
-            self.win.status("%s: %s" % (switches.TEXT[kind], e))
-            QTimer.singleShot(0, self._homing_again)
-            return
-        self.show_settings(s)
-        QTimer.singleShot(0, self._homing_again)
-        self.win.changed()
-        self.win.status("%s: %s%s" % (switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:],
-                                      "on %s" % name if name else "no input",
-                                      ("; " + "; ".join(notes)) if notes else ""))
-
-    def input_settings_toggled(self, on):
-        if on:
-            self.look_for_input_settings()
-        else:
-            self.home_switch_found.setText("")
-            self.home_switch_found.setVisible(False)
-
-    def look_for_input_settings(self):
-        """The drive's settings that look like setting up its inputs, with their
-        values where the bus can be read."""
-        s = self.win.session.slave(self.position)
-        found = switches.input_settings(s, self.win.session.dictionary(self.position))
-        d = self.win.session.dictionary(self.position)
-        out = []
-        for index, sub, name in found:
-            value = None
-            e = d.entries.get((index, sub)) if d else None
-            if e is not None and self.win.session.bus.get(self.position) is not None:
-                try:
-                    value = tool.upload(self.position, index, sub, e.data_type)
-                except (tool.ToolError, ValueError):
-                    value = None
-            out.append("%s  %s%s" % (config.obj(index, sub), name,
-                                     "" if value is None else "  = %s" % value))
-        self.home_switch_for = self.position
-        need = switches.needed(s, self.home_axis_number())
-        first = ("The switches are set up right as the drive is now (Switches card): these are only "
-                 "needed to change them.\n" if self.switches_tried(need) else "")
-        self.home_switch_found.setText(first + (
-            ("Found by name (a guess; change them under Settings, the drive's manual says which "
-             "values mean what):\n" + "\n".join(out)) if out else
-            "Nothing found by name: see the drive's manual under digital inputs."))
-        self.home_switch_found.setVisible(True)
 
     def home_ini_toggled(self, *_):
         shown = not self.home_ini_title.isHidden() and self.home_ini_title.isChecked()
@@ -5355,108 +5169,64 @@ class RecordingPlot(QWidget):
         p.end()
 
 
-class ClickBox(QLabel):
-    """A state box (QLabel[box]) that can be clicked."""
-    clicked = pyqtSignal()
-
-    def __init__(self, text):
-        super().__init__(text)
-        self.setCursor(Qt.PointingHandCursor)
-
-    def mousePressEvent(self, ev):
-        if ev.button() == Qt.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(ev)
-
-
 class SwitchCard(Card):
-    """A drive's home and limit switches as it sees them (0x60FD), live during
-    the I/O test, and a test: released, then pressed, and what that says
-    (switches.verdict). Nothing moves: the drive is not enabled for it."""
-
-    RELEASED_S = 1.0    # watched released first: bits that change on their own are left out
-    STABLE_S = 0.3      # a change must hold this long
-    WAIT_S = 15.0       # for the press
+    """A drive's home and limit switches as it sees them: the three bits of 0x60FD
+    the standard gives them, live during the workbench. Nothing moves. Which input
+    is which, and its polarity, is the maker's own: set under Settings, watched as
+    pins or on the SDO card."""
 
     def __init__(self, win):
         super().__init__("Switches", "The drive's home and limit switches as it sees them "
-                         "(0x60FD), live. Nothing moves.")
+                         "(0x60FD bits 0 to 2, as the standard has them), live. Nothing moves.")
         self.win = win
         self.slave = None
-        self.test = None
-        # a box per switch and per input: grey when off, green when on, live; a
-        # switch's box starts its test when clicked
         lamps = QHBoxLayout()
         self.lamps = {}
-        for kind, _bit, text in switches.FUNCTIONS:
-            box = ClickBox(text[0].upper() + text[1:])
+        for kind, bit, text in switches.FUNCTIONS:
+            box = QLabel(text[0].upper() + text[1:])
             box.setProperty("box", "off")
             box.setAlignment(Qt.AlignCenter)
-            box.setToolTip("Click to test the %s: leave it released, then press it" % text)
-            box.clicked.connect(lambda k=kind: self.start(k))
+            box.setToolTip("0x60FD bit %d: lit while the drive sees the %s" % (bit, text))
             lamps.addWidget(box)
             self.lamps[kind] = box
         lamps.addStretch(1)
         self.add(lamps)
-        self.input_row = QHBoxLayout()
-        self.input_boxes = {}
-        self.input_row.addStretch(1)
-        self.add(self.input_row)
-        self.inputs = label("", "hint", wrap=True)
-        self.add(self.inputs)
-        self.step = label("", None, wrap=True)
-        self.add(self.step)
-        self.result = label("", None, wrap=True)
-        self.add(self.result)
+        self.hint = label("", "hint", wrap=True)
+        self.add(self.hint)
         self.missing = label("", "hint", wrap=True)
         self.add(self.missing)
-        self.name_row = QHBoxLayout()
-        self.name_button = QPushButton("Name this input...")
-        self.name_button.setToolTip("Remember for the device type which input this 0x60FD bit is (as the "
-                                    "drive's manual or its connector names it)")
-        # clicked passes its checked state: not the name
-        self.name_button.clicked.connect(lambda _checked=False: self.name_input())
-        self.name_row.addWidget(self.name_button)
-        self.name_row.addStretch(1)
-        self.add(self.name_row)
-        self.name_button.hide()
-        self.found_bit = None
+        mrow = QHBoxLayout()
+        self.watch_button = QPushButton("Watch 0x60FD on the SDO card")
+        self.watch_button.setToolTip("Read the drive's digital inputs once a second by SDO, "
+                                     "without changing its process data")
+        self.watch_button.clicked.connect(self.watch_by_sdo)
+        mrow.addWidget(self.watch_button)
+        mrow.addStretch(1)
+        self.add(mrow)
 
-    def name_input(self, name=None):
-        """The physical input the last test reached, named for the device type."""
-        from . import devicedataview
-        if self.found_bit is None or self.slave is None:
-            return None
-        if name is None:
-            name, ok = QInputDialog.getText(self, TITLE, "Which input is 0x60FD bit %d (as the manual or "
-                                            "the connector names it, such as IN5 or DI3)?" % self.found_bit)
-            if not ok or not name.strip():
-                return None
-        return devicedataview.remember(self.win, self, self.slave.get("position"),
-                                       ("homing", "input-bits", name.strip()), self.found_bit,
-                                       "Input %s is 0x60FD bit" % name.strip())
+    def watch_by_sdo(self):
+        if self.slave is not None:
+            self.win.test_page.watch_sdo(self.slave.get("position"), 0x60FD, 0)
 
     def show_drive(self, slave):
-        if slave is not self.slave:
-            # another drive: its inputs have other names
-            for box in self.input_boxes.values():
-                self.input_row.removeWidget(box)
-                box.deleteLater()
-            self.input_boxes = {}
         self.slave = slave
-        pin = switches.input_pin(slave)
-        has = pin is not None
-        for w in ([self.inputs, self.step, self.result] + list(self.lamps.values())
-                  + list(self.input_boxes.values())):
+        has = switches.input_pin(slave) is not None
+        for w in [self.hint] + list(self.lamps.values()):
             w.setVisible(has)
         self.missing.setVisible(not has)
+        self.watch_button.setVisible(not has)
         self.missing.setText("" if has else
                              "0x60FD (Digital inputs) is not in the drive's process data, or has no pin: "
-                             "add it on the drive's page (Process data) to see its switches here.")
-        self.need = switches.needed(slave) if slave else []
-        if self.test and self.test.get("slave") is not slave:
-            self.test = None
-            self.step.setText("")
+                             "add it on the drive's page (Process data), or watch it by SDO.")
+        need = switches.needed(slave) if slave else []
+        self.hint.setText(
+            "Press a switch: its box lights up while the drive sees it.%s If it does not, or "
+            "it is lit while the switch is free, the drive's input settings decide (its manual, "
+            "under digital inputs; set them under Settings): the input's function, and its "
+            "polarity, or the switch's other contact (normally open or closed). The bits of the "
+            "physical inputs (16 and up) are in the pin's value and on the SDO card."
+            % (" The homing method chosen needs the %s." % " and the ".join(switches.TEXT[k] for k in need)
+               if need else ""))
 
     @staticmethod
     def _light(box, on):
@@ -5464,37 +5234,6 @@ class SwitchCard(Card):
         if box.property("box") != want:
             box.setProperty("box", want)
             restyle(box)
-
-    def show_inputs(self, value):
-        """A box per physical input: those the quirk file names, else bits 16
-        to 23; an input of another bit that is on gets its box too."""
-        names = switches.input_names(self.slave)
-        bits = sorted(set(names or range(16, 24)) | {b for b in range(16, 32) if value >> b & 1})
-        if list(self.input_boxes) != bits:
-            for box in self.input_boxes.values():
-                self.input_row.removeWidget(box)
-                box.deleteLater()
-            self.input_boxes = {}
-            for i, b in enumerate(bits):
-                box = QLabel(names.get(b, "bit %d" % b))
-                box.setProperty("box", "off")
-                box.setAlignment(Qt.AlignCenter)
-                box.setToolTip("0x60FD bit %d" % b)
-                self.input_row.insertWidget(i, box)
-                self.input_boxes[b] = box
-        for b, box in self.input_boxes.items():
-            self._light(box, value >> b & 1)
-        need = getattr(self, "need", [])
-        self.inputs.setText("Click a switch above to test it.%s%s" % (
-            " The homing method chosen needs the %s." % " and the ".join(switches.TEXT[k] for k in need)
-            if need else "", "" if names else " Which input each bit is: see the drive's manual."))
-
-    def start(self, kind):
-        # the time starts with the first reading (step_test)
-        self.test = {"kind": kind, "slave": self.slave, "phase": "released", "t": None,
-                     "base": None, "noisy": 0, "seen": None}
-        self.result.setText("")
-        self.step.setText("Leave the %s released..." % switches.TEXT[kind])
 
     def update_values(self, v):
         if self.slave is None:
@@ -5507,66 +5246,9 @@ class SwitchCard(Card):
             value = None
         if value is None:
             return
-        st = switches.state(value, self.slave)
+        st = switches.state(value)
         for kind, box in self.lamps.items():
             self._light(box, st[kind])
-        self.show_inputs(value)
-        if self.test:
-            self.step_test(value)
-
-    def step_test(self, value, now=None):
-        t = self.test
-        if t is None:
-            return
-        now = time.monotonic() if now is None else now
-        kind = t["kind"]
-        if t["t"] is None:
-            t["t"] = now
-        if t["phase"] == "released":
-            if t["base"] is None:
-                t["base"] = value
-            t["noisy"] |= value ^ t["base"]
-            if now - t["t"] >= self.RELEASED_S:
-                t.update(phase="pressed", t=now)
-                self.step.setText("Now press and hold the %s (up to %d s)..."
-                                  % (switches.TEXT[kind], self.WAIT_S))
-            return
-        keep = ~t["noisy"] & 0xFFFFFFFF
-        base, now_v = t["base"] & keep, value & keep
-        if now_v != base:
-            if t["seen"] != now_v:
-                t["seen"], t["since"] = now_v, now
-                return
-            if now - t["since"] < self.STABLE_S:
-                return
-            self.finish(switches.verdict(kind, base, now_v, self.slave), base ^ now_v)
-        elif now - t["t"] >= self.WAIT_S:
-            self.finish(switches.verdict(kind, base, base, self.slave))
-
-    def finish(self, found, changed=0):
-        level, text = found
-        kind = (self.test or {}).get("kind")
-        if kind and self.slave is not None:
-            from . import bringup
-            seen = self.win.bringup_seen.setdefault(self.slave.get("position"), bringup.Seen())
-            seen.switches[kind] = (level, text)
-            if self.win.slave_page.position == self.slave.get("position"):
-                self.win.slave_page.show_bringup()
-                s = self.win.session.slave(self.slave.get("position"))
-                if s is not None and s.get("profile") == "cia402":
-                    self.win.slave_page.show_homing(s)    # the homing card: nothing to change
-        # one physical input changed: it can be named for the device type
-        bits = [b for b in range(16, 32) if changed >> b & 1]
-        self.found_bit = bits[0] if len(bits) == 1 else None
-        self.name_button.setVisible(self.found_bit is not None)
-        if self.found_bit is not None:
-            self.name_button.setText("Name input bit %d (%s)..." % (
-                self.found_bit, switches.bit_name(self.found_bit, self.slave)))
-        self.test = None
-        self.step.setText("Done: you can release the switch.")
-        self.result.setText(text)
-        self.result.setStyleSheet("color: %s" % {"ok": GREEN, "warning": AMBER}.get(level, RED).name())
-        self.win.status(text)
 
 
 class ResponseCard(Card):
@@ -6744,6 +6426,10 @@ class TestPage(QWidget):
         read = QPushButton("Read")
         read.clicked.connect(self.sdo_read)
         form.addWidget(read)
+        watch = QPushButton("Watch")
+        watch.setToolTip("Read this object again about once a second, in a list below")
+        watch.clicked.connect(lambda _checked=False: self.watch_typed())
+        form.addWidget(watch)
         self.sdo_value = QLineEdit()
         self.sdo_value.setPlaceholderText("value")
         form.addWidget(self.sdo_value, 1)
@@ -6763,6 +6449,24 @@ class TestPage(QWidget):
         form.addWidget(self.hex_box)
         sdo.add(form)
         self.sdo_name = sdo.add(label("", "hint"))
+        # watched objects, read again about once a second
+        self.watch = sdowatch.Watch()
+        self.watch_worker = None
+        self.watch_hint = sdo.add(label(
+            "Watch reads the object again about once a second, from whatever master runs "
+            "(nothing is written): for what the process data does not carry, such as the "
+            "drive's physical inputs. A value that changed is marked for a moment.", "hint", wrap=True))
+        self.watch_table = QTableWidget(0, 6)
+        self.watch_table.setHorizontalHeaderLabels(["Slave", "Object", "Name", "Value", "Bits on", ""])
+        self.watch_table.verticalHeader().hide()
+        self.watch_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.watch_table.setSelectionMode(QTableWidget.NoSelection)
+        self.watch_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.watch_table.hide()
+        sdo.add(self.watch_table)
+        self.watch_timer = QTimer(self)
+        self.watch_timer.setInterval(1000)
+        self.watch_timer.timeout.connect(self.watch_round)
         lay.addWidget(sdo)
         lay.addStretch(1)
 
@@ -7095,6 +6799,85 @@ class TestPage(QWidget):
             text = text.split()[0 if self.win.hex_values else -1]
         self.sdo_value.setText(text)
         self.win.status("0x%04X:%02X = %s" % (t[0], t[1], text))
+
+    # watched SDOs (sdowatch.py)
+
+    def watch_typed(self):
+        t = self._sdo_target()
+        pos = self.position
+        if t and isinstance(pos, int) and pos >= 0:
+            self.watch_sdo(pos, t[0], t[1], self.sdo_type.currentData())
+
+    def watch_sdo(self, position, index, sub, dtype=None):
+        """Add an object to the watched ones and show it at once."""
+        if not self.watch.add(position, index, sub, dtype,
+                              self.win.session.object_name(position, index, sub) or ""):
+            self.win.status("At most %d objects are watched: remove one first" % sdowatch.MAX)
+            return
+        self.show_watch()
+        self.watch_round()
+        if not self.watch_timer.isActive():
+            self.watch_timer.start()
+        self.win.status("Watching 0x%04X:%02X of slave %d" % (index, sub, position))
+
+    def unwatch(self, key):
+        self.watch.remove(key)
+        if not self.watch.entries:
+            self.watch_timer.stop()
+        self.show_watch()
+
+    def watch_round(self):
+        """One round of reads in a thread; none while the last is still out, or
+        while the page is not shown (no SDO traffic for nothing)."""
+        if not self.watch.entries:
+            self.watch_timer.stop()
+            return
+        if self.watch_worker is not None or not self.isVisible():
+            return
+        self.watch_worker = Worker(lambda _p: self.watch.read_all(), self)
+        self.watch_worker.done.connect(self.watch_read)
+        self.watch_worker.failed.connect(lambda _m: self.watch_read([]))
+        self.watch_worker.start()
+
+    def watch_read(self, results):
+        self.watch_worker = None
+        self.watch.take(results)
+        self.show_watch_values()
+
+    def show_watch(self):
+        """The watched rows (made again when one comes or goes)."""
+        t = self.watch_table
+        t.setRowCount(len(self.watch.entries))
+        for r, e in enumerate(self.watch.entries):
+            for c, text in enumerate([str(e.position), "0x%04X:%02X" % (e.index, e.sub), e.name]):
+                t.setItem(r, c, QTableWidgetItem(text))
+            for c in (3, 4):
+                item = QTableWidgetItem("")
+                item.setFont(mono())
+                t.setItem(r, c, item)
+            stop = QPushButton("Remove")
+            stop.clicked.connect(lambda _c=False, k=e.key: self.unwatch(k))
+            t.setCellWidget(r, 5, stop)
+        t.setVisible(bool(self.watch.entries))
+        t.setFixedHeight(t.horizontalHeader().height() + 4 + sum(t.rowHeight(r) for r in range(t.rowCount())))
+        self.show_watch_values()
+
+    def show_watch_values(self):
+        now = time.monotonic()
+        t = self.watch_table
+        for r, e in enumerate(self.watch.entries):
+            value, bits = t.item(r, 3), t.item(r, 4)
+            if value is None or bits is None:
+                continue
+            value.setText(sdowatch.shown(e, self.win.hex_values))
+            value.setToolTip(e.error or e.text)
+            bits.setText("" if e.error else sdowatch.bits_on(e.value))
+            fresh = now - e.changed < sdowatch.CHANGED_S
+            for item in (value, bits):
+                f = item.font()
+                f.setBold(fresh)
+                item.setFont(f)
+                item.setForeground(QBrush(RED if e.error else AMBER if fresh else self.palette().text().color()))
 
     def sdo_run_command(self):
         """Run a command object once: confirmed, and not while a drive is enabled."""
@@ -9403,6 +9186,7 @@ class MainWindow(QMainWindow):
             box.blockSignals(True)
             box.setChecked(on)
             box.blockSignals(False)
+        self.test_page.show_watch_values()
         s = self.session.slave(self.slave_page.position)
         if s is not None:
             self.slave_page.show_settings(s)

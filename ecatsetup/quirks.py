@@ -208,18 +208,13 @@ def parse(data, path="<quirk>"):
 def _homing(data):
     """homing: methods (numbers), describe (text, needs, moves per method),
     extras (settings per method), enable-again (methods after which the
-    drive follows its target only once enabled again)."""
+    drive follows its target only once enabled again). input-bits and inputs
+    (how the inputs got their function, until 2026-11-27) are no longer read:
+    a file that has them is taken without them."""
     if not isinstance(data, dict) or set(data) - {"methods", "describe", "extras", "enable-again",
                                                   "input-bits", "inputs"}:
-        raise QuirkError("homing takes methods, describe, extras, enable-again, input-bits and inputs")
-    out = {"methods": [], "describe": {}, "extras": {}, "enable-again": [], "input-bits": {}}
-    if data.get("inputs") is not None:
-        out["inputs"] = _inputs(data["inputs"])
-    bits = data.get("input-bits") or {}
-    if not isinstance(bits, dict):
-        raise QuirkError("homing.input-bits: input names and their bits in 0x60FD, such as IN5: 20")
-    for name, bit in bits.items():
-        out["input-bits"][str(name)] = int(bit)
+        raise QuirkError("homing takes methods, describe, extras and enable-again")
+    out = {"methods": [], "describe": {}, "extras": {}, "enable-again": []}
     for n in data.get("methods") or []:
         out["methods"].append(int(n))
     for n in data.get("enable-again") or []:
@@ -241,49 +236,6 @@ def _homing(data):
             lst.append(st)
         out["extras"][int(n)] = lst
     return out
-
-
-def _inputs(data):
-    """homing: inputs: how the drive's inputs get their function (home switch,
-    limits) and polarity; see docs/reference.md "Homing (quirk files)"."""
-    def fail(why):
-        raise QuirkError("homing.inputs: " + why)
-    if not isinstance(data, dict) or set(data) - {"function", "polarity"} or "function" not in data:
-        fail("takes function (and polarity)")
-    f = data["function"]
-    if not isinstance(f, dict) or not isinstance(f.get("objects"), dict) or not isinstance(f.get("codes"), dict):
-        fail("function needs objects (input: object) and codes (home, positive, negative, none)")
-    if set(f["codes"]) - {"home", "positive", "negative", "none"} or "none" not in f["codes"]:
-        fail("function codes are home, positive, negative and none (none is needed)")
-    names = [str(n) for n in f["objects"]]
-    out = {"names": names, "function": {
-        "objects": {str(n): "0x%04X:%02X" % _sub(o) for n, o in f["objects"].items()},
-        "type": str(f.get("type", "UINT")),
-        "codes": {k: int(v) for k, v in f["codes"].items()},
-        "factory": {str(n): int(v) for n, v in (f.get("factory") or {}).items()}}}
-    p = data.get("polarity")
-    if p is not None:
-        if not isinstance(p, dict) or not isinstance(p.get("choices"), dict) or len(p["choices"]) != 2:
-            fail("polarity needs choices: two names and their values (bits)")
-        pol = {"type": str(p.get("type", "UINT")),
-               "choices": {str(k): int(v) for k, v in p["choices"].items()}}
-        if "object" in p and "bits" in p:
-            pol["object"] = "0x%04X:%02X" % _sub(p["object"])
-            pol["bits"] = {str(n): int(b) for n, b in p["bits"].items()}
-            if p.get("factory") is not None:
-                pol["factory"] = int(p["factory"])
-        elif "objects" in p:
-            pol["objects"] = {str(n): "0x%04X:%02X" % _sub(o) for n, o in p["objects"].items()}
-            pol["factory"] = {str(n): int(v) for n, v in (p.get("factory") or {}).items()}
-        else:
-            fail("polarity needs object and bits (one object, a bit per input) or objects (one per input)")
-        out["polarity"] = pol
-    return out
-
-
-def _sub(o):
-    index, sub = _obj(o)
-    return index, sub or 0
 
 
 _cache = None
@@ -527,7 +479,7 @@ def save(slave, path=None):
     except (OSError, yaml.YAMLError):
         old = None
     if isinstance(old, dict):
-        # what was remembered before (commands, inputs, sources) stays
+        # what was remembered before (commands, sources) stays
         data = devicedata.merge(old, data)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:

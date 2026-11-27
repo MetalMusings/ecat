@@ -48,7 +48,6 @@ class Seen:
     fault: int = None           # 0x603F at a fault
     moved: float = None         # mm the drive followed a move
     runs: list = field(default_factory=list)    # [first, last, run] drv-actual-position per run
-    switches: dict = field(default_factory=dict)    # kind -> (level, text) of the Switches card's test
     homed: str = None           # the Move card's last homing: "homed" or "error"
     follows_after: bool = None  # whether the drive followed its target after it
     since: dict = field(default_factory=dict)   # how long a state has lasted (monotonic)
@@ -65,7 +64,7 @@ class Seen:
         """What the card shows of it: when this changes, the card is worked out again."""
         return (self.op, self.not_op, self.enabled, self.stuck, self.fault, bool(self.moved),
                 tuple((r[0], r[2]) for r in self.runs), tuple(r[1] for r in self.runs[:-1]),
-                tuple(sorted(self.switches.items())), self.homed, self.follows_after)
+                self.homed, self.follows_after)
 
     def _lasted(self, what, on, seconds, clock):
         if not on:
@@ -365,30 +364,14 @@ def homing_rows(slave, seen=None, support=(None, None), axis=0):
     if not need:
         out.append(Row("switches", OK, "Switches", "the method needs none"))
     else:
-        tried = all(((seen or Seen()).switches.get(k) or ("",))[0] == "ok" for k in need)
-        if switches.setup(slave) is not None:
-            out.append(Row("inputs", OK, "Which input is which",
-                           "the quirk file says how the inputs get their function: set them on the "
-                           "homing card", "homing"))
-        elif tried:
-            out.append(Row("inputs", OK, "Which input is which",
-                           "works as the drive is set up now (tried on the Switches card); how its "
-                           "inputs are set is not known, and only needed to change them", "homing"))
+        what = " and the ".join(switches.TEXT[k] for k in need)
+        if (seen or Seen()).homed == "homed":
+            out.append(Row("switches", OK, "Switches", "the method needs the %s: homing found it" % what))
         else:
-            out.append(Row("inputs", MISSING, "Which input is which",
-                           "set in the drive's own objects, not known: without it the %s may not "
-                           "be wired to homing at all. Look for the drive's input settings, or "
-                           "Remember how its inputs are set up... from its manual"
-                           % " and the ".join(switches.TEXT[k] for k in need), "homing"))
-        s = seen or Seen()
-        for kind in need:
-            got = s.switches.get(kind)
-            what = switches.TEXT[kind][0].upper() + switches.TEXT[kind][1:]
-            if got is None:
-                out.append(Row("switch-" + kind, TRY, what, "test it on the Switches card: press it "
-                               "while the workbench runs (nothing moves)", "switches"))
-            else:
-                out.append(Row("switch-" + kind, OK if got[0] == "ok" else BAD, what, got[1], "switches"))
+            out.append(Row("switches", TRY, "Switches",
+                           "the method needs the %s: on the workbench its box on the Switches card "
+                           "lights while the drive sees it pressed. Which input it is, and its "
+                           "polarity, the drive's manual says (set under Settings)" % what, "switches"))
     if m.uses_index:
         out.append(Row("index", TRY, "Index pulse", "the method needs the encoder's index pulse: "
                        "shows when it homes", "move"))

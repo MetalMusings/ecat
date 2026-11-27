@@ -1478,72 +1478,15 @@ class TestWindow(WindowBase):
         page = w.slave_page
         page.home_method.setCurrentIndex(page.home_method.findData(35))
         page.homing_edited()
-        self.assertTrue(page.home_switch_text.isHidden() and page.home_switch_look.isHidden())
+        self.assertTrue(page.home_switch_text.isHidden())
         page.home_method.setCurrentIndex(page.home_method.findData(21))
         page.homing_edited()
         self.assertFalse(page.home_switch_text.isHidden())
+        # the standard's bit, and the manual for which input it is: no rows of its own
         self.assertIn("needs the home switch", page.home_switch_text.text())
-        # the ECT60's quirk file says how: rows below, not the general advice
-        self.assertIn("Set which input is which below", page.home_switch_text.text())
-        d = coe.Dictionary('SDO 0x2007, "Inputs Function"\n'
-                           '  0x2007:05, rwrwrw, uint16, 16 bit, "Input 5 Function"\n')
-        with mock.patch.object(w.session, "dictionary", lambda pos: d), \
-                mock.patch.object(gui.tool, "upload", lambda *a: 3):
-            page.home_switch_look.click()
-        self.assertTrue(page.home_switch_look.isChecked())
-        self.assertFalse(page.home_switch_found.isHidden())
-        self.assertIn("0x2007:05", page.home_switch_found.text())
-        page.home_switch_look.click()                   # a toggle: the list goes
-        self.assertTrue(page.home_switch_found.isHidden())
-        self.assertEqual(page.home_switch_found.text(), "")
-        with mock.patch.object(w.session, "dictionary", lambda pos: coe.Dictionary()):
-            page.look_for_input_settings()
-        self.assertIn("Nothing found", page.home_switch_found.text())
-
-    def test_homing_card_input_rows(self):
-        w = self.window()
-        s = w.session.slave(0)
-        s["profile"] = "cia402"
-        s["cia402"] = {"mode": "csp", "modes": ["hm"]}
-        s["identity"] = {"vendor": "0x00000A88", "product": "0x0A880002"}
-        w.select_slave(0)
-        page = w.slave_page
-        page.home_method.setCurrentIndex(page.home_method.findData(21))
-        page.homing_edited()
-        form = page.home_inputs_form
-        self.assertFalse(page.home_inputs.isHidden())
-        self.assertEqual(form.rowCount(), 1)                 # 21 needs the home switch only
-        self.assertEqual(form.itemAt(0, QFormLayout.LabelRole).widget().text(), "Home switch")
-        # the ECT60 from the factory: IN5, normally open
-        row = form.itemAt(0, QFormLayout.FieldRole).layout()
-        box, pbox = row.itemAt(0).widget(), row.itemAt(1).widget()
-        self.assertEqual((box.currentData(), pbox.currentData()), ("IN5", "normally open"))
-        page.input_row_changed("home", "IN3", "normally closed")
-        objs = {x["object"]: x["value"] for x in s["settings"]}
-        self.assertEqual((objs["0x2007:03"], objs["0x2007:05"], objs["0x2008:00"]), (3, 0, 0x3B))
-        self.assertIn("IN3 was the negative limit switch", w.statusBar().currentMessage())
-        # the drive has another choice now (a test wrote one that was not saved):
-        # said, with a button that writes the configuration's choice
-        s["settings"] = [x for x in s["settings"] if not x["object"].startswith(("0x2007", "0x2008"))]
-        drive = {(0x2007, 3): 1, (0x2007, 4): 3, (0x2007, 5): 0, (0x2007, 6): 6, (0x2008, 0): 0x3F}
-        w.session.bus[0] = w.session.bus.get(0) or object()
-        with mock.patch.object(gui.tool, "upload", lambda pos, i, sub, t: drive.get((i, sub))):
-            page.show_homing(s)
-            self.assertEqual(form.rowCount(), 2)
-            warn = form.itemAt(1, QFormLayout.FieldRole).layout()
-            self.assertIn("The drive has IN4 (normally open) now", warn.itemAt(0).widget().text())
-            self.assertIn("the configuration IN5 (normally open)", warn.itemAt(0).widget().text())
-            warn.itemAt(1).widget().click()
-        objs = {x["object"]: x["value"] for x in s["settings"]}
-        self.assertEqual((objs["0x2007:04"], objs["0x2007:05"]), (0, 3))
-        # a method with limits gets their rows too; a drive without data none
-        page.home_method.setCurrentIndex(page.home_method.findData(23))
-        page.homing_edited()
-        self.assertEqual(form.rowCount(), 2)
-        s["identity"] = {"vendor": "0x00000001", "product": "0x00000001"}
-        page.show_homing(s)
-        self.assertTrue(page.home_inputs.isHidden())
-        self.assertIn("normally open or closed", page.home_switch_text.text())
+        self.assertIn("0x60FD home switch bit 2", page.home_switch_text.text())
+        self.assertIn("manual", page.home_switch_text.text())
+        self.assertFalse(hasattr(page, "home_inputs"))
 
     def test_pin_table_objects(self):
         import tempfile
@@ -1584,61 +1527,83 @@ class TestWindow(WindowBase):
     def test_switch_card(self):
         w = self.window()
         card = w.test_page.switches
-        slave = {"name": "x", "profile": "cia402", "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
+        slave = {"name": "x", "position": 0, "profile": "cia402",
+                 "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
                  "cia402": {"mode": "csp", "modes": ["hm"], }, "homing": {"method": 21},
                  "process-data": {"inputs": [{"pdo": "0x1A00", "entries": [
                      {"object": "0x60FD:00", "bits": 32, "type": "UDINT", "pin": "digital-inputs"}]}]}}
         card.show_drive(slave)
-        self.assertTrue(card.missing.isHidden())
+        self.assertTrue(card.missing.isHidden() and card.watch_button.isHidden())
+        self.assertIn("needs the home switch", card.hint.text())
+        self.assertIn("manual", card.hint.text())
         pins = {"digital-inputs": "0x00030000"}
         card.update_values(lambda n: pins.get(n))
-        # a box per switch and per input, grey when off and green when on, live
-        self.assertEqual(card.lamps["home"].property("box"), "off")
-        self.assertEqual([b.text() for b in card.input_boxes.values()],
-                         ["IN1 (encoder A)", "IN2 (encoder B)", "IN3", "IN4", "IN5", "IN6"])
-        self.assertEqual([card.input_boxes[b].property("box") for b in (16, 17, 20)], ["on", "on", "off"])
-        self.assertIn("needs the home switch", card.inputs.text())
+        # a box per switch of the standard, grey when off and green when on, live
+        self.assertEqual([card.lamps[k].property("box") for k in ("home", "negative", "positive")],
+                         ["off", "off", "off"])
         pins["digital-inputs"] = "0x00130004"           # the home switch on IN5, pressed
         card.update_values(lambda n: pins.get(n))
         self.assertEqual(card.lamps["home"].property("box"), "on")
         self.assertEqual(card.lamps["negative"].property("box"), "off")
-        self.assertEqual(card.input_boxes[20].property("box"), "on")
-        # a drive without input names: bits 16 to 23, and any other that is on
-        other = dict(slave, identity={"vendor": "0x00000001", "product": "0x00000001"})
-        card.show_drive(other)
-        pins["digital-inputs"] = "0x01000000"
-        card.update_values(lambda n: pins.get(n))
-        self.assertEqual(sorted(card.input_boxes), list(range(16, 25)))
-        self.assertEqual(card.input_boxes[24].property("box"), "on")
-        self.assertIn("see the drive's manual", card.inputs.text())
-        card.show_drive(slave)
-        pins["digital-inputs"] = "0x00030000"
-        # the test, started by clicking the switch's box: released (IN1 flickers
-        # on its own: left out), then pressed
-        self.assertFalse(hasattr(card, "buttons"))
-        card.lamps["home"].clicked.emit()
-        self.assertEqual(card.test["kind"], "home")
-        t = 100.0
-        for value in (0x30000, 0x20000, 0x30000):
-            card.step_test(value, t)
-            t += 0.5
-        self.assertIn("press and hold", card.step.text())
-        card.step_test(0x130004, t)
-        card.step_test(0x130004, t + 0.1)
-        self.assertEqual(card.result.text(), "")          # held 0.3 s first
-        card.step_test(0x120004, t + 0.4)                 # IN1 left out: the same
-        self.assertIn("Set up right", card.result.text())
-        self.assertIsNone(card.test)
-        # not pressed within the time: nothing reached the drive
-        card.start("home")
-        card.step_test(0x30000, 200.0)
-        card.step_test(0x30000, 201.1)
-        card.step_test(0x30000, 216.2)
-        self.assertIn("Nothing changed", card.result.text())
-        # without 0x60FD in the process data: what to do
+        self.assertFalse(hasattr(card, "input_boxes") or hasattr(card, "start"))
+        # without 0x60FD in the process data: what to do, and watching it by SDO
         card.show_drive(dict(slave, **{"process-data": {}}))
         self.assertFalse(card.missing.isHidden())
         self.assertIn("0x60FD", card.missing.text())
+        self.assertFalse(card.watch_button.isHidden())
+        with mock.patch.object(w.test_page, "watch_sdo") as watch:
+            card.watch_button.click()
+        watch.assert_called_once_with(0, 0x60FD, 0)
+
+    def test_sdo_watch(self):
+        w = self.window()
+        page = w.test_page
+        w.select_slave(0)
+        values = {(0, 0x60FD, 0): "0x00030000 196608"}
+
+        def read(pos, index, sub, dtype=None):
+            if (pos, index, sub) not in values:
+                raise gui.tool.ToolError("SDO upload aborted\nNo such object")
+            return values[(pos, index, sub)]
+        with mock.patch.object(gui.tool, "upload_text", read), \
+                mock.patch.object(page, "isVisible", lambda: True):
+            page.sdo_obj.setText("0x60FD:00")
+            page.watch_typed()
+            self.assertFalse(page.watch_table.isHidden())
+            self.assertEqual(page.watch_table.rowCount(), 1)
+            page.watch_worker.wait(5000)
+            QApplication.processEvents()
+            self.assertIsNone(page.watch_worker)
+            self.assertEqual(page.watch_table.item(0, 1).text(), "0x60FD:00")
+            self.assertEqual(page.watch_table.item(0, 3).text(),
+                             "0x00030000" if w.hex_values else "196608")
+            self.assertEqual(page.watch_table.item(0, 4).text(), "16, 17")
+            self.assertTrue(page.watch_timer.isActive())
+            # the home switch on IN5 pressed: the bits follow, the change is marked
+            values[(0, 0x60FD, 0)] = "0x00130004 1245188"
+            page.watch_round()
+            page.watch_worker.wait(5000)
+            QApplication.processEvents()
+            self.assertEqual(page.watch_table.item(0, 4).text(), "2, 16, 17, 20")
+            self.assertTrue(page.watch_table.item(0, 4).font().bold())
+            w.set_hex_values(not w.hex_values)
+            self.assertEqual(page.watch_table.item(0, 3).text(),
+                             "0x00130004" if w.hex_values else "1245188")
+            # one the slave does not have: its row says so, the others go on
+            page.watch_sdo(0, 0x2999, 0)
+            page.watch_worker.wait(5000)
+            QApplication.processEvents()
+            self.assertEqual(page.watch_table.rowCount(), 2)
+            self.assertEqual(page.watch_table.item(1, 3).text(), "–")
+            self.assertEqual(page.watch_table.item(1, 3).toolTip(), "No such object")
+            page.watch_sdo(0, 0x60FD, 0)                 # once only
+            page.watch_worker.wait(5000)
+            QApplication.processEvents()
+            self.assertEqual(page.watch_table.rowCount(), 2)
+            page.watch_table.cellWidget(0, 5).click()     # Remove
+            page.watch_table.cellWidget(0, 5).click()
+            self.assertTrue(page.watch_table.isHidden())
+            self.assertFalse(page.watch_timer.isActive())
 
     def test_settings(self):
         w = self.window()
@@ -3566,19 +3531,14 @@ class TestBringup(WindowBase):
         page.show_bringup()
         keys = [r.key for r in page.bringup_found]
         self.assertEqual(keys[:3], ["hm", "methods", "method"])
-        self.assertIn("switch-home", keys)
-        # the Switches card's test result comes to the card
-        card = w.test_page.switches
-        card.slave = s
-        card.test = {"kind": "home"}
-        card.finish(("ok", "Set up right"))
-        row = page.bringup_found[[r.key for r in page.bringup_found].index("switch-home")]
-        self.assertEqual(row.state, bringup.OK)
+        found = {r.key: r for r in page.bringup_found}
+        self.assertEqual((found["switches"].state, found["switches"].card), (bringup.TRY, "switches"))
         # and the Move card's homing
         from types import SimpleNamespace
         w.test_page.move.home_finished(SimpleNamespace(slave=s, name="x", axis=0), "homed", True)
         found = {r.key: r.state for r in page.bringup_found}
         self.assertEqual((found["homed"], found["after"]), (bringup.OK, bringup.OK))
+        self.assertEqual(found["switches"], bringup.OK)        # homing found the switch
 
     def test_the_workbench_tells_the_card(self):
         w = self.window()
@@ -3642,28 +3602,6 @@ class TestBringup(WindowBase):
         QApplication.processEvents()
         self.assertEqual(row.box.direction(), gui.QBoxLayout.LeftToRight)
         w.hide()
-
-    def test_a_switch_found_right_needs_no_input_setup(self):
-        # no quirk file knows the inputs, the Switches card found the home switch right: the
-        # homing card asks for nothing (the machine test, 2026-11-27)
-        from ecatsetup import bringup
-        w = self.window()
-        s = w.session.slave(0)
-        s["profile"], s["cia402"] = "cia402", {"mode": "csp", "modes": ["hm"]}
-        s["homing"] = {"method": 21}
-        w.select_slave(0)
-        page = w.slave_page
-        page.show_homing(s)
-        self.assertIn(gui.switches.GUIDE[:40], page.home_switch_text.text())
-        seen = w.bringup_seen.setdefault(0, bringup.Seen())
-        seen.switches["home"] = ("ok", "Set up right")
-        page.show_homing(s)
-        self.assertIn("found home switch set up right as the drive is now: nothing to change",
-                      page.home_switch_text.text())
-        with mock.patch.object(gui.switches, "input_settings", return_value=[]):
-            page.look_for_input_settings()
-        self.assertTrue(page.home_switch_found.text().startswith("The switches are set up right"))
-        w.bringup_seen.clear()
 
     def test_a_fault_code_the_pdos_lack_is_read_once(self):
         # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once
@@ -3768,26 +3706,6 @@ class TestDeviceData(WindowBase):
         src = devicedata.sources(ident)["homing methods"]
         self.assertEqual((src["kind"], src["list"], src["relation"], src["ref"]),
                          ("manual", "closed", "completes", "manual 2.4.6"))
-        # the inputs: a function object per input, its codes, the polarity bits
-        dlg = self.dv.InputsDialog(w, ["IN1", "IN2"])
-        self.addCleanup(dlg.deleteLater)
-        self.assertEqual(list(dlg.rows), ["IN1", "IN2"])
-        # the bit column says whose bit it is (the user did not see it was a table, 2026-11-27)
-        self.assertEqual(dlg.bit_head.text(), "Polarity bit")
-        dlg.pobject.setText("0x2008:00")
-        self.assertEqual(dlg.bit_head.text(), "Bit in 0x2008:00")
-        dlg.pobject.setText("")
-        dlg.rows["IN1"][0].setText("0x2007:01")
-        dlg.rows["IN1"][1].setText("0")
-        with self.assertRaisesRegex(ValueError, "no function is needed"):
-            dlg.inputs()
-        for k, v in (("home", "3"), ("negative", "1"), ("positive", "2"), ("none", "0")):
-            dlg.codes[k].setText(v)
-        dlg.pobject.setText("0x2008:00")
-        self.assertIsNotNone(self.dv.remember_inputs(w, w, 0, ask=False, dialog=dlg))
-        got = self.quirks.of(ident)["homing"]["inputs"]
-        self.assertEqual(got["function"]["objects"], {"IN1": "0x2007:01"})
-        self.assertEqual(got["polarity"]["choices"], {"normally open": 1, "normally closed": 0})
 
     def test_the_bringup_card_keeps_what_it_saw(self):
         from ecatsetup import bringup
@@ -4085,41 +4003,13 @@ class TestDeviceData(WindowBase):
         s["profile"] = "cia402"
         dlg = self.dv.DeviceDataDialog(w, 0)
         self.addCleanup(dlg.deleteLater)
-        self.assertIn("Which input is which is not known", dlg.page.toPlainText())
-        self.assertIn("card:switches", dlg.page.toHtml())
+        self.assertIn("No commands known", dlg.page.toPlainText())
+        self.assertIn("card:sdo", dlg.page.toHtml())
         dlg.unknown_box.setChecked(False)
         self.assertNotIn("not known", dlg.page.toPlainText())
         self.assertIs(settings.load()[self.dv.UNKNOWNS_SETTING], False)
         ident = self.quirks.identity(s)
-        devicedata.remember(ident, "x", ("homing", "input-bits", "IN1"), 16, {"kind": "tried"})
+        devicedata.remember(ident, "x", ("commands", "0x2010"), "zero position", {"kind": "tried"})
         dlg.unknown_box.setChecked(True)
-        self.assertNotIn("Which input is which", dlg.page.toPlainText())
-        self.assertIn("No commands known", dlg.page.toPlainText())
-
-    def test_a_switch_test_offers_to_name_the_input(self):
-        w = self.window()
-        card = w.test_page.switches
-        slave = {"name": "x", "position": 0, "profile": "cia402",
-                 "identity": {"vendor": "0x00000099", "product": "0x00000001"},
-                 "cia402": {"mode": "csp"},
-                 "process-data": {"inputs": [{"pdo": "0x1A00", "entries": [
-                     {"object": "0x60FD:00", "bits": 32, "type": "UDINT", "pin": "digital-inputs"}]}]}}
-        card.show_drive(slave)
-        card.start("home")
-        card.step_test(0x0, 100.0)
-        card.step_test(0x0, 101.1)
-        card.step_test(0x100000, 101.2)
-        card.step_test(0x100000, 101.6)
-        self.assertFalse(card.name_button.isHidden())
-        self.assertIn("bit 20", card.name_button.text())
-        # by the button, as the user does: clicked passes False, which is not the name
-        # (the window crashed on it, 2026-11-27)
-        with mock.patch.object(w.session, "slave", lambda pos: slave), \
-                mock.patch.object(gui.QInputDialog, "getText", return_value=("DI3", True)):
-            card.name_button.click()
-        self.assertEqual(self.quirks.of((0x99, 1))["homing"]["input-bits"], {"DI3": 20})
-        card.start("home")
-        card.step_test(0x0, 200.0)
-        card.step_test(0x0, 201.1)
-        card.step_test(0x0, 216.2)
-        self.assertTrue(card.name_button.isHidden())
+        self.assertNotIn("No commands known", dlg.page.toPlainText())
+        self.assertIn("No tuning objects known", dlg.page.toPlainText())

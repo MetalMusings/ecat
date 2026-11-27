@@ -4,19 +4,10 @@
 name: StepperOnline A6-EC
 match: {vendor: '0x00400000', product: '0x00000715'}
 
-homing:
-  # How DI1-DI5 get their function and logic: parameter group C04, object
-  # 0x2004 (A6-EC manual 11.3.4): function at subindex 1, 5, 9, 13, 17, logic
-  # at 2, 6, 10, 14, 18 (filter time at 3, 7, ...). Two inputs with one
-  # function is error Er82.0. From the manual; not tried on a drive.
-  inputs:
-    function:
-      objects: {DI1: '0x2004:01', DI2: '0x2004:05', DI3: '0x2004:09', DI4: '0x2004:0D', DI5: '0x2004:11'}
-      type: UINT
-      codes: {home: 5, positive: 6, negative: 7, none: 0}
-      factory: {DI1: 6, DI2: 7, DI3: 5, DI4: 31, DI5: 30}
-    polarity:
-      objects: {DI1: '0x2004:02', DI2: '0x2004:06', DI3: '0x2004:0A', DI4: '0x2004:0E', DI5: '0x2004:12'}
-      type: UINT
-      choices: {active low: 0, active high: 1}
-      factory: {DI1: 0, DI2: 0, DI3: 0, DI4: 0, DI5: 0}
+# The inputs, for a reader (the program knows only 0x60FD bits 0-2 of the
+# standard): DI1-DI5 get their function and logic in parameter group C04,
+# object 0x2004 (A6-EC manual 11.3.4): function at subindex 1, 5, 9, 13, 17
+# (5 home, 6 positive limit, 7 negative limit, 0 none; factory DI1 6, DI2 7,
+# DI3 5), logic at 2, 6, 10, 14, 18 (0 active low, 1 active high; factory 0).
+# Two inputs with one function is error Er82.0. From the manual; not tried on
+# a drive.

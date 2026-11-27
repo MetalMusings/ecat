@@ -7,7 +7,7 @@ and chosen one fact at a time. No Qt here: the window (gui.DeviceDataDialog) and
 the repository's Action (devices-repo/tools) both use it.
 
 A *fact* is one thing a quirk file says, addressed by a path: ("commands",
-"0x2010"), ("settings", "0x2009:00"), ("homing", "input-bits", "IN5"). Facts
+"0x2010"), ("settings", "0x2009:00"), ("homing", "describe", "36"). Facts
 are the unit of layering (shipped, then the user's own), of sources, of
 comparing a shared file with what is in use, and of choosing.
 """
@@ -116,8 +116,6 @@ KINDS = (
     # the objects a method needs are the drive's; the values in them worked somewhere
     Kind(("homing", "extras", "*"), "Homing", "Method {2}: settings it needs", "homing", sort=EXPERIENCE),
     Kind(("homing", "enable-again"), "Homing", "Enabled again after methods", "homing", listing=True),
-    Kind(("homing", "input-bits", "*"), "Homing", "Input {2} is 0x60FD bit", "switches"),
-    Kind(("homing", "inputs"), "Homing", "How the inputs get their function and polarity", "switches"),
     Kind(("limits", "*"), "Drive test", "Limit: {1}", "move"),
     Kind(("position", "kept"), "Drive test", "Keeps its position over a restart of the bus", "operation",
          value="true or false; the advice (Start position) is the window's"),
@@ -304,9 +302,6 @@ def unknowns(slave, raw, measured_results):
             out.append(("Commands and settings", "No commands known. If an object does something when "
                         "written (zero the position, store the parameters), remember it from Run command "
                         "on the SDO card.", "sdo"))
-        if not (raw.get("homing") or {}).get("input-bits"):
-            out.append(("Homing", "Which input is which is not known: test a switch on the Switches card "
-                        "and name its input.", "switches"))
         if not raw.get("tuning"):
             out.append(("Tuning", "No tuning objects known: Look for settings in the drive on the Response "
                         "card, and remember what helps.", "response"))
