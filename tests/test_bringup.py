@@ -62,6 +62,7 @@ class TestRows(Base):
         self.assertEqual(self.row(found, "esi").state, bringup.OK)
         self.assertEqual(self.row(found, "pdo").state, bringup.OK)
         self.assertIn("set every cycle", self.row(found, "mode").text)
+        self.assertEqual(self.row(found, "mode").card, "operation")     # where it is chosen
         # nothing seen yet: the workbench rows wait for a try
         for key in ("op", "enable", "follows"):
             self.assertEqual(self.row(found, key).state, bringup.TRY, key)

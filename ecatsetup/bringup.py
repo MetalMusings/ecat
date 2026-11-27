@@ -190,11 +190,14 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
     outputs, inputs = _objects(slave, "outputs"), _objects(slave, "inputs")
     mode = (slave.get("cia402") or {}).get("mode", "csp")
     if (0x6060, 0) in outputs:
-        out.append(Row("mode", OK, "Mode", "%s, set every cycle (0x6060 mapped)" % mode.upper()))
+        out.append(Row("mode", OK, "Mode", "%s, set every cycle (0x6060 mapped)" % mode.upper(),
+                       "operation"))
     elif config.mode_setting(slave) is not None:
-        out.append(Row("mode", OK, "Mode", "%s, set once at start (0x6060:00)" % mode.upper()))
+        out.append(Row("mode", OK, "Mode", "%s, set once at start (0x6060:00)" % mode.upper(),
+                       "operation"))
     elif (0x6061, 0) in inputs:
-        out.append(Row("mode", OK, "Mode", "%s, seen in 0x6061: the drive must be in it already" % mode.upper()))
+        out.append(Row("mode", OK, "Mode", "%s, seen in 0x6061: the drive must be in it already" % mode.upper(),
+                       "operation"))
     else:
         out.append(Row("mode", BAD, "Mode", "neither set nor seen: map 0x6060 or 0x6061, or set "
                        "0x6060:00", "process-data"))
