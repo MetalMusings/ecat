@@ -5385,7 +5385,8 @@ class SwitchCard(Card):
         self.name_button = QPushButton("Name this input...")
         self.name_button.setToolTip("Remember for the device type which input this 0x60FD bit is (as the "
                                     "drive's manual or its connector names it)")
-        self.name_button.clicked.connect(self.name_input)
+        # clicked passes its checked state: not the name
+        self.name_button.clicked.connect(lambda _checked=False: self.name_input())
         self.name_row.addWidget(self.name_button)
         self.name_row.addStretch(1)
         self.add(self.name_row)
@@ -9039,7 +9040,7 @@ class TodoDialog(QDialog):
         row = QHBoxLayout()
         self.save_button = QPushButton("Save...")
         self.save_button.setObjectName("primary")
-        self.save_button.clicked.connect(self.save)
+        self.save_button.clicked.connect(lambda _checked=False: self.save())
         row.addWidget(self.save_button)
         copy = QPushButton("Copy")
         copy.clicked.connect(lambda: QApplication.clipboard().setText(self.text.toPlainText()))

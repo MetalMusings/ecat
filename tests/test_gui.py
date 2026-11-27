@@ -4068,8 +4068,11 @@ class TestDeviceData(WindowBase):
         card.step_test(0x100000, 101.6)
         self.assertFalse(card.name_button.isHidden())
         self.assertIn("bit 20", card.name_button.text())
-        with mock.patch.object(w.session, "slave", lambda pos: slave):
-            card.name_input("DI3")
+        # by the button, as the user does: clicked passes False, which is not the name
+        # (the window crashed on it, 2026-11-27)
+        with mock.patch.object(w.session, "slave", lambda pos: slave), \
+                mock.patch.object(gui.QInputDialog, "getText", return_value=("DI3", True)):
+            card.name_button.click()
         self.assertEqual(self.quirks.of((0x99, 1))["homing"]["input-bits"], {"DI3": 20})
         card.start("home")
         card.step_test(0x0, 200.0)
