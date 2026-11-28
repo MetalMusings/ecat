@@ -3064,7 +3064,7 @@ class SlaveView(QWidget):
         # a bit field needs more than one bit
         return "pin" in e or "split" in e
 
-    def _entry(self, row):
+    def entry(self, row):
         direction, pi, ei = self.pd_rows[row]
         s = self.win.session.slave(self.position)
         return s["process-data"][direction][pi]["entries"][ei]
@@ -3269,7 +3269,7 @@ class SlaveView(QWidget):
         if self.loading:
             return
         row, col = it.row(), it.column()
-        e = self._entry(row)
+        e = self.entry(row)
         text = it.text().strip()
         if col == self.PIN:
             if text:
@@ -3339,7 +3339,7 @@ class SlaveView(QWidget):
         """A bit field has no pin name of its own: go to its bit pins instead."""
         if col != self.PIN or row >= len(self.pd_rows):
             return
-        if "split" in self._entry(row):
+        if "split" in self.entry(row):
             self.pd.setColumnHidden(self.SPLIT, False)
             self.pd.setCurrentCell(row, self.SPLIT)
             self.pd.editItem(self.pd.item(row, self.SPLIT))
@@ -3388,7 +3388,7 @@ class SlaveView(QWidget):
     def hal_type_edited(self, row, text):
         if self.loading:
             return
-        e = self._entry(row)
+        e = self.entry(row)
         if "pin" not in e and "split" not in e:
             return
         if text == self.BIT_FIELD:
@@ -5210,14 +5210,22 @@ class SwitchCard(Card):
 
     def show_drive(self, slave):
         self.slave = slave
-        has = switches.input_pin(slave) is not None
-        for w in [self.hint] + list(self.lamps.values()):
-            w.setVisible(has)
+        src = switches.sources(slave)
+        has = bool(src)
+        self.hint.setVisible(has)
+        for kind, box in self.lamps.items():
+            box.setVisible(kind in src)
         self.missing.setVisible(not has)
         self.watch_button.setVisible(not has)
-        self.missing.setText("" if has else
-                             "0x60FD (Digital inputs) is not in the drive's process data, or has no pin: "
-                             "add it on the drive's page (Process data), or watch it by SDO.")
+        if has:
+            text = ""
+        elif switches.entry(slave) is not None:
+            text = ("0x60FD (Digital inputs) is a bit field without pins for bits 0 to 2: name "
+                    "them on the drive's page (Process data), or watch it by SDO.")
+        else:
+            text = ("0x60FD (Digital inputs) is not in the drive's process data, or has no pin: "
+                    "add it on the drive's page (Process data), or watch it by SDO.")
+        self.missing.setText(text)
         need = switches.needed(slave) if slave else []
         self.hint.setText(
             "A box changes colour (green) while the drive sees that switch pressed: press the "
@@ -5237,17 +5245,8 @@ class SwitchCard(Card):
     def update_values(self, v):
         if self.slave is None:
             return
-        pin = switches.input_pin(self.slave)
-        raw = v(pin) if pin else None
-        try:
-            value = int(raw, 0) if raw is not None else None
-        except ValueError:
-            value = None
-        if value is None:
-            return
-        st = switches.state(value)
-        for kind, box in self.lamps.items():
-            self._light(box, st[kind])
+        for kind, on in switches.read(switches.sources(self.slave), v).items():
+            self._light(self.lamps[kind], on)
 
 
 class ResponseCard(Card):

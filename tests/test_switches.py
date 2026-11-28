@@ -28,6 +28,23 @@ class TestRead(unittest.TestCase):
         # the physical inputs (bits 16 and up) are not switches to the program
         self.assertEqual(switches.state(0xFFFF0000), {"home": False, "negative": False, "positive": False})
 
+    def test_a_bit_field(self):
+        # 0x60FD as a bit field (the user, 2026-11-28): each switch from its bit's own pin
+        e = {"object": "0x60FD:00", "bits": 32, "type": "UDINT",
+             "split": ["neg", "", "home"] + [""] * 17 + ["in5"]}
+        s = dict(ECT60, **{"process-data": {"inputs": [{"pdo": "0x1A00", "entries": [e]}]}})
+        self.assertIsNone(switches.input_pin(s))
+        self.assertEqual(switches.sources(s), {"home": ("home", None), "negative": ("neg", None)})
+        pins = {"home": "TRUE", "neg": "FALSE"}
+        self.assertEqual(switches.read(switches.sources(s), pins.get), {"home": True, "negative": False})
+        self.assertEqual(switches.read(switches.sources(s), {}.get), {})
+        # the whole object's pin: the bits of its value
+        src = switches.sources(ECT60)
+        self.assertEqual(src["home"], ("digital-inputs", 2))
+        self.assertEqual(switches.read(src, {"digital-inputs": "0x00100004"}.get),
+                         {"home": True, "negative": False, "positive": False})
+        self.assertEqual(switches.sources(dict(ECT60, **{"process-data": {}})), {})
+
     def test_needed_by_the_method(self):
         s = dict(ECT60)
         self.assertEqual(switches.needed(s), [])

@@ -1546,6 +1546,19 @@ class TestWindow(WindowBase):
         self.assertEqual(card.lamps["home"].property("box"), "on")
         self.assertEqual(card.lamps["negative"].property("box"), "off")
         self.assertFalse(hasattr(card, "input_boxes") or hasattr(card, "start"))
+        # 0x60FD as a bit field: the boxes of the bits that have pins, from those pins
+        bf = {"object": "0x60FD:00", "bits": 32, "type": "UDINT", "split": ["", "", "home-sw"]}
+        card.show_drive(dict(slave, **{"process-data": {"inputs": [{"pdo": "0x1A00", "entries": [bf]}]}}))
+        self.assertTrue(card.missing.isHidden())
+        self.assertFalse(card.lamps["home"].isHidden())
+        self.assertTrue(card.lamps["negative"].isHidden())
+        card.update_values({"home-sw": "FALSE"}.get)
+        self.assertEqual(card.lamps["home"].property("box"), "off")
+        card.update_values({"home-sw": "TRUE"}.get)
+        self.assertEqual(card.lamps["home"].property("box"), "on")
+        card.show_drive(dict(slave, **{"process-data": {"inputs": [{"pdo": "0x1A00", "entries": [
+            dict(bf, split=[""] * 32)]}]}}))
+        self.assertIn("bit field", card.missing.text())
         # without 0x60FD in the process data: what to do, and watching it by SDO
         card.show_drive(dict(slave, **{"process-data": {}}))
         self.assertFalse(card.missing.isHidden())

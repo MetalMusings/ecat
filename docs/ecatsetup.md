@@ -1337,6 +1337,10 @@ drive), as a box each that is grey when off and green when on. It says which
 switches the homing method chosen needs. Nothing moves: the drive is not
 enabled.
 
+`0x60FD` may be one pin or a bit field (a pin per input): with a bit
+field, each box follows the pin of its bit, and a bit without a pin has no
+box.
+
 A box changes colour (green) while the drive sees that switch pressed:
 press the home switch and the *Home switch* box lights up, let go and it
 turns grey again. If it stays grey, or it is lit while the switch is free, the drive's own input

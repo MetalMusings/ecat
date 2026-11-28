@@ -31,9 +31,7 @@ def guide(need):
             "the drive sees the switch pressed." % (what, bits, what))
 
 
-def input_pin(slave):
-    """The pin of 0x60FD in the slave's process data (as the file names it),
-    or None when it is not mapped or has no pin."""
+def entry(slave):
     for pdo in ((slave or {}).get("process-data") or {}).get("inputs") or []:
         for e in pdo.get("entries") or []:
             try:
@@ -41,8 +39,47 @@ def input_pin(slave):
             except ValueError:
                 continue
             if (index, sub) == (0x60FD, 0):
-                return e.get("pin")
+                return e
     return None
+
+
+def input_pin(slave):
+    """The pin of 0x60FD in the slave's process data (as the file names it),
+    or None when it is not mapped or has no pin of its own."""
+    return (entry(slave) or {}).get("pin")
+
+
+def sources(slave):
+    """Where each switch is read, {kind: (pin, bit)}: the bit of 0x60FD's own
+    pin, or (pin, None) for a bit field's pin of that bit. A switch whose bit has
+    no pin is left out; {} when 0x60FD is not mapped."""
+    e = entry(slave)
+    if e is None:
+        return {}
+    if e.get("pin"):
+        return {kind: (e["pin"], bit) for kind, bit, _ in FUNCTIONS}
+    split = e.get("split") or []
+    return {kind: (split[bit], None) for kind, bit, _ in FUNCTIONS
+            if bit < len(split) and split[bit]}
+
+
+def read(src, v):
+    """Each switch as v (a pin's value as text, or None) shows it: {kind: bool};
+    a switch whose pin gives nothing is left out."""
+    out = {}
+    for kind, (pin, bit) in src.items():
+        raw = v(pin)
+        if raw is None:
+            continue
+        raw = raw.strip()
+        if bit is None:
+            out[kind] = raw.upper() in ("TRUE", "1")
+            continue
+        try:
+            out[kind] = bool(int(raw, 0) >> bit & 1)
+        except ValueError:
+            pass
+    return out
 
 
 def needed(slave, axis=0):
