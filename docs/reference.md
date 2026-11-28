@@ -403,12 +403,13 @@ them. The import prints a note for everything it changes or leaves out.
 To move a whole LinuxCNC configuration from lcec, its HAL files too, read
 the bus instead and see [from an lcec configuration](ecatsetup.md#from-an-lcec-configuration).
 
-Some lcec settings are replaced by what ecat does instead (in
-[quirk files](ecatsetup.md#quirk-files)): an Rtelligent ECT60's `sdoConfig` of `0x2010`
-(Zero Position) is not imported when the slave gets the cia402 profile
-(read from the bus): it is a command and not needed with ecat, and a note
-says that `cia402: {zero-at-start: true}` does the same if wanted; as a
-`generic` slave the setting is kept, with a note.
+An lcec `sdoConfig` is imported as a setting, also one that is a command
+rather than a setting, such as an Rtelligent ECT60's `0x2010` (Zero
+Position): the [notes on the device](ecatsetup.md#notes-on-a-device) warn
+of it, and `cia402: {zero-at-start: true}` does the same without writing
+it. Where a [translation of lcec's driver](#lcec-translations) replaces an
+`sdoConfig` (`sdo:`), the setting is not imported when the slave gets the
+cia402 profile, and a note names what does it instead.
 
 lcec's `initCmds`, `idnConfig` and `watchdog` are not imported yet.
 `modParam`s become settings where a [translation of lcec's
@@ -925,7 +926,7 @@ sdo:                       # sdoConfig entries ecat does differently
 | `types` | lcec type names that the file applies to (required). |
 | `modparams` | Per lcec `modParam`: the `object` and `type` of the setting, and `convert` (`milli`: ×1000, `flag`: 0/1, else a number as it is) or `values` (a table). |
 | `settings` | Settings always added for those types (what the lcec driver always wrote). |
-| `sdo` | An lcec `sdoConfig` that ecat does differently: `replace` with `cia402.zero-at-start` (when the slave gets the cia402 profile: the setting is not imported and zero-at-start is offered as an option). Not needed for a command whose `purpose` is `zero-position` in the device's quirk file. |
+| `sdo` | An lcec `sdoConfig` that ecat does differently: `replace` with `cia402.zero-at-start` (when the slave gets the cia402 profile: the setting is not imported and zero-at-start is offered as an option). |
 
 The program's files: `el7041.yaml` (EL7041, EL7041-1000, EP7041) and
 `el70x1.yaml` (EL7031, EL7041-0052, the position interface).
