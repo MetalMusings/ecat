@@ -4375,8 +4375,10 @@ from `ecatsetup --check`.
 
 **A prototype, being tried; it uses a test repository that will go.**
 *Device data...* on a slave's page (or *Your notes...* on the card
-*Notes on this device*) shows everything known about its device type in
-one place. First the notes: those that came with the program, and yours
+*Notes on this device*) opens the window *Notes and device data*, with
+everything known about its device type in one place. First the notes
+(drag the bar under them to give them or the rest more room; the window
+can be made as low as you like, and then scrolls): those that came with the program, and yours
 in a field to write in (*Save your notes*; empty: none of yours). What the
 manual says that matters goes there, in plain words: which objects are
 commands, where the inputs get their function, what the drive's own

@@ -3845,7 +3845,17 @@ class TestDeviceData(WindowBase):
         text = dlg.page.toPlainText()
         self.assertLess(text.index("Settings"), text.index("Process data"))
         # the notes: the program's above, yours in the field (not rows of the page)
-        self.assertIn("Bit 3 of 0x7000:00", dlg.program_notes.text())
+        self.assertIn("Bit 3 of 0x7000:00", dlg.program_notes.toPlainText())
+        self.assertIn("Notes and device data: ", dlg.windowTitle())
+        # long notes scroll: the window can still be made low (it was as tall as its notes)
+        with mock.patch.object(self.dv.quirks, "notes",
+                               return_value=[(os.path.join(self.quirks.SHIPPED, "x.yaml"), "A long sentence of a manual. " * 400)]):
+            dlg.show_notes()
+        dlg.show()
+        dlg.resize(900, 300)
+        QApplication.processEvents()
+        self.assertLessEqual(dlg.height(), 320)
+        dlg.hide()
         self.assertNotIn("Notes on the device", text)
         self.assertEqual(dlg.notes_edit.toPlainText(), "")
         dlg.notes_edit.setPlainText("Mine: 0x2000:02 is the I2C address.")

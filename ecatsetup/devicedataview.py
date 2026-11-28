@@ -6,11 +6,12 @@ Report)."""
 
 import html
 import os
+import re
 import urllib.parse
 
 from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+from PyQt5.QtWidgets import (QApplication, QSplitter, QWidget, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                              QFormLayout, QHBoxLayout, QInputDialog, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
                              QGridLayout, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
 
@@ -333,22 +334,40 @@ class DeviceDataDialog(QDialog):
         self.setWindowFlags(Qt.Window)
         self.win, self.position = win, position
         self.slave, self.ident, self.name, self.revision = device(win, position)
-        self.setWindowTitle("Device data - %s" % TITLE)
-        self.resize(980, 760)
+        self.setWindowTitle("Notes and device data: %s - %s" % (self.name, TITLE))
+        # no taller than the screen: the notes and the page scroll, the window is resized freely
+        screen = QApplication.primaryScreen()
+        height = screen.availableGeometry().height() - 80 if screen is not None else 760
+        self.resize(980, max(400, min(760, height)))
         self.files, self.rows, self.at, self.used, self.imports = [], [], 0, [], []
-        lay = QVBoxLayout(self)
+        # everything in a scroll area: a wrapped text's height never holds the window's
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        outer.addWidget(scroll)
+        body = QWidget()
+        scroll.setWidget(body)
+        lay = QVBoxLayout(body)
         lay.addWidget(label("<b>%s</b> &nbsp; vendor 0x%08X, product 0x%08X%s &nbsp; "
                             "<span style='color:#b45309'>prototype</span>" % (
                                 self.name, self.ident[0], self.ident[1],
                                 ", revision %s" % self.revision if self.revision else ""), wrap=True))
 
-        # the notes: the program's, then yours to write (what the manual says that matters)
+        # the notes: the program's, then yours to write (what the manual says that matters);
+        # above the rest of what is known, the split between them dragged as wanted
+        split = self.split = QSplitter(Qt.Vertical)
+        split.setChildrenCollapsible(False)
+        top = QWidget()
+        lay_all, lay = lay, QVBoxLayout(top)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(label("<b>Notes on this device</b>: what is worth knowing beyond the "
                             "standards and its own data. A sentence that names an object (0x2010) "
                             "shows as its tooltip in the window.", wrap=True))
-        self.program_notes = label("", "hint", wrap=True)
-        self.program_notes.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.program_notes)
+        self.program_notes = QTextBrowser()
+        self.program_notes.setMinimumHeight(60)
+        lay.addWidget(self.program_notes, 2)
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setPlaceholderText(
             "Your notes, such as: 0x2007:03-06 give IN3-IN6 their function (manual 2.2.7). "
@@ -363,7 +382,11 @@ class DeviceDataDialog(QDialog):
         row.addWidget(self.notes_save)
         row.addStretch(1)
         lay.addLayout(row)
+        split.addWidget(top)
 
+        rest = QWidget()
+        lay = QVBoxLayout(rest)
+        lay.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
         row.addWidget(label("<b>The rest that is known about this device type</b>, grouped; each fact "
                             "is changed on its card.", wrap=True), 1)
@@ -378,7 +401,13 @@ class DeviceDataDialog(QDialog):
         self.page = QTextBrowser()
         self.page.setOpenLinks(False)
         self.page.anchorClicked.connect(self.link)
-        lay.addWidget(self.page, 3)
+        self.page.setMinimumHeight(60)
+        lay.addWidget(self.page, 1)
+        split.addWidget(rest)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 1)
+        lay = lay_all
+        lay.addWidget(split, 1)
         row = QHBoxLayout()
         self.share_button = QPushButton("Share yours...")
         self.share_button.setToolTip("Post your notes and settings for this device (not your pin names or "
@@ -472,8 +501,12 @@ class DeviceDataDialog(QDialog):
         """The program's notes (read only) and yours in the field."""
         found = [(p, t) for p, t in quirks.notes(self.ident)
                  if os.path.abspath(p).startswith(os.path.abspath(quirks.SHIPPED))]
-        self.program_notes.setText("Came with the program:\n" + "\n\n".join(t for _, t in found)
-                                   if found else "None came with the program.")
+        if found:
+            paras = [" ".join(x.split()) for _, t in found for x in re.split(r"\n\s*\n", t) if x.strip()]
+            self.program_notes.setHtml("<p><i>Came with the program:</i></p>" + "".join(
+                "<p>%s</p>" % html.escape(x) for x in paras))
+        else:
+            self.program_notes.setHtml("<p><i>None came with the program.</i></p>")
         own = devicedata.read_raw(devicedata.own_path(self.ident)) or {}
         self.notes_edit.setPlainText(str(own.get("notes") or ""))
 
