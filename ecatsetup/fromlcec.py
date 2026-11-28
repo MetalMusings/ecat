@@ -560,7 +560,6 @@ class SettingHint:
     now: object = None          # the configuration's value of that object, or None
     what: str = ""              # where it comes from
     zero_at_start: bool = False  # optional (not needed with ecat): not added by Add all
-    command: str = ""           # why the object is a command (the quirk file): not added by Add all
 
 
 _SIZES = {"SINT": 1, "USINT": 1, "INT": 2, "UINT": 2, "DINT": 4, "UDINT": 4, "LINT": 8,
@@ -613,20 +612,16 @@ def setting_hints(f, cfg, dictionaries=None):
             except ValueError:
                 pass
         rows_ = []
-        commands = {}
         for index, sub, data in x.sdos:
             if sub == "complete":
                 continue
-            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub, x.type)
+            got = quirks.lcec_replacement(x.type, index, sub)
             if got and got[0] == quirks.ZERO_AT_START:
                 if s.get("profile") == "cia402" and not (s.get("cia402") or {}).get("zero-at-start"):
                     out.append(SettingHint(x.idx, s["name"], what="lcec's sdoConfig 0x%04X:%02X: "
                                            "%s" % (index, sub, got[1]), zero_at_start=True))
                 continue
-            if got and got[0] == "command":
-                # advice, not a rule: shown, and added only on its own Add
-                commands[(index, sub)] = got[1]
-            elif got:
+            if got:
                 continue
             rows_.append((importxml._setting(index, sub, data, coe), "lcec's sdoConfig"))
         if x.modparams:
@@ -642,14 +637,13 @@ def setting_hints(f, cfg, dictionaries=None):
             st = _typed(st, cur)
             if cur is not None and _value(cur) == _value(st):
                 continue
-            out.append(SettingHint(x.idx, s["name"], st, None if cur is None else _value(cur),
-                                   what, command=commands.get(obj, "")))
+            out.append(SettingHint(x.idx, s["name"], st, None if cur is None else _value(cur), what))
     return out
 
 
 def for_add_all(hints):
-    """The hints Add all takes: not a command, and not the optional zero-at-start."""
-    return [h for h in hints if not h.command and not h.zero_at_start]
+    """The hints Add all takes: not the optional zero-at-start."""
+    return [h for h in hints if not h.zero_at_start]
 
 
 def add_setting(cfg, hint):

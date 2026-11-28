@@ -2,14 +2,12 @@
 drive supports, and the settings a chosen method needs.
 
 The catalog is the same for every drive. What a drive supports comes from the
-drive itself (0x60E3, if it has that object) or from its quirk file
-(`homing: methods`); the quirk file wins, because some drives do not report
-it right. A drive that needs more than the standard objects for a method
-(the ECT60's torque homing) gives `homing: extras` for it. See
-docs/ecatsetup.md.
+drive itself (0x60E3, if it has that object). What a drive's own methods do,
+and the settings of its own they need (the ECT60's torque homing), are in its
+manual and the notes on the device. See docs/ecatsetup.md.
 """
 
-from . import config, quirks, tool
+from . import config, tool
 
 # What a method needs from the machine
 LIMIT_NEG, LIMIT_POS, HOME_SWITCH, INDEX, STOP = \
@@ -72,27 +70,19 @@ CATALOG = _build()
 
 
 def method(number, slave=None):
-    """A catalog entry, with the drive's own text and needs from its quirk file
-    laid over it. A number that is in neither gives a manufacturer-specific entry."""
+    """A catalog entry; a number that is not in it gives a manufacturer-specific
+    entry (the drive's manual, and the notes on the device, say what it does)."""
     base = CATALOG.get(number)
-    over = (quirks.of(slave).get("homing") or {}).get("describe", {}).get(number) if slave else None
     if base is None:
         base = Method(number, "Manufacturer specific (the drive's manual says what it does)")
-    if over:
-        base = Method(number, over.get("text", base.text),
-                      over.get("needs", base.needs), over.get("moves", base.moves),
-                      over.get("index", base.uses_index))
     return base
 
 
 def supported(slave, axis=0, read=None):
-    """(methods, where) for a slave: a sorted list of numbers and "quirk file" or
-    "drive (0x60E3)"; or (None, None) when neither knows, and every method in
-    the catalog may be tried. `read(index, sub, type)` reads an SDO (None if
-    the drive refuses); tool.upload by default."""
-    listed = (quirks.of(slave).get("homing") or {}).get("methods")
-    if listed:
-        return sorted(listed), "quirk file"
+    """(methods, where) for a slave: a sorted list of numbers and "drive (0x60E3)";
+    or (None, None) when the drive does not say, and every method in the catalog
+    may be tried. `read(index, sub, type)` reads an SDO (None if the drive
+    refuses); tool.upload by default."""
     read = read or (lambda i, s, t: tool.upload(slave["position"], i, s, t))
     base = 0x60E3 + axis * config.AXIS_OFFSET
     count = read(base, 0, "uint8")
@@ -110,8 +100,8 @@ def supported(slave, axis=0, read=None):
 
 def choices(slave, axis=0, read=None):
     """The list for the window: [(Method, supported)] for every method of the
-    catalog plus those a quirk file adds; supported is True, False, or None
-    when nothing says."""
+    catalog plus those the drive lists; supported is True, False, or None when
+    nothing says."""
     nums, _ = supported(slave, axis, read)
     every = sorted(set(CATALOG) | set(nums or ()))
     return [(method(n, slave), None if nums is None else n in nums) for n in every]
@@ -135,8 +125,7 @@ def parameters(number, slave=None):
 def plan(slave, number, params=None, axis=0):
     """The settings that make the drive home by a method: [{"object", "type",
     "value", "name"}] for the slave's `settings`. params: {"fast": ...} for
-    those the method uses; the others are left out. The drive's own extras for
-    the method (its quirk file) come last."""
+    those the method uses; the others are left out."""
     params = params or {}
     off = axis * config.AXIS_OFFSET
     out = [{"object": "0x%04X:%02X" % (0x6098 + off, 0), "type": "SINT", "value": number,
@@ -147,12 +136,6 @@ def plan(slave, number, params=None, axis=0):
             out.append({"object": "0x%04X:%02X" % (index + off, sub),
                         "type": {"uint32": "UDINT", "int32": "DINT"}[dtype],
                         "value": int(params[key]), "name": text})
-    extras = ((quirks.of(slave).get("homing") or {}).get("extras") or {}).get(number, [])
-    for e in extras:
-        index, _, sub = e["object"].partition(":")
-        i = int(index, 16)
-        # the CiA 402 objects of a later axis move; a vendor's own do not
-        out.append(dict(e, object="0x%04X:%s" % (i + off if 0x6000 <= i < 0x6800 else i, sub)))
     return out
 
 
@@ -179,13 +162,6 @@ def _norm(text):
     return (int(index, 16), int(sub or "0", 16))
 
 
-def enable_again(number, slave=None):
-    """Whether the drive must be enabled again after homing by this method
-    before it follows its target (its quirk file's `homing: enable-again`,
-    a list of methods)."""
-    return number in (((quirks.of(slave).get("homing") or {}).get("enable-again")) or [])
-
-
 def _cia402_keys(slave):
     """The profile's homing keys from the slave's choices (one per axis):
     home-enable-again if a chosen method needs it, and home-speed, the
@@ -194,7 +170,7 @@ def _cia402_keys(slave):
     n = max(len(config.axes(slave)), 1)
     chosen = [c for c in (choice(slave, a) for a in range(n)) if c]
     c402 = slave.setdefault("cia402", {})
-    again = any(c.get("enable-again", enable_again(c["method"], slave)) for c in chosen)
+    again = any(c.get("enable-again") for c in chosen)
     if again:
         c402["home-enable-again"] = True
     else:

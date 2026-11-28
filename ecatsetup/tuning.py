@@ -1,6 +1,6 @@
 """The drive's settings that may explain a response measurement
-(response.py): those its quirk file names (`tuning:`), and the others found
-by name in its object dictionary, with their present values.
+(response.py): those found by name in its object dictionary, and those the
+notes on the device name, with their present values and what the notes say.
 
 This is the step after the diagnosis: response.diagnose() says what kind of
 setting the following error points at (response.KINDS: a command filter,
@@ -52,10 +52,10 @@ class Candidate:
     maximum: int = None
     factory: int = None
     unit: str = ""
-    note: str = ""          # from the quirk file
-    tried: str = ""         # from the quirk file: what was found on a machine
-    applies: bool = True    # False: the quirk's `when` does not hold (another mode)
-    from_quirk: bool = False
+    note: str = ""          # what the notes on the device say of it
+    tried: str = ""
+    applies: bool = True    # False: it is for another mode of the drive
+    from_quirk: bool = False    # named in the notes on the device
 
     @property
     def edge(self):
@@ -116,27 +116,13 @@ def _process_data(slave):
 
 def candidates(slave, dictionary, read=None, kinds=()):
     """The drive's settings worth a look, those of `kinds` (in that order)
-    first, then the quirk file's before those found by name, then those at the
-    end of their range. read(index, subindex, tool type) -> int or None gives
+    first, then those the notes on the device name before the others found by
+    name, then those at the end of their range. read(index, subindex, tool type) -> int or None gives
     the present values (None: not read)."""
     out, seen = [], set()
-    commands = quirks.of(slave).get("commands", {})
-    for t in quirks.tuning(slave):
-        e = dictionary.entries.get((t["index"], t["subindex"])) if dictionary else None
-        c = Candidate(t["index"], t["subindex"],
-                      dictionary.name(t["index"], t["subindex"]) if dictionary else "",
-                      t["kind"], TOOL_TYPES.get(t["type"].upper(), t["type"]),
-                      minimum=t.get("min", e.minimum if e else None),
-                      maximum=t.get("max", e.maximum if e else None),
-                      factory=t.get("factory", e.default if e else None),
-                      unit=t.get("unit", ""), note=t.get("note", ""), tried=t.get("tried", ""),
-                      from_quirk=True)
-        c.when = t.get("when")
-        out.append(c)
-        seen.add((c.index, c.subindex))
     pdo = _process_data(slave)
     for (index, sub), e in sorted((dictionary.entries if dictionary else {}).items()):
-        if (index, sub) in seen or index not in VENDOR or (index, sub) in pdo or index in commands:
+        if (index, sub) in seen or index not in VENDOR or (index, sub) in pdo:
             continue
         if not e.writable or e.data_type not in TOOL_TYPES.values():
             continue
@@ -145,17 +131,16 @@ def candidates(slave, dictionary, read=None, kinds=()):
         kind = kind_of(dictionary.name(index, sub))
         if kind is None:
             continue
+        # what the notes say of it comes with it, and puts it first among its kind (a
+        # sentence alone does not make an object a tuning setting: it may warn of a command)
+        said = quirks.object_notes(slave, index, sub)
         c = Candidate(index, sub, dictionary.name(index, sub), kind, e.data_type,
-                      minimum=e.minimum, maximum=e.maximum, factory=e.default)
-        c.when = None
+                      minimum=e.minimum, maximum=e.maximum, factory=e.default,
+                      note=" ".join(said), from_quirk=bool(said))
         out.append(c)
     if read is not None:
         for c in out[:MAX_READ]:
             c.value = read(c.index, c.subindex, c.data_type)
-            if c.when:
-                wi, ws, values, wtype = c.when
-                mode = read(wi, ws, wtype)
-                c.applies = mode is None or mode in values
     order = list(kinds)
 
     def rank(c):

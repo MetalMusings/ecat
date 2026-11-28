@@ -10,11 +10,3 @@ notes: |
   positive limit, 7 negative limit, 0 none; factory DI1 6, DI2 7, DI3 5), the logic
   at 2, 6, 10, 14, 18 (0 active low, 1 active high; factory 0). Two inputs with one
   function is error Er82.0. From the manual; not tried on a drive.
-
-# The inputs, for a reader (the program knows only 0x60FD bits 0-2 of the
-# standard): DI1-DI5 get their function and logic in parameter group C04,
-# object 0x2004 (A6-EC manual 11.3.4): function at subindex 1, 5, 9, 13, 17
-# (5 home, 6 positive limit, 7 negative limit, 0 none; factory DI1 6, DI2 7,
-# DI3 5), logic at 2, 6, 10, 14, 18 (0 active low, 1 active high; factory 0).
-# Two inputs with one function is error Er82.0. From the manual; not tried on
-# a drive.

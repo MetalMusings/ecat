@@ -40,7 +40,7 @@ import subprocess
 import tempfile
 import time
 
-from . import config, kernelmaster, lcnc_env, netif, quirks
+from . import config, kernelmaster, lcnc_env, netif
 
 HALRUN = os.environ.get("ECAT_HALRUN") or lcnc_env.program("halrun")
 HALCMD = os.environ.get("ECAT_HALCMD") or lcnc_env.program("halcmd")
@@ -214,10 +214,6 @@ TOOL_TYPES = {"BOOL": "bool", "SINT": "int8", "INT": "int16", "DINT": "int32", "
 
 def sdo_write_refused(slave, index, subindex):
     """Why test mode does not write this object to the slave, or None."""
-    # objects that are commands, not settings (quirk files)
-    why = quirks.command(slave, index)
-    if why:
-        return why
     for direction in ("outputs", "inputs"):
         for pdo in (slave.get("process-data") or {}).get(direction) or []:
             for e in pdo.get("entries") or []:

@@ -65,9 +65,7 @@ class TestQuirks(unittest.TestCase):
         q = quirks.parse({"name": "x", "match": {"vendor": "0x1", "product": "0x1"},
                           "homing": {"methods": [21], "input-bits": {"IN5": 20},
                                      "inputs": {"function": {}}}}, "x.yaml")
-        self.assertEqual(q["homing"]["methods"], [21])
-        self.assertNotIn("inputs", q["homing"])
-        self.assertNotIn("input-bits", q["homing"])
+        self.assertNotIn("homing", q)        # retired with the other fact keys (2026-11-28)
 
 
 if __name__ == "__main__":

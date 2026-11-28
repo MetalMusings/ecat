@@ -337,12 +337,12 @@ Choosing a slave shows:
   object; it completes from the dictionary. A row with a problem is
   coloured and explained under the table: not in the dictionary, not
   writable in PREOP, a value that does not fit the type or the ESI's
-  range, another type than the dictionary's, or a command: one the
-  device's quirk file names, or one that looks like a command by its name,
-  write-only access or 0x1010/0x1011. A command is a warning, also in
-  `--check`, not an error: what a quirk file says is advice, and the file
-  can be saved; but a setting is written at every start, so the command
-  runs at every start. For a command once, use *Run command* on the
+  range, another type than the dictionary's, or one that looks like a
+  command by its name, write-only access or 0x1010/0x1011. A command is a
+  warning, not an error, and the file can be saved; but a setting is
+  written at every start, so the command runs at every start. What the
+  notes on the device say of an object (such as the ECT60's `0x2010`, a
+  command that must never be a setting) is the row's tooltip. For a command once, use *Run command* on the
   workbench's SDO card. *Read present values* fills the *Now* column from the slave.
   A CiA 402 drive in PP or PV (as its mode or one of its modes) plans its
   own moves, so its maximum velocity (`0x607F`, each axis's) must be a
@@ -597,26 +597,26 @@ To OP and moving:
 | Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
 | Velocity limit | In PP or PV: the drive's maximum velocity (0x607F) is a setting, or the drive has no such object. Missing until it is: *Add what the device needs* on the Settings card adds the drive's present value. |
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
-| Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; read once by SDO when the drive's PDOs lack it, as the ECT60's do) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
+| Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; read once by SDO when the drive's PDOs lack it, as the ECT60's do) in words: the standard's name, and the sentence of the device's notes that names the code. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |
 | Follows | Seen when you jog it on the Move card. A fault after "Operation enabled" (such as a following error in a fast jog) makes this row red, with the code in words, until the drive is reset and has moved again. |
-| Start position | Whether the drive keeps its position counter over a restart of the bus: from the device's quirk file, or seen over two runs of the workbench with the drive's power on (move it in the first), and then offered with *Remember for the device type...*. Information only: either way works, since LinuxCNC takes the position as it is and the profile holds it while the drive enables (see [Zero at start](#zero-at-start)). |
+| Start position | Whether the drive keeps its position counter over a restart of the bus: seen over two runs of the workbench with the drive's power on (move it in the first). Information only: either way works, since LinuxCNC takes the position as it is and the profile holds it while the drive enables (see [Zero at start](#zero-at-start)). |
 
 Homing and switches:
 
 | Row | Known from |
 |---|---|
 | Homing by the drive | Homing (hm) among the drive's modes (*Operation and sync*). |
-| Methods | The drive (0x60E3) or its quirk file; else every method may be tried, and *Remember the drive's methods...* on the homing card keeps the manual's list. |
-| Method | The one chosen on the homing card; for a number the standard leaves to the drive (36, 37, negatives), what it does, from the quirk file. |
-| Settings it needs | For a method of the drive's own: the quirk file's settings for it, or the manual. |
+| Methods | The drive (0x60E3); else every method may be tried (the manual, and the notes on the device, list them). |
+| Method | The one chosen on the homing card; a number the standard leaves to the drive (36, 37, negatives) shows when it homes: what it does is in the manual and the notes on the device. |
+| Settings it needs | For a method of the drive's own: the manual and the notes on the device say which (such as the ECT60's torque limits for torque homing); add them under Settings. |
 | Switches | For a method that needs switches: OK once it homes (homing found the switch). Before that, the Switches card on the Workbench shows whether the drive sees each one; which input is which, and its polarity, the drive's manual says (set under Settings). |
 | Index pulse | For a method that needs it: shows when it homes. |
 | Homes | Home (hold) on the Move card. |
 | Follows after homing | The Move card's check after a homing; a drive that does not follow needs *Enable the drive again after homing*. |
 
 What the workbench saw is kept only while the window is open: the card is
-worked out again each time from the configuration, the bus, the quirk
-files and that. Nothing on it is written anywhere; what you choose, you
+worked out again each time from the configuration, the bus, the notes on
+the device and that. Nothing on it is written anywhere; what you choose, you
 choose on the cards it leads to. The line under the title says how far it
 is.
 
@@ -1195,14 +1195,13 @@ crashed window does not keep it.
 
 Each slave's inputs show live; the outputs of I/O slaves can be set.
 Pins set while the workbench runs go back to 0 before it stops. SDOs can be read
-and written from the same page whenever a master runs; objects that are
-commands rather than settings (such as `0x2010` on the ECT60), objects in
-the process data, and a drive's CiA 402 objects are refused by *Write*.
-*Run command...* runs a command object once: it asks first, showing what
-the quirk file says it does, and is refused while a CiA 402 drive is in
-"Operation enabled" (read from its statusword). Only objects known as
-commands (a quirk file's `commands:`, or suspected from the dictionary)
-can be run this way; the value is the quirk's, else the one typed.
+and written from the same page whenever a master runs; objects in the
+process data and a drive's CiA 402 objects are refused by *Write*.
+*Run command...* writes an object that does something when written (such
+as `0x2010` on the ECT60) once: it asks first, showing what the notes on
+the device say of it (else: check the manual), and is refused while a
+CiA 402 drive is in "Operation enabled" (read from its statusword). The
+value is the one typed.
 
 #### Watching SDOs
 
@@ -1437,7 +1436,8 @@ The first lines say where most of the error comes from. What to do:
 
 - *Look for settings in the drive* lists the settings that may be the
   cause, what the measurement points at first, with their present values
-  (from the drive's quirk file, then by name from its own dictionary).
+  (by name from its own dictionary, those the notes on the device name
+  first, with what the notes say).
   Nothing is written.
 - Choose one, give a new value and press *Try it*: the drive's own value is
   kept first, and the new one goes to its RAM while it is disabled.
@@ -1589,13 +1589,12 @@ first part of tuning, the measuring.
     else the joint whose `motor-pos-cmd` the HAL files connect to the
     drive's `pos-cmd`), else at the workbench's own.
 - **Look for settings in the drive** lists the drive's settings that may
-  explain the result, what it points at first: those its quirk file names
-  (`tuning:`, with their range, factory value and what was found on a
-  machine), then those whose names in the drive's own dictionary suggest a
-  filter, a gain, feedforward, inertia or a notch (input filters, the
-  current loop, alarms and commands are left out), with their present
-  values. A value at the end of its range is marked, and so is one that
-  belongs to a mode the drive is not in. Listing them writes nothing. This
+  explain the result, what it points at first: those whose names in the
+  drive's own dictionary suggest a filter, a gain, feedforward, inertia or
+  a notch (input filters, the current loop, alarms and commands are left
+  out), with their present values; among them those the notes on the device
+  name come first, with what the notes say. A value at the end of its
+  range is marked. Listing them writes nothing. This
   is how a drive nobody has tuned here yet can be looked at without its
   manual; the measurement before and after decides, not the name.
 - **Trying one**: choose a row, give a new value and press *Try it*. The
@@ -2044,14 +2043,13 @@ than one master is refused: ecat drives one.
   another value, are listed under the pins with *Add* (and *Add all these
   settings*); nothing is added unasked. A drive that does
   not keep a value has its own again after a power cycle, so check the list.
-  A command lcec wrote as a setting is not offered as one: a command that
-  zeroes the position (the ECT60's `0x2010` Zero Position, as its quirk file
-  says) is not needed with ecat (see [Zero at start](#zero-at-start)): *Start
-  position: Position counts from 0 at start* is offered in its place, grey,
-  for a machine that should read 0 at start, and only with its own *Add*;
-  another command the quirk file names is listed grey,
-  marked as a command, and is added only with its own *Add*, not with *Add
-  all these settings*.
+  A command lcec wrote as a setting is listed like any other row: what the
+  notes on the device say of the object is its tooltip. The ECT60's `0x2010`
+  Zero Position must not be added: it zeroes the position at every start,
+  and ecat does not need it (see [Zero at start](#zero-at-start)). Where a
+  translation of lcec's driver replaces an sdoConfig, *Start position:
+  Position counts from 0 at start* is offered in its place, grey, only with
+  its own *Add*.
 
 Tried on a copy of the plasma cutter's lcec configuration (three ECT60
 through the cia402 component, an EaserCAT 7000 with bit pins), against
@@ -3112,8 +3110,8 @@ net x-index-enable  joint.0.index-enable <=> x-drive.index-enable
 In EtherCAT Setup the homing card on the slave's page (*Homing by the
 drive*) lists the methods of the standard and marks those the drive
 supports: a method the drive itself does not list (`0x60E3`) cannot be
-chosen, one that is only missing from its quirk file's list can, marked
-*not in the quirk file's list* (the list may be incomplete). It writes the
+chosen; a drive without `0x60E3` (the ECT60) offers every method, and its
+manual and notes say which it has. It writes the
 choice and the objects it needs as settings, and shows the INI lines above for the
 joint that uses the drive, and the HAL lines (the `index-enable` net, and
 `home-max-travel` and `home-timeout-ms`), ready to copy. Apply writes the
@@ -3124,8 +3122,8 @@ net; it does not change the INI file or write the other HAL lines.
 enabled again: it stays where homing ended (pressing against the stop,
 after torque homing) while motion believes the joint has gone to `HOME`,
 and motion sees nothing wrong as long as the difference is within
-`FERROR`. The box is set from the drive's quirk file when a method is
-chosen (the ECT60: methods 36 and 37) and can be changed. The homing test
+`FERROR`. Tick it yourself for such a method (the ECT60's notes: methods
+36 and 37). The homing test
 on the *Move* card finds such a drive: after homing it moves the target
 0.5 mm one way and, if the drive does not get there (a stop that way),
 the other way, and says *Homed, but the drive did not follow* when it
@@ -3236,7 +3234,7 @@ machine switched off the axis sprang back 0.74 mm (the stop and the
 mechanics had been pressed together); switched on again the drive followed
 every jog. After method 35 and method 21 (a switch on IN5) the drive
 followed at once (`HOME` 5 mm from `HOME_OFFSET`). Hence *Enable the drive
-again after homing* (in the ECT60's quirk file for 36 and 37; 37 assumed
+again after homing* (the ECT60's notes say it for 36 and 37; 37 assumed
 alike). The ECT60 has no general torque check besides torque homing's own
 (`0x2030`): out of homing, pressing against something ends in the
 following-error alarm 0x8611 (`0x2022`).
@@ -3335,9 +3333,11 @@ configuration):
    *CiA 402 modes*, tick *Homing by the drive's own method*; the mode
    objects `0x6060` and `0x6061` must be in the process data. On the
    *Homing by the drive* card choose the method and the speeds. What the
-   drive needs besides (its quirk file's extras) comes along as settings.
+   drive needs besides (the manual and the notes on the device say which)
+   you add under Settings.
    (X: method 36, fast 3000 and slow 1000 pulses/s, acceleration 20000
-   pulses/s², and the ECT60's `0x2030:01`–`:06` and `0x2022`, see
+   pulses/s², and the ECT60's `0x2030:01`–`:06` and `0x2022` added under
+   Settings, see
    [Homing by the drive](#homing-by-the-drive).) Save.
 3. **Try it on the workbench first** ([PP, PV and homing](#pp-pv-and-homing)):
    on the *Workbench*, *Move* card, write the limits, tick *The homing may
@@ -3712,7 +3712,9 @@ The EL7041 has one, `beckhoff-el7041.yaml`, which gives:
 
 and HAL lines that reset an error when `enable` comes on again (below).
 For another terminal, copy that file, change `match` and the objects, and
-put it in `~/.config/ecatsetup/devices/`. Without a quirk file, the
+put it in `~/.config/ecatsetup/devices/`: its pins and notes are read,
+its HAL lines are not (they come only with the program; write them in a
+HAL file of your own). Without a quirk file, the
 velocity is a `sint` pin in raw values (±32767).
 
 `nn` is the channel: the EL7041's motor is `0x7010`/`0x6010`, its
@@ -4348,41 +4350,17 @@ workbench's watch list and on *From lcec*.
 have configured it: its identity, the pin names, HAL types, scales and
 offsets of its process data, and its settings. It is saved as
 `<vendor>-<product>.yaml` in your folder, and the next slave of that
-device (vendor and product) is proposed with them. What you remembered
-for the device type before (below) stays in the file.
+device (vendor and product) is proposed with them. Your notes stay in
+the file. HAL lines come only in the program's own files: a file of yours
+is read without them.
 
-What you learn about a device in the window can be kept for its type
-where you learn it, each fact with where it comes from (the manual, a
-try on this machine):
-
-- *Remember for the device type...* on the Settings card: the chosen
-  setting;
-- *Run command...* on the SDO card, for an object that is not known as a
-  command: *Remember it as a command...*;
-- on the homing card, *Remember the drive's methods...*: the methods the
-  manual lists, ticked against the standard's, whether that is all of
-  them, and what the drive's own numbers (36, 37, negatives) do;
-- on the Settings card, for a drive in PP or PV, *Set objects for missing
-  limits...*: the object of a drive's own for its velocity limit or its
-  software position limits, or why a standard one is not used (such as the
-  ECT60 ignoring `0x607D` in CSP). The settings then ask for that object,
-  and the workbench writes it in PP and PV;
-- on the Response card, after *Look for settings in the drive*, *Remember
-  for tuning...* on the chosen object: what kind it is, its range and
-  factory value and what it does (not a value: that is a setting);
-- on the card *Bringing it up*: that the drive keeps its position over a
-  restart of the bus (seen over two runs of the workbench), and what an
-  error code the drive reported means (typed from its manual);
-- what the program sees by itself, offered as it is seen: a torque
-  (0x6077) that did not move during a measurement on the Response card
-  (*Remember: 0x6077 means nothing here...*), and a drive that did not
-  follow its target after homing by a method (the Move card asks whether
-  it must be enabled again after that method).
-
-The window acts on some of these: a command whose purpose is to zero the
-position is not imported when an lcec configuration is moved, and *Start
-position* is offered as an option in its place; an error code is shown in
-words wherever it is shown.
+Until 2026-11-28 a quirk file had a key per kind of fact (commands, homing
+methods, limits, tuning objects, error codes, whether the drive keeps its
+position), and *Remember ...* buttons on the cards wrote them. They are
+notes now: a file that still has those keys is read without them. The
+window no longer acts on them: a command lcec wrote as a setting is
+offered as a setting on *From lcec*, with the notes' warning as its
+tooltip, and the drive's own homing methods are chosen by number.
 
 A file that cannot be read is skipped, with a warning in the window and
 from `ecatsetup --check`.
@@ -4392,31 +4370,30 @@ from `ecatsetup --check`.
 **A prototype, being tried; it uses a test repository that will go.**
 *Device data...* on a slave's page shows everything known about its
 device type in one place: a line on its ESI file, then the facts grouped
-(commands and settings, homing, drive test, tuning, timing with the
-measured SYNC0 periods, process data, HAL), each with its value,
+(the notes, settings, timing with the measured SYNC0 periods, process
+data, HAL), each with its value,
 where it comes from (came with the program, the manual, tried on a
 machine, shared), a link to **the card that owns it** and, for yours,
 *forget*. A fact is changed on its card, where it is used and can be
 tried; the page itself changes nothing but your sources. *Show what is
-not known yet* adds, in amber, what is missing and where to learn it
-(such as: which commands it has, from Run command on the SDO card).
+not known yet* adds, in amber, what is missing (such as: no notes on the
+device yet).
 
 What a quirk file says is advice, never a rule: you can always choose
 otherwise on the card. Facts are of three sorts, and the page says which
 (a property is not marked):
 
 - a **property** of the device holds for every one of them, perhaps for a
-  firmware: that `0x2010` is a command, which bit is IN5, which homing
-  methods there are, what a tuning object does and its range;
+  firmware: the notes (that `0x2010` is a command, which bit is IN5, which
+  homing methods there are, what a tuning object does);
 - **experience from a machine** is a value that worked there, such as a
-  setting (`0x2009` = 2000 on a plasma cutter in CSP) or the values a
-  homing method needs: it says where it worked, and may not suit yours;
+  setting (`0x2009` = 2000 on a plasma cutter in CSP): it says where it
+  worked, and may not suit yours;
 - **advice** is a recipe made from properties: HAL lines (the program's own, not shared).
 
 When you remember a fact, you say where it comes from (the manual with its
 version and section, a test, ...); for experience also where it worked,
-and for a list (homing methods) whether it is all there is (the manual's
-list) or only what worked.
+and for a list whether it is all there is or only what worked.
 
 - **Share yours...** opens a new post in the data repository
   ([MetalMusings/ecat-devices-test](https://github.com/MetalMusings/ecat-devices-test))

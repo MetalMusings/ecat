@@ -448,14 +448,17 @@ class TestSettings(Folder):
                          [{"object": "0x2000:00", "type": "UINT", "value": 4000},
                           {"object": "0x2003:00", "type": "UINT", "value": 100}])
 
-    def test_zero_position_offers_zero_at_start(self):
-        # the ECT60's quirk file: lcec's 0x2010 is a command; zero-at-start is offered as an
-        # option (not needed with ecat), added only on its own Add
+    def test_an_lcec_translation_offers_zero_at_start(self):
+        # an sdoConfig that a translation of the lcec type replaces: zero-at-start is offered
+        # as an option (not needed with ecat), added only on its own Add
+        from ecatsetup import lcecmap
         self.write("ethercat-conf.xml", XML.replace(
             '<sdoConfig idx="2000"', '<sdoConfig idx="2010" subIdx="0"><sdoDataRaw data="01 00"/>'
             '</sdoConfig><sdoConfig idx="2000"'))
         c = cfg()
-        hints = fromlcec.setting_hints(fromlcec.find(self.ini), c)
+        with mock.patch.object(lcecmap, "_cache", [lcecmap.parse({"types": ["generic"], "sdo": {
+                "0x2010:00": {"replace": "cia402.zero-at-start", "note": "not needed with ecat"}}})]):
+            hints = fromlcec.setting_hints(fromlcec.find(self.ini), c)
         z = [h for h in hints if h.zero_at_start]
         self.assertEqual(len(z), 1)
         self.assertIn("not needed with ecat", z[0].what)
@@ -465,20 +468,16 @@ class TestSettings(Folder):
         fromlcec.add_setting(c, z[0])
         self.assertTrue(c["slaves"][0]["cia402"]["zero-at-start"])
 
-    def test_another_command_is_shown_not_dropped(self):
-        # a quirk command without a purpose the program acts on: offered, marked, its own Add only
-        from unittest import mock
+    def test_a_command_lcec_wrote_is_an_ordinary_row(self):
+        # the ECT60's 0x2010: what it is, the notes on the device say (the row's tooltip)
         self.write("ethercat-conf.xml", XML.replace(
             '<sdoConfig idx="2000"', '<sdoConfig idx="2010" subIdx="0"><sdoDataRaw data="01 00"/>'
             '</sdoConfig><sdoConfig idx="2000"'))
-        with mock.patch.object(quirks, "command_purpose", lambda *a: None):
-            hints = fromlcec.setting_hints(fromlcec.find(self.ini), cfg())
+        hints = fromlcec.setting_hints(fromlcec.find(self.ini), cfg())
         h = [h for h in hints if h.setting and h.setting["object"] == "0x2010:00"]
         self.assertEqual(len(h), 1)
-        self.assertIn("a command, says the device's quirk file", h[0].command)
         self.assertFalse(any(x.zero_at_start for x in hints))
-        self.assertNotIn(h[0], fromlcec.for_add_all(hints))
-
+        self.assertIn("Never write 0x2010", quirks.object_tip(cfg()["slaves"][0], 0x2010, 0))
 
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

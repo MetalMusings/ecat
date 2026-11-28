@@ -193,11 +193,9 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
             if sub == "complete":
                 notes.append("%s: SDO 0x%04X complete access not imported" % (where, index))
                 continue
-            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub, x.type)
+            got = quirks.lcec_replacement(x.type, index, sub)
             if got:
                 what, why = got
-                if what == "command":
-                    notes.append("%s: %s; imported as lcec had it" % (where, why))
                 if what == "cia402.zero-at-start" and s.get("profile") == "cia402":
                     # not imported: a command; zero-at-start is the user's choice
                     notes.append("%s: not imported: %s" % (where, why))

@@ -345,7 +345,8 @@ class TestTestMode(unittest.TestCase):
 
     def test_sdo_writes_refused(self):
         x, io = cfg()["slaves"]
-        self.assertIn("Zero Position", testmode.sdo_write_refused(x, 0x2010, 0))
+        # a command is the user's to run (Run command); the notes on the device say which
+        self.assertIsNone(testmode.sdo_write_refused(x, 0x2010, 0))
         self.assertIn("process data", testmode.sdo_write_refused(io, 0x7000, 1))
         self.assertIn("CiA 402", testmode.sdo_write_refused(x, 0x6081, 0))
         self.assertIsNone(testmode.sdo_write_refused(x, 0x2000, 1))

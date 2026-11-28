@@ -232,7 +232,7 @@ file each stopped the load with their own line.
 | `cia402.zero-at-start` | For `cia402`: `true` makes positions count from where the drive stands when the bus first reaches OP, for drives that keep their position from an earlier run (see [cia402](ecatsetup.md#zero-at-start)). Default `false`. |
 | `cia402.feedforward` | For `cia402` in CSP: `velocity` (the share of the command's velocity fed forward, 1.0 for all), `torque` (% of rated torque per machine unit/s² of acceleration), `torque-max` (the torque offset's limit, %, default 30); written to `0x60B1` and `0x60B2`, which must be `use: profile` in the outputs (see [cia402](ecatsetup.md#feedforward-in-csp)). |
 | `cia402.modes` | For `cia402`: other modes the drive may change to: `hm` for homing by the drive's own method, and `csp`, `csv`, `pv`, `pp` to choose with the `opmode-cmd` pin. It needs `0x6060` and `0x6061`, and each mode's objects, in the process data. |
-| `homing` | For `cia402` with `hm`: the homing method chosen in the window, `{method: 17, fast: 3000, slow: 1000, accel: 5000, offset: 0}` (a list of them, `null` for an axis without, for a drive with several axes). The master ignores it. The window writes the same choice to `settings` (0x6098, 0x6099, 0x609A, 0x607C and what the drive needs besides, from its quirk file), which is what the drive gets at start; the drive test writes it too, so a test homes as LinuxCNC will ([quirk files](#homing-quirk-files)). |
+| `homing` | For `cia402` with `hm`: the homing method chosen in the window, `{method: 17, fast: 3000, slow: 1000, accel: 5000, offset: 0}` (a list of them, `null` for an axis without, for a drive with several axes). The master ignores it. The window writes the same choice to `settings` (0x6098, 0x6099, 0x609A, 0x607C; what a drive needs besides, such as the ECT60's torque homing objects, are settings of your own), which is what the drive gets at start; the drive test writes it too, so a test homes as LinuxCNC will. |
 | `encoders` | Incremental encoder channels laid out as in MDP 511: a list of `name` (pin prefix) and `index` (the channel's status index, such as `'0x6010'`). See [encoder channels](ecatsetup.md#encoder-channels). |
 | `unused` | `true`: the slave is on the bus but LinuxCNC does not use it: the component compares its `identity` with the bus at start (so a swapped slave is noticed) and does nothing else with it: no pins, no configuration, no state change. Everything else the entry holds is kept, unread, for a later `false`. Not with `eoe` (a slave with a network address is used). Default `false`. A slave that is not in the file at all is treated the same way, but an `unused` entry keeps the place (and the identity check), and the window and `--check` still know it. |
 | `configure-pdos` | `true`: the master writes the PDO assignment and mapping below to the slave; `false`: the slave's own mapping is used and the entries below are only located in it. `false` is not advised: many slaves keep a mapping only until the power goes off, and the window asks before it sets it. With `false` the start check compares the PDOs below with the slave's own, as the master read them, sync manager by sync manager, and stops with a message naming both when they differ (`ecatsetup --check` and the window's check compare the same with a master running) (needs linuxcnc-ethercat-uspace 1.6 or later, which has `ecrt_master_get_pdo` & co.; with 1.5 it is not compared, a warning says so). |
@@ -823,7 +823,7 @@ notes: |                   # what is worth knowing, as text
   A blank line starts a new paragraph.
 
 sources:                   # where each fact comes from (optional)
-  commands 0x2010: {kind: manual, ref: ECT manual 2.4.6, date: 2026-11-26}
+  notes: {kind: manual, ref: EL70x1 manual, date: 2026-11-26}
   settings 0x8010:01: {kind: tried, date: 2026-11-26, revision: '0x00100000'}
 
 pins:                      # when the slave is proposed
@@ -833,27 +833,7 @@ pins:                      # when the slave is proposed
 settings:                  # added to the slave when it is proposed
 - {object: '0x8010:01', name: Maximal current, type: UINT, value: 1500}
 
-commands:                  # objects that are commands, not settings
-  '0x2010': Zero Position, a command
-  '0x1010:01':             # the longer form tells "Run command" what to write
-    note: Store parameters
-    value: 1702257011      # "save" as ASCII
-    type: uint32
-    confirm: Keeps every setting through a power cycle
-
-limits:                    # where a drive keeps a limit PP and PV need
-  max-velocity: {object: '0x2008:00', type: uint32}   # instead of 0x607F
-  travel: why the drive's own object is not used      # 0x607D
-
-tuning:                    # settings the Response card's search shows first
-  '0x2009:00': {kind: command-filter, type: UINT, unit: us, min: 0, max: 25600, factory: 6400,
-                note: what it does, tried: what it gave on a machine}
-  '0x2023:04': {kind: feedforward, type: UINT, when: {object: '0x2011:00', values: [1]}}
-
-measure:
-  ignore: {'0x6077': why the response measurement does not record it}
-
-hal:                       # HAL lines for each matching slave
+hal:                       # HAL lines for each matching slave (the program's files only)
   load: {edge: ['{name}-enable-edge']}
   addf: ['{name}-enable-edge']
   lines:
@@ -872,17 +852,12 @@ used, and the rest of the shipped file stays.
 | Key | |
 |---|---|
 | `format` | The file format, now 1. A file of a newer format is read without the keys this program does not know; an older program does not refuse it. |
-| `sources` | Per fact, where it comes from: `kind` (`manual`, `tried`, `observed`, `shared`, `other`) and optionally `ref`, `date`, `revision`, `firmware`, `by`, `given`, `context` (for experience: the machine where it worked), `list` (for a list: `closed`, only these, or `open`, these worked) and `relation` (`completes`: the drive and its ESI file say nothing; `corrects`: they say otherwise). A fact is named by its key and object, as `commands 0x2010`, `settings 0x2009:00`, `homing input-bits IN5`, `tuning 0x2009:00`, `measure ignore 0x6077`, `position kept`, `errors 0x8611`, `hal`. *Device data...* writes them. |
+| `sources` | Per fact, where it comes from: `kind` (`manual`, `tried`, `observed`, `shared`, `other`) and optionally `ref`, `date`, `revision`, `firmware`, `by`, `given`, `context` (for experience: the machine where it worked), `list` (for a list: `closed`, only these, or `open`, these worked) and `relation` (`completes`: the drive and its ESI file say nothing; `corrects`: they say otherwise). A fact is named by its key and object, as `notes`, `settings 0x2009:00`, `pins 0x7010:21`. *Device data...* writes them. |
 | `match` | `vendor` and `product` of the device. |
 | `notes` | A text: what is worth knowing about the device (a YAML block, `notes: \|`). Blank lines part paragraphs. A sentence that names an object (`0x2010`, `0x2007:03`, `0x2007:03-06`) is also that object's tooltip in the window. Yours is shown after the program's, not instead of it. |
 | `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [the configuration file](#pdos-and-entries); or `split`, a list of bit pin names from bit 0 (`null` for a bit without a pin) for an object that holds several bits. Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. *Save as quirk file* keeps bit pins too. |
 | `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [the configuration file](#pdos-and-entries). |
-| `commands` | Per object index: why it is a command, or the longer form `note` (why), `value`, `type`, `confirm` (what *Run command* writes) and `purpose` (`zero-position`, `store-parameters`, `clear-fault`, `other`: what it is for, when the program can act on it). The workbench's *Write* does not write it (*Run command* does); as a setting it is warned about, in the window and by `--check`, not refused. An lcec `sdoConfig` of a `zero-position` command is not imported; `cia402.zero-at-start` is offered as an option in its place (From lcec, the import's note); one of another command is offered marked, and not by *Add all*. |
-| `position` | `kept: true` when the drive keeps its position counter over a restart of the bus while it has power, `false` when it starts from 0. A property only: with ecat neither needs anything (*Start position* is an option). |
-| `errors` | Per error code (0x603F): what the drive means by it, from its manual. Shown with the code in Diagnose, on the workbench and on the card *Bringing it up*. |
-| `tuning` | Per object: `kind` (`command-filter`, `position-loop`, `feedforward`, `torque`, `gain-high`, `other`) and `type`, and optionally `unit`, `min`, `max`, `factory`, `note`, `tried` (what it gave on a machine), and `when` (`object` and `values`: it is used only in that mode of the drive). Shown by *Look for settings in the drive* ([Measuring a drive's response](ecatsetup.md#measuring-a-drives-response)). |
-| `measure` | `ignore`: per object index, why the response measurement does not record it (a drive's object that does not mean what the standard says). |
-| `limits` | For a drive in PP or PV: `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), where the drive keeps it instead of `0x607F` (the settings then ask for it, the workbench writes it), or `travel` and `max-velocity` as a text saying why the drive's own object is not used. `following-error` and `max-torque` are still read (older files have them) but no longer used. |
+| `commands`, `limits`, `homing`, `tuning`, `measure`, `position`, `errors`, `lcec` | Keys of their own until 2026-11-28, now read without them (the notes say these things). |
 | `hal` | Only in the program's own files: a file of yours is read without it (a note says so). `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
 
 ### HAL lines
@@ -920,32 +895,8 @@ stricter rules, here and in the data repository:
 - every `sources` entry names a fact of the file and has a `kind`;
 - at most 32 KB, texts at most 2000 characters.
 
-### Homing (quirk files)
-
-```yaml
-homing:
-  methods: [17, 18, 35, 36]          # the CiA 402 homing methods (0x6098) the drive supports
-  describe:                          # the drive's own text for a method (default: the standard's)
-    36: {text: "Torque homing ...", needs: [mechanical stop], moves: true}
-  extras:                            # settings the drive needs besides 0x6098, 0x6099, 0x609A, 0x607C
-    36:
-      - {object: '0x2030:01', type: UINT, value: 70, name: Max torque output}
-  enable-again: [36, 37]             # methods after which the drive follows only once enabled again
-```
-
 `match` may give a list of products for a family with the same objects
 (`product: ['0x00000980', '0x00000990']`).
-
-`input-bits` and `inputs` (how the drive's inputs got their function and
-polarity) were read until 2026-11-27 and are no longer: a file that has them
-is taken without them. The shipped files keep what the manuals say about the
-inputs as comments, for a reader.
-
-Without `methods`, EtherCAT Setup reads the drive's 0x60E3 (supported homing
-methods); if the drive has neither, every method of the standard is offered.
-The ECT60 has no 0x60E3 (read from a drive, 2026-11-10), so its file lists
-the methods from the manual. The extras are for the axis of the slave's
-first axis; for later axes their indexes move by 0x800 as the other objects do.
 
 ## lcec translations
 

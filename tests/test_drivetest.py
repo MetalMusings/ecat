@@ -58,10 +58,10 @@ class TestPlan(unittest.TestCase):
         s = dict(drivetest.DEFAULTS, scale=100.0)
         limits, notes = drivetest.plan_limits(ECT60, lambda i, sub: (i, sub) in {
             (0x607D, 1), (0x607D, 2), (0x2022, 0)}, 100.0, 5000, s)
-        # the ECT60 ignores 0x607D in CSP, so its travel is limited in HAL only; its
-        # following-error window (0x2022) is not written: the workbench checks itself
-        self.assertEqual(limits, [])
-        self.assertTrue(any("ignores its software position limits" in n for n in notes))
+        # 0x607D as on any drive (the ECT60 ignores it in CSP, its notes say: HAL limits the
+        # travel too); its following-error window (0x2022) is not written: the workbench
+        # checks itself
+        self.assertEqual([lim.index for lim in limits], [0x607D, 0x607D])
         self.assertTrue(any("following error over 2 mm stops the drive" in n for n in notes))
         self.assertTrue(any("limit3" in n for n in notes))
 
@@ -142,10 +142,10 @@ class TestDriveTest(TestTestMode):
         run = self.started()
         dt = drivetest.DriveTest(run, ECT60, self.coe(), {"scale": 100.0})
         dt.prepare()
-        # nothing written to an ECT60: 0x607D it ignores in CSP, and its following-error
-        # window (0x2022) is not touched nor spoken of
-        self.assertEqual(drivetest.pending_restores(), [])
-        self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)
+        # the travel in 0x607D, kept to be put back; its following-error window (0x2022)
+        # is not touched nor spoken of
+        self.assertEqual([e["index"] for e in drivetest.pending_restores()], [0x607D, 0x607D])
+        self.assertEqual(self.drive.sdos[(0x607D, 1)], 5000 - 2000)
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
         self.assertFalse(any("window" in n for n in dt.notes))
         log = self.setp_log()
@@ -169,6 +169,7 @@ class TestDriveTest(TestTestMode):
 
         self.assertEqual(dt.restore(), [])
         self.assertEqual(self.drive.sdos[(0x2022, 0)], 4000)
+        self.assertEqual(self.drive.sdos[(0x607D, 1)], -1)        # put back
         self.assertEqual(drivetest.pending_restores(), [])
         self.assertIn("ecatjog0.maxv 0", self.setp_log())
         self.assertIn("x.ferror-max 0", self.setp_log())
@@ -366,33 +367,6 @@ class TestDriveTest(TestTestMode):
         dt.restore()
         self.assertEqual(self.drive.sdos[(0x6098, 0)], 35)
         self.assertEqual(self.drive.sdos[(0x6099, 1)], 7)
-
-    def test_torque_homing_keeps_its_own_torque_limit(self):
-        # a drive that limits torque homing with 0x6072 (its quirk file's extras): the
-        # test writes the method's value, as LinuxCNC's settings will, never a limit of
-        # its own on top
-        d = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, d)
-        with open(os.path.join(d, "t.yaml"), "w") as f:
-            f.write("name: t\nmatch: {vendor: '0x2', product: '0x1234'}\nhoming:\n  extras:\n"
-                    "    37: [{object: '0x6072:00', type: UINT, value: 400, name: Max torque}]\n")
-        p = mock.patch.dict(os.environ, {"ECATSETUP_DEVICES": d})
-        p.start()
-        self.addCleanup(p.stop)
-        from ecatsetup import quirks
-        quirks.load(reload=True)
-        self.addCleanup(quirks.load, True)
-        run = self.started()
-        self.drive.sdos.update({(0x6098, 0): 35, (0x6072, 0): 1000})
-        slave = dict(OTHER, cia402={"mode": "csp", "modes": ["hm"]}, homing={"method": 37})
-        coe = self.coe()
-        coe.entries.update({(0x6098, 0): 1, (0x6072, 0): 1})
-        dt = drivetest.DriveTest(run, slave, coe, {"scale": 100.0})
-        dt.prepare()
-        self.assertEqual(self.drive.sdos[(0x6072, 0)], 400)
-        self.assertEqual([lim.name for lim in dt.limits if lim.index == 0x6072], ["homing"])
-        dt.restore()
-        self.assertEqual(self.drive.sdos[(0x6072, 0)], 1000)
 
     def test_home_result(self):
         run = self.started()

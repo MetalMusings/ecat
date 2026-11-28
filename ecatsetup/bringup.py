@@ -3,17 +3,16 @@ goal "to OP and moving" (docs/development.md "Device facts: properties, advice,
 and bringing up a new drive", item 3). No Qt: the slave page's card shows the rows.
 
 The rows are worked out again each time from the configuration's slave, what was
-read from the bus, the quirk files and measured results, and what the workbench saw
-in this window's session (`Seen`). What the workbench saw is not stored: it belongs
-to the session and the machine. Only properties go to a quirk file, and only when
-the user chooses so on the card that owns them.
+read from the bus, the device's notes and measured results, and what the workbench
+saw in this window's session (`Seen`). What the workbench saw is not stored: it
+belongs to the session and the machine.
 """
 
 import os
 import time
 from dataclasses import dataclass, field
 
-from . import config, diagnose, measured, quirks
+from . import config, diagnose, measured
 
 GOAL = "To OP and moving"
 HOMING = "Homing and switches"
@@ -33,9 +32,6 @@ class Row:
     what: str           # the row's name
     text: str           # what is known, or how the gap is filled
     card: str = None    # devicedataview.CARDS: where it is filled
-    # a fact the row can keep for the device type: (path, value, what, note, source kind);
-    # note not None: the user types the value (what an error code means)
-    remember: tuple = None
 
 
 @dataclass
@@ -118,10 +114,8 @@ def _objects(slave, direction):
 
 
 def _start_position(slave, seen):
-    """The start position row: the quirk file's property first, then what two runs of
-    the workbench showed (offered as the property, source observed)."""
+    """The start position row, from what two runs of the workbench showed."""
     c = slave.get("cia402") or {}
-    known = quirks.keeps_position(slave)
     ticked = bool(c.get("zero-at-start"))
     runs = [r for r in (seen.runs if seen else []) if r]
     kept = None
@@ -132,28 +126,19 @@ def _start_position(slave, seen):
             kept = True
         elif abs(after) <= SAME_COUNTS and abs(before) > SAME_COUNTS:
             kept = False
-    keep = None
-    if known is None and kept is not None:
-        keep = (("position", "kept"), kept, "The drive %s its position over a restart of the bus"
-                % ("keeps" if kept else "does not keep"), None, "observed")
     if ticked:
-        return Row("start", OK, "Start position", "counts from 0 at start (ticked)", "operation",
-                   remember=keep)
-    if known is True or kept is True:
-        where = "the device's quirk file says so" if known is True else \
-            "%d counts at the end of one run, %d at the start of the next" % (before, after)
+        return Row("start", OK, "Start position", "counts from 0 at start (ticked)", "operation")
+    if kept is True:
         return Row("start", OK, "Start position",
-                   "the drive keeps its position over a restart of the bus (%s). Nothing is "
-                   "needed: LinuxCNC takes the position as it is, and the profile holds it while "
-                   "the drive enables. Tick Start position: Position counts from 0 at start only "
-                   "if the machine should read 0 at start" % where, "operation", remember=keep)
-    if known is False:
-        return Row("start", OK, "Start position", "the drive starts from 0 by itself (the device's "
-                   "quirk file)")
+                   "the drive keeps its position over a restart of the bus (%d counts at the end "
+                   "of one run, %d at the start of the next). Nothing is needed: LinuxCNC takes "
+                   "the position as it is, and the profile holds it while the drive enables. Tick "
+                   "Start position: Position counts from 0 at start only if the machine should "
+                   "read 0 at start" % (before, after), "operation")
     if kept is False:
         return Row("start", OK, "Start position",
                    "the drive starts from 0 by itself (it ended a run at %d counts and started "
-                   "the next at %d)" % (before, after), remember=keep)
+                   "the next at %d)" % (before, after))
     return Row("start", OK, "Start position",
                "not known whether the drive keeps its position; either works. It shows over two "
                "runs of the workbench with the drive's power on and the drive moved in the first",
@@ -275,19 +260,13 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
     else:
         out.append(Row("op", TRY, "Reaches OP", "shows when the workbench runs", "workbench"))
     def fault():
-        """(text, remember) of the fault seen: in words, or offered to be remembered."""
-        if quirks.error_meaning(slave, s.fault):
-            return "fault %s" % diagnose.error_text(s.fault, slave), None
-        code = "0x%04X" % s.fault
-        return ("fault %s: what the drive means by it is in its manual; remember it for the "
-                "device type, so that it is said in words next time" % diagnose.error_text(s.fault),
-                (("errors", code), None, "Error code %s: what it means" % code, "", "manual"))
+        """The fault seen, in words (the standard's, and the device's notes')."""
+        return "fault %s" % diagnose.error_text(s.fault, slave)
     # a fault before "Operation enabled" was seen is the enable's; one after it, the move's
     if s.enabled:
         out.append(Row("enable", OK, "Enables", "\"Operation enabled\" seen at %s" % s.enabled, "move"))
     elif s.fault:
-        text, keep = fault()
-        out.append(Row("enable", BAD, "Enables", text, "diagnose", remember=keep))
+        out.append(Row("enable", BAD, "Enables", fault(), "diagnose"))
     elif s.stuck:
         out.append(Row("enable", BAD, "Enables",
                        "stays in \"Switch on disabled\" while enable is held: usually the hardware "
@@ -296,10 +275,9 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("enable", TRY, "Enables", "shows when you write limits and hold Enable "
                        "on the Move card", "move"))
     if s.enabled and s.fault:
-        text, keep = fault()
         out.append(Row("follows", BAD, "Follows", "%s%s: Reset fault on the Move card and jog "
-                       "again" % (text, " after a move of %.2f mm" % s.moved if s.moved else ""),
-                       "move", remember=keep))
+                       "again" % (fault(), " after a move of %.2f mm" % s.moved if s.moved else ""),
+                       "move"))
     elif s.moved:
         out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm" % s.moved, "move"))
     else:
@@ -327,8 +305,8 @@ def homing_rows(slave, seen=None, support=(None, None), axis=0):
         out.append(Row("methods", OK, "Methods", "%s (from the %s)" % (_numbers(nums), where), "homing"))
     else:
         out.append(Row("methods", TRY, "Methods",
-                       "not known: every method of the standard may be tried. The manual lists them: "
-                       "Remember the drive's methods... on the homing card", "homing"))
+                       "not known: every method of the standard may be tried; the drive's manual "
+                       "lists them (the notes on this device may say)", "homing"))
     chosen = homing.choice(slave, axis)
     if not chosen:
         out.append(Row("method", MISSING, "Method", "none chosen: choose one on the homing card", "homing"))
@@ -336,24 +314,17 @@ def homing_rows(slave, seen=None, support=(None, None), axis=0):
     n = chosen["method"]
     m = homing.method(n, slave)
     own = n not in homing.CATALOG or n in (36, 37)
-    described = n in ((quirks.of(slave).get("homing") or {}).get("describe") or {})
-    if own and not described:
-        out.append(Row("method", MISSING, "Method",
-                       "%d: the standard leaves its meaning to the drive. What it does is in the "
-                       "drive's manual: Remember the drive's methods... says it for the next one" % n,
+    if own:
+        out.append(Row("method", TRY, "Method",
+                       "%d: the standard leaves its meaning to the drive: what it does is in the "
+                       "drive's manual (the notes on this device may say); shows when it homes" % n,
                        "homing"))
+        out.append(Row("extras", TRY, "Settings it needs",
+                       "a method of the drive's own may need settings of the drive's own (such as "
+                       "torque limits for torque homing): see its manual and the notes on this "
+                       "device, and add them under Settings", "settings"))
     else:
         out.append(Row("method", OK, "Method", "%d: %s" % (n, m.text), "homing"))
-    if own:
-        extras = ((quirks.of(slave).get("homing") or {}).get("extras") or {}).get(n)
-        if extras:
-            out.append(Row("extras", OK, "Settings it needs", "%d from the quirk file (%s)" % (
-                len(extras), ", ".join(st["object"] for st in extras)), "settings"))
-        else:
-            out.append(Row("extras", TRY, "Settings it needs",
-                           "a method of the drive's own may need settings of the drive's own (such as "
-                           "torque limits for torque homing): see its manual, and add them under "
-                           "Settings", "settings"))
     need = switches.needed(slave, axis)
     if not need:
         out.append(Row("switches", OK, "Switches", "the method needs none"))

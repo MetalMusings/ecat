@@ -168,8 +168,8 @@ class TestHoming(Base):
         # homing that found the switch proves it; the Move card tells
         seen = bringup.Seen()
         seen.homed, seen.follows_after = "homed", False
-        found = {r.key: r for r in bringup.homing_rows(s, seen, ([17, 18, 19, 20, 21, 22], "quirk file"))}
-        self.assertEqual(found["methods"].text, "17-22 (from the quirk file)")
+        found = {r.key: r for r in bringup.homing_rows(s, seen, ([17, 18, 19, 20, 21, 22], "drive (0x60E3)"))}
+        self.assertEqual(found["methods"].text, "17-22 (from the drive (0x60E3))")
         self.assertEqual(found["switches"].state, bringup.OK)
         self.assertIn("homing found it", found["switches"].text)
         self.assertEqual(found["homed"].state, bringup.OK)
@@ -182,17 +182,11 @@ class TestHoming(Base):
         s = drive(modes=["hm"])
         s["homing"] = {"method": 36}
         found = {r.key: r for r in bringup.homing_rows(s)}
-        self.assertEqual(found["method"].state, bringup.MISSING)
+        # the drive's manual and the notes on the device say what it does: shows when it homes
+        self.assertEqual(found["method"].state, bringup.TRY)
+        self.assertIn("notes on this device", found["method"].text)
         self.assertEqual(found["extras"].state, bringup.TRY)
         self.assertEqual(found["switches"].state, bringup.OK)      # 36 needs no switch here
-        # the ECT60's quirk file says what 36 does and the settings it needs
-        s = drive(identity=ECT60, modes=["hm"])
-        s["homing"] = {"method": 36}
-        found = {r.key: r for r in bringup.homing_rows(s)}
-        self.assertEqual(found["method"].state, bringup.OK)
-        self.assertIn("Torque homing", found["method"].text)
-        self.assertEqual(found["extras"].state, bringup.OK)
-        self.assertIn("0x2030:01", found["extras"].text)
 
 
 class TestSeen(Base):
@@ -229,7 +223,8 @@ class TestSeen(Base):
         self.assertEqual(self.row(found, "enable").state, bringup.OK)
         row = self.row(found, "follows")
         self.assertEqual(row.state, bringup.BAD)
-        self.assertIn("fault 0x8611 Position following error too large", row.text)
+        self.assertIn("fault 0x8611", row.text)
+        self.assertIn("the notes on this device: Error 0x8611 (0x603F) is a following error", row.text)
         self.assertIn("after a move of 0.66 mm", row.text)
         # reset and enabled: not cleared until it has moved again
         seen.saw("r", True, 4, moved=0.66)
@@ -243,7 +238,7 @@ class TestSeen(Base):
         seen.saw("r", True, 7, error=0x8611)
         row = self.row(bringup.rows(drive(), proposal(), seen=seen), "follows")
         self.assertEqual(row.state, bringup.BAD)
-        self.assertEqual(row.remember[0], ("errors", "0x8611"))     # unknown: offered
+        self.assertNotIn("notes", row.text)                     # a drive without notes
         seen = bringup.Seen()
         seen.saw("r", True, 1, enable_asked=True, clock=0)
         self.assertIsNone(seen.stuck)
@@ -261,7 +256,6 @@ class TestSeen(Base):
         seen.saw("r1", True, position=51234)       # moved in the first run
         row = self.row(bringup.rows(drive(), proposal(), seen=seen), "start")
         self.assertIn("not known", row.text)
-        self.assertIsNone(row.remember)
         seen.saw("r2", True, position=51235)       # started where it ended: kept
         row = self.row(bringup.rows(drive(), proposal(), seen=seen), "start")
         # a property, not a gap: ecat holds the drive's position while it enables
@@ -269,9 +263,6 @@ class TestSeen(Base):
         self.assertIn("keeps its position", row.text)
         self.assertIn("Nothing is needed", row.text)
         self.assertEqual(row.card, "operation")
-        # offered as the property, seen by the program
-        self.assertEqual(row.remember[:2], (("position", "kept"), True))
-        self.assertEqual(row.remember[4], "observed")
         # ticked: known
         self.assertEqual(self.row(bringup.rows(drive(**{"zero-at-start": True}), proposal(), seen=seen),
                                   "start").state, bringup.OK)
@@ -283,46 +274,12 @@ class TestSeen(Base):
         self.assertEqual(row.state, bringup.OK)
         self.assertIn("starts from 0 by itself", row.text)
 
-    def test_the_quirk_files_facts(self):
-        # the ECT60's file says it keeps its position and what 0x8611 means
-        row = self.row(bringup.rows(drive(identity=ECT60), proposal()), "start")
-        self.assertEqual(row.state, bringup.OK)
-        self.assertIn("the device's quirk file says so", row.text)
-        self.assertIsNone(row.remember)                 # known already: nothing to keep
-        seen = bringup.Seen()
-        seen.saw("r", True, 7, error=0x8611)
-        row = self.row(bringup.rows(drive(identity=ECT60), proposal(), seen=seen), "enable")
-        self.assertIn("Position following error too large", row.text)
-        self.assertIsNone(row.remember)
-        # an unknown code is offered to be kept, the meaning typed from the manual
-        row = self.row(bringup.rows(drive(), proposal(), seen=seen), "enable")
-        self.assertEqual(row.remember[0], ("errors", "0x8611"))
-        self.assertEqual(row.remember[3], "")
-        self.assertEqual(row.remember[4], "manual")
-
     def test_an_error_code_in_words(self):
         from ecatsetup import diagnose
-        self.assertIn("0x8611 Position following error too large (more than 0x2022, in pulses) (the device's quirk file)",
-                      diagnose.error_text(0x8611, (0xA88, 0xA880002)))
-        self.assertNotIn("quirk file", diagnose.error_text(0x8611))
-        self.assertNotIn("quirk file", diagnose.error_text(0x8611, (2, 0x1234)))
-
-    def test_lcec_translation_follows_from_the_commands_purpose(self):
-        ect = (0xA88, 0xA880002)
-        what, why = quirks.lcec_replacement(ect, 0x2010, 0)
-        self.assertEqual(what, quirks.ZERO_AT_START)
-        self.assertIn("not needed with ecat", why)
-        self.assertIsNone(quirks.lcec_replacement(ect, 0x2009, 0))
-        d = os.environ["ECATSETUP_DEVICES"]
-        os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "t.yaml"), "w") as f:
-            f.write("name: t\nmatch: {vendor: '0x2', product: '0x1234'}\n"
-                    "commands: {'0x3000': Store, '0x3001': {note: Zero it, purpose: zero-position}}\n")
-        quirks.load(reload=True)
-        what, why = quirks.lcec_replacement((2, 0x1234), 0x3000, 0)
-        self.assertEqual(what, "command")
-        self.assertIn("run at every start", why)
-        self.assertEqual(quirks.lcec_replacement((2, 0x1234), 0x3001, 0)[0], quirks.ZERO_AT_START)
+        self.assertIn("; the notes on this device: Error 0x8611 (0x603F) is a following error larger "
+                      "than 0x2022", diagnose.error_text(0x8611, (0xA88, 0xA880002)))
+        self.assertNotIn("notes", diagnose.error_text(0x8611))
+        self.assertNotIn("notes", diagnose.error_text(0x8611, (2, 0x1234)))
 
     def test_the_key_changes_only_with_what_the_card_shows(self):
         seen = bringup.Seen()

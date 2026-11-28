@@ -123,7 +123,7 @@ def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
     has_object(index, subindex): whether the drive's dictionary has it;
     scale: counts per machine unit; start_counts: the drive's position;
     axis: the axis of a drive with several, whose CiA 402 objects are at
-    index + axis * 0x800 (vendor objects of quirks are not moved)."""
+    index + axis * 0x800."""
     off = axis * config.AXIS_OFFSET
     if off:
         # planned as axis 0, then moved to the axis's objects
@@ -138,12 +138,8 @@ def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
     limits, notes = [], []
     mode = mode_of(slave) or "csp"
     travel = int(round(abs(settings["travel"] * scale)))
-    # where the drive keeps a limit, if not in the CiA 402 object (quirk files)
-    quirks = q.limits(slave)
     if mode == "pv":
         notes.append("PV runs while a button is held: there is no travel limit")
-    elif isinstance(quirks.get("travel"), str) and mode == "csp":
-        notes.append("%s: travel is limited in HAL only" % quirks["travel"])
     elif has_object(0x607D, 1) and has_object(0x607D, 2):
         limits += [Limit("travel-min", 0x607D, 1, "int32", start_counts - travel,
                          "travel %+g mm from start (0x607D:01)" % -settings["travel"]),
@@ -153,7 +149,7 @@ def plan_limits(slave, has_object, scale, start_counts, settings, axis=0):
         notes.append("no software position limits (0x607D) in the drive: travel is limited "
                      "in %s only" % ("HAL" if mode == "csp" else "this program's targets"))
     if mode in ("pp", "pv"):
-        where = quirks.get("max-velocity") or STANDARD_LIMITS["max-velocity"]
+        where = STANDARD_LIMITS["max-velocity"]
         if has_object(where[0], where[1]):
             limits.append(Limit("max-velocity", where[0], where[1], where[2],
                                 int(round(abs(settings["max-velocity"] * scale))),

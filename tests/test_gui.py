@@ -1395,9 +1395,9 @@ class TestWindow(WindowBase):
         self.assertFalse(page.homing_card.isHidden())
         self.assertEqual(page.home_method.itemData(0), None)
         i = page.home_method.findData(1)
-        # the ECT60's quirk file does not list 1: advice, so it can still be chosen, marked
+        # the ECT60 has no 0x60E3: every method can be chosen, none marked
         self.assertTrue(page.home_method.model().item(i).isEnabled())
-        self.assertIn("not in the quirk file's list", page.home_method.itemText(i))
+        self.assertNotIn("(", page.home_method.itemText(i))
         page.home_method.setCurrentIndex(page.home_method.findData(17))
         page.homing_edited()
         self.assertEqual(s["homing"]["method"], 17)
@@ -1426,13 +1426,15 @@ class TestWindow(WindowBase):
         s["process-data"]["outputs"][0]["entries"].pop()
         page.home_method.setCurrentIndex(page.home_method.findData(36))
         page.homing_edited()
-        self.assertIn("0x2030:01", [x["object"] for x in s["settings"]])
-        # the ECT60 follows its target after torque homing only when enabled
-        # again (its quirk file); the profile is told, and how fast it homes
-        self.assertTrue(page.home_again.isChecked() and not page.home_again.isHidden())
+        # the drive's own settings for 36 (the ECT60's 0x2030) are the user's, under Settings
+        self.assertNotIn("0x2030:01", [x["object"] for x in s["settings"]])
+        # the ECT60 follows its target after torque homing only when enabled again (its
+        # notes): the user ticks it; the profile is told, and how fast it homes
+        self.assertTrue(not page.home_again.isChecked() and not page.home_again.isHidden())
+        page.home_again.setChecked(True)
         self.assertEqual((s["cia402"].get("home-enable-again"), s["cia402"].get("home-speed")),
                          (True, 4000))
-        page.home_again.setChecked(False)                 # the user's word wins
+        page.home_again.setChecked(False)
         self.assertNotIn("home-enable-again", s["cia402"])
         self.assertFalse(s["homing"]["enable-again"])
         page.show_homing(s)
@@ -1441,19 +1443,19 @@ class TestWindow(WindowBase):
         page.homing_edited()
         self.assertFalse(page.home_again.isChecked())
         self.assertEqual(s["cia402"].get("home-speed"), 1)   # does not move: any step is a set
-        # ticking homing off takes the choice and its settings out (0x2022 for torque
-        # homing would stay a setting otherwise) and hides the card; on again: back
+        # ticking homing off takes the choice and its settings out and hides the card;
+        # on again: back
         page.home_method.setCurrentIndex(page.home_method.findData(36))
         page.homing_edited()
         page.other_modes["hm"].setChecked(False)
         self.assertTrue(page.homing_card.isHidden())
         self.assertNotIn("homing", s)
-        self.assertNotIn("0x2022:00", [x["object"] for x in s.get("settings") or []])
+        self.assertNotIn("0x6098:00", [x["object"] for x in s.get("settings") or []])
         self.assertNotIn("home-enable-again", s["cia402"])
         page.other_modes["hm"].setChecked(True)
         self.assertFalse(page.homing_card.isHidden())
         self.assertEqual(s["homing"]["method"], 36)
-        self.assertIn("0x2022:00", [x["object"] for x in s["settings"]])
+        self.assertIn("0x6098:00", [x["object"] for x in s["settings"]])
         page.home_method.setCurrentIndex(0)
         page.homing_edited()
         self.assertTrue(page.home_again.isHidden())
@@ -1747,12 +1749,19 @@ class TestWindow(WindowBase):
         page.sdo_value.setText("1")
         QMB = gui.QMessageBox
         calls = []
+        asked = []
         with mock.patch.object(tool, "download", lambda *a, **k: calls.append(a)), \
-                mock.patch.object(QMB, "information", lambda *a, **k: calls.append("info")), \
                 mock.patch.object(QMB, "warning", lambda *a, **k: calls.append("warning")), \
-                mock.patch.object(QMB, "question", lambda *a, **k: QMB.Yes):
-            page.sdo_run_command()                  # an ordinary object: not a command
-            self.assertEqual(calls, ["info"])
+                mock.patch.object(QMB, "question", lambda *a, **k: (asked.append(a[2]), QMB.Yes)[1]), \
+                mock.patch.object(testmode, "drives_enabled", lambda cfg, up: []):
+            # any object, once asked: what it does, the drive's manual (and its notes) say
+            page.sdo_run_command()
+            self.assertEqual(calls, [(0, 0x2000, 2, "1", None)])
+            self.assertIn("Check in the drive's manual", asked[-1])
+            page.sdo_obj.setText("0x7000:00")
+            page.sdo_run_command()
+            self.assertIn("ohmic-sensing relay", asked[-1])
+            page.sdo_obj.setText("0x2000:02")
             del calls[:]
             reason = ("warning", "Zero position: a command")
             with mock.patch.object(guidance, "command_reason", lambda *a, **k: reason), \
@@ -2624,13 +2633,11 @@ class TestPdoEditing(WindowBase):
         w.session.dictionary(1).objects[0x607F] = "Max profile velocity"
         # CSP: neither the button for the drive's own objects nor the velocity limit
         page.show_settings(s)
-        self.assertTrue(page.limits_remember.isHidden())
         self.assertNotIn("0x607F", page.init_button.toolTip())
         s["cia402"]["modes"] = ["pv"]
         with mock.patch.object(tool, "upload", return_value=5000) as up:
             page.show_settings(s)
             up.assert_not_called()                  # shown without asking the drive
-            self.assertFalse(page.limits_remember.isHidden())
             self.assertFalse(page.init_button.isHidden())
             self.assertIn("0x607F:00 (max velocity", page.init_button.toolTip())
             self.assertIn("0x607F:00 (max profile velocity)", page.st_problems.text())
@@ -3593,7 +3600,7 @@ class TestBringup(WindowBase):
         self.assertFalse(page.bringup_card.isHidden())
         keys = [r.key for r in page.bringup_found]
         self.assertEqual(keys[-4:], ["op", "enable", "follows", "start"])
-        mark, what, text, go, _keep = page.bringup_rows[keys.index("op")]
+        mark, what, text, go = page.bringup_rows[keys.index("op")]
         self.assertEqual(mark.text(), "?")
         self.assertEqual(go.text(), "Workbench →")
         self.assertIn("shown only when tried", page.bringup_summary.text())
@@ -3601,7 +3608,7 @@ class TestBringup(WindowBase):
         seen = w.bringup_seen.setdefault(0, bringup.Seen())
         seen.saw("run", True, 4)
         page.show_bringup()
-        mark, what, text, go, _keep = page.bringup_rows[keys.index("op")]
+        mark, what, text, go = page.bringup_rows[keys.index("op")]
         self.assertEqual(mark.text(), "✓")
         self.assertFalse(go.isHidden())                        # still leads to the workbench
         # a row leads to its card
@@ -3784,108 +3791,6 @@ class TestDeviceData(WindowBase):
         o.start()
         self.addCleanup(o.stop)
 
-    def test_homing_methods_and_inputs_from_the_manual(self):
-        from ecatsetup import devicedata, homing
-        w = self.window()
-        w.select_slave(0)
-        ident = self.quirks.identity(w.session.slave(0))
-        dlg = self.dv.MethodsDialog(w, None, {}, None)
-        self.addCleanup(dlg.deleteLater)
-        for n in (19, 20, 21, 22, 35, 36, 37):
-            dlg.boxes[n].setChecked(True)
-        dlg.more.setText("-1")
-        dlg.texts[36].setText("torque homing towards CCW")
-        dlg.ref.setText("manual 2.4.6")
-        self.assertEqual(dlg.methods(), [-1, 19, 20, 21, 22, 35, 36, 37])
-        path = self.dv.remember_methods(w, w, 0, None, None, ask=False, dialog=dlg)
-        self.assertTrue(path.startswith(self.tmp.name))
-        self.assertEqual(homing.supported(w.session.slave(0), read=lambda *a: None)[0],
-                         [-1, 19, 20, 21, 22, 35, 36, 37])
-        self.assertEqual(homing.method(36, w.session.slave(0)).text, "torque homing towards CCW")
-        src = devicedata.sources(ident)["homing methods"]
-        self.assertEqual((src["kind"], src["list"], src["relation"], src["ref"]),
-                         ("manual", "closed", "completes", "manual 2.4.6"))
-
-    def test_the_bringup_card_keeps_what_it_saw(self):
-        from ecatsetup import bringup
-        w = self.window()
-        s = w.session.slave(0)
-        s["profile"], s["cia402"] = "cia402", {"mode": "csp"}
-        w.select_slave(0)
-        page = w.slave_page
-        seen = w.bringup_seen.setdefault(0, bringup.Seen())
-        seen.saw("r1", True, 7, error=0x8123, position=5000)
-        seen.saw("r2", True, 7, error=0x8123, position=5001)
-        page.show_bringup()
-        keys = [r.key for r in page.bringup_found]
-        n = keys.index("start")
-        self.assertFalse(page.bringup_rows[n][4].isHidden())         # Remember...
-        page.bringup_remember(n)
-        ident = self.quirks.identity(s)
-        self.assertIs(self.quirks.keeps_position(ident), True)
-        self.assertIsNone(page.bringup_found[keys.index("start")].remember)   # known now
-        # an error code: the meaning typed in the source dialog's text
-        n = keys.index("enable")
-        with mock.patch.object(self.dv.SourceDialog, "exec_",
-                               lambda d: (d.note.setText("overcurrent"), QDialog.Accepted)[1]):
-            page.bringup_remember(n)
-        self.assertEqual(self.quirks.error_meaning(ident, 0x8123), "overcurrent")
-        self.assertIn("overcurrent", page.bringup_found[n].text)
-
-    def test_what_the_workbench_saw_is_offered_as_facts(self):
-        from types import SimpleNamespace
-        w = self.window()
-        s = w.session.slave(0)
-        s["profile"], s["cia402"] = "cia402", {"mode": "csp", "modes": ["hm"]}
-        s["homing"] = {"method": 21}
-        ident = self.quirks.identity(s)
-        dt = SimpleNamespace(slave=s, axis=0, name="x")
-        # a torque that never moved during a measurement
-        card = w.test_page.response
-        with mock.patch.object(card, "drive", lambda: dt):
-            card.show_constant(SimpleNamespace(constant={0x6077: "it stayed at 0"}))
-            self.assertFalse(card.ignore_button.isHidden())
-            card.remember_constant()
-        self.assertIn(0x6077, self.quirks.measure_ignore(ident))
-        # a drive that did not follow after homing by 21
-        with mock.patch.object(gui.QMessageBox, "question", lambda *a, **k: gui.QMessageBox.Yes):
-            w.test_page.move.offer_enable_again(dt)
-        self.assertEqual(self.quirks.of(ident)["homing"]["enable-again"], [21])
-        from ecatsetup import devicedata
-        self.assertEqual(devicedata.sources(ident)["homing enable-again"]["kind"], "observed")
-        # known now: not asked again
-        with mock.patch.object(gui.QMessageBox, "question", side_effect=AssertionError):
-            self.assertIsNone(w.test_page.move.offer_enable_again(dt))
-
-    def test_limits_and_tuning_objects_from_the_window(self):
-        from types import SimpleNamespace
-        from ecatsetup import tuning
-        w = self.window()
-        s = w.session.slave(0)
-        ident = self.quirks.identity(s)
-        dlg = self.dv.LimitsDialog(w)
-        self.addCleanup(dlg.deleteLater)
-        self.assertEqual(sorted(dlg.rows), ["max-velocity", "travel"])    # what PP and PV need
-        obj, typ, why = dlg.rows["max-velocity"]
-        obj.setText("0x2008:00")
-        dlg.rows["travel"][2].setText("ignored in CSP")
-        self.assertIsNotNone(self.dv.remember_limits(w, w, 0, ask=False, dialog=dlg))
-        lim = self.quirks.limits(ident)
-        self.assertEqual(lim["max-velocity"], (0x2008, 0, "uint32"))
-        self.assertEqual(lim["travel"], "ignored in CSP")
-        # a tuning object found by Look for settings
-        card = w.test_page.response
-        c = tuning.Candidate(0x2009, 0, "Filter Time", "command-filter", "uint16", value=2000,
-                             minimum=0, maximum=25600, factory=6400, unit="us")
-        dt = SimpleNamespace(slave=s)
-        with mock.patch.object(card, "drive", lambda: dt), mock.patch.object(card, "chosen", lambda: c), \
-                mock.patch.object(self.dv.SourceDialog, "exec_",
-                                  lambda d: (d.note.setText("sliding average"), QDialog.Accepted)[1]):
-            card.remember_tuning()
-        t = next(x for x in self.quirks.tuning(ident) if x["index"] == 0x2009)
-        self.assertEqual((t["kind"], t["type"], t["max"], t["factory"], t["note"]),
-                         ("command-filter", "UINT", 25600, 6400, "sliding average"))
-
     def test_the_source_asks_what_the_sort_of_fact_needs(self):
         # experience: where it worked; a list: closed or open; a property: neither
         w = self.window()
@@ -3895,11 +3800,7 @@ class TestDeviceData(WindowBase):
         self.assertIsNone(d.listing)
         d.context.setText("plasma cutter, CSP, 500 us")
         self.assertEqual(d.source()["context"], "plasma cutter, CSP, 500 us")
-        d = self.dv.SourceDialog(w, "Homing methods", "[21]", None, path=("homing", "methods"))
-        self.addCleanup(d.deleteLater)
-        self.assertIsNone(d.context)
-        self.assertEqual(d.source()["list"], "closed")
-        d = self.dv.SourceDialog(w, "0x2010 is a command", None, None, note="", path=("commands", "0x2010"))
+        d = self.dv.SourceDialog(w, "Notes on the device", None, None, note="", path=("notes",))
         self.addCleanup(d.deleteLater)
         self.assertTrue(d.context is None and d.listing is None)
         self.assertNotIn("context", d.source())
@@ -3923,9 +3824,6 @@ class TestDeviceData(WindowBase):
         path = page.remember_setting()
         self.assertTrue(path.startswith(self.tmp.name))
         self.assertEqual(self.quirks.settings(ident)[0]["value"], 5)
-        # a command, from the SDO card
-        w.test_page.remember_command((0x2001, 0))
-        self.assertIn(0x2001, self.quirks.of(ident)["commands"])
         src = devicedata.sources(ident)
         self.assertEqual(src["settings 0x2000:02"]["kind"], "tried")
         # the device's page: the facts grouped, each with where it comes from and its card
@@ -3936,7 +3834,8 @@ class TestDeviceData(WindowBase):
         self.assertIs(page.device_data(), dlg)
         html = dlg.page.toHtml()
         text = dlg.page.toPlainText()
-        self.assertLess(text.index("Commands and settings"), text.index("Process data"))
+        self.assertLess(text.index("Notes"), text.index("Settings"))
+        self.assertLess(text.index("Settings"), text.index("Process data"))
         self.assertIn("Setting 0x2000:02", text)
         self.assertIn("value: 5", text)
         # the kind, the date and the slave's revision
@@ -3980,7 +3879,7 @@ class TestDeviceData(WindowBase):
         # someone shares another value; fetched, it is offered fact by fact
         theirs = devicedata.strip(devicedata.read_raw(devicedata.own_path(ident)))
         devicedata.put(theirs, ("settings", "0x2000:02"), {"type": "USINT", "value": 9})
-        devicedata.put(theirs, ("commands", "0x2002"), "another command")
+        devicedata.put(theirs, ("notes",), "Their notes.")
         folder = "devices/%08x-%08x" % ident
         tgz = os.path.join(self.tmp.name, "r.tar.gz")
         with tarfile.open(tgz, "w:gz") as tar:
@@ -3995,8 +3894,8 @@ class TestDeviceData(WindowBase):
         with mock.patch.dict(os.environ, {"ECATSETUP_DEVICES_URL": "file://" + tgz}):
             dlg.fetch()
         self.assertEqual(dlg.file_box.count(), 1)
-        self.assertEqual(dlg.file_box.itemText(0), "#5 · MetalMusings EaserCAT 7000 · 0x2001 is a command, not "
-                         "a setting, 0x2002 is a command, not a setting and 1 more · bob · 2 up, 1 worked")
+        self.assertEqual(dlg.file_box.itemText(0), "#5 · MetalMusings EaserCAT 7000 · Notes on the device, "
+                         "Setting 0x2000:02 · bob · 2 up, 1 worked")
         self.assertIn("2 facts differ", dlg.file_info.text())
         # the whole shared file, grouped the same way, marked against what is in use
         dlg.whole_button.setChecked(True)
@@ -4008,12 +3907,12 @@ class TestDeviceData(WindowBase):
         self.assertIn("(experience from a machine)", text)
         self.assertNotIn("Pin for", text)                            # pins are never shared
         dlg.whole_button.setChecked(False)
-        self.assertIn("1 of 2: 0x2002 is a command", dlg.step.text())
+        self.assertIn("1 of 2: Notes on the device", dlg.step.text())
         self.assertIn("(a property of the device)", dlg.step.text())
         self.assertTrue(dlg.try_button.isHidden())
         dlg.use()
-        self.assertEqual(self.quirks.of(ident)["commands"][0x2002], "another command")
-        self.assertEqual(devicedata.sources(ident)["commands 0x2002"]["ref"], "https://example/5")
+        self.assertEqual([t for _, t in self.quirks.notes(ident)][-1], "Their notes.")
+        self.assertEqual(devicedata.sources(ident)["notes"]["ref"], "https://example/5")
         self.assertIn("2 of 2: Setting 0x2000:02", dlg.step.text())
         self.assertIn("value: 5", dlg.step.text())               # in use
         self.assertIn("value: 9", dlg.step.text())               # shared
@@ -4050,11 +3949,11 @@ class TestDeviceData(WindowBase):
         text = dlg.report(rep)
         self.assertEqual(QApplication.clipboard().text(), text)
         self.assertEqual(self.opened[-1], "https://example/5")
-        self.assertEqual(devicedata.read_report(text)["used"], ["commands 0x2002"])
+        self.assertEqual(devicedata.read_report(text)["used"], ["notes"])
         # Forget takes one of yours away again
-        dlg.link(QUrl("forget:commands 0x2002"))
-        self.assertNotIn(0x2002, self.quirks.of(ident)["commands"])
-        self.assertNotIn("0x2002", dlg.page.toPlainText())
+        dlg.link(QUrl("forget:notes"))
+        self.assertNotIn("Their notes.", [t for _, t in self.quirks.notes(ident)])
+        self.assertNotIn("Their notes", dlg.page.toPlainText())
 
     def test_a_file_from_elsewhere_is_gone_through_like_a_shared_one(self):
         import yaml
@@ -4064,17 +3963,17 @@ class TestDeviceData(WindowBase):
         dlg = self.dv.DeviceDataDialog(w, 0)
         self.addCleanup(dlg.deleteLater)
         raw = {"format": 1, "name": "x", "match": {"vendor": "0x%08X" % ident[0], "product": "0x%08X" % ident[1]},
-               "commands": {"0x2003": "from the forum"}}
+               "notes": "From the forum."}
         path = os.path.join(self.tmp.name, "forum.yaml")
         with open(path, "w") as f:
             yaml.safe_dump(raw, f)
         e = dlg.open_file(path)
         self.assertEqual(e["problems"], [])
         self.assertIn("From forum.yaml", dlg.file_box.currentText())
-        self.assertIn("1 of 1: 0x2003 is a command", dlg.step.text())
+        self.assertIn("1 of 1: Notes on the device", dlg.step.text())
         self.assertTrue(dlg.report_button.isHidden())          # no thread to report in
         dlg.use()
-        self.assertEqual(devicedata.sources(ident)["commands 0x2003"]["ref"], "forum.yaml")
+        self.assertEqual(devicedata.sources(ident)["notes"]["ref"], "forum.yaml")
         # pasted from a post, for another device: refused, nothing offered
         post = "Mine:\n```yaml\n%s```" % yaml.safe_dump(dict(raw, match={"vendor": "0x1", "product": "0x2"}))
         e = dlg.paste(post)
@@ -4097,18 +3996,19 @@ class TestDeviceData(WindowBase):
 
     def test_what_is_not_known_yet(self):
         from ecatsetup import devicedata, settings
+        # a device without notes (the test buses' file left out of the program's)
+        os.remove(os.path.join(self.quirks.SHIPPED, "easercat-7000.yaml"))
+        self.quirks.load(reload=True)
         w = self.window()
         s = w.session.slave(0)
         s["profile"] = "cia402"
         dlg = self.dv.DeviceDataDialog(w, 0)
         self.addCleanup(dlg.deleteLater)
-        self.assertIn("No commands known", dlg.page.toPlainText())
-        self.assertIn("card:sdo", dlg.page.toHtml())
+        self.assertIn("No notes on this device yet", dlg.page.toPlainText())
         dlg.unknown_box.setChecked(False)
-        self.assertNotIn("not known", dlg.page.toPlainText())
+        self.assertNotIn("No notes", dlg.page.toPlainText())
         self.assertIs(settings.load()[self.dv.UNKNOWNS_SETTING], False)
         ident = self.quirks.identity(s)
-        devicedata.remember(ident, "x", ("commands", "0x2010"), "zero position", {"kind": "tried"})
+        devicedata.remember(ident, "x", ("notes",), "Mine.", {"kind": "tried"})
         dlg.unknown_box.setChecked(True)
-        self.assertNotIn("No commands known", dlg.page.toPlainText())
-        self.assertIn("No tuning objects known", dlg.page.toPlainText())
+        self.assertNotIn("No notes on this device yet", dlg.page.toPlainText())

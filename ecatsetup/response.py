@@ -37,7 +37,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
-from . import config, lcnc_env, quirks, testmode
+from . import config, lcnc_env, testmode
 
 HALSAMPLER = os.environ.get("ECAT_HALSAMPLER") or lcnc_env.program("halsampler")
 DEPTH = 16384           # samples in each sampler channel's FIFO
@@ -153,8 +153,6 @@ def measure_entries(slave, axis=0):
             except ValueError:
                 continue
             col = MEASURE_OBJECTS.get(index - off)
-            if index - off in quirks.measure_ignore(slave):
-                continue
             if col and sub == 0 and e.get("pin") and e.get("hal-type") in SAMPLER_LETTER:
                 out[col[0]] = (index, e)
     return out
@@ -1054,10 +1052,7 @@ def missing_objects(slave, dictionary, axis=0):
     have = measure_entries(slave, axis)
     off = axis * config.AXIS_OFFSET
     out = []
-    ignored = quirks.measure_ignore(slave)
     for index, (col, what) in sorted(MEASURE_OBJECTS.items()):
-        if index in ignored:
-            continue
         if col not in have and dictionary is not None and (index + off, 0) in dictionary.entries:
             out.append((index + off, col, what))
     return out

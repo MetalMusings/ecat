@@ -177,19 +177,20 @@ def cia402_state(sw):
 
 
 def error_text(code, key=None):
-    """An error code (0x603F) in words: what the device's quirk file says the drive
-    means by it, else the standard's name or class. key: a (vendor, product) or a
-    configuration's slave, or None."""
+    """An error code (0x603F) in words: the standard's name or class, and the
+    sentence of the device's notes that names the code. key: a (vendor, product)
+    or a configuration's slave, or None."""
     if code == 0:
         return "no error"
-    if key:
-        from . import quirks
-        meaning = quirks.error_meaning(key, code)
-        if meaning:
-            return "0x%04X %s (the device's quirk file)" % (code, meaning)
     name = ERROR_CODES.get(code)
     cls = next((n for base, n in reversed(ERROR_CLASSES) if code >= base), "")
-    return "0x%04X %s" % (code, name or ("(%s)" % cls if cls else ""))
+    text = "0x%04X %s" % (code, name or ("(%s)" % cls if cls else ""))
+    if key:
+        from . import quirks
+        said = quirks.object_notes(key, code)
+        if said:
+            text = "%s; the notes on this device: %s" % (text.rstrip(), said[0])
+    return text
 
 
 @dataclass

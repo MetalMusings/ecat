@@ -8,7 +8,7 @@ A dictionary is a coe.Dictionary: the slave's own, an ESI file's, or both
 
 import re
 
-from . import config, propose, quirks
+from . import config, propose
 
 # the type names a configuration uses, from the tool's
 CONFIG_TYPES = dict(propose.COE_TYPES)
@@ -30,12 +30,9 @@ def config_type(entry):
 
 
 def command_reason(slave, index, entry=None):
-    """(level, why) when an object is a command, not a setting: "warning", both
-    for a quirk file's commands (advice, not a rule: the user may still set it)
-    and for a suspicion from the dictionary; None if it looks like a setting."""
-    why = quirks.command(slave, index)
-    if why:
-        return "warning", "a command, says the device's quirk file: %s" % why
+    """(level, why) when an object looks like a command, not a setting, from the
+    dictionary: "warning"; None if it looks like a setting. (What the device's notes
+    say of the object shows as its tooltip.)"""
     if index in _STORE_OBJECTS:
         return "warning", "store/restore parameters run when written: a command, not a setting"
     if entry is not None:

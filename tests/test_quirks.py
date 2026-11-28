@@ -58,15 +58,9 @@ class TestFiles(unittest.TestCase):
         self.assertEqual(quirks.of((0xAB5, 0x980))["name"], "GeRui EC1 series")
         self.assertEqual(quirks.of((0xAB5, 0x1030))["name"], "GeRui EC1 series")
         self.assertEqual(quirks.of((0xAB5, 0x69673537)), {})
-        ect = quirks.of((0xA88, 0xA880002))
-        self.assertEqual(ect["commands"], {0x2010: "Zero Position on the ECT60, a command, not a setting"})
-        self.assertEqual(ect["limits"]["following-error"], (0x2022, 0, "uint32"))
-        self.assertIn("ignores", ect["limits"]["travel"])
-        # the translation follows from the command's purpose (no hand-written lcec row)
-        self.assertEqual(quirks.command_purpose((0xA88, 0xA880002), 0x2010), "zero-position")
-        self.assertEqual(quirks.lcec_replacement((0xA88, 0xA880002), 0x2010, 0)[0], "cia402.zero-at-start")
-        self.assertIs(quirks.keeps_position((0xA88, 0xA880002)), True)
-        self.assertIn("following error", quirks.error_meaning((0xA88, 0xA880002), 0x8611))
+        # the shipped files hold notes, pins and HAL lines only (2026-11-28)
+        for q in qs:
+            self.assertFalse(set(q["raw"]) & quirks.RETIRED, q["path"])
         self.assertEqual(quirks.pins((2, 0x1B813052))[(0x7010, 0x21)]["scale"], 32767)
         self.assertEqual(quirks.of((1, 2)), {})
 
@@ -74,20 +68,17 @@ class TestFiles(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "mine.yaml"), "w") as f:
                 f.write("name: my ECT60\nmatch: {vendor: '0xA88', product: '0x0A880002'}\n"
-                        "commands: {'0x2011': mine}\n")
+                        "notes: Mine.\ncommands: {'0x2011': mine}\n")
             with open(os.path.join(d, "bad.yaml"), "w") as f:
                 f.write("name: x\nmatsh: {}\n")
             os.environ["ECATSETUP_DEVICES"] = d
             try:
                 quirks.load(reload=True)
                 self.assertEqual(quirks.of((0xA88, 0xA880002))["name"], "my ECT60")
-                self.assertEqual(quirks.command({"identity": {"vendor": "0xA88",
-                                                              "product": "0x0A880002"}}, 0x2011),
-                                 "mine")
-                # laid over the shipped file: what only the shipped file says stays
+                # laid over the shipped file: its notes stay, a retired key is read without
                 ect = quirks.of((0xA88, 0xA880002))
-                self.assertIn(0x2010, ect["commands"])
-                self.assertEqual(ect["limits"]["following-error"], (0x2022, 0, "uint32"))
+                self.assertEqual([t for _, t in ect["notes"]][1:], ["Mine."])
+                self.assertNotIn("commands", ect)
                 self.assertTrue(ect["layers"][0].endswith("rtelligent-ect60.yaml"))
                 self.assertEqual(len(quirks.problems), 1)
                 self.assertIn("bad.yaml: unknown keys matsh", quirks.problems[0])
@@ -121,14 +112,10 @@ class TestFiles(unittest.TestCase):
     def test_parse_errors(self):
         for data, msg in (({"match": {"vendor": "0x2"}}, "match needs vendor and product"),
                           ({"pins": {"0x7010:01": {}}}, "pins.0x7010:01 needs a pin"),
-                          ({"limits": {"travel": 3}}, "limits.travel needs object and type"),
-                          ({"commands": {"x": "y"}}, "object 'x' is not a hex number"),
+                          ({"pins": {"x": {"pin": "a"}}}, "object 'x' is not a hex number"),
                           ({"settings": [{"object": "0x2000:01"}]},
                            "settings need object, type and value"),
-                          ({"commands": {"0x2010": {"note": "z", "purpose": "fly"}}}, "purpose is one of"),
-                          ({"position": {"kept": "yes"}}, "position needs kept"),
-                          ({"errors": {"0x8611": ""}}, "a code of 16 bits and a text"),
-                          ({"errors": {"0x18611": "x"}}, "a code of 16 bits and a text")):
+                          ({"colour": "red"}, "unknown keys colour")):
             with self.assertRaisesRegex(quirks.QuirkError, msg):
                 quirks.parse(data)
 
@@ -212,10 +199,9 @@ class TestLcecMap(unittest.TestCase):
         lcecmap._cache = [lcecmap.parse({"types": ["T"], "sdo": {
             "0x2010:00": {"replace": "cia402.zero-at-start", "note": "why"}}})]
         try:
-            self.assertEqual(quirks.lcec_replacement((2, 1), 0x2010, 0, "T"),
-                             ("cia402.zero-at-start", "why"))
-            self.assertIsNone(quirks.lcec_replacement((2, 1), 0x2010, 0, "U"))
-            self.assertIsNone(quirks.lcec_replacement((2, 1), 0x2010, 0))
+            self.assertEqual(quirks.lcec_replacement("T", 0x2010, 0), ("cia402.zero-at-start", "why"))
+            self.assertIsNone(quirks.lcec_replacement("U", 0x2010, 0))
+            self.assertIsNone(quirks.lcec_replacement(None, 0x2010, 0))
         finally:
             lcecmap._cache = orig
 

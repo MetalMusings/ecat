@@ -114,8 +114,7 @@ TOOL_TO_COE = {"uint32": "UDINT", "uint16": "UINT", "uint8": "USINT", "int32": "
 def velocity_limits_missing(slave, has_object):
     """The maximum velocity a drive in PP or PV must have as a setting, where the drive has
     the object and the settings lack it: [(axis, index, subindex, CoE type)]. The object is
-    0x607F (each axis's), or the quirk file's `limits: max-velocity` for a drive that keeps it
-    elsewhere; none when the quirk file says why the drive's object is not used.
+    0x607F (each axis's), where the drive has it.
     has_object(index, subindex): whether the drive's dictionary has it."""
     c = slave.get("cia402") or {}
     if slave.get("profile") != "cia402" or not {"pp", "pv"} & set([c.get("mode")] + list(c.get("modes") or [])):
@@ -126,15 +125,9 @@ def velocity_limits_missing(slave, has_object):
             have.add(parse_obj(st.get("object")))
         except (ValueError, TypeError):
             pass
-    where = quirks.limits(slave).get("max-velocity")
-    if isinstance(where, str):
-        return []
     out = []
     for a in range(len(c.get("axes") or []) or 1):
-        if where:
-            index, sub, t = where[0] + (a * AXIS_OFFSET if 0x6000 <= where[0] < 0x6800 else 0), where[1], where[2]
-        else:
-            index, sub, t = 0x607F + a * AXIS_OFFSET, 0, "uint32"
+        index, sub, t = 0x607F + a * AXIS_OFFSET, 0, "uint32"
         if (index, sub) not in have and has_object(index, sub):
             out.append((a, index, sub, TOOL_TO_COE.get(t, t.upper())))
     return out
@@ -447,27 +440,6 @@ def dc_warnings(cfg):
                        "(SYNC1 every n SYNC0 cycles, from the DC mode in the ESI file)"
                        % (s.get("position"), s.get("name"), dc.get("assign-activate")))
     return out + _master_dc_warnings(cfg)
-
-
-def command_warnings(cfg):
-    """Settings that a quirk file calls commands: advice, not a rule (the user,
-    2026-11-27): the file is valid, the user is told that the object does
-    something each time it is written, and at every start it will be."""
-    out = []
-    for s in (cfg or {}).get("slaves") or []:
-        if not isinstance(s, dict):
-            continue
-        for st in s.get("settings") or []:
-            try:
-                index = parse_obj(st.get("object"))[0]
-            except (ValueError, AttributeError):
-                continue
-            why = quirks.command(s, index)
-            if why:
-                out.append("slave %s (%s): setting %s is a command, not a setting, says the device's "
-                           "quirk file (%s): it is written, and so run, at every start"
-                           % (s.get("position"), s.get("name"), st.get("object"), why))
-    return out
 
 
 def _master_dc_warnings(cfg):

@@ -20,16 +20,15 @@ import yaml
 from . import config
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
-KEYS = {"name", "match", "notes", "commands", "limits", "pins", "settings", "hal", "lcec", "homing",
-        "tuning", "measure", "format", "sources", "position", "errors"}
-# what a command does, when the program can act on it (commands' rich form, `purpose`):
-# a drive's "zero position" command is what cia402.zero-at-start replaces
-COMMAND_PURPOSES = {"zero-position", "store-parameters", "clear-fault", "other"}
+# what a quirk file holds (decided 2026-11-28): a device's notes as text, and the pins,
+# settings and HAL lines a proposal takes. The facts that were keys of their own until
+# then (commands, limits, homing, tuning, measure, position, errors) are notes now, and
+# lcec's translations are in ecatsetup/lcec: a file that has them is read without them.
+KEYS = {"name", "match", "notes", "pins", "settings", "hal", "format", "sources"}
+RETIRED = {"commands", "limits", "homing", "tuning", "measure", "position", "errors", "lcec"}
 # the newest file format this program reads (devicedata.FORMAT); a file of a newer
 # format may hold keys this one does not know: they are skipped, not refused
 FORMAT = 1
-# what a tuning entry is about (response.KINDS)
-TUNING_KINDS = {"command-filter", "position-loop", "feedforward", "torque", "gain-high", "other"}
 
 
 def user_dir():
@@ -59,7 +58,7 @@ def parse(data, path="<quirk>"):
     """Check a quirk file's content; returns it with objects parsed."""
     if not isinstance(data, dict):
         raise QuirkError("not a YAML mapping")
-    unknown = set(data) - KEYS
+    unknown = set(data) - KEYS - RETIRED
     fmt = data.get("format")
     newer = isinstance(fmt, int) and fmt > FORMAT
     if unknown and not newer:
@@ -85,35 +84,6 @@ def parse(data, path="<quirk>"):
         vendor = _hex(m["vendor"], "vendor")
         q["matches"] = [(vendor, _hex(p, "product")) for p in products]
         q["match"] = q["matches"][0]
-    q["commands"], q["command-runs"], q["command-purposes"] = {}, {}, {}
-    for k, v in (data.get("commands") or {}).items():
-        index, sub = _obj(k)
-        if isinstance(v, dict):
-            # note, and optionally what "Run command" writes: value, type, confirm; and
-            # what it is for (purpose), when the program can act on it
-            if "note" not in v:
-                raise QuirkError("commands.%s needs a note" % k)
-            if v.get("purpose") is not None:
-                if v["purpose"] not in COMMAND_PURPOSES:
-                    raise QuirkError("commands.%s: purpose is one of %s"
-                                     % (k, ", ".join(sorted(COMMAND_PURPOSES))))
-                q["command-purposes"][index] = v["purpose"]
-            q["commands"][index] = str(v["note"])
-            q["command-runs"][(index, sub or 0)] = {
-                "value": v.get("value"), "type": v.get("type"),
-                "confirm": str(v["confirm"]) if v.get("confirm") else None}
-        else:
-            q["commands"][index] = str(v)
-    limits = {}
-    for k, v in (data.get("limits") or {}).items():
-        if isinstance(v, str):
-            limits[k] = v
-        elif isinstance(v, dict) and "object" in v and "type" in v:
-            index, sub = _obj(v["object"])
-            limits[k] = (index, sub or 0, str(v["type"]))
-        else:
-            raise QuirkError("limits.%s needs object and type, or a text" % k)
-    q["limits"] = limits
     pins = {}
     for k, v in (data.get("pins") or {}).items():
         index, sub = _obj(k)
@@ -146,91 +116,7 @@ def parse(data, path="<quirk>"):
                              for k, v in (hal.get("load") or {}).items()},
                     "addf": [str(x) for x in hal.get("addf") or []],
                     "lines": [str(x) for x in hal.get("lines") or []]}
-    homing = data.get("homing")
-    if homing is not None:
-        q["homing"] = _homing(homing)
-    tuning = []
-    for k, v in (data.get("tuning") or {}).items():
-        index, sub = _obj(k)
-        if not isinstance(v, dict) or v.get("kind") not in TUNING_KINDS or "type" not in v:
-            raise QuirkError("tuning.%s needs a kind (%s) and a type"
-                             % (k, ", ".join(sorted(TUNING_KINDS))))
-        t = {"index": index, "subindex": sub or 0, "kind": v["kind"], "type": str(v["type"])}
-        for key in ("unit", "note", "tried"):
-            if v.get(key) is not None:
-                t[key] = str(v[key])
-        for key in ("min", "max", "factory"):
-            if v.get(key) is not None:
-                t[key] = int(v[key])
-        when = v.get("when")
-        if when is not None:
-            if not isinstance(when, dict) or "object" not in when or "values" not in when:
-                raise QuirkError("tuning.%s: when needs object and values" % k)
-            wi, ws = _obj(when["object"])
-            t["when"] = (wi, ws or 0, [int(x) for x in when["values"]], str(when.get("type", "uint16")))
-        tuning.append(t)
-    q["tuning"] = tuning
-    measure = data.get("measure") or {}
-    if not isinstance(measure, dict):
-        raise QuirkError("measure needs a mapping (ignore: {object: why})")
-    q["measure-ignore"] = {_obj(k)[0]: str(v) for k, v in (measure.get("ignore") or {}).items()}
-    # the drive's position counter at start: kept from an earlier run while it has power
-    # (a property; the advice, cia402.zero-at-start, is the window's)
-    position = data.get("position")
-    q["position"] = {}
-    if position is not None:
-        if not isinstance(position, dict) or not isinstance(position.get("kept"), bool):
-            raise QuirkError("position needs kept: true or false")
-        q["position"] = {"kept": position["kept"]}
-    # what the drive means by its error codes (0x603F)
-    errors = data.get("errors") or {}
-    if not isinstance(errors, dict):
-        raise QuirkError("errors needs a mapping of codes (0x603F) to what they mean")
-    q["errors"] = {}
-    for k, v in errors.items():
-        try:
-            code = _hex(k, "error code") if isinstance(k, str) else int(k)
-        except (QuirkError, ValueError, TypeError):
-            raise QuirkError("errors: %r is not a code" % (k,))
-        if not 0 <= code <= 0xFFFF or not isinstance(v, str) or not v.strip():
-            raise QuirkError("errors.%s: a code of 16 bits and a text" % k)
-        q["errors"][code] = v.strip()
-    # lcec: (lcec's drivers' translations, until 2026-11-28) is read from ecatsetup/lcec
-    # (lcecmap.py) now; a file that has it is taken without it
     return q
-
-
-def _homing(data):
-    """homing: methods (numbers), describe (text, needs, moves per method),
-    extras (settings per method), enable-again (methods after which the
-    drive follows its target only once enabled again). input-bits and inputs
-    (how the inputs got their function, until 2026-11-27) are no longer read:
-    a file that has them is taken without them."""
-    if not isinstance(data, dict) or set(data) - {"methods", "describe", "extras", "enable-again",
-                                                  "input-bits", "inputs"}:
-        raise QuirkError("homing takes methods, describe, extras and enable-again")
-    out = {"methods": [], "describe": {}, "extras": {}, "enable-again": []}
-    for n in data.get("methods") or []:
-        out["methods"].append(int(n))
-    for n in data.get("enable-again") or []:
-        out["enable-again"].append(int(n))
-    for n, v in (data.get("describe") or {}).items():
-        if not isinstance(v, dict):
-            raise QuirkError("homing.describe.%s needs text (and needs, moves)" % n)
-        out["describe"][int(n)] = dict(v)
-    for n, items in (data.get("extras") or {}).items():
-        lst = []
-        for v in items or []:
-            if not isinstance(v, dict) or "object" not in v or "type" not in v or "value" not in v:
-                raise QuirkError("homing.extras.%s: settings need object, type and value" % n)
-            index, sub = _obj(v["object"])
-            st = {"object": "0x%04X:%02X" % (index, sub or 0), "type": str(v["type"]),
-                  "value": v["value"]}
-            if v.get("name"):
-                st["name"] = str(v["name"])
-            lst.append(st)
-        out["extras"][int(n)] = lst
-    return out
 
 
 _cache = None
@@ -349,49 +235,6 @@ def object_tip(slave, index, subindex=None):
     return ("From the notes on this device:\n" + "\n".join("- " + x for x in found)) if found else ""
 
 
-def command(slave, index):
-    """Why an object of this slave is a command, not a setting; or None."""
-    return of(slave).get("commands", {}).get(index)
-
-
-def command_purpose(slave, index):
-    """What a command is for (COMMAND_PURPOSES), or None."""
-    return of(slave).get("command-purposes", {}).get(index)
-
-
-def keeps_position(slave):
-    """True, False, or None when the quirk file does not say."""
-    return (of(slave).get("position") or {}).get("kept")
-
-
-def error_meaning(slave, code):
-    """What the drive means by an error code (0x603F), or None."""
-    return (of(slave).get("errors") or {}).get(code)
-
-
-def command_run(slave, index, subindex):
-    """What "Run command" writes for a quirk file's command: {"value", "type",
-    "confirm"} (each may be None), or None if the file does not say."""
-    return of(slave).get("command-runs", {}).get((index, subindex))
-
-
-def limits(slave):
-    """{limit: (index, subindex, tool type), or why the drive's object is
-    not used} for the drive test."""
-    return of(slave).get("limits", {})
-
-
-def tuning(slave):
-    """[{"index", "subindex", "kind", "type", "unit", "min", "max", "factory",
-    "note", "tried", "when"}]: the drive's settings that tuning looks at."""
-    return of(slave).get("tuning", [])
-
-
-def measure_ignore(slave):
-    """{object index: why}: objects the response measurement does not record."""
-    return of(slave).get("measure-ignore", {})
-
-
 def pins(key):
     """{(index, subindex): {"pin", "hal-type", "scale", "offset"}}."""
     return of(key).get("pins", {})
@@ -405,27 +248,13 @@ def settings(key):
 ZERO_AT_START = "cia402.zero-at-start"
 
 
-def lcec_replacement(key, index, subindex, lcec_type=None):
-    """What an lcec sdoConfig of this object becomes: (what, why), what being
-    ZERO_AT_START or "command"; None for an ordinary setting. The lcec type's
-    translation (lcecmap) first; otherwise it follows from the object's properties: a
-    command whose purpose is zero-position is what cia402.zero-at-start does
-    without writing to the drive, and any other command is not a setting."""
+def lcec_replacement(lcec_type, index, subindex):
+    """What an lcec sdoConfig of this object becomes, from the lcec type's
+    translation (lcecmap): (what, why) with what ZERO_AT_START; None for an
+    ordinary setting. A command lcec wrote as a setting is not known here any
+    more: the device's notes say it (they show with the row on From lcec)."""
     from . import lcecmap
-    given = lcecmap.sdo(lcec_type).get((index, subindex)) if lcec_type else None
-    if given:
-        return given
-    why = command(key, index)
-    if not why:
-        return None
-    if command_purpose(key, index) == "zero-position":
-        return ZERO_AT_START, ("0x%04X:%02X (%s) zeroes the drive's position, a command: not "
-                               "needed with ecat, which holds the drive's position while it "
-                               "enables. cia402.zero-at-start (Start position) gives the same 0 "
-                               "at start without writing to the drive, if the machine should "
-                               "read 0 at start" % (index, subindex, why))
-    return "command", ("0x%04X:%02X is a command, says the device's quirk file (%s): as a "
-                       "setting it would run at every start" % (index, subindex, why))
+    return lcecmap.sdo(lcec_type).get((index, subindex)) or None
 
 
 def from_slave(slave):

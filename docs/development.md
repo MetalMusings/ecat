@@ -4470,3 +4470,33 @@ are a recipe the program carries and tests, as lcec's translations are. A user's
 HAL form for sharing, `devicedata.check_hal`, is gone). The MetalMusings
 EaserCAT 7000 file is no longer shipped: it is the user's own card, with the
 plasma cutter's names (kept as test data in tests/data/devices).
+
+## Quirk files are notes (2026-11-28)
+
+Decided with the user: "we have to start somewhere and it may be simple; the
+warning about 0x2010 goes into the quirk text; we may come back to this when
+there is feedback on how it works". Up to OP, a device's SII, its ESI file, its
+dictionary and the standards (ETG.1020, CiA 402, ETG.5001) are enough; after OP
+the manual governs. So a quirk file is now `name`, `match`, a `notes` text and
+what a proposal takes (`pins`, `settings`, the program's own `hal`). The fact keys
+(`commands`, `limits`, `homing`, `tuning`, `measure`, `position`, `errors`) are
+read no more (a file that has them is taken without them), and with them went
+the *Remember ...* buttons and dialogs (methods, limits, tuning, a constant
+object, a command, the bring-up card's), the offer to remember *enable again*,
+the warning of a quirk command as a setting (window and `--check`), the
+workbench's refusal to *Write* one, From lcec's zero-position replacement taken
+from a command's purpose, and the homing list, descriptions and extras from a
+quirk file. What remains of them:
+
+- the notes: shown on the slave page (*Notes on this device*), a sentence naming
+  an object as that object's tooltip (Settings, Process data, the watch list,
+  From lcec, Run command's question, Look for settings' rows, ranked first), and a
+  sentence naming an error code with the code wherever it is shown in words;
+- a drive's measured torque (0x6077) that stays constant through a Response
+  measurement is left out by the analysis, for any drive (it was already; the
+  quirk's ignore list only kept it out of the recording);
+- *Enable the drive again after homing* is the user's box only;
+- a drive without 0x60E3 offers every homing method.
+
+Revisit after feedback. Device data and sharing still work fact by fact on what
+is left (notes, settings); how far the notes replace them is the next step.

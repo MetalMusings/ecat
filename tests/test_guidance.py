@@ -111,16 +111,7 @@ class TestCheckSetting(unittest.TestCase):
         found = self.check(object="0x8000:01", type="UDINT")
         self.assertTrue(any("the dictionary says UINT" in t for _, t in found))
 
-    def test_a_quirk_command_is_a_warning_and_a_name_a_suspicion(self):
-        d = os.environ["ECATSETUP_DEVICES"]
-        with open(os.path.join(d, "t.yaml"), "w") as f:
-            f.write("name: t\nmatch: {vendor: '0x2', product: '0x1234'}\n"
-                    "commands: {'0x9000': Mode is a command here}\n")
-        quirks.load(reload=True)
-        (level, text), = self.check(object="0x9000:00", type="USINT", value=1)
-        # advice, not a rule (the user, 2026-11-27): a warning, with where it comes from
-        self.assertEqual(level, "warning")
-        self.assertIn("quirk file: Mode is a command here", text)
+    def test_a_name_is_a_suspicion(self):
         found = self.check(object="0x8000:02", type="DINT", value=0)    # "Zero position"
         self.assertEqual(found[0][0], "warning")
         self.assertIn("sounds like a command", found[0][1])
@@ -129,35 +120,7 @@ class TestCheckSetting(unittest.TestCase):
         self.assertEqual(guidance.command_reason(self.slave, 0x1010)[0], "warning")
 
 
-class TestCommandQuirk(unittest.TestCase):
-    def setUp(self):
-        os.environ["ECATSETUP_DEVICES"] = self.dir = tempfile.mkdtemp()
-        self.addCleanup(quirks.load, True)
-
-    def write(self, text):
-        with open(os.path.join(self.dir, "t.yaml"), "w") as f:
-            f.write("name: t\nmatch: {vendor: '0x2', product: '0x1'}\n" + text)
-        quirks.load(reload=True)
-
-    slave = {"identity": {"vendor": "0x2", "product": "0x1"}}
-
-    def test_the_plain_form_has_no_run_values(self):
-        self.write("commands: {'0x2010': Zero position}\n")
-        self.assertEqual(quirks.command(self.slave, 0x2010), "Zero position")
-        self.assertIsNone(quirks.command_run(self.slave, 0x2010, 0))
-
-    def test_the_rich_form_gives_what_run_command_writes(self):
-        self.write("commands:\n  '0x1010:01': {note: Store, value: 1702257011, type: uint32, "
-                   "confirm: Keeps all settings}\n")
-        self.assertEqual(quirks.command(self.slave, 0x1010), "Store")
-        self.assertEqual(quirks.command_run(self.slave, 0x1010, 1),
-                         {"value": 1702257011, "type": "uint32", "confirm": "Keeps all settings"})
-        self.assertEqual(quirks.problems, [])
-
-    def test_a_command_without_a_note_is_a_problem(self):
-        self.write("commands:\n  '0x1010': {value: 1}\n")
-        self.assertTrue(quirks.problems)
-
+class TestRunCommand(unittest.TestCase):
     def test_drives_enabled_reads_the_statusword(self):
         from ecatsetup import testmode
         cfg = {"slaves": [{"position": 1, "name": "x", "profile": "cia402"},
@@ -181,9 +144,10 @@ class TestSessionDictionary(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("slave 0 (s): setting 0x8000:01", found[0][1])
 
-    def test_config_check_warns_of_a_quirk_command_as_a_setting(self):
+    def test_config_check_says_nothing_of_a_command_as_a_setting(self):
+        # the ECT60's 0x2010 is a command: its notes say so (a tooltip on the setting);
+        # the check itself knows only the standard and the dictionary
         from ecatsetup import config, propose  # noqa: F401
-        # the shipped files only: an empty folder of one's own (not the user's real one)
         os.environ["ECATSETUP_DEVICES"] = tempfile.mkdtemp()
         quirks.load(reload=True)
         cfg = config.from_proposals([], None, "raw", None)
@@ -191,10 +155,7 @@ class TestSessionDictionary(unittest.TestCase):
                           "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
                           "settings": [{"object": "0x2010:00", "type": "UINT", "value": 1}]}]
         self.assertFalse(any("command" in e for e in config.check(cfg)))
-        found = config.command_warnings(cfg)
-        self.assertEqual(len(found), 1)
-        self.assertIn("setting 0x2010:00 is a command, not a setting, says the device's quirk file", found[0])
-
+        self.assertIn("Never write 0x2010", quirks.object_tip(cfg["slaves"][0], 0x2010, 0))
 
 if __name__ == "__main__":
     unittest.main()

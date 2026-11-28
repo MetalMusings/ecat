@@ -37,7 +37,7 @@ LICENCE = "CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)"
 
 # what a shared file may hold: the device's facts, never the machine's choices
 # pins: a machine's choice; hal: the program's own (quirks.SHIPPED_ONLY); lcec: read no more
-SHARE_KEYS = (quirks.KEYS | {"format", "sources"}) - {"pins", "lcec"} - set(quirks.SHIPPED_ONLY)
+SHARE_KEYS = (quirks.KEYS | {"format", "sources"}) - {"pins"} - set(quirks.SHIPPED_ONLY)
 SOURCE_KINDS = ("manual", "tried", "observed", "shared", "other")
 # what else a source may say (docs/development.md "Device facts: properties, advice, ..."):
 # a list's kind (a manual's "only these" or tests' "these worked"), what the fact does to
@@ -98,27 +98,11 @@ class Kind:
     listing: bool = False   # a list: its source says closed (only these) or open (these worked)
 
 
-SECTIONS = ("Notes", "Commands and settings", "Homing", "Drive test", "Tuning", "Process data", "HAL")
+SECTIONS = ("Notes", "Settings", "Process data", "HAL")
 KINDS = (
     Kind(("notes",), "Notes", "Notes on the device", None, value="a text"),
-    Kind(("commands", "*"), "Commands and settings", "{1} is a command, not a setting", "sdo",
-         value="why (text), or note/value/type/confirm for Run command"),
-    Kind(("settings", "*"), "Commands and settings", "Setting {1}", "settings",
+    Kind(("settings", "*"), "Settings", "Setting {1}", "settings",
          value="type, value, name: written at every start", sort=EXPERIENCE),
-    Kind(("homing", "methods"), "Homing", "Homing methods", "homing", value="list of 0x6098 values",
-         listing=True),
-    Kind(("homing", "describe", "*"), "Homing", "Method {2}: what it does", "homing"),
-    # the objects a method needs are the drive's; the values in them worked somewhere
-    Kind(("homing", "extras", "*"), "Homing", "Method {2}: settings it needs", "homing", sort=EXPERIENCE),
-    Kind(("homing", "enable-again"), "Homing", "Enabled again after methods", "homing", listing=True),
-    Kind(("limits", "*"), "Drive test", "Limit: {1}", "move"),
-    Kind(("position", "kept"), "Drive test", "Keeps its position over a restart of the bus", "operation",
-         value="true or false; the advice (Start position) is the window's"),
-    Kind(("errors", "*"), "Drive test", "Error code {1}: what it means", "diagnose",
-         value="text, from the drive's manual"),
-    # what an object does, its range and factory value; its `tried` text is experience
-    Kind(("tuning", "*"), "Tuning", "Tuning object {1}", "response"),
-    Kind(("measure", "ignore", "*"), "Tuning", "{2} is not recorded when measuring", "response"),
     Kind(("pins", "*"), "Process data", "Pin for {1}", "process-data", share=False,
          value="a machine's choice: never shared", sort=MACHINE),
     Kind(("hal",), "HAL", "HAL lines", None, share=False, sort=ADVICE,
@@ -292,21 +276,10 @@ def unknowns(slave, raw, measured_results):
     switched off)."""
     out = []
     raw = raw or {}
-    if (slave or {}).get("profile") == "cia402":
-        if not raw.get("commands"):
-            out.append(("Commands and settings", "No commands known. If an object does something when "
-                        "written (zero the position, store the parameters), remember it from Run command "
-                        "on the SDO card.", "sdo"))
-        if not raw.get("tuning"):
-            out.append(("Tuning", "No tuning objects known: Look for settings in the drive on the Response "
-                        "card, and remember what helps.", "response"))
-        if not isinstance(raw.get("position"), dict):
-            out.append(("Drive test", "Not known whether the drive keeps its position over a restart of "
-                        "the bus: the card Bringing it up sees it over two runs of the workbench.",
-                        "operation"))
-        if not raw.get("errors"):
-            out.append(("Drive test", "No error codes known: when the drive reports one, the card "
-                        "Bringing it up offers to remember what it means.", "operation"))
+    if (slave or {}).get("profile") == "cia402" and not raw.get("notes"):
+        out.append(("Notes", "No notes on this device yet: what its manual says that matters here "
+                    "(commands, inputs, homing, tuning objects, error codes) is worth writing down.",
+                    None))
     if (slave or {}).get("dc") and not measured_results:
         out.append(("Timing", "No SYNC0 period measured for this device: after a run, Remember this period "
                     "on the Live tab.", "sync"))

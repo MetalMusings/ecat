@@ -17,7 +17,7 @@ os.environ.setdefault("ECATSETUP_LINUXCNC_SERIES", "2.10")
 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 
-from ecatsetup import coe, quirks, response, tuning  # noqa: E402
+from ecatsetup import coe, response, tuning  # noqa: E402
 
 ECT60 = {"name": "x", "position": 0, "profile": "cia402", "cia402": {"mode": "csp"},
          "identity": {"vendor": "0x00000A88", "product": "0x0A880002"},
@@ -84,21 +84,17 @@ class TestCandidates(unittest.TestCase):
         found = tuning.candidates(ECT60, coe.Dictionary(SDOS), read,
                                   kinds=["command-filter", "feedforward"])
         objs = [c.obj for c in found]
-        # what the result points at first; the quirk file's before those found by name
+        # what the result points at first; those the notes name before the others
         self.assertEqual(objs[:2], ["0x2009:00", "0x2080:00"])
         f = found[0]
         self.assertTrue(f.from_quirk)
-        self.assertEqual((f.value, f.maximum, f.factory, f.edge), (25600, 25600, 6400, "max"))
-        self.assertIn("at the maximum of its range", f.why())
-        self.assertIn("tried: 25600 -> 2000", f.why())
+        self.assertIn("0x2009 is a sliding average on the command", f.why())
+        self.assertFalse(found[1].from_quirk)
         self.assertEqual(found[2].obj, "0x2023:04")     # feedforward next
-        # a mode's settings: the other mode's are kept, marked, after
-        kp2 = next(c for c in found if c.obj == "0x2026:01")
-        self.assertFalse(kp2.applies)
-        self.assertIn("not used in the drive's present mode", kp2.why())
-        self.assertTrue(next(c for c in found if c.obj == "0x2023:01").applies)
-        # not: commands, input filters, the current loop, read-only, CiA 402, the count
-        for obj in ("0x2010:00", "0x204B:00", "0x200B:02", "0x2070:00", "0x6065:00", "0x2023:00"):
+        # not: commands (even one the notes name), input filters, the current loop,
+        # read-only, CiA 402, the count
+        for obj in ("0x2010:00", "0x2011:00", "0x204B:00", "0x200B:02", "0x2070:00", "0x6065:00",
+                    "0x2023:00"):
             self.assertNotIn(obj, objs)
         self.assertIn("0x2060:00", objs)
 
@@ -136,33 +132,14 @@ class TestCandidates(unittest.TestCase):
         self.assertNotIn("0x2080:00", [c.obj for c in tuning.candidates(s, coe.Dictionary(SDOS))])
 
 
-class TestQuirkKeys(unittest.TestCase):
-    def test_parse(self):
-        q = quirks.parse({"tuning": {"0x2009": {"kind": "command-filter", "type": "UINT",
-                                                "max": 25600, "when": {"object": "0x2011:00",
-                                                                        "values": [1]}}},
-                          "measure": {"ignore": {"0x6077": "no torque"}}})
-        self.assertEqual(q["tuning"][0]["index"], 0x2009)
-        self.assertEqual(q["tuning"][0]["when"], (0x2011, 0, [1], "uint16"))
-        self.assertEqual(q["measure-ignore"], {0x6077: "no torque"})
-        for bad in ({"tuning": {"0x2009": {"kind": "nonsense", "type": "UINT"}}},
-                    {"tuning": {"0x2009": {"kind": "command-filter"}}},
-                    {"tuning": {"0x2009": {"kind": "command-filter", "type": "UINT",
-                                           "when": {"object": "0x2011"}}}},
-                    {"measure": ["0x6077"]}):
-            with self.assertRaises(quirks.QuirkError):
-                quirks.parse(bad)
-
-    def test_ect60_torque_is_not_recorded(self):
-        # its 0x6077 reads a constant: not a column, not offered to add
-        self.assertEqual(sorted(response.measure_entries(ECT60)), ["drive-error"])
-        self.assertEqual(sorted(response.measure_entries(OTHER)), ["drive-error", "torque"])
+class TestConstant(unittest.TestCase):
+    def test_a_torque_column_for_every_drive(self):
+        # whether 0x6077 means anything shows in the measurement (it stays constant on the
+        # ECT60: the analysis leaves it out), not in a file
+        self.assertEqual(sorted(response.measure_entries(ECT60)), ["drive-error", "torque"])
         d = coe.Dictionary(SDOS + 'SDO 0x6077, "Torque"\n  0x6077:00, r-r-r-, int16, 16 bit, "T"\n')
         bare = dict(ECT60, **{"process-data": {"inputs": [{"pdo": "0x1A00", "entries": []}]}})
-        self.assertEqual(response.missing_objects(bare, d), [])
-        self.assertEqual([m[0] for m in response.missing_objects(dict(bare, identity=OTHER["identity"]), d)],
-                         [0x6077])
-
+        self.assertEqual([m[0] for m in response.missing_objects(bare, d)], [0x6077])
 
 if __name__ == "__main__":
     unittest.main()

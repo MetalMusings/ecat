@@ -1,4 +1,4 @@
-"""Tests of the homing method catalog (homing.py) and its quirk keys.
+"""Tests of the homing method catalog (homing.py).
 
 Run with: python3 -m unittest discover -s tests
 """
@@ -20,7 +20,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
         __import__("tempfile").tempdir = __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 
-from ecatsetup import homing, quirks  # noqa: E402
+from ecatsetup import homing  # noqa: E402
 
 ECT = {"position": 0, "identity": {"vendor": "0x00000A88", "product": "0x0A880002"}}
 OTHER = {"position": 1, "identity": {"vendor": "0x00000001", "product": "0x00000001"}}
@@ -38,12 +38,11 @@ class TestHoming(unittest.TestCase):
         self.assertNotIn(homing.INDEX, homing.CATALOG[17].needs)
         self.assertNotIn(15, homing.CATALOG)
 
-    def test_quirk_file_decides_support(self):
-        nums, where = homing.supported(ECT, read=reader({}))
-        self.assertEqual(nums, [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37])
-        self.assertEqual(where, "quirk file")
+    def test_a_quirk_file_says_nothing_of_support(self):
+        # the ECT60 has no 0x60E3: every method may be tried (its notes list the manual's)
+        self.assertEqual(homing.supported(ECT, read=reader({})), (None, None))
 
-    def test_drive_object_when_no_quirk(self):
+    def test_drive_object(self):
         nums, where = homing.supported(OTHER, read=reader(
             {(0x60E3, 0): 3, (0x60E3, 1): 1, (0x60E3, 2): 17, (0x60E3, 3): 35}))
         self.assertEqual((nums, where), ([1, 17, 35], "drive (0x60E3)"))
@@ -53,30 +52,22 @@ class TestHoming(unittest.TestCase):
         self.assertTrue(all(ok is None for _, ok in homing.choices(OTHER, read=reader({}))))
 
     def test_choices_mark_unsupported(self):
-        got = {m.number: ok for m, ok in homing.choices(ECT)}
+        got = {m.number: ok for m, ok in homing.choices(OTHER, read=reader(
+            {(0x60E3, 0): 2, (0x60E3, 1): 17, (0x60E3, 2): 36}))}
         self.assertTrue(got[36])
         self.assertFalse(got[1])
-        self.assertIn("Torque homing", homing.method(36, ECT).text)
-        self.assertIn("Manufacturer", homing.method(36, OTHER).text)
-
-    def test_enable_again_from_the_quirk_file(self):
-        # the ECT60 follows its target after torque homing only once enabled again
-        self.assertTrue(homing.enable_again(36, ECT) and homing.enable_again(37, ECT))
-        self.assertFalse(homing.enable_again(21, ECT) or homing.enable_again(35, ECT))
-        self.assertFalse(homing.enable_again(36, OTHER))
-        with self.assertRaisesRegex(quirks.QuirkError, "enable-again"):
-            quirks._homing({"enable-agian": [36]})
+        self.assertIn("Manufacturer", homing.method(36, ECT).text)
 
     def test_apply_tells_the_profile(self):
         s = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"]})
         homing.apply(s, 0, {"method": 36, "fast": 3000, "slow": 1000})
-        self.assertEqual((s["cia402"]["home-enable-again"], s["cia402"]["home-speed"]), (True, 3000))
+        self.assertNotIn("home-enable-again", s["cia402"])     # the user's word only
+        self.assertEqual(s["cia402"]["home-speed"], 3000)
+        homing.apply(s, 0, {"method": 36, "fast": 3000, "enable-again": True})
+        self.assertTrue(s["cia402"]["home-enable-again"])
         homing.apply(s, 0, {"method": 21, "fast": 2000, "slow": 4000})
         self.assertNotIn("home-enable-again", s["cia402"])
         self.assertEqual(s["cia402"]["home-speed"], 4000)
-        # the user's word for the drive wins over its quirk file
-        homing.apply(s, 0, {"method": 21, "fast": 2000, "enable-again": True})
-        self.assertTrue(s["cia402"]["home-enable-again"])
         homing.apply(s, 0, {"method": 35})
         self.assertEqual(s["cia402"]["home-speed"], 1)       # it does not move
         homing.apply(s, 0, None)
@@ -84,35 +75,7 @@ class TestHoming(unittest.TestCase):
         # several axes: either needs it, the faster one counts
         two = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"], "axes": ["a", "b"]})
         homing.apply(two, 0, {"method": 21, "fast": 1000})
-        homing.apply(two, 1, {"method": 36, "fast": 5000})
-        self.assertEqual((two["cia402"]["home-enable-again"], two["cia402"]["home-speed"]), (True, 5000))
-
-    def test_enable_again_from_the_quirk_file(self):
-        # the ECT60 follows its target after torque homing only once enabled again
-        self.assertTrue(homing.enable_again(36, ECT) and homing.enable_again(37, ECT))
-        self.assertFalse(homing.enable_again(21, ECT) or homing.enable_again(35, ECT))
-        self.assertFalse(homing.enable_again(36, OTHER))
-        with self.assertRaisesRegex(quirks.QuirkError, "enable-again"):
-            quirks._homing({"enable-agian": [36]})
-
-    def test_apply_tells_the_profile(self):
-        s = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"]})
-        homing.apply(s, 0, {"method": 36, "fast": 3000, "slow": 1000})
-        self.assertEqual((s["cia402"]["home-enable-again"], s["cia402"]["home-speed"]), (True, 3000))
-        homing.apply(s, 0, {"method": 21, "fast": 2000, "slow": 4000})
-        self.assertNotIn("home-enable-again", s["cia402"])
-        self.assertEqual(s["cia402"]["home-speed"], 4000)
-        # the user's word for the drive wins over its quirk file
-        homing.apply(s, 0, {"method": 21, "fast": 2000, "enable-again": True})
-        self.assertTrue(s["cia402"]["home-enable-again"])
-        homing.apply(s, 0, {"method": 35})
-        self.assertEqual(s["cia402"]["home-speed"], 1)       # it does not move
-        homing.apply(s, 0, None)
-        self.assertEqual(s["cia402"], {"mode": "csp", "modes": ["hm"]})
-        # several axes: either needs it, the faster one counts
-        two = dict(ECT, profile="cia402", cia402={"mode": "csp", "modes": ["hm"], "axes": ["a", "b"]})
-        homing.apply(two, 0, {"method": 21, "fast": 1000})
-        homing.apply(two, 1, {"method": 36, "fast": 5000})
+        homing.apply(two, 1, {"method": 36, "fast": 5000, "enable-again": True})
         self.assertEqual((two["cia402"]["home-enable-again"], two["cia402"]["home-speed"]), (True, 5000))
 
     def test_hal_lines(self):
@@ -175,20 +138,9 @@ class TestHoming(unittest.TestCase):
         p = homing.plan(OTHER, 35, {"fast": 3000, "offset": 7})
         self.assertEqual([s["object"] for s in p], ["0x6098:00", "0x607C:00"])
 
-    def test_plan_adds_the_drive_extras_and_moves_to_the_axis(self):
+    def test_plan_moves_to_the_axis(self):
         p = homing.plan(ECT, 36, {"fast": 3000}, axis=1)
-        objs = [s["object"] for s in p]
-        self.assertEqual(objs[:2], ["0x6898:00", "0x6899:01"])
-        self.assertIn("0x2030:01", objs)
-        self.assertEqual(len(p), 2 + 7)
-        self.assertEqual(len(homing.plan(ECT, 17, {"fast": 1})), 2)
-
-    def test_bad_quirk(self):
-        with self.assertRaises(quirks.QuirkError):
-            quirks.parse({"homing": {"nope": 1}})
-        with self.assertRaises(quirks.QuirkError):
-            quirks.parse({"homing": {"extras": {36: [{"object": "0x2030:01"}]}}})
-
+        self.assertEqual([x["object"] for x in p], ["0x6898:00", "0x6899:01"])
 
 if __name__ == "__main__":
     unittest.main()
@@ -212,13 +164,6 @@ class TestChoice(unittest.TestCase):
         homing.apply(s, 0, None)
         self.assertNotIn("homing", s)
         self.assertEqual(s["settings"], [{"object": "0x2000:01", "type": "UINT", "value": 5}])
-
-    def test_extras_go_with_the_method(self):
-        s = self.slave(identity=dict(ECT["identity"]), settings=[])
-        homing.apply(s, 0, {"method": 36, "fast": 3000})
-        self.assertIn("0x2030:01", [x["object"] for x in s["settings"]])
-        homing.apply(s, 0, {"method": 17, "fast": 3000})
-        self.assertNotIn("0x2030:01", [x["object"] for x in s["settings"]])
 
     def test_choice_reads_both_forms(self):
         self.assertEqual(homing.choice({"homing": {"method": 17}}), {"method": 17})
