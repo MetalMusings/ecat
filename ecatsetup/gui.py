@@ -5220,11 +5220,10 @@ class SwitchCard(Card):
                              "add it on the drive's page (Process data), or watch it by SDO.")
         need = switches.needed(slave) if slave else []
         self.hint.setText(
-            "Press a switch: its box lights up while the drive sees it.%s If it does not, or "
-            "it is lit while the switch is free, the drive's input settings decide (its manual, "
-            "under digital inputs; set them under Settings): the input's function, and its "
-            "polarity, or the switch's other contact (normally open or closed). The bits of the "
-            "physical inputs (16 and up) are in the pin's value and on the SDO card."
+            "A box changes colour (green) while the drive sees that switch pressed: press the "
+            "home switch and the Home switch box lights up, let go and it turns grey again.%s "
+            "If it stays grey, the drive's settings decide which input is the home switch "
+            "(its manual, under digital inputs; set it under Settings)."
             % (" The homing method chosen needs the %s." % " and the ".join(switches.TEXT[k] for k in need)
                if need else ""))
 

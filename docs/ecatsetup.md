@@ -1337,8 +1337,9 @@ drive), as a box each that is grey when off and green when on. It says which
 switches the homing method chosen needs. Nothing moves: the drive is not
 enabled.
 
-Press a switch: its box lights while the drive sees it. If it does not
-light, or it is lit while the switch is free, the drive's own input
+A box changes colour (green) while the drive sees that switch pressed:
+press the home switch and the *Home switch* box lights up, let go and it
+turns grey again. If it stays grey, or it is lit while the switch is free, the drive's own input
 settings decide, and they are the maker's: which input is the home switch
 (its function) and how it is read (its polarity). The drive's manual says
 where, under digital inputs; set them under Settings. A switch read the
