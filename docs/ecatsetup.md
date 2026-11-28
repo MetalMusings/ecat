@@ -593,7 +593,6 @@ To OP and moving:
 | Settings | Shown when the file lacks a setting the drive's mode needs, such as PP's software position limits `0x607D:01` and `:02`: the PDOs can be right and the file still refused. *Add what the device needs* on the Settings card adds the drive's present values (check them). |
 | Mode | Set every cycle (0x6060 mapped), once at start (0x6060:00), or only seen (0x6061). |
 | Sync | DC with SYNC0, and the shortest period measured on this device; your servo period against it. |
-| Following error | In CSP the workbench stops the drive above the Move card's value itself, as LinuxCNC's FERROR will. The FERROR for LinuxCNC comes from the Response card. |
 | Velocity limit | In PP or PV: the drive's maximum velocity (0x607F) is a setting, or the drive has no such object. Missing until it is: *Add what the device needs* on the Settings card adds the drive's present value. |
 | Reaches OP | Seen on the workbench; if not, Diagnose has the AL status code and what it means. |
 | Enables | "Operation enabled" seen when you hold Enable on the Move card. A fault shows its code (0x603F; read once by SDO when the drive's PDOs lack it, as the ECT60's do) in words when the device's quirk file knows it; otherwise *Remember for the device type...* keeps what the drive's manual says it means. A drive that stays in "Switch on disabled" is usually held by its hardware (STO, an enable input, the power stage), not by the configuration. |

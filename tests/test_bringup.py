@@ -55,7 +55,7 @@ class TestRows(Base):
         self.assertEqual(bringup.rows(dict(drive(), unused=True)), [])
         found = bringup.rows(drive(), proposal())
         self.assertEqual([r.key for r in found],
-                         ["esi", "pdo", "mode", "sync", "ferror", "op", "enable", "follows", "start"])
+                         ["esi", "pdo", "mode", "sync", "op", "enable", "follows", "start"])
 
     def test_what_is_known_from_data(self):
         found = bringup.rows(drive(), proposal())
@@ -104,15 +104,9 @@ class TestRows(Base):
         self.assertEqual(keys.index("settings"), keys.index("pdo") + 1)
         self.assertNotIn("settings", [r.key for r in bringup.rows(drive(), proposal())])
 
-    def test_the_following_error_check(self):
-        # the workbench checks the following error itself (CSP): never a gap, and the
-        # drive's own window is not spoken of
-        row = self.row(bringup.rows(drive(identity=ECT60), proposal()), "ferror")
-        self.assertEqual(row.state, bringup.OK)
-        self.assertIn("stops the drive above the Move card's value", row.text)
-        self.assertNotIn("window", row.text)
-        self.assertEqual(row.card, "response")
-        self.assertNotIn("ferror", [r.key for r in bringup.rows(drive(mode="pv"), proposal())])
+    def test_no_following_error_row(self):
+        # the workbench's own stop is no step of its own: Follows is (the user, 2026-11-28)
+        self.assertNotIn("ferror", [r.key for r in bringup.rows(drive(identity=ECT60), proposal())])
 
     def test_the_velocity_limit_in_pp_and_pv(self):
         d = coe.Dictionary()

@@ -243,12 +243,6 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
         out.append(Row("sync", MISSING, "Sync", "free run: a CSP drive usually needs DC (SYNC0); "
                        "choose its DC mode", "operation"))
 
-    # the following error: on the workbench the profile's own check (ferror-max, the Move
-    # card's value), as motion's FERROR in LinuxCNC
-    if mode == "csp":
-        out.append(Row("ferror", OK, "Following error",
-                       "the workbench stops the drive above the Move card's value, as LinuxCNC's "
-                       "FERROR will. The FERROR for LinuxCNC comes from the Response card", "response"))
     # PP and PV: the drive plans its own moves, so its velocity limit belongs in the settings
     c = slave.get("cia402") or {}
     if {"pp", "pv"} & set([mode] + list(c.get("modes") or [])):
