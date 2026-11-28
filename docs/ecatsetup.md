@@ -148,13 +148,13 @@ shift time (`auto` lets the component find it; see
 
 Choosing a slave shows:
 
-- its identity, its **name** (the pin prefix) and its profile;
+- its identity, its **name** (the pin prefix) and its profile; *Notes*
+  shows the [notes on the device](#notes-on-a-device) under it (and *Hide*
+  on the card, or *Notes* again, puts them away: it stays so as you go
+  from slave to slave);
+- **Bringing it up**, for a drive: the way to OP and a first move, row by
+  row, each leading to the card where it is done;
 - **Problems**, when the proposal or the check found any;
-- **Where the configuration comes from**: SII, CoE, ESI file, DC, profile.
-  A green tick means the source was found, an amber mark that something
-  would improve the proposal (usually an ESI file). *Choose ESI files...*
-  and *Save as quirk file...* (what you chose, kept for the device, see
-  [quirk files](#quirk-files)) are here;
 - **Operation and sync**: first the *Profile*: how ecat runs the slave.
   *CiA 402 drive* (enable, fault handling and the modes below), *Modular
   device* (I/O terminals, with their encoder and serial channels) or
@@ -368,7 +368,12 @@ Choosing a slave shows:
   ![The Settings card after Add](images/gui-settings.png)
 
 - **Settings** (continued): *Remove setting* removes the selected rows;
-- **Notes from the proposal**.
+- **Notes from the proposal**;
+- **Where the configuration comes from**: SII, CoE, ESI file, DC, profile.
+  A green tick means the source was found, an amber mark that something
+  would improve the proposal (usually an ESI file). *Choose ESI files...*
+  and *Save as quirk file...* (what you chose, kept for the device, see
+  [quirk files](#quirk-files)) and *Device data...* are here.
 
 The buttons *Diagnose*, *Live* and *Workbench* in the slave's header jump
 to those tabs with the slave chosen.
@@ -4333,7 +4338,8 @@ tuning objects do, what an error code means. Up to OP, the device's SII,
 its ESI file and its dictionary are enough; after that the manual governs,
 and the notes are where the practical part of it is kept.
 
-*Notes on this device* at the top of a slave's page shows them: the notes
+*Notes* at the top of a slave's page shows the card *Notes on this device*
+(*Hide* puts it away again): the notes
 that came with the program first, then yours. A sentence that names an
 object (`0x2010`, `0x2007:03`, or a range `0x2007:03-06`) also shows as the
 tooltip of that object on the Settings and Process data cards, in the

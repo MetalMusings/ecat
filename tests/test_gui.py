@@ -3236,6 +3236,12 @@ class TestDeviceNotes(WindowBase):
         w = self.window()
         w.select_slave(0)
         page = w.slave_page
+        # the card is hidden until the Notes button is pressed, and stays so for other slaves
+        self.assertTrue(page.device_notes.isHidden())
+        self.assertFalse(page.notes_button.isHidden())
+        page.notes_button.setChecked(True)
+        self.assertFalse(page.device_notes.isHidden())
+        w.select_slave(0)
         self.assertFalse(page.device_notes.isHidden())
         text = page.device_notes_text.text()
         self.assertIn("<p>Bit 3 of 0x7000:00 switches the ohmic-sensing relay.</p>", text)
@@ -3258,14 +3264,21 @@ class TestDeviceNotes(WindowBase):
         tp.watch.add(0, 0x7000, 0, None, "Outputs")
         tp.show_watch()
         self.assertIn("ohmic-sensing relay", tp.watch_table.item(0, 1).toolTip())
-        # a device without notes: no card, unless it is a drive (to start them)
+        # a device without notes: no button or card, unless it is a drive (to start them)
         with mock.patch.object(gui.quirks, "notes", return_value=[]):
             page.show_device_notes(w.session.slave(0))
+            self.assertTrue(page.notes_button.isHidden())
             self.assertTrue(page.device_notes.isHidden())
             page.show_device_notes(dict(w.session.slave(0), profile="cia402"))
             self.assertFalse(page.device_notes.isHidden())
+            self.assertEqual(page.notes_button.text(), "Notes (none yet)")
             self.assertIn("No notes on this device yet", page.device_notes_text.text())
         self.assertEqual(page.device_notes_edit.text(), "Your notes...")
+        # Hide on the card lets the button up again
+        hide = next(b for b in page.device_notes.findChildren(gui.QPushButton) if b.text() == "Hide")
+        hide.click()
+        self.assertFalse(page.notes_button.isChecked())
+        self.assertTrue(page.device_notes.isHidden())
 
 
 @unittest.skipIf(gui is None, "PyQt5 is not installed")
@@ -3685,25 +3698,17 @@ class TestBringup(WindowBase):
         self.assertNotIn("settings", [r.key for r in page.bringup_found])
         self.assertFalse(any("0x607D" in r.text for r in page.bringup_found))
 
-    def test_the_slave_page_fits_a_narrow_window(self):
-        # the source card and Operation and sync side by side made the page 1275 px wide:
-        # under each other when the window is narrow
+    def test_the_slave_page_order(self):
+        # bringing it up first, then Operation and sync; where the configuration comes from
+        # last on the page (the user, 2026-11-28)
         w = self.window()
-        s = w.session.slave(0)
-        s["profile"], s["cia402"] = "cia402", {"mode": "csp", "modes": ["pp"]}
         w.select_slave(0)
         p = w.slave_page
-        row = p.source_and_op
-        self.assertLess(p.minimumSizeHint().width(),
-                        p.source.minimumSizeHint().width() + p.op_card.minimumSizeHint().width())
-        w.resize(1100, 800)
-        w.show()
-        QApplication.processEvents()
-        self.assertEqual(row.box.direction(), gui.QBoxLayout.TopToBottom)
-        w.resize(1900, 800)
-        QApplication.processEvents()
-        self.assertEqual(row.box.direction(), gui.QBoxLayout.LeftToRight)
-        w.hide()
+        lay = p.layout()
+        at = [lay.indexOf(c) for c in (p.bringup_card, p.op_card, p.notes, p.source)]
+        self.assertEqual(at, sorted(at))
+        self.assertTrue(all(i >= 0 for i in at))
+        self.assertEqual(lay.indexOf(p.source), lay.count() - 2)     # then the stretch
 
     def test_a_fault_code_the_pdos_lack_is_read_once(self):
         # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once

@@ -485,44 +485,6 @@ def label(text="", name=None, wrap=False):
     return lab
 
 
-class SideBySide(QWidget):
-    """Widgets side by side when there is room for them, else one under the other: its
-    minimum width is the widest one's, so that the page is never wider than the window."""
-
-    def __init__(self, spacing=16):
-        super().__init__()
-        self.box = QBoxLayout(QBoxLayout.LeftToRight, self)
-        self.box.setContentsMargins(0, 0, 0, 0)
-        self.box.setSpacing(spacing)
-        self.items = []
-
-    def addWidget(self, w, stretch=0):
-        self.items.append(w)
-        self.box.addWidget(w, stretch)
-
-    def _shown(self):
-        return [w for w in self.items if not w.isHidden()]
-
-    def wide_enough(self, width):
-        shown = self._shown()
-        need = sum(w.minimumSizeHint().width() for w in shown) + self.box.spacing() * max(len(shown) - 1, 0)
-        return width >= need
-
-    def minimumSizeHint(self):
-        shown = self._shown()
-        hint = super().minimumSizeHint()
-        if not shown:
-            return hint
-        return QSize(max(w.minimumSizeHint().width() for w in shown), hint.height())
-
-    def resizeEvent(self, event):
-        want = QBoxLayout.LeftToRight if self.wide_enough(event.size().width()) else QBoxLayout.TopToBottom
-        if self.box.direction() != want:
-            self.box.setDirection(want)
-            self.updateGeometry()
-        super().resizeEvent(event)
-
-
 class Card(QFrame):
     """A white card with an uppercase title and an optional hint."""
 
@@ -1378,6 +1340,13 @@ class SlaveView(QWidget):
         self.where = label("", "hint")
         row.addWidget(self.where)
         row.addStretch(1)
+        # the notes on the device type: read once, then out of the way (the card is shown
+        # while the button is down, for every slave, until it is pressed again)
+        self.notes_button = QPushButton("Notes")
+        self.notes_button.setCheckable(True)
+        self.notes_button.setToolTip("Show or hide the notes on this device type")
+        self.notes_button.toggled.connect(self.notes_toggled)
+        row.addWidget(self.notes_button)
         trouble = QPushButton("Diagnose")
         trouble.clicked.connect(lambda: win.show_tab(win.trouble_page))
         row.addWidget(trouble)
@@ -1423,7 +1392,12 @@ class SlaveView(QWidget):
         self.device_notes_edit.setToolTip("Write your own notes on this device type (Device data)")
         self.device_notes_edit.clicked.connect(lambda: self.device_data())
         row.addWidget(self.device_notes_edit, 0, Qt.AlignTop)
+        hide = QPushButton("Hide")
+        hide.setToolTip("Hide the notes; the Notes button at the top shows them again")
+        hide.clicked.connect(lambda: self.notes_button.setChecked(False))
+        row.addWidget(hide, 0, Qt.AlignTop)
         self.device_notes.add(row)
+        self.device_notes.hide()
         lay.addWidget(self.device_notes)
 
         # a drive's way to OP and its first move (bringup.py): what is known, missing, or
@@ -1470,9 +1444,7 @@ class SlaveView(QWidget):
         self.problem_text = self.problems.add(label(wrap=True))
         lay.addWidget(self.problems)
 
-        # where the configuration comes from, and operation and sync
-        # side by side when the window is wide enough, else one under the other
-        two = self.source_and_op = SideBySide(16)
+        # where the configuration comes from: last on the page (added at the end)
         self.source = Card("Where the configuration comes from")
         self.source_rows = []
         for _ in range(7):
@@ -1504,7 +1476,6 @@ class SlaveView(QWidget):
         esi_row.addStretch(1)
         self.source.add(esi_row)
         self.source.lay.addStretch(1)
-        two.addWidget(self.source, 1)
 
         op = self.op_card = Card("Operation and sync")
         self.cia402 = QWidget()
@@ -1653,8 +1624,7 @@ class SlaveView(QWidget):
         self.dc_warn = op.add(label("", wrap=True))
         self.dc_warn.setObjectName("warnText")
         op.lay.addStretch(1)
-        two.addWidget(op, 1)
-        lay.addWidget(two)
+        lay.addWidget(op)
 
         # homing (CiA 402 hm)
         self.homing_card = Card("Homing by the drive",
@@ -1919,6 +1889,7 @@ class SlaveView(QWidget):
         self.notes = Card("Notes from the proposal")
         self.notes_text = self.notes.add(label(wrap=True))
         lay.addWidget(self.notes)
+        lay.addWidget(self.source)
         lay.addStretch(1)
 
     def device_data(self):
@@ -2090,10 +2061,15 @@ class SlaveView(QWidget):
         self.show_serial(s)
         self.show_eoe(s)
 
+    def notes_toggled(self, on):
+        self.device_notes.setVisible(on and not self.notes_button.isHidden())
+
     def show_device_notes(self, s):
         found = quirks.notes(s)
-        # shown with notes, and for a drive without (to start them)
-        self.device_notes.setVisible(bool(found) or (s or {}).get("profile") == "cia402")
+        # the button with notes, and for a drive without (to start them); the card while it is down
+        self.notes_button.setVisible(bool(found) or (s or {}).get("profile") == "cia402")
+        self.notes_button.setText("Notes" if found else "Notes (none yet)")
+        self.notes_toggled(self.notes_button.isChecked())
         if not found:
             self.device_notes_text.setText("<i>No notes on this device yet.</i>")
             return
