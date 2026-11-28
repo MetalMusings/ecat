@@ -3064,7 +3064,7 @@ class SlaveView(QWidget):
         # a bit field needs more than one bit
         return "pin" in e or "split" in e
 
-    def entry(self, row):
+    def _entry(self, row):
         direction, pi, ei = self.pd_rows[row]
         s = self.win.session.slave(self.position)
         return s["process-data"][direction][pi]["entries"][ei]
@@ -3269,7 +3269,7 @@ class SlaveView(QWidget):
         if self.loading:
             return
         row, col = it.row(), it.column()
-        e = self.entry(row)
+        e = self._entry(row)
         text = it.text().strip()
         if col == self.PIN:
             if text:
@@ -3339,7 +3339,7 @@ class SlaveView(QWidget):
         """A bit field has no pin name of its own: go to its bit pins instead."""
         if col != self.PIN or row >= len(self.pd_rows):
             return
-        if "split" in self.entry(row):
+        if "split" in self._entry(row):
             self.pd.setColumnHidden(self.SPLIT, False)
             self.pd.setCurrentCell(row, self.SPLIT)
             self.pd.editItem(self.pd.item(row, self.SPLIT))
@@ -3388,7 +3388,7 @@ class SlaveView(QWidget):
     def hal_type_edited(self, row, text):
         if self.loading:
             return
-        e = self.entry(row)
+        e = self._entry(row)
         if "pin" not in e and "split" not in e:
             return
         if text == self.BIT_FIELD:
