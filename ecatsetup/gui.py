@@ -1340,6 +1340,10 @@ class SlaveView(QWidget):
         self.where = label("", "hint")
         row.addWidget(self.where)
         row.addStretch(1)
+        head.add(row)
+        # the buttons on a row of their own: beside a long name they made the page wider
+        # than the window
+        row = QHBoxLayout()
         # the notes on the device type: read once, then out of the way (the card is shown
         # while the button is down, for every slave, until it is pressed again)
         self.notes_button = QPushButton("Notes")
@@ -1356,7 +1360,7 @@ class SlaveView(QWidget):
         test = QPushButton("Workbench")
         test.clicked.connect(lambda: win.show_tab(win.test_page))
         row.addWidget(test)
-        head.add(row)
+        row.addStretch(1)
         grid = QGridLayout()
         grid.setHorizontalSpacing(24)
         self.fields = {}
@@ -1374,6 +1378,7 @@ class SlaveView(QWidget):
         grid.addWidget(self.name, 1, 4)
         grid.setColumnStretch(4, 1)
         head.add(grid)
+        head.add(row)
         self.bus_ident = head.add(label("", "hint", wrap=True))
         lay.addWidget(head)
 

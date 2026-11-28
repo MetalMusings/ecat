@@ -3710,6 +3710,18 @@ class TestBringup(WindowBase):
         self.assertTrue(all(i >= 0 for i in at))
         self.assertEqual(lay.indexOf(p.source), lay.count() - 2)     # then the stretch
 
+    def test_the_slave_page_fits_a_narrow_window(self):
+        # the header's buttons beside a long name made the page wider than the window
+        w = self.window()
+        w.select_slave(0)
+        p = w.slave_page
+        p.title.setText("Slave 12 · A vendor with a long name, a drive with a longer one")
+        w.resize(1300, 900)
+        w.show()
+        QApplication.processEvents()
+        self.assertLess(p.minimumSizeHint().width(), 1100)     # 1246 with the buttons beside it
+        w.hide()
+
     def test_a_fault_code_the_pdos_lack_is_read_once(self):
         # the ECT60 does not map 0x603F: at a fault the code is read by SDO, once
         w = self.window()
