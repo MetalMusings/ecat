@@ -571,7 +571,7 @@ convenience lcec's drivers give.
 | Encoder (MDP 511) | `el5101`, `el5151`, `el5152`, the encoder channels of `el7342`/`em7004` | Done |
 | `cia402` with several axes per slave | two-axis drives (`ECT60x2`, `ECR60x2`), EL72xx with channel offset | Built (`cia402.axes`, objects 0x800 apart, pins per axis); not tried on such a drive. |
 | Analog I/O (MDP) | `el3xxx`, `el31x2`, `el3255`, `el4xxx`, `el41x2` | Built as a proposal, not a profile ([analog terminals](ecatsetup.md#analog-inputs-and-outputs)): `generic` with the value as a float pin scaled from the range in the device's name, status bits as pins, the 0x8nn0 channel settings offered by name. Not tried on a terminal. |
-| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale, error reset (HAL lines) and lcec modParams are a quirk file ([stepper terminals](ecatsetup.md#stepper-and-dc-motor-terminals), [quirk files](ecatsetup.md#quirk-files)). Not tried on a terminal. `el2521` (pulse train) not yet. |
+| Stepper and DC motor terminals | `el7041`, `el70x1`, `el7342` | `generic` slaves; the EL7041's pin names, velocity scale and error reset (HAL lines) are a quirk file, lcec's modParams a translation file (`ecatsetup/lcec`) ([stepper terminals](ecatsetup.md#stepper-and-dc-motor-terminals), [quirk files](ecatsetup.md#quirk-files)). Not tried on a terminal. `el2521` (pulse train) not yet. |
 | Absolute encoders (SSI, EnDat) | `el5002`, `el5032` | Check first whether `generic` plus settings is enough. |
 
 The order is set by what users run; analog I/O and the EL7041 are
@@ -4440,3 +4440,19 @@ A gap that stops (unknown input function: the home switch may not be wired to ho
 at all) is told apart from one that only leaves doubt (unknown methods: all may be
 tried). Switch rows belong to the Switches card also when the goal is limit switches
 without homing.
+
+## lcec's translations apart from the device files (2026-11-28)
+
+The quirk files' `lcec` key (lcec's per-product drivers: type names, modParams,
+the settings a driver always wrote, sdoConfig replacements) is knowledge of
+lcec's C code, not of the devices: nothing in a device's SII, ESI file or
+dictionary says it, and only *From lcec* and `--import-xml` use it. Decided with
+the user: it moves to its own folder, `ecatsetup/lcec/*.yaml` (`lcecmap.py`;
+format in [lcec translations](reference.md#lcec-translations)), one file per lcec
+driver, shipped only. `beckhoff-el70x1-position.yaml`, which had nothing but the
+translation, is gone; the device files, *Device data* and sharing are about
+devices only (the `lcec` fact kind and its *From lcec* card link are removed). A
+device file that still has `lcec:` is read without it. This is a first step of
+reducing the device files to what concerns the device (the discussion of
+2026-11-28: a free-text note per device, the rest from the standards and the
+device's own data).

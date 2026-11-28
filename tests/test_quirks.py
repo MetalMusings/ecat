@@ -24,7 +24,7 @@ if "ECATSETUP_TEST_STATE" not in os.environ:
         __import__("tempfile").tempdir = __import__("tempfile").mkdtemp(prefix="ecatsetup-test-state-")
     __import__("atexit").register(__import__("shutil").rmtree, os.environ["ECATSETUP_TEST_STATE"], True)
 
-from ecatsetup import config, integrate, quirks  # noqa: E402
+from ecatsetup import config, integrate, lcecmap, quirks  # noqa: E402
 from ecatsetup import propose  # noqa: E402
 from test_integrate import Folder  # noqa: E402
 from test_prototype import easercat  # noqa: E402
@@ -53,7 +53,7 @@ class TestFiles(unittest.TestCase):
     def test_shipped_files_read(self):
         qs = quirks.load(reload=True)
         self.assertEqual(quirks.problems, [])
-        self.assertEqual(len(qs), 6)
+        self.assertEqual(len(qs), 5)
         # a family's file matches each of its products
         self.assertEqual(quirks.of((0xAB5, 0x980))["name"], "GeRui EC1 series")
         self.assertEqual(quirks.of((0xAB5, 0x1030))["name"], "GeRui EC1 series")
@@ -63,14 +63,11 @@ class TestFiles(unittest.TestCase):
         self.assertEqual(ect["limits"]["following-error"], (0x2022, 0, "uint32"))
         self.assertIn("ignores", ect["limits"]["travel"])
         # the translation follows from the command's purpose (no hand-written lcec row)
-        self.assertEqual(quirks.lcec_sdo((0xA88, 0xA880002)), {})
         self.assertEqual(quirks.command_purpose((0xA88, 0xA880002), 0x2010), "zero-position")
         self.assertEqual(quirks.lcec_replacement((0xA88, 0xA880002), 0x2010, 0)[0], "cia402.zero-at-start")
         self.assertIs(quirks.keeps_position((0xA88, 0xA880002)), True)
         self.assertIn("following error", quirks.error_meaning((0xA88, 0xA880002), 0x8611))
         self.assertEqual(quirks.pins((2, 0x1B813052))[(0x7010, 0x21)]["scale"], 32767)
-        self.assertEqual(quirks.for_lcec_type("EL7031")["name"],
-                         "Beckhoff EL70x1, position interface (lcec el70x1)")
         self.assertEqual(quirks.of((1, 2)), {})
 
     def test_user_file_wins_and_bad_files_are_reported(self):
@@ -111,6 +108,46 @@ class TestFiles(unittest.TestCase):
                           ({"errors": {"0x18611": "x"}}, "a code of 16 bits and a text")):
             with self.assertRaisesRegex(quirks.QuirkError, msg):
                 quirks.parse(data)
+
+
+class TestLcecMap(unittest.TestCase):
+    """lcec's drivers' translations (lcecmap.py, ecatsetup/lcec), apart from the devices."""
+
+    def test_the_shipped_files(self):
+        ms = lcecmap.load(reload=True)
+        self.assertEqual(lcecmap.problems, [])
+        self.assertEqual(len(ms), 2)
+        types = [t for m in ms for t in m["types"]]
+        self.assertEqual(len(types), len(set(types)))
+        self.assertIn("el70x1", lcecmap.for_type("EL7031")["name"])
+        self.assertEqual(lcecmap.for_type("EL7041")["modparams"]["maxCurrent"][:2], (0x8010, 1))
+        self.assertEqual(lcecmap.for_type("generic"), {})
+        # no device file holds lcec's translations any more
+        self.assertFalse(any(q["raw"].get("lcec") for q in quirks.load(reload=True)))
+
+    def test_an_old_device_file_with_lcec_is_read_without_it(self):
+        q = quirks.parse({"name": "old", "match": {"vendor": "0x2", "product": "0x1"},
+                          "lcec": {"types": ["X"], "modparams": {"a": {"object": "0x8010:01"}}}})
+        self.assertNotIn("lcec", q)
+
+    def test_an_sdo_row_of_the_lcec_type_comes_first(self):
+        orig = lcecmap._cache
+        lcecmap._cache = [lcecmap.parse({"types": ["T"], "sdo": {
+            "0x2010:00": {"replace": "cia402.zero-at-start", "note": "why"}}})]
+        try:
+            self.assertEqual(quirks.lcec_replacement((2, 1), 0x2010, 0, "T"),
+                             ("cia402.zero-at-start", "why"))
+            self.assertIsNone(quirks.lcec_replacement((2, 1), 0x2010, 0, "U"))
+            self.assertIsNone(quirks.lcec_replacement((2, 1), 0x2010, 0))
+        finally:
+            lcecmap._cache = orig
+
+    def test_parse_errors(self):
+        for data, msg in (({"types": ["T"], "match": {}}, "unknown keys match"),
+                          ({"name": "x"}, "types")):
+            with self.assertRaises(lcecmap.LcecMapError) as e:
+                lcecmap.parse(data)
+            self.assertIn(msg, str(e.exception))
 
 
 class TestSplitPins(unittest.TestCase):

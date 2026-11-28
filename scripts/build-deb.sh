@@ -104,7 +104,7 @@ install -m 644 "$WORK/ecat/component/ecat.so" "$WORK/ecat/component/ecat_rtprobe
     "$ROOT/usr/lib/linuxcnc/modules/"
 strip --strip-unneeded "$ROOT/usr/lib/linuxcnc/modules/ecat.so" "$ROOT/usr/lib/linuxcnc/modules/ecat_rtprobe.so"
 install -m 644 "$WORK/ecat"/ecatsetup/*.py "$PY/ecatsetup/"
-for d in devices explain measured pdoreq rtrules; do
+for d in devices explain lcec measured pdoreq rtrules; do
     install -d "$PY/ecatsetup/$d"
     install -m 644 "$WORK/ecat"/ecatsetup/$d/*.yaml "$PY/ecatsetup/$d/"
 done

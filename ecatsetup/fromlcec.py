@@ -594,7 +594,7 @@ def setting_hints(f, cfg, dictionaries=None):
     """[SettingHint] of the settings lcec wrote at every start (sdoConfig, and its
     modParams as the quirk files translate them) that the configuration does not
     have, or has with another value. dictionaries: {position: coe.Dictionary}."""
-    from . import importxml, quirks
+    from . import importxml, lcecmap, quirks
     if f.xml is None:
         return []
     out = []
@@ -617,7 +617,7 @@ def setting_hints(f, cfg, dictionaries=None):
         for index, sub, data in x.sdos:
             if sub == "complete":
                 continue
-            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub)
+            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub, x.type)
             if got and got[0] == quirks.ZERO_AT_START:
                 if s.get("profile") == "cia402" and not (s.get("cia402") or {}).get("zero-at-start"):
                     out.append(SettingHint(x.idx, s["name"], what="lcec's sdoConfig 0x%04X:%02X: "
@@ -630,7 +630,7 @@ def setting_hints(f, cfg, dictionaries=None):
                 continue
             rows_.append((importxml._setting(index, sub, data, coe), "lcec's sdoConfig"))
         if x.modparams:
-            params, _ = quirks.lcec_modparams(x.type, x.modparams)
+            params, _ = lcecmap.modparams(x.type, x.modparams)
             for index, sub, dtype, value, name in params:
                 st = {"object": config.obj(index, sub), "type": dtype, "value": value}
                 if coe is not None and (index, sub) in coe.entries:

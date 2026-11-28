@@ -2037,9 +2037,10 @@ than one master is refused: ecat drives one.
   lcec`, `addf lcec.*`) are commented out as always. A `.tcl` HAL file with
   old pins is turned into a `.hal` file, as for a simulation.
 - **lcec's settings.** lcec wrote its `sdoConfig` values (and modParams,
-  through the quirk files) at every start. Those the configuration does not
-  have, or has with another value, are listed under the pins with *Add* (and
-  *Add all these settings*); nothing is added unasked. A drive that does
+  through its drivers: [lcec translations](reference.md#lcec-translations))
+  at every start. Those the configuration does not have, or has with
+  another value, are listed under the pins with *Add* (and *Add all these
+  settings*); nothing is added unasked. A drive that does
   not keep a value has its own again after a power cycle, so check the list.
   A command lcec wrote as a setting is not offered as one: a command that
   zeroes the position (the ECT60's `0x2010` Zero Position, as its quirk file
@@ -3777,7 +3778,7 @@ command is the feedback, as with lcec's el70x1 driver.
 #### From lcec (stepper)
 
 Importing an lcec XML file translates the stepper drivers' `modParam`s
-into settings:
+into settings ([lcec translations](reference.md#lcec-translations)):
 
 | lcec type | modParams |
 |---|---|
@@ -4320,7 +4321,7 @@ them, so the written files say everything that happens.
 | Folder | |
 |---|---|
 | `~/.config/ecatsetup/devices/*.yaml` (or `$ECATSETUP_DEVICES`) | Your own. A file here for a vendor and product is laid over the one that comes with the program, fact by fact: where both say something, yours is used; the rest of the shipped file stays. |
-| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `stepperonline-a6.yaml`, `gerui-ec1.yaml`, `beckhoff-el7041.yaml`, `beckhoff-el70x1-position.yaml`, `metalmusings-easercat-7000.yaml`. |
+| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `stepperonline-a6.yaml`, `gerui-ec1.yaml`, `beckhoff-el7041.yaml`, `metalmusings-easercat-7000.yaml`. |
 
 *Save as quirk file...* on a slave's page writes one from a slave as you
 have configured it: its identity, the pin names, HAL types, scales and
@@ -4371,7 +4372,7 @@ from `ecatsetup --check`.
 *Device data...* on a slave's page shows everything known about its
 device type in one place: a line on its ESI file, then the facts grouped
 (commands and settings, homing, drive test, tuning, timing with the
-measured SYNC0 periods, process data, HAL and lcec), each with its value,
+measured SYNC0 periods, process data, HAL), each with its value,
 where it comes from (came with the program, the manual, tried on a
 machine, shared), a link to **the card that owns it** and, for yours,
 *forget*. A fact is changed on its card, where it is used and can be
@@ -4439,10 +4440,8 @@ program under development, and may change.
   tuning settings (`0x2009` the command filter, `0x2023` servo mode 1,
   `0x2026` FOC); its `0x6077` is not recorded (it does not report torque).
 - `beckhoff-el7041.yaml`: pin names and the velocity scale; HAL lines
-  that reset an error when `enable` comes on again (as lcec's driver did);
-  lcec's modParams. See [stepper terminals](#stepper-and-dc-motor-terminals).
-- `beckhoff-el70x1-position.yaml`: lcec's el70x1 modParams and the
-  position interface it always set.
+  that reset an error when `enable` comes on again (as lcec's driver did).
+  See [stepper terminals](#stepper-and-dc-motor-terminals).
 - `metalmusings-easercat-7000.yaml`: the bit pins of the THC and I/O device
   (`in-1`..`in-12`, `out-1`, `out-2`, `activate-relay`, `out-4`, the ohmic
   sensing flags). Which terminal is wired to what is the machine's: see

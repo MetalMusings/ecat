@@ -125,10 +125,6 @@ class TestCheck(unittest.TestCase):
         for path in glob.glob(os.path.join(quirks.SHIPPED, "*.yaml")):
             with open(path) as f:
                 raw = devicedata.strip(yaml.safe_load(f))
-            if "match" not in raw:
-                # for lcec types only (beckhoff-el70x1-position): a shared file needs a device
-                self.assertIn("match: vendor and product are needed", devicedata.check(raw))
-                continue
             self.assertEqual(devicedata.check(raw), [], path)
             self.assertNotIn("pins", raw)
 
@@ -304,12 +300,13 @@ class TestKinds(unittest.TestCase):
 
     def test_every_key_of_the_format_has_kinds(self):
         heads = {k.path[0] for k in devicedata.KINDS}
-        self.assertEqual(quirks.KEYS - {"name", "match", "format", "sources"}, heads)
+        # lcec: still read (and ignored) in older files; ecatsetup/lcec holds it now
+        self.assertEqual(quirks.KEYS - {"name", "match", "format", "sources", "lcec"}, heads)
 
     def test_every_shipped_fact_has_a_kind_a_section_and_a_known_card(self):
         # devicedataview.CARDS (not imported here: no Qt in this module's tests)
         cards = {"settings", "process-data", "homing", "sdo", "switches", "move", "response", "sync",
-                 "from-lcec", "operation", "source", "workbench", "diagnose"}
+                 "operation", "source", "workbench", "diagnose"}
         for path in glob.glob(os.path.join(quirks.SHIPPED, "*.yaml")):
             with open(path) as f:
                 raw = yaml.safe_load(f)

@@ -188,20 +188,8 @@ def parse(data, path="<quirk>"):
         if not 0 <= code <= 0xFFFF or not isinstance(v, str) or not v.strip():
             raise QuirkError("errors.%s: a code of 16 bits and a text" % k)
         q["errors"][code] = v.strip()
-    lcec = data.get("lcec") or {}
-    q["lcec"] = {"types": [str(t) for t in lcec.get("types") or []],
-                 "sdo": {}, "modparams": {}, "settings": []}
-    for k, v in (lcec.get("sdo") or {}).items():
-        index, sub = _obj(k)
-        q["lcec"]["sdo"][(index, sub or 0)] = (v.get("replace"), str(v.get("note", "")))
-    for k, v in (lcec.get("modparams") or {}).items():
-        index, sub = _obj(v.get("object"))
-        q["lcec"]["modparams"][k] = (index, sub or 0, str(v.get("type")), v.get("convert"),
-                                     v.get("values"))
-    for v in lcec.get("settings") or []:
-        index, sub = _obj(v.get("object"))
-        q["lcec"]["settings"].append((index, sub or 0, str(v.get("type")), int(v.get("value")),
-                                      str(v.get("note", ""))))
+    # lcec: (lcec's drivers' translations, until 2026-11-28) is read from ecatsetup/lcec
+    # (lcecmap.py) now; a file that has it is taken without it
     return q
 
 
@@ -350,21 +338,17 @@ def settings(key):
     return of(key).get("settings", [])
 
 
-def lcec_sdo(key):
-    """{(index, subindex): (replacement, note)} for an lcec sdoConfig."""
-    return of(key).get("lcec", {}).get("sdo", {})
-
-
 ZERO_AT_START = "cia402.zero-at-start"
 
 
-def lcec_replacement(key, index, subindex):
+def lcec_replacement(key, index, subindex, lcec_type=None):
     """What an lcec sdoConfig of this object becomes: (what, why), what being
-    ZERO_AT_START or "command"; None for an ordinary setting. The quirk file's own
-    lcec translation first; otherwise it follows from the object's properties: a
+    ZERO_AT_START or "command"; None for an ordinary setting. The lcec type's
+    translation (lcecmap) first; otherwise it follows from the object's properties: a
     command whose purpose is zero-position is what cia402.zero-at-start does
     without writing to the drive, and any other command is not a setting."""
-    given = lcec_sdo(key).get((index, subindex))
+    from . import lcecmap
+    given = lcecmap.sdo(lcec_type).get((index, subindex)) if lcec_type else None
     if given:
         return given
     why = command(key, index)
@@ -378,53 +362,6 @@ def lcec_replacement(key, index, subindex):
                                "read 0 at start" % (index, subindex, why))
     return "command", ("0x%04X:%02X is a command, says the device's quirk file (%s): as a "
                        "setting it would run at every start" % (index, subindex, why))
-
-
-def for_lcec_type(lcec_type):
-    return next((q for q in load() if lcec_type in q["lcec"]["types"]), {})
-
-
-def _convert(conv, values, text):
-    if values:
-        v = int(float(text))
-        if v not in values:
-            raise ValueError("%s is not one of %s" % (text, ", ".join(str(k) for k in values)))
-        return int(values[v])
-    if conv == "milli":
-        return int(round(float(text) * 1000))
-    if conv == "flag":
-        return 1 if str(text).strip().lower() in ("1", "true", "yes", "on") else 0
-    if conv in (None, "int"):
-        return int(float(text))
-    raise ValueError("unknown conversion %r" % conv)
-
-
-def lcec_modparams(lcec_type, modparams):
-    """lcec modParams of a slave as settings: ([(index, subindex, type,
-    value, name)], notes)."""
-    q = for_lcec_type(lcec_type)
-    table = q.get("lcec", {}).get("modparams", {})
-    out, notes = [], []
-    for index, sub, dtype, value, why in q.get("lcec", {}).get("settings", []):
-        out.append((index, sub, dtype, value, None))
-        notes.append("0x%04X:%02X = %d added: %s" % (index, sub, value, why))
-    for name, text in modparams:
-        if name not in table:
-            notes.append("modParam %s=%s not imported%s" % (
-                name, text, "" if table else " (no quirk file translates lcec type %s)"
-                % lcec_type))
-            continue
-        index, sub, dtype, conv, values = table[name]
-        try:
-            value = _convert(conv, values, text)
-        except (TypeError, ValueError) as e:
-            notes.append("modParam %s=%s not imported: %s" % (name, text, e))
-            continue
-        out = [o for o in out if (o[0], o[1]) != (index, sub)]
-        out.append((index, sub, dtype, value, name))
-        notes.append("modParam %s=%s imported as setting 0x%04X:%02X = %d"
-                     % (name, text, index, sub, value))
-    return out, notes
 
 
 def from_slave(slave):

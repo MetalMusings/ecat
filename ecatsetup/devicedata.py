@@ -84,7 +84,7 @@ def _obj_key(k):
 # What sort of fact a kind is (agreed 2026-11-27): a PROPERTY holds for every unit of the
 # device (perhaps for a firmware) and is what is worth sharing first; two that disagree are
 # a conflict. ADVICE is a choice made from properties and a machine's situation (a recipe:
-# HAL lines, lcec translations). EXPERIENCE is a value that worked in one machine, marked
+# HAL lines). EXPERIENCE is a value that worked in one machine, marked
 # with its context; two that differ can both be right. MACHINE is a machine's own choice,
 # never shared.
 PROPERTY, ADVICE, EXPERIENCE, MACHINE = "property", "advice", "experience", "machine"
@@ -104,7 +104,7 @@ class Kind:
     listing: bool = False   # a list: its source says closed (only these) or open (these worked)
 
 
-SECTIONS = ("Commands and settings", "Homing", "Drive test", "Tuning", "Process data", "HAL and lcec")
+SECTIONS = ("Commands and settings", "Homing", "Drive test", "Tuning", "Process data", "HAL")
 KINDS = (
     Kind(("commands", "*"), "Commands and settings", "{1} is a command, not a setting", "sdo",
          value="why (text), or note/value/type/confirm for Run command"),
@@ -126,8 +126,7 @@ KINDS = (
     Kind(("measure", "ignore", "*"), "Tuning", "{2} is not recorded when measuring", "response"),
     Kind(("pins", "*"), "Process data", "Pin for {1}", "process-data", share=False,
          value="a machine's choice: never shared", sort=MACHINE),
-    Kind(("hal",), "HAL and lcec", "HAL lines", None, sort=ADVICE),
-    Kind(("lcec",), "HAL and lcec", "Translation of lcec's settings", "from-lcec", sort=ADVICE),
+    Kind(("hal",), "HAL", "HAL lines", None, sort=ADVICE),
 )
 
 

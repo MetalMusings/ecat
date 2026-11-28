@@ -10,7 +10,7 @@ Every import gives a list of notes saying what was changed or left out.
 
 import re
 
-from . import config, propose, quirks
+from . import config, lcecmap, propose, quirks
 
 # lcec hal types -> (hal-type, data type for a given bit length or None)
 _SIGNED = {8: "SINT", 16: "INT", 32: "DINT", 64: "LINT"}
@@ -193,7 +193,7 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
             if sub == "complete":
                 notes.append("%s: SDO 0x%04X complete access not imported" % (where, index))
                 continue
-            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub)
+            got = quirks.lcec_replacement((x.vendor_id, x.product_code), index, sub, x.type)
             if got:
                 what, why = got
                 if what == "command":
@@ -208,7 +208,7 @@ def import_lcec(xml_cfg, bus=None, servo_period=None):
                                  "%s" % (where, index, sub, why))
             settings.append(_setting(index, sub, data, coe))
         if x.modparams:
-            rows, mp_notes = quirks.lcec_modparams(x.type, x.modparams)
+            rows, mp_notes = lcecmap.modparams(x.type, x.modparams)
             have = {config.parse_obj(st["object"]) for st in settings}
             for index, sub, dtype, value, name in rows:
                 if (index, sub) in have:

@@ -411,9 +411,9 @@ says that `cia402: {zero-at-start: true}` does the same if wanted; as a
 `generic` slave the setting is kept, with a note.
 
 lcec's `initCmds`, `idnConfig` and `watchdog` are not imported yet.
-`modParam`s become settings where a [quirk file](ecatsetup.md#quirk-files) translates
-them (lcec's stepper drivers, [stepper terminals](ecatsetup.md#from-lcec-stepper)); others
-get a note. ecat has no product drivers, so a `modParam` will become settings
+`modParam`s become settings where a [translation of lcec's
+driver](#lcec-translations) exists (lcec's stepper drivers, [stepper
+terminals](ecatsetup.md#from-lcec-stepper)); others get a note. ecat has no product drivers, so a `modParam` will become settings
 rows or process data choices (see the design draft, [Decision: profiles
 with quirks, no product
 drivers](development.md#decision-profiles-with-quirks-no-product-drivers)).
@@ -853,20 +853,11 @@ hal:                       # HAL lines for each matching slave
   addf: ['{name}-enable-edge']
   lines:
   - net {signal:0x7010:01} => {name}-enable-edge.in
-
-lcec:                      # importing lcec XML files
-  types: [EL7041, EP7041]
-  modparams:
-    maxCurrent: {object: '0x8010:01', type: UINT, convert: milli}
-    maxSpeed: {object: '0x8012:05', type: UINT, values: {1000: 0, 2000: 1}}
-  settings:                # always added for these lcec types
-  - {object: '0x8012:01', type: USINT, value: 3, note: why}
-  sdo:                     # sdoConfig entries replaced
-    '0x2010:00': {replace: cia402.zero-at-start, note: why}
 ```
 
-Every key but `name` is optional. A file with only `lcec` (no `match`)
-serves the import alone.
+Every key but `name` is optional. A file with `lcec` (lcec's translations,
+until 2026-11-28) is read without it: they are in their own files now
+([lcec translations](#lcec-translations)).
 
 Your file for a device is laid over the one that comes with the program,
 fact by fact: where both say something about the same thing (a command,
@@ -887,10 +878,6 @@ used, and the rest of the shipped file stays.
 | `measure` | `ignore`: per object index, why the response measurement does not record it (a drive's object that does not mean what the standard says). |
 | `limits` | For a drive in PP or PV: `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), where the drive keeps it instead of `0x607F` (the settings then ask for it, the workbench writes it), or `travel` and `max-velocity` as a text saying why the drive's own object is not used. `following-error` and `max-torque` are still read (older files have them) but no longer used. |
 | `hal` | `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
-| `lcec.types` | lcec type names (`type=` in the XML) that `modparams` and `settings` apply to. |
-| `lcec.modparams` | Per lcec `modParam`: the `object` and `type` of the setting, and `convert` (`milli`: ×1000, `flag`: 0/1, else a number as it is) or `values` (a table). |
-| `lcec.settings` | Settings always added for those types (what the lcec driver always wrote). |
-| `lcec.sdo` | An lcec `sdoConfig` that ecat does differently: `replace` with `cia402.zero-at-start` (when the slave gets the cia402 profile: the setting is not imported and zero-at-start is offered as an option). Not needed for a command whose `purpose` is `zero-position`. |
 
 ### HAL lines
 
@@ -953,3 +940,35 @@ methods); if the drive has neither, every method of the standard is offered.
 The ECT60 has no 0x60E3 (read from a drive, 2026-11-10), so its file lists
 the methods from the manual. The extras are for the axis of the slave's
 first axis; for later axes their indexes move by 0x800 as the other objects do.
+
+## lcec translations
+
+lcec had a C driver per product; its XML file gave them named `modParam`s that
+the driver turned into SDO writes, and some drivers wrote settings of their own
+that the XML file never showed. ecat has no product drivers: what such a driver
+did is a file in `ecatsetup/lcec/`, read only when an lcec configuration is
+moved (*From lcec*, `--import-xml`). It is knowledge of lcec's code, not of the
+devices, so it is not in the quirk files. Only the files that come with the
+program are read.
+
+```yaml
+name: lcec el7041          # shown in notes
+types: [EL7041, EP7041]    # lcec type names (type= in the XML)
+modparams:
+  maxCurrent: {object: '0x8010:01', type: UINT, convert: milli}
+  maxSpeed: {object: '0x8012:05', type: UINT, values: {1000: 0, 2000: 1}}
+settings:                  # always added for these types
+- {object: '0x8012:01', type: USINT, value: 3, note: why}
+sdo:                       # sdoConfig entries ecat does differently
+  '0x2010:00': {replace: cia402.zero-at-start, note: why}
+```
+
+| Key | |
+|---|---|
+| `types` | lcec type names that the file applies to (required). |
+| `modparams` | Per lcec `modParam`: the `object` and `type` of the setting, and `convert` (`milli`: ×1000, `flag`: 0/1, else a number as it is) or `values` (a table). |
+| `settings` | Settings always added for those types (what the lcec driver always wrote). |
+| `sdo` | An lcec `sdoConfig` that ecat does differently: `replace` with `cia402.zero-at-start` (when the slave gets the cia402 profile: the setting is not imported and zero-at-start is offered as an option). Not needed for a command whose `purpose` is `zero-position` in the device's quirk file. |
+
+The program's files: `el7041.yaml` (EL7041, EL7041-1000, EP7041) and
+`el70x1.yaml` (EL7031, EL7041-0052, the position interface).

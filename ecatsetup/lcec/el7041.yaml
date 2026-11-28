@@ -1,0 +1,19 @@
+# lcec's el7041 driver (lcec_el7041.c): its modParams as settings. lcec_el7041.c
+# had no break after motorEMF and the cases after it, so it also wrote that
+# value into the objects after it; here each value goes to its own object.
+name: lcec el7041 (Beckhoff EL7041, EP7041)
+types: [EL7041, EL7041_1000, EL7041-1000, EP7041]
+modparams:
+  maxCurrent: {object: '0x8010:01', type: UINT, convert: milli}   # A -> mA
+  reducedCurrent: {object: '0x8010:02', type: UINT, convert: milli}
+  nominalVoltage: {object: '0x8010:03', type: UINT, convert: milli}   # x1000, as lcec wrote it
+  coilResistance: {object: '0x8010:04', type: UINT, convert: milli}   # x1000, as lcec wrote it
+  motorEMF: {object: '0x8010:05', type: UINT, convert: milli}         # x1000, as lcec wrote it
+  motorFullsteps: {object: '0x8010:06', type: UINT}
+  encoderIncrements: {object: '0x8010:07', type: UINT}
+  startVelocity: {object: '0x8010:09', type: UINT}
+  driveOnDelay: {object: '0x8010:10', type: UINT}
+  driveOffDelay: {object: '0x8010:11', type: UINT}
+  maxSpeed: {object: '0x8012:05', type: UINT, values: {1000: 0, 2000: 1, 4000: 2, 8000: 3, 16000: 4, 32000: 5}}
+  encoder: {object: '0x8012:08', type: USINT, convert: flag}
+  microsteps: {object: '0x8012:45', type: USINT, values: {1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6}}
