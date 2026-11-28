@@ -87,14 +87,10 @@ class TestPropose(unittest.TestCase):
         self.assertIn((0x6001, 2), entries)
         self.assertEqual(entries[(0x6001, 2)].pin, "out-unit1.calculated-voltage")
         self.assertEqual(entries[(0x6001, 2)].hal_type, "real")
-        # bit names from the shipped quirk file for the EaserCAT 7000
-        self.assertEqual(entries[(0x7000, 0)].split, ["out-1", "out-2", "activate-relay", "out-4"])
-        self.assertEqual(entries[(0x7000, 0)].pin, "")
-        self.assertEqual(len(entries[(0x6000, 0)].split), 12)
-        self.assertTrue(any("from the quirk file metalmusings-easercat-7000.yaml" in n for n in p.notes))
-        cfg_entry = config._entry(entries[(0x7000, 0)])
-        self.assertEqual(cfg_entry["split"][2], "activate-relay")
-        self.assertNotIn("pin", cfg_entry)
+        # no quirk file: the I/O words are whole pins (the user names bits in the window)
+        self.assertFalse(entries[(0x7000, 0)].split)
+        self.assertTrue(entries[(0x7000, 0)].pin)
+        self.assertFalse(any("quirk file" in n for n in p.notes))
         self.assertTrue(any("subindexes taken from the CoE dictionary" in n for n in p.notes))
         self.assertIsNone(p.dc_assign)
 
@@ -1100,6 +1096,8 @@ class TestConfig(unittest.TestCase):
     def test_invert_is_checked(self):
         cfg = self.easercat_config()
         entries = cfg["slaves"][0]["process-data"]["inputs"][0]["entries"]
+        entries[0].pop("pin", None)
+        entries[0]["split"] = ["in-%d" % n for n in range(1, 13)]
         entries[0]["invert"] = ["in-4", "in-7"]
         self.assertFalse(config.check(cfg))
         entries[0]["invert"] = ["in-4", "nope"]

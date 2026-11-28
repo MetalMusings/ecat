@@ -53,7 +53,7 @@ class TestFiles(unittest.TestCase):
     def test_shipped_files_read(self):
         qs = quirks.load(reload=True)
         self.assertEqual(quirks.problems, [])
-        self.assertEqual(len(qs), 5)
+        self.assertEqual(len(qs), 4)
         # a family's file matches each of its products
         self.assertEqual(quirks.of((0xAB5, 0x980))["name"], "GeRui EC1 series")
         self.assertEqual(quirks.of((0xAB5, 0x1030))["name"], "GeRui EC1 series")
@@ -157,11 +157,6 @@ class TestSplitPins(unittest.TestCase):
         for bad in ({"split": "abc"}, {"split": [1]}, {}):
             with self.assertRaises(quirks.QuirkError):
                 quirks.parse({"pins": {"0x6000:00": bad}})
-
-    def test_the_shipped_easercat_file_names_the_bits(self):
-        pins = quirks.pins((0xD0BED1D0, 0x7000))
-        self.assertEqual(pins[(0x6000, 0)]["split"][:4], ["in-1", "in-2", "in-3", "in-4"])
-        self.assertEqual(pins[(0x7000, 0)]["split"][2], "activate-relay")
 
     def test_saving_a_slave_keeps_its_bit_pins(self):
         slave = {"identity": dict(EL7041), "name": "n", "process-data": {"inputs": [

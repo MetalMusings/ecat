@@ -4321,7 +4321,7 @@ them, so the written files say everything that happens.
 | Folder | |
 |---|---|
 | `~/.config/ecatsetup/devices/*.yaml` (or `$ECATSETUP_DEVICES`) | Your own. A file here for a vendor and product is laid over the one that comes with the program, fact by fact: where both say something, yours is used; the rest of the shipped file stays. |
-| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `stepperonline-a6.yaml`, `gerui-ec1.yaml`, `beckhoff-el7041.yaml`, `metalmusings-easercat-7000.yaml`. |
+| `ecatsetup/devices/*.yaml` in the program | Those that come with EtherCAT Setup: `rtelligent-ect60.yaml`, `stepperonline-a6.yaml`, `gerui-ec1.yaml`, `beckhoff-el7041.yaml`. |
 
 *Save as quirk file...* on a slave's page writes one from a slave as you
 have configured it: its identity, the pin names, HAL types, scales and
@@ -4442,10 +4442,6 @@ program under development, and may change.
 - `beckhoff-el7041.yaml`: pin names and the velocity scale; HAL lines
   that reset an error when `enable` comes on again (as lcec's driver did).
   See [stepper terminals](#stepper-and-dc-motor-terminals).
-- `metalmusings-easercat-7000.yaml`: the bit pins of the THC and I/O device
-  (`in-1`..`in-12`, `out-1`, `out-2`, `activate-relay`, `out-4`, the ohmic
-  sensing flags). Which terminal is wired to what is the machine's: see
-  the comments in the file for the plasma cutter it ran on.
 
 ## Command line
 

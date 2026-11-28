@@ -1,0 +1,15 @@
+# Test data only: the bit names of the EaserCAT 7000 test buses (the device's
+# owner's own names, not shipped with the program). The window's tests read it
+# as the user's quirk files (ECATSETUP_DEVICES).
+name: MetalMusings EaserCAT 7000
+match: {vendor: '0xD0BED1D0', product: '0x00007000'}
+
+pins:
+  '0x6000:00':
+    split: [in-1, in-2, in-3, in-4, in-5, in-6, in-7, in-8, in-9, in-10, in-11, in-12]
+  '0x7000:00':
+    split: [out-1, out-2, activate-relay, out-4]
+  '0x7001:04': {split: [in-unit1.enable-ohmic-sensing]}
+  '0x7002:04': {split: [in-unit2.enable-ohmic-sensing]}
+  '0x6001:05': {split: [out-unit1.ohmic-sensing-sensed]}
+  '0x6002:05': {split: [out-unit2.ohmic-sensing-sensed]}

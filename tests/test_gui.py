@@ -8,6 +8,7 @@ import copy
 import ipaddress
 import os
 import time
+import shutil
 import sys
 import tempfile
 import unittest
@@ -17,8 +18,8 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # the tests are written for 2.10 unless they say otherwise (lcnc_env.series)
 os.environ.setdefault("ECATSETUP_LINUXCNC_SERIES", "2.10")
-# quirk files: only those that come with the program
-os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+# quirk files: those that come with the program and the test buses' EaserCAT 7000 names
+os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "data", "devices")
 os.environ["ECATSETUP_MEASURED"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 # state (test lock, drive limits): never the user's own
@@ -3539,7 +3540,7 @@ class TestBringup(WindowBase):
         page.show_bringup()
         mark, what, text, go, _keep = page.bringup_rows[keys.index("op")]
         self.assertEqual(mark.text(), "✓")
-        self.assertTrue(go.isHidden())
+        self.assertFalse(go.isHidden())                        # still leads to the workbench
         # a row leads to its card
         n = keys.index("start")
         page.bringup_found[n].card = "operation"
@@ -3699,6 +3700,14 @@ class TestDeviceData(WindowBase):
         # cleanups run last first: the quirks are read again after the environment is back
         self.addCleanup(quirks.load, True)
         p = mock.patch.dict(os.environ, env)
+        p.start()
+        self.addCleanup(p.stop)
+        # the program's files and, as one of them, the test buses' EaserCAT 7000 names
+        shipped = os.path.join(self.tmp.name, "shipped")
+        shutil.copytree(quirks.SHIPPED, shipped)
+        shutil.copy(os.path.join(os.path.dirname(__file__), "data", "devices", "easercat-7000.yaml"),
+                    shipped)
+        p = mock.patch.object(quirks, "SHIPPED", shipped)
         p.start()
         self.addCleanup(p.stop)
         quirks.load(reload=True)
