@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # the tests are written for 2.10 unless they say otherwise (lcnc_env.series)
 os.environ.setdefault("ECATSETUP_LINUXCNC_SERIES", "2.10")
 # quirk files: those that come with the program and the test buses' EaserCAT 7000 names
-os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "data", "devices")
+DEVICES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "devices")
+os.environ["ECATSETUP_DEVICES"] = DEVICES
 os.environ["ECATSETUP_MEASURED"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
 os.environ["ECATSETUP_SETTINGS"] = os.path.join(os.path.dirname(__file__), "no-such-dir", "settings.yaml")
 # state (test lock, drive limits): never the user's own
@@ -91,6 +92,13 @@ class BusTest(unittest.TestCase):
             self.addCleanup(p.stop)
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
+        # the test buses' EaserCAT 7000 names, whatever another test module set at import
+        from ecatsetup import quirks
+        self.addCleanup(quirks.load, True)
+        p = mock.patch.dict(os.environ, {"ECATSETUP_DEVICES": DEVICES})
+        p.start()
+        self.addCleanup(p.stop)
+        quirks.load(reload=True)
 
 
 class TestTool(unittest.TestCase):
@@ -3210,6 +3218,43 @@ class TestProcessDataColumns(WindowBase):
             page.pd.setColumnHidden(page.SPLIT, True)
         page.pd.cellWidget(row, page.HALTYPE).setCurrentText(page.BIT_FIELD)
         self.assertFalse(page.pd.isColumnHidden(page.SPLIT))
+
+
+@unittest.skipIf(gui is None, "PyQt5 is not installed")
+class TestDeviceNotes(WindowBase):
+    """Notes on this device: the card at the top of the slave page, and a sentence that
+    names an object as that object's tooltip (tests/data/devices/easercat-7000.yaml)."""
+
+    def test_the_card_and_the_tooltips(self):
+        w = self.window()
+        w.select_slave(0)
+        page = w.slave_page
+        self.assertFalse(page.device_notes.isHidden())
+        text = page.device_notes_text.text()
+        self.assertIn("<p>Bit 3 of 0x7000:00 switches the ohmic-sensing relay.</p>", text)
+        self.assertIn("<p>A second paragraph", text)
+        self.assertIn("Yours (", text)                         # the test file is a user's file
+        rows = {page.pd.item(r, 1).text(): r for r in range(page.pd.rowCount())}
+        tip = page.pd.item(rows["0x7000:00"], 1).toolTip()
+        self.assertIn("From the notes on this device:\n- Bit 3 of 0x7000:00", tip)
+        self.assertIn("ohmic-sensing relay", page.pd.item(rows["0x7000:00"], 2).toolTip())
+        self.assertNotIn("notes", page.pd.item(rows["0x6000:00"], 1).toolTip() or "")
+        # a setting of that object
+        w.session.slave(0).setdefault("settings", []).append(
+            {"object": "0x7000:00", "type": "UDINT", "value": 0})
+        w.select_slave(0)
+        st = page.st
+        r = next(r for r in range(st.rowCount()) if st.item(r, 0).text() == "0x7000:00")
+        self.assertIn("ohmic-sensing relay", st.item(r, 0).toolTip())
+        # the workbench's watch list
+        tp = w.test_page
+        tp.watch.add(0, 0x7000, 0, None, "Outputs")
+        tp.show_watch()
+        self.assertIn("ohmic-sensing relay", tp.watch_table.item(0, 1).toolTip())
+        # a device without notes: no card
+        with mock.patch.object(gui.quirks, "notes", return_value=[]):
+            page.show_device_notes(w.session.slave(0))
+        self.assertTrue(page.device_notes.isHidden())
 
 
 @unittest.skipIf(gui is None, "PyQt5 is not installed")

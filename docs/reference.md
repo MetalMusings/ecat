@@ -817,6 +817,11 @@ format: 1                  # the file format (shared files need it)
 name: Beckhoff EL7041
 match: {vendor: '0x00000002', product: '0x1B813052'}
 
+notes: |                   # what is worth knowing, as text
+  The motor's current is 0x8010:01 (mA).
+
+  A blank line starts a new paragraph.
+
 sources:                   # where each fact comes from (optional)
   commands 0x2010: {kind: manual, ref: ECT manual 2.4.6, date: 2026-11-26}
   settings 0x8010:01: {kind: tried, date: 2026-11-26, revision: '0x00100000'}
@@ -869,6 +874,7 @@ used, and the rest of the shipped file stays.
 | `format` | The file format, now 1. A file of a newer format is read without the keys this program does not know; an older program does not refuse it. |
 | `sources` | Per fact, where it comes from: `kind` (`manual`, `tried`, `observed`, `shared`, `other`) and optionally `ref`, `date`, `revision`, `firmware`, `by`, `given`, `context` (for experience: the machine where it worked), `list` (for a list: `closed`, only these, or `open`, these worked) and `relation` (`completes`: the drive and its ESI file say nothing; `corrects`: they say otherwise). A fact is named by its key and object, as `commands 0x2010`, `settings 0x2009:00`, `homing input-bits IN5`, `tuning 0x2009:00`, `measure ignore 0x6077`, `position kept`, `errors 0x8611`, `hal`. *Device data...* writes them. |
 | `match` | `vendor` and `product` of the device. |
+| `notes` | A text: what is worth knowing about the device (a YAML block, `notes: \|`). Blank lines part paragraphs. A sentence that names an object (`0x2010`, `0x2007:03`, `0x2007:03-06`) is also that object's tooltip in the window. Yours is shown after the program's, not instead of it. |
 | `pins` | Per object: `pin` (its name), and optionally `hal-type`, `scale`, `offset`, as in [the configuration file](#pdos-and-entries); or `split`, a list of bit pin names from bit 0 (`null` for a bit without a pin) for an object that holds several bits. Used when EtherCAT Setup proposes the slave; the file then holds them like any other pin. *Save as quirk file* keeps bit pins too. |
 | `settings` | Settings (SDOs written at every start) the slave gets when it is proposed: `object`, `type`, `value`, and optionally `name`, as in [the configuration file](#pdos-and-entries). |
 | `commands` | Per object index: why it is a command, or the longer form `note` (why), `value`, `type`, `confirm` (what *Run command* writes) and `purpose` (`zero-position`, `store-parameters`, `clear-fault`, `other`: what it is for, when the program can act on it). The workbench's *Write* does not write it (*Run command* does); as a setting it is warned about, in the window and by `--check`, not refused. An lcec `sdoConfig` of a `zero-position` command is not imported; `cia402.zero-at-start` is offered as an option in its place (From lcec, the import's note); one of another command is offered marked, and not by *Add all*. |

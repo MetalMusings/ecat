@@ -4,6 +4,11 @@
 name: MetalMusings EaserCAT 7000
 match: {vendor: '0xD0BED1D0', product: '0x00007000'}
 
+notes: |
+  Bit 3 of 0x7000:00 switches the ohmic-sensing relay.
+
+  A second paragraph without an object.
+
 pins:
   '0x6000:00':
     split: [in-1, in-2, in-3, in-4, in-5, in-6, in-7, in-8, in-9, in-10, in-11, in-12]

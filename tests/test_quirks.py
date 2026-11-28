@@ -133,6 +133,60 @@ class TestFiles(unittest.TestCase):
                 quirks.parse(data)
 
 
+class TestNotes(unittest.TestCase):
+    """The notes on a device (a text) and the sentences that name an object."""
+
+    def test_the_shipped_drives_have_notes(self):
+        quirks.load(reload=True)
+        ect = (0xA88, 0xA880002)
+        self.assertEqual(len(quirks.notes(ect)), 1)
+        tip = quirks.object_tip(ect, 0x2010, 0)
+        self.assertIn("Never write 0x2010", tip)
+        for key in ((0x400000, 0x715), (0xAB5, 0x980), (2, 0x1B813052)):
+            self.assertTrue(quirks.notes(key), key)
+        self.assertEqual(quirks.notes((1, 2)), [])
+
+    def test_sentences_and_objects(self):
+        q = quirks.parse({"name": "t", "match": {"vendor": "0x2", "product": "0x1"}, "notes":
+                          "Inputs: 0x2007:03-06 set the function. Polarity\nis 0x2008, bits 2-5.\n\n"
+                          "Error 0x8611 (0x603F) is a following error. 0x2023:01 is Kp."})
+        self.assertEqual(quirks.sentences(q["notes"][0][1]),
+                         ["Inputs: 0x2007:03-06 set the function.", "Polarity is 0x2008, bits 2-5.",
+                          "Error 0x8611 (0x603F) is a following error.", "0x2023:01 is Kp."])
+        orig = quirks._cache
+        quirks._cache = [q]
+        try:
+            n = quirks.object_notes
+            self.assertEqual(n((2, 1), 0x2007, 5), ["Inputs: 0x2007:03-06 set the function."])
+            self.assertEqual(n((2, 1), 0x2007, 7), [])
+            self.assertEqual(n((2, 1), 0x2007), ["Inputs: 0x2007:03-06 set the function."])
+            self.assertEqual(n((2, 1), 0x2008, 0), ["Polarity is 0x2008, bits 2-5."])   # any subindex
+            self.assertEqual(n((2, 1), 0x2023, 2), [])
+            self.assertEqual(n((2, 1), 0x603F, 0), ["Error 0x8611 (0x603F) is a following error."])
+            self.assertEqual(quirks.object_tip((2, 1), 0x9999, 0), "")
+        finally:
+            quirks._cache = orig
+
+    def test_yours_comes_after_the_programs(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "mine.yaml"), "w") as f:
+                f.write("name: mine\nmatch: {vendor: '0xA88', product: '0x0A880002'}\n"
+                        "notes: My X uses 0x2010 never.\n")
+            os.environ["ECATSETUP_DEVICES"] = d
+            try:
+                quirks.load(reload=True)
+                got = quirks.notes((0xA88, 0xA880002))
+                self.assertEqual([os.path.basename(p) for p, _ in got], ["rtelligent-ect60.yaml", "mine.yaml"])
+                self.assertEqual(len(quirks.object_notes((0xA88, 0xA880002), 0x2010, 0)), 2)
+            finally:
+                os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__), "no-such-dir")
+                quirks.load(reload=True)
+
+    def test_notes_must_be_text(self):
+        with self.assertRaises(quirks.QuirkError):
+            quirks.parse({"notes": ["a"]})
+
+
 class TestLcecMap(unittest.TestCase):
     """lcec's drivers' translations (lcecmap.py, ecatsetup/lcec), apart from the devices."""
 

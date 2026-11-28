@@ -174,6 +174,7 @@ TOPICS = {
     "Problems": ("ecatsetup.md", "bus"),
     "Where the configuration comes from": ("ecatsetup.md", "bus"),
     "Bringing it up": ("ecatsetup.md", "bringing-a-drive-up"),
+    "Notes on this device": ("ecatsetup.md", "notes-on-a-device"),
     "What runs": ("ecatsetup.md", "live"),
     "Slaves": ("ecatsetup.md", "live"),
     "Pins (the chosen slave)": ("ecatsetup.md", "live"),

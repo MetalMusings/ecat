@@ -5,6 +5,12 @@
 name: Beckhoff EL7041
 match: {vendor: '0x00000002', product: '0x1B813052'}
 
+notes: |
+  The velocity interface: 0x7010:21 is -32767..32767 of the speed range set in
+  0x8012:05 (0 = 1000 ... 5 = 32000 full steps/s). The motor's current is 0x8010:01
+  (mA). The program's HAL lines reset an error when enable comes on again, as lcec's
+  el7041 driver did. Not tried on a terminal.
+
 # Pins for objects, used when EtherCAT Setup proposes the slave.
 pins:
   '0x7010:01': {pin: enable}

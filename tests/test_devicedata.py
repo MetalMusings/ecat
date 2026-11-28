@@ -419,7 +419,7 @@ class TestRepoTools(unittest.TestCase):
         self.assertEqual((e["path"], e["upvotes"], e["author"]), (rel, 3, "alice"))
         self.assertEqual((e["created"], e["words"]), ("2026-11-26T18:00:00Z", "My mill's X."))
         line = devicedata.describe(dict(e, raw=devicedata.read_raw(os.path.join(self.root, rel))))
-        self.assertTrue(line.startswith("#7 · Rtelligent ECT60 · 0x2010 is a command, not a setting, "), line)
+        self.assertTrue(line.startswith("#7 · Rtelligent ECT60 · Notes on the device, 0x2010 is a command, "), line)
         self.assertIn("more · alice, 2026-11-26 · 3 up, 1 worked", line)
         self.assertEqual(devicedata.post_words(body), "")
         self.assertEqual([(r["author"], r["result"], r["words"]) for r in e["reports"]],

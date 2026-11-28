@@ -13,13 +13,14 @@ so that the written files stay complete and predictable.
 
 import glob
 import os
+import re
 
 import yaml
 
 from . import config
 
 SHIPPED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices")
-KEYS = {"name", "match", "commands", "limits", "pins", "settings", "hal", "lcec", "homing",
+KEYS = {"name", "match", "notes", "commands", "limits", "pins", "settings", "hal", "lcec", "homing",
         "tuning", "measure", "format", "sources", "position", "errors"}
 # what a command does, when the program can act on it (commands' rich form, `purpose`):
 # a drive's "zero position" command is what cia402.zero-at-start replaces
@@ -67,6 +68,12 @@ def parse(data, path="<quirk>"):
         raise QuirkError("sources: a mapping of facts to where they come from")
     q = {"name": str(data.get("name") or os.path.basename(path)), "path": path, "raw": data,
          "sources": dict(data.get("sources") or {})}
+    notes = data.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise QuirkError("notes: a text")
+    # what is worth knowing about the device, as text (decided 2026-11-28): one note per
+    # file, the program's and the user's apart (load)
+    q["notes"] = [(path, notes.strip())] if notes and notes.strip() else []
     m = data.get("match")
     if m is not None:
         if not isinstance(m, dict) or "vendor" not in m or "product" not in m:
@@ -268,8 +275,11 @@ def load(reload=False):
                       if mine & set(sq.get("matches", [sq.get("match")]))), None)
         if under:
             try:
+                mine_notes = q["notes"]
                 q = parse(devicedata.merge(under[1], data), q["path"])
                 q["layers"] = [under[0]["path"]]
+                # both notes: the program's first, then the user's
+                q["notes"] = under[0]["notes"] + mine_notes
             except (TypeError, ValueError, AttributeError) as e:
                 problems.append("%s over %s: %s" % (q["path"], under[0]["path"], e))
         out.append(q)
@@ -293,6 +303,50 @@ def of(key):
     if isinstance(key, dict):
         key = identity(key)
     return next((q for q in load() if key in q.get("matches", [q.get("match")])), {}) if key else {}
+
+
+def notes(slave):
+    """[(path, text)]: the device's notes, the program's first, then the user's."""
+    return list(of(slave).get("notes") or [])
+
+
+# 0x2010, 0x2007:03, or a range of subindexes 0x2007:03-06
+_OBJECT = re.compile(r"\b0x([0-9A-Fa-f]{4})(?::([0-9A-Fa-f]{1,2})(?:-([0-9A-Fa-f]{1,2}))?)?\b")
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\"'])")
+
+
+def sentences(text):
+    """The text's sentences, each on one line (a paragraph's line breaks joined)."""
+    out = []
+    for para in re.split(r"\n\s*\n", text or ""):
+        para = " ".join(para.split())
+        out += [x for x in _SENTENCE.split(para) if x]
+    return out
+
+
+def object_notes(slave, index, subindex=None):
+    """The notes' sentences that name this object (0x2010, or 0x2010:01 for that
+    subindex only), in order; [] when none does."""
+    out = []
+    for _path, text in notes(slave):
+        for x in sentences(text):
+            for m in _OBJECT.finditer(x):
+                if int(m.group(1), 16) != index:
+                    continue
+                if m.group(2) is not None and subindex is not None:
+                    lo = int(m.group(2), 16)
+                    hi = int(m.group(3), 16) if m.group(3) else lo
+                    if not lo <= subindex <= hi:
+                        continue
+                out.append(x)
+                break
+    return out
+
+
+def object_tip(slave, index, subindex=None):
+    """A tooltip's text for an object named in the device's notes, or ""."""
+    found = object_notes(slave, index, subindex)
+    return ("From the notes on this device:\n" + "\n".join("- " + x for x in found)) if found else ""
 
 
 def command(slave, index):

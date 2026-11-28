@@ -4,6 +4,43 @@
 name: Rtelligent ECT60
 match: {vendor: '0x00000A88', product: '0x0A880002'}
 
+notes: |
+  Never write 0x2010 (Zero Position) as a setting: it is a command that zeroes the
+  drive's position. A setting is written at every configuration, also when the
+  drive comes back on the bus while LinuxCNC runs, and then moves the origin while
+  LinuxCNC still takes the axis as homed. It is not needed with ecat, which holds
+  the drive's position while it enables; Start position (cia402 zero-at-start)
+  gives 0 at start without writing to the drive.
+
+  The drive keeps its position counter while it has power (a plasma cutter,
+  2026-11-09).
+
+  Error 0x8611 (0x603F) is a following error larger than 0x2022 (in pulses). The
+  drive ignores its software position limits 0x607D in CSP (it moved 4.6 mm past a
+  1 mm limit, 2026-11-09).
+
+  Homing: the drive has no 0x60E3; the manual (ECT Series User Manual 2.4.6) lists
+  methods 17 to 30, 35, 36 and 37. 36 and 37 are torque homing against a stop, set
+  in 0x2030:01-06 (max torque, torque at the stop, speed, hold time, speed loop P
+  and I); 70, 50, 20, 2000, 1000, 100 and 0x2022 = 100000 worked on a plasma
+  cutter's X with 36. After torque homing the drive ignores its target until it is
+  enabled again: tick "enable again" on the homing card (home-enable-again, with
+  home-again-ms 200). After 21 and 35 it follows at once.
+
+  Inputs (manual 2.2.7, 2.2.8, 2.3.23): 0x60FD bit 16 is IN1 ... bit 21 IN6 (IN1
+  and IN2 are the encoder's A and B). 0x2007:03-06 give IN3-IN6 their function (0
+  none, 1 CW limit, 2 CCW limit, 3 home; factory IN3 1, IN4 2, IN5 3, IN6 6), 0x2008
+  their polarity at bits 2-5 (1 normally open; factory 0x3F). IN5 as a normally open
+  home switch was tried on a plasma cutter's X (2026-11-24).
+
+  Tuning (manual 2.2.9, 2.2.21, 2.2.24): 0x2009 is a sliding average on the
+  command (0-25600 us, factory 6400) that delays motion by about half its time;
+  25600 -> 2000 on a plasma cutter's X and Y gave a lag of 4.6 ms instead of 17 ms.
+  0x2011 is the servo mode. In mode 1, 0x2023:01 is the position loop Kp (factory
+  2000), 0x2023:02 Ki (100), 0x2023:04 the speed feedforward (0-100, factory 30); in
+  mode 2 (FOC), 0x2026:01 Kp and 0x2026:05 the speed feedforward. 0x6077 does not
+  report the torque (constant on these drives).
+
 # Objects that are commands, not settings: the test mode does not write
 # them, and a configuration should not set them at every start.
 commands:

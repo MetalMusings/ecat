@@ -7,6 +7,16 @@ name: GeRui EC1 series
 match: {vendor: '0x00000AB5', product: ['0x00000980', '0x00000990', '0x00001000', '0x00001010',
                                          '0x00001020', '0x00001030']}
 
+notes: |
+  0x2708 clears the fault record and 0x2709 the current fault (write 1): commands,
+  never settings.
+
+  Inputs (EC1 Series manual): X0-X2 get their function in 0x2702:01-03 (1 home, 2
+  positive limit, 4 negative limit; factory X0 4, X1 2, X2 1), their polarity in
+  0x2701, a bit per input (1 reverses). The manual gives no factory value for
+  0x2701. The EC-57A-7 (product 0x69673537) has other objects and is not covered.
+  From the manual; not tried on a drive.
+
 commands:
   '0x2708': Clear the fault record (write 1), a command, not a setting
   '0x2709': Clear the current fault (write 1), a command, not a setting

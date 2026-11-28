@@ -50,6 +50,7 @@ SOURCE_KEYS = ("kind", "ref", "date", "revision", "firmware", "by", "given", "li
 RESULTS = ("worked", "partly", "did not work")
 MAX_FILE = 32 * 1024
 MAX_TEXT = 2000
+MAX_NOTES = 16000          # the notes on a device: the file's main text
 
 
 class Error(ValueError):
@@ -97,8 +98,9 @@ class Kind:
     listing: bool = False   # a list: its source says closed (only these) or open (these worked)
 
 
-SECTIONS = ("Commands and settings", "Homing", "Drive test", "Tuning", "Process data", "HAL")
+SECTIONS = ("Notes", "Commands and settings", "Homing", "Drive test", "Tuning", "Process data", "HAL")
 KINDS = (
+    Kind(("notes",), "Notes", "Notes on the device", None, value="a text"),
     Kind(("commands", "*"), "Commands and settings", "{1} is a command, not a setting", "sdo",
          value="why (text), or note/value/type/confirm for Run command"),
     Kind(("settings", "*"), "Commands and settings", "Setting {1}", "settings",
@@ -411,8 +413,9 @@ def strip(raw):
 
 
 def _strings(x, where, out):
-    if isinstance(x, str) and len(x) > MAX_TEXT:
-        out.append("%s: a text longer than %d characters" % (where, MAX_TEXT))
+    most = MAX_NOTES if where == "file.notes" else MAX_TEXT
+    if isinstance(x, str) and len(x) > most:
+        out.append("%s: a text longer than %d characters" % (where, most))
     elif isinstance(x, dict):
         for k, v in x.items():
             _strings(k, where, out)

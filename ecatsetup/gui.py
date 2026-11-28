@@ -665,6 +665,17 @@ def item(text, editable=False, tip=None, colour=None, font=None):
     return it
 
 
+def note_tip(slave, obj, tip=None):
+    """A tooltip with what the device's notes say of an object ("0x2010:00", or
+    (index, subindex)) after the tooltip it has; tip alone when they say nothing."""
+    try:
+        index, sub = config.parse_obj(obj) if isinstance(obj, str) else obj
+    except (ValueError, TypeError):
+        return tip
+    said = quirks.object_tip(slave, index, sub) if slave else ""
+    return "\n\n".join(x for x in (tip, said) if x) or None
+
+
 def scroll(widget):
     """A page in a scroll area. Its content shrinks to the window's width as far as it can;
     what cannot (a page wider than a small window) scrolls sideways rather than being cut."""
@@ -1397,6 +1408,17 @@ class SlaveView(QWidget):
         self.bus_ident = head.add(label("", "hint", wrap=True))
         lay.addWidget(head)
 
+        # what is worth knowing about the device type, as text (quirk files' notes: the
+        # program's and the user's); sentences naming an object show where it is shown too
+        self.device_notes = Card("Notes on this device")
+        self.device_notes_text = self.device_notes.add(label("", wrap=True))
+        self.device_notes_text.setTextFormat(Qt.RichText)
+        self.device_notes_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.device_notes_hint = self.device_notes.add(label(
+            "A sentence that names an object (0x2010) shows as its tooltip on the Settings and "
+            "Process data cards, in the workbench's watch list and on From lcec.", "hint", wrap=True))
+        lay.addWidget(self.device_notes)
+
         # a drive's way to OP and its first move (bringup.py): what is known, missing, or
         # shows only when tried, each row leading to the card where it is filled
         self.bringup_card = Card("Bringing it up")
@@ -2072,6 +2094,7 @@ class SlaveView(QWidget):
         self.again.setEnabled(b is not None and not win.busy)
 
         self.show_dc(s)
+        self.show_device_notes(s)
         notes = list(p.notes) if p else []
         self.notes.setVisible(bool(notes))
         self.notes_text.setText("\n".join(notes))
@@ -2081,6 +2104,18 @@ class SlaveView(QWidget):
         self.show_homing(s)
         self.show_serial(s)
         self.show_eoe(s)
+
+    def show_device_notes(self, s):
+        found = quirks.notes(s)
+        self.device_notes.setVisible(bool(found))
+        parts = []
+        for path, text in found:
+            mine = not os.path.abspath(path).startswith(os.path.abspath(quirks.SHIPPED))
+            head = ("Yours (%s)" % html.escape(path)) if mine else "Came with the program"
+            paras = "".join("<p>%s</p>" % html.escape(" ".join(x.split()))
+                            for x in re.split(r"\n\s*\n", text) if x.strip())
+            parts.append("<p><i>%s</i></p>%s" % (head, paras) if len(found) > 1 or mine else paras)
+        self.device_notes_text.setText("".join(parts))
 
     # -- Ethernet over EtherCAT
 
@@ -3013,9 +3048,11 @@ class SlaveView(QWidget):
         cells = ["%s %s" % ("out" if direction == "outputs" else "in", pdo.get("pdo")),
                  e.get("object"), name, "%s %s" % (e.get("type", ""), e.get("bits")), use]
         for c, v in enumerate(cells):
+            tip = str(v) if v and c == 2 else None
+            if c in (1, 2):
+                tip = note_tip(s, e.get("object"), tip)
             self.pd.setItem(r, c, item(v, colour=GREY if v in ("profile", "gap") else None,
-                                       font=mono() if c in (0, 1) else None,
-                                       tip=str(v) if v and c == 2 else None))
+                                       font=mono() if c in (0, 1) else None, tip=tip))
         pin_text = e.get("pin", "")
         if use == "profile":
             ser = next((c.get("name") for c in s.get("serial") or []
@@ -3164,8 +3201,10 @@ class SlaveView(QWidget):
             value = show_value(st.get("value", ""), st.get("type"), self.win.hex_values)
             if "value" not in st and "data" in st:
                 value = "data %s" % st["data"]
+            tip = note_tip(s, st.get("object"))
             for c, v in enumerate((st.get("object"), st.get("name", ""), st.get("type", ""), value)):
-                self.st.setItem(r, c, item(v, editable=True, font=mono() if c == 0 else None))
+                self.st.setItem(r, c, item(v, editable=True, font=mono() if c == 0 else None,
+                                           tip=tip if c in (0, 1) else None))
             now = self.present.get((self.position, st.get("object")), "")
             try:
                 now = str(show_value(int(now, 0), st.get("type"), self.win.hex_values))
@@ -3193,6 +3232,8 @@ class SlaveView(QWidget):
         for row, probs in found.items():
             level = "error" if any(lv == "error" for lv, _ in probs) else "warning"
             tip = "\n".join(t for _, t in probs)
+            obj = self.st.item(row, 0)
+            tip = note_tip(s, obj.text() if obj is not None else None, tip)
             for c in range(self.st.columnCount()):
                 it = self.st.item(row, c)
                 if it is not None:
@@ -6848,12 +6889,11 @@ class TestPage(QWidget):
         t = self.watch_table
         t.setRowCount(len(self.watch.entries))
         for r, e in enumerate(self.watch.entries):
+            tip = note_tip(self.win.session.slave(e.position), (e.index, e.sub))
             for c, text in enumerate([str(e.position), "0x%04X:%02X" % (e.index, e.sub), e.name]):
-                t.setItem(r, c, QTableWidgetItem(text))
+                t.setItem(r, c, item(text, tip=tip if c in (1, 2) else None))
             for c in (3, 4):
-                item = QTableWidgetItem("")
-                item.setFont(mono())
-                t.setItem(r, c, item)
+                t.setItem(r, c, item("", font=mono()))
             stop = QPushButton("Remove")
             stop.clicked.connect(lambda _c=False, k=e.key: self.unwatch(k))
             t.setCellWidget(r, 5, stop)
@@ -7692,11 +7732,14 @@ class HalPage(QWidget):
                 st.setItem(i, 4, item("false"))
             else:
                 grey = GREY if h.command else None
+                slave = next((x for x in cfg.get("slaves") or [] if x.get("position") == h.position),
+                             None)
                 st.setItem(i, 1, item(h.setting["object"], font=mono(), colour=grey,
-                                      tip=h.command or None))
+                                      tip=note_tip(slave, h.setting["object"], h.command or None)))
                 st.setItem(i, 2, item(("%s (a command: not added by Add all)" % h.setting.get("name", "")
                                        if h.command else h.setting.get("name", "")),
-                                      tip=h.command or h.what, colour=grey))
+                                      tip=note_tip(slave, h.setting["object"], h.command or h.what),
+                                      colour=grey))
                 v = h.setting.get("value", h.setting.get("data"))
                 ttype = h.setting.get("type")
                 st.setItem(i, 3, item(show_value(v, ttype, self.win.hex_values), font=mono(),

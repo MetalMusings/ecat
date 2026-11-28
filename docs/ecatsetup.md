@@ -4321,6 +4321,22 @@ Quirks act only through what EtherCAT Setup writes (`ethercat.yaml`,
 `ethercat.hal`) or does in its workbench. The `ecat` component never reads
 them, so the written files say everything that happens.
 
+### Notes on a device
+
+The main part of a quirk file is a text, its notes: what is worth knowing
+about the device beyond the standards and its own data, such as which
+objects are commands (the ECT60's `0x2010` Zero Position must never be a
+setting), where its inputs get their function and polarity, what its
+tuning objects do, what an error code means. Up to OP, the device's SII,
+its ESI file and its dictionary are enough; after that the manual governs,
+and the notes are where the practical part of it is kept.
+
+*Notes on this device* at the top of a slave's page shows them: the notes
+that came with the program first, then yours. A sentence that names an
+object (`0x2010`, `0x2007:03`, or a range `0x2007:03-06`) also shows as the
+tooltip of that object on the Settings and Process data cards, in the
+workbench's watch list and on *From lcec*.
+
 ### Where they are
 
 | Folder | |
