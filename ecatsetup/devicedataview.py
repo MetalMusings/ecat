@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialo
                              QFormLayout, QHBoxLayout, QInputDialog, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
                              QGridLayout, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout)
 
-from . import devicedata, homing, measured, quirks, settings, testmode, tool, tuning
+from . import devicedata, measured, quirks, settings, testmode, tool, tuning
 from .gui import TITLE, label
 
 # where each card is, from the main window: (the tab's page, the card, the card shown
@@ -48,11 +48,10 @@ CARD_NAMES = {"settings": "Settings", "process-data": "Process data", "homing": 
               "diagnose": "Diagnose"}
 UNKNOWNS_SETTING = "device-data-unknowns"
 NOTHING_TO_SHARE = (
-    "You have no facts of your own about %s yet: what came with the program is shared already.\n\n"
-    "Remember what you learn about the device where you learn it, then share it here:\n"
-    "- a setting: choose it on the Settings card, then Remember for the device type...\n"
-    "- a command: Run command... on the Workbench's SDO card, for an object not known as one\n"
-    "- homing methods: Remember the drive's methods... on the homing card\n\n"
+    "You have nothing of your own about %s yet: what came with the program is shared already.\n\n"
+    "Write what you learn about the device under Your notes above (what its manual says that "
+    "matters: commands, inputs, homing, tuning objects, error codes), or remember a setting on "
+    "the Settings card (Remember for the device type...), then share it here.\n\n"
     "Your pin names and scales are never shared.")
 
 KINDS = [("tried", "Tried on this machine"), ("manual", "The device's manual"),
@@ -279,6 +278,8 @@ def page_html(name, ident, revision, esi_line, now, own, unknown=(), timing=None
         k = devicedata.kind(p)
         if other and not k.share:
             continue
+        if not other and p == ("notes",):
+            continue            # the dialog's own field above the page
         rows[k.section].append((p, k))
     out = ["<h3 style='margin-bottom:2px'>%s</h3>" % _html(name),
            "<p style='margin-top:0'>vendor 0x%08X, product 0x%08X%s<br>%s</p>" % (
@@ -312,9 +313,9 @@ def page_html(name, ident, revision, esi_line, now, own, unknown=(), timing=None
                          "<a href='card:sync'>Synchronisation card</a></td></tr>" % (_html(timing), "measured"))
         for usec, text, card in unknown if not other else ():
             if usec == sec:
-                lines.append("<tr><td colspan='3'><i style='color:#b45309'>%s</i></td><td>"
-                             "<a href='card:%s'>%s card</a></td></tr>" % (
-                                 _html(text), card, CARD_NAMES.get(card, card)))
+                lines.append("<tr><td colspan='3'><i style='color:#b45309'>%s</i></td><td>%s</td></tr>" % (
+                    _html(text), "<a href='card:%s'>%s card</a>" % (card, CARD_NAMES.get(card, card))
+                    if card else ""))
         if lines:
             out.append("<h4 style='margin-bottom:2px'>%s</h4><table cellspacing='0' cellpadding='3' "
                        "width='100%%'>%s</table>" % (_html(sec), "".join(lines)))
@@ -341,9 +342,31 @@ class DeviceDataDialog(QDialog):
                                 self.name, self.ident[0], self.ident[1],
                                 ", revision %s" % self.revision if self.revision else ""), wrap=True))
 
+        # the notes: the program's, then yours to write (what the manual says that matters)
+        lay.addWidget(label("<b>Notes on this device</b>: what is worth knowing beyond the "
+                            "standards and its own data. A sentence that names an object (0x2010) "
+                            "shows as its tooltip in the window.", wrap=True))
+        self.program_notes = label("", "hint", wrap=True)
+        self.program_notes.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.program_notes)
+        self.notes_edit = QPlainTextEdit()
+        self.notes_edit.setPlaceholderText(
+            "Your notes, such as: 0x2007:03-06 give IN3-IN6 their function (manual 2.2.7). "
+            "A blank line starts a new paragraph.")
+        self.notes_edit.setMinimumHeight(90)
+        lay.addWidget(self.notes_edit, 1)
         row = QHBoxLayout()
-        row.addWidget(label("<b>What is known about this device type</b>, grouped; each fact is changed "
-                            "on its card.", wrap=True), 1)
+        self.notes_save = QPushButton("Save your notes")
+        self.notes_save.setToolTip("Keep them in your own quirk file for this device type; empty: "
+                                   "no notes of yours")
+        self.notes_save.clicked.connect(self.save_notes)
+        row.addWidget(self.notes_save)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        row = QHBoxLayout()
+        row.addWidget(label("<b>The rest that is known about this device type</b>, grouped; each fact "
+                            "is changed on its card.", wrap=True), 1)
         self.unknown_box = QCheckBox("Show what is not known yet")
         try:
             self.unknown_box.setChecked(bool(settings.load().get(UNKNOWNS_SETTING, True)))
@@ -358,8 +381,8 @@ class DeviceDataDialog(QDialog):
         lay.addWidget(self.page, 3)
         row = QHBoxLayout()
         self.share_button = QPushButton("Share yours...")
-        self.share_button.setToolTip("Post your facts for this device (not your pin names or scales) so that "
-                                     "others can use them; needs a GitHub account")
+        self.share_button.setToolTip("Post your notes and settings for this device (not your pin names or "
+                                     "scales) so that others can use them; needs a GitHub account")
         self.share_button.clicked.connect(self.share)
         row.addWidget(self.share_button)
         self.whole_button = QPushButton("Show the whole shared file")
@@ -409,7 +432,8 @@ class DeviceDataDialog(QDialog):
         lay.addWidget(self.step)
         row = QHBoxLayout()
         self.use_button = QPushButton("Use it")
-        self.use_button.setToolTip("Put this fact into your own quirk file, with where it came from")
+        self.use_button.setToolTip("Put this fact into your own quirk file, with where it came from "
+                                   "(shared notes go under yours, headed by where they came from)")
         self.use_button.clicked.connect(self.use)
         self.try_button = QPushButton("Try it")
         self.try_button.setToolTip("Write the setting into the drive's RAM now (the drive's own value is kept "
@@ -428,6 +452,7 @@ class DeviceDataDialog(QDialog):
         close.clicked.connect(self.accept)
         row.addWidget(close)
         lay.addLayout(row)
+        self.show_notes()
         self.show_facts()
         self.show_files()
 
@@ -443,6 +468,29 @@ class DeviceDataDialog(QDialog):
         return "ESI file: %s (%s)%s" % (dev.name, os.path.basename(dev.path),
                                         ", profile %d" % dev.profile if dev.profile else "")
 
+    def show_notes(self):
+        """The program's notes (read only) and yours in the field."""
+        found = [(p, t) for p, t in quirks.notes(self.ident)
+                 if os.path.abspath(p).startswith(os.path.abspath(quirks.SHIPPED))]
+        self.program_notes.setText("Came with the program:\n" + "\n\n".join(t for _, t in found)
+                                   if found else "None came with the program.")
+        own = devicedata.read_raw(devicedata.own_path(self.ident)) or {}
+        self.notes_edit.setPlainText(str(own.get("notes") or ""))
+
+    def save_notes(self):
+        text = self.notes_edit.toPlainText().strip()
+        try:
+            path = devicedata.remember(self.ident, self.name, ("notes",), text or None, None)
+        except devicedata.Error as e:
+            QMessageBox.warning(self, TITLE, str(e))
+            return None
+        self.win.status("Your notes on %s: %s" % (self.name, "kept in %s" % path if text else "none"))
+        self.show_facts()
+        sp = getattr(self.win, "slave_page", None)
+        if sp is not None and sp.position is not None and hasattr(sp, "show_device_notes"):
+            sp.show_device_notes(self.win.session.slave(sp.position))
+        return path
+
     def show_facts(self):
         own = devicedata.read_raw(devicedata.own_path(self.ident)) or {}
         now = devicedata.current_raw(self.ident)
@@ -457,9 +505,9 @@ class DeviceDataDialog(QDialog):
                                     unknown, measured.describe(res), other))
         self.page.verticalScrollBar().setValue(bar)
         self.share_button.setToolTip(
-            "Post your facts for this device (not your pin names or scales) so that others can use "
-            "them; needs a GitHub account" if devicedata.facts(devicedata.strip(own)) else
-            "Nothing of yours to share yet: remember a fact first (press to see how)")
+            "Post your notes and settings for this device (not your pin names or scales) so that "
+            "others can use them; needs a GitHub account" if devicedata.facts(devicedata.strip(own))
+            else "Nothing of yours to share yet: write your notes first (press to see how)")
 
     def unknown_toggled(self, on):
         try:
@@ -654,7 +702,10 @@ class DeviceDataDialog(QDialog):
             QMessageBox.warning(self, TITLE, str(e))
             return
         self.used.append(devicedata.key(r["path"]))
-        self.win.status("In your own quirk file now: %s" % r["label"])
+        self.win.status("In your own quirk file now: %s" % (
+            "the shared notes, under yours" if r["path"] == ("notes",) else r["label"]))
+        if r["path"] == ("notes",):
+            self.show_notes()
         self.show_facts()
         r["now"], r["same"] = r["shared"], True
         self.go(self.at + 1)

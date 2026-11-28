@@ -1414,9 +1414,16 @@ class SlaveView(QWidget):
         self.device_notes_text = self.device_notes.add(label("", wrap=True))
         self.device_notes_text.setTextFormat(Qt.RichText)
         self.device_notes_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.device_notes_hint = self.device_notes.add(label(
+        row = QHBoxLayout()
+        self.device_notes_hint = label(
             "A sentence that names an object (0x2010) shows as its tooltip on the Settings and "
-            "Process data cards, in the workbench's watch list and on From lcec.", "hint", wrap=True))
+            "Process data cards, in the workbench's watch list and on From lcec.", "hint", wrap=True)
+        row.addWidget(self.device_notes_hint, 1)
+        self.device_notes_edit = QPushButton("Your notes...")
+        self.device_notes_edit.setToolTip("Write your own notes on this device type (Device data)")
+        self.device_notes_edit.clicked.connect(lambda: self.device_data())
+        row.addWidget(self.device_notes_edit, 0, Qt.AlignTop)
+        self.device_notes.add(row)
         lay.addWidget(self.device_notes)
 
         # a drive's way to OP and its first move (bringup.py): what is known, missing, or
@@ -2085,7 +2092,11 @@ class SlaveView(QWidget):
 
     def show_device_notes(self, s):
         found = quirks.notes(s)
-        self.device_notes.setVisible(bool(found))
+        # shown with notes, and for a drive without (to start them)
+        self.device_notes.setVisible(bool(found) or (s or {}).get("profile") == "cia402")
+        if not found:
+            self.device_notes_text.setText("<i>No notes on this device yet.</i>")
+            return
         parts = []
         for path, text in found:
             mine = not os.path.abspath(path).startswith(os.path.abspath(quirks.SHIPPED))

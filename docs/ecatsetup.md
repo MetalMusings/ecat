@@ -4368,14 +4368,19 @@ from `ecatsetup --check`.
 ### Shared device data (prototype)
 
 **A prototype, being tried; it uses a test repository that will go.**
-*Device data...* on a slave's page shows everything known about its
-device type in one place: a line on its ESI file, then the facts grouped
-(the notes, settings, timing with the measured SYNC0 periods, process
-data, HAL), each with its value,
+*Device data...* on a slave's page (or *Your notes...* on the card
+*Notes on this device*) shows everything known about its device type in
+one place. First the notes: those that came with the program, and yours
+in a field to write in (*Save your notes*; empty: none of yours). What the
+manual says that matters goes there, in plain words: which objects are
+commands, where the inputs get their function, what the drive's own
+homing methods do and the settings they need, what its tuning objects
+do, what its error codes mean. Then the rest, grouped (settings, timing
+with the measured SYNC0 periods, process data, HAL), each with its value,
 where it comes from (came with the program, the manual, tried on a
 machine, shared), a link to **the card that owns it** and, for yours,
-*forget*. A fact is changed on its card, where it is used and can be
-tried; the page itself changes nothing but your sources. *Show what is
+*forget*. A setting is changed on its card, where it is used and can be
+tried. *Show what is
 not known yet* adds, in amber, what is missing (such as: no notes on the
 device yet).
 
@@ -4397,7 +4402,8 @@ and for a list whether it is all there is or only what worked.
 
 - **Share yours...** opens a new post in the data repository
   ([MetalMusings/ecat-devices-test](https://github.com/MetalMusings/ecat-devices-test))
-  in your browser with your facts; your pin names and scales are left out.
+  in your browser with your notes and settings; your pin names and scales
+  are left out.
   Sending it needs a GitHub account. It is checked automatically there and
   shared under CC0 (anyone may use it); nobody reviews it beforehand.
 - **Fetch shared data** downloads what others shared, only when you press
@@ -4415,8 +4421,9 @@ and for a list whether it is all there is or only what worked.
   property that differs is a conflict (one of them is wrong, or the
   firmware differs: look at both sources); experience that differs is
   another machine's, and both can be right.
-  *Use it* puts the fact into your own file (with where it came from),
-  *Skip* leaves it. A shared setting can be tried first: *Try it* writes
+  *Use it* puts the fact into your own file (with where it came from);
+  shared notes go under yours, headed by where they came from, so that you
+  keep your own and can edit both. *Skip* leaves it. A shared setting can be tried first: *Try it* writes
   it into the drive's RAM while the drive stands disabled, keeping the
   drive's own value, and *Undo* (or stopping the workbench) puts that back.
 - **Report...** tells how a file worked for you (worked, partly, did not
@@ -4431,12 +4438,14 @@ program under development, and may change.
 
 ### The files that come with the program
 
-- `rtelligent-ect60.yaml`: `0x2010` is a command (Zero Position); the
-  drive test's following error is `0x2022`; the ECT60 ignores `0x607D` in
-  CSP; lcec's `0x2010` sdoConfig is not imported (*Start position* offered); it
-  keeps its position over a restart of the bus; its
-  tuning settings (`0x2009` the command filter, `0x2023` servo mode 1,
-  `0x2026` FOC); its `0x6077` is not recorded (it does not report torque).
+- `rtelligent-ect60.yaml`: notes: `0x2010` (Zero Position) is a command,
+  never a setting; it keeps its position while it has power; error
+  `0x8611`; it ignores `0x607D` in CSP; its homing methods and torque
+  homing (`0x2030`, enable again after 36 and 37); its inputs (`0x2007`,
+  `0x2008`); its tuning objects (`0x2009`, `0x2011`, `0x2023`, `0x2026`);
+  `0x6077` does not report the torque.
+- `stepperonline-a6.yaml`, `gerui-ec1.yaml`: notes on their inputs (and the
+  EC1's fault-clearing commands), from the manuals.
 - `beckhoff-el7041.yaml`: pin names and the velocity scale; HAL lines
   that reset an error when `enable` comes on again (as lcec's driver did).
   See [stepper terminals](#stepper-and-dc-motor-terminals).

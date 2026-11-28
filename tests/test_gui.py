@@ -3258,10 +3258,14 @@ class TestDeviceNotes(WindowBase):
         tp.watch.add(0, 0x7000, 0, None, "Outputs")
         tp.show_watch()
         self.assertIn("ohmic-sensing relay", tp.watch_table.item(0, 1).toolTip())
-        # a device without notes: no card
+        # a device without notes: no card, unless it is a drive (to start them)
         with mock.patch.object(gui.quirks, "notes", return_value=[]):
             page.show_device_notes(w.session.slave(0))
-        self.assertTrue(page.device_notes.isHidden())
+            self.assertTrue(page.device_notes.isHidden())
+            page.show_device_notes(dict(w.session.slave(0), profile="cia402"))
+            self.assertFalse(page.device_notes.isHidden())
+            self.assertIn("No notes on this device yet", page.device_notes_text.text())
+        self.assertEqual(page.device_notes_edit.text(), "Your notes...")
 
 
 @unittest.skipIf(gui is None, "PyQt5 is not installed")
@@ -3834,8 +3838,17 @@ class TestDeviceData(WindowBase):
         self.assertIs(page.device_data(), dlg)
         html = dlg.page.toHtml()
         text = dlg.page.toPlainText()
-        self.assertLess(text.index("Notes"), text.index("Settings"))
         self.assertLess(text.index("Settings"), text.index("Process data"))
+        # the notes: the program's above, yours in the field (not rows of the page)
+        self.assertIn("Bit 3 of 0x7000:00", dlg.program_notes.text())
+        self.assertNotIn("Notes on the device", text)
+        self.assertEqual(dlg.notes_edit.toPlainText(), "")
+        dlg.notes_edit.setPlainText("Mine: 0x2000:02 is the I2C address.")
+        dlg.save_notes()
+        self.assertEqual(self.quirks.notes(ident)[-1][1], "Mine: 0x2000:02 is the I2C address.")
+        self.assertIn("I2C address", w.slave_page.device_notes_text.text())   # the card follows
+        tip = gui.note_tip(w.session.slave(0), "0x2000:02")
+        self.assertIn("I2C address", tip)
         self.assertIn("Setting 0x2000:02", text)
         self.assertIn("value: 5", text)
         # the kind, the date and the slave's revision
@@ -3911,7 +3924,9 @@ class TestDeviceData(WindowBase):
         self.assertIn("(a property of the device)", dlg.step.text())
         self.assertTrue(dlg.try_button.isHidden())
         dlg.use()
-        self.assertEqual([t for _, t in self.quirks.notes(ident)][-1], "Their notes.")
+        self.assertEqual(self.quirks.notes(ident)[-1][1],
+                         "Mine: 0x2000:02 is the I2C address.\n\nFrom https://example/5 (bob):\nTheir notes.")
+        self.assertIn("Their notes.", dlg.notes_edit.toPlainText())        # the field shows it
         self.assertEqual(devicedata.sources(ident)["notes"]["ref"], "https://example/5")
         self.assertIn("2 of 2: Setting 0x2000:02", dlg.step.text())
         self.assertIn("value: 5", dlg.step.text())               # in use
@@ -3951,9 +3966,9 @@ class TestDeviceData(WindowBase):
         self.assertEqual(self.opened[-1], "https://example/5")
         self.assertEqual(devicedata.read_report(text)["used"], ["notes"])
         # Forget takes one of yours away again
-        dlg.link(QUrl("forget:notes"))
-        self.assertNotIn("Their notes.", [t for _, t in self.quirks.notes(ident)])
-        self.assertNotIn("Their notes", dlg.page.toPlainText())
+        dlg.notes_edit.setPlainText("")
+        dlg.save_notes()
+        self.assertEqual(len(self.quirks.notes(ident)), 1)                     # the program's only
 
     def test_a_file_from_elsewhere_is_gone_through_like_a_shared_one(self):
         import yaml

@@ -278,8 +278,8 @@ def unknowns(slave, raw, measured_results):
     raw = raw or {}
     if (slave or {}).get("profile") == "cia402" and not raw.get("notes"):
         out.append(("Notes", "No notes on this device yet: what its manual says that matters here "
-                    "(commands, inputs, homing, tuning objects, error codes) is worth writing down.",
-                    None))
+                    "(commands, inputs, homing, tuning objects, error codes) is worth writing down "
+                    "under Your notes above.", None))
     if (slave or {}).get("dc") and not measured_results:
         out.append(("Timing", "No SYNC0 period measured for this device: after a run, Remember this period "
                     "on the Live tab.", "sync"))
@@ -717,4 +717,16 @@ def take(ident, name, entry, path):
     given = (raw.get("sources") or {}).get(key(path))
     if given:
         src["given"] = source_text(given)
-    return remember(ident, name, path, get(raw, path), src)
+    value = get(raw, path)
+    if tuple(path) == ("notes",):
+        value = add_notes(read_raw(own_path(ident)) or {}, value, src)
+    return remember(ident, name, path, value, src)
+
+
+def add_notes(own, text, src):
+    """Shared notes added under your own (not in their place), headed by where they
+    came from, so that you keep yours and can edit both."""
+    head = "From %s%s:" % (src.get("ref") or "elsewhere", " (%s)" % src["by"] if src.get("by") else "")
+    mine = str(own.get("notes") or "").rstrip()
+    return ("%s\n\n%s\n%s" % (mine, head, str(text).strip())) if mine else \
+        "%s\n%s" % (head, str(text).strip())

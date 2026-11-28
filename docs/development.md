@@ -4498,5 +4498,13 @@ quirk file. What remains of them:
 - *Enable the drive again after homing* is the user's box only;
 - a drive without 0x60E3 offers every homing method.
 
-Revisit after feedback. Device data and sharing still work fact by fact on what
-is left (notes, settings); how far the notes replace them is the next step.
+Revisit after feedback.
+
+Device data around the notes (the same day, the user: "the notes largely replace
+device data"): the page shows the program's notes and yours in a field to write
+(*Save your notes*; the card *Notes on this device* has *Your notes...* for it, and
+is shown for a drive without notes too), the rest (settings, timing, pins, HAL)
+below as before. Sharing posts your notes and settings; a shared or opened file's
+notes are taken *under* yours, headed by where they came from
+(`devicedata.add_notes`), never in their place. Settings keep their fact-by-fact
+review and *Try it*.

@@ -230,7 +230,11 @@ class TestFetch(Folders):
         self.assertTrue(row["now"].startswith("Never write 0x2010"))
         self.assertEqual(row["source"]["kind"], "tried")
         devicedata.take(ECT60, "ECT60", found[0], ("notes",))
-        self.assertEqual([t for _, t in quirks.notes(ECT60)][1:], ["shared words"])
+        self.assertEqual([t for _, t in quirks.notes(ECT60)][1:], ["From https://x/3 (a):\nshared words"])
+        # shared notes go under yours, not in their place
+        devicedata.remember(ECT60, "ECT60", ("notes",), "Mine.", None)
+        devicedata.take(ECT60, "ECT60", found[0], ("notes",))
+        self.assertEqual(quirks.notes(ECT60)[-1][1], "Mine.\n\nFrom https://x/3 (a):\nshared words")
         src = devicedata.sources(ECT60)["notes"]
         self.assertEqual((src["kind"], src["ref"], src["by"]), ("shared", "https://x/3", "a"))
         self.assertIn("tried on a machine", src["given"])
