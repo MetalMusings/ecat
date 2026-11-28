@@ -4412,6 +4412,15 @@ what the process data does not carry. Next, for the manual itself: memory
 `idea-manual-excerpts` (parts of the user's own manual by object number). In the table
 below, the rows of the manufacturer's input objects are now the manual's only.
 
+Tried 2026-11-28 with the user on the same copy (slave 4, the EaserCAT 3000 test card,
+unplugged: it had given "working counter zero" every few seconds and then dropped the
+whole bus): the Switches card's Home switch box with 0x60FD as one pin and as a bit
+field (fixed for it, 96fb20a); Watch on the SDO card (0x60FD bits 2 and 20 with the
+switch, add, remove, the tab hidden, hex); method 21 on X, the bring-up row Switches
+green, the follow check after homing ("follows", its first try at the machine);
+Response on X, lag about 4.2 ms. Fixed on the way: a left drive-test file stood in
+front of the offer to start the master, and held only unchanged values (4c25b3a).
+
 The goal "homing" as the discussion went through it (for the card's next goal):
 
 | What is needed | Standard or manufacturer's | From |
