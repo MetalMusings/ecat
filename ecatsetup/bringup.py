@@ -264,7 +264,7 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
     # what the workbench saw
     s = seen or Seen()
     if s.op:
-        out.append(Row("op", OK, "Reaches OP", "seen at %s" % s.op))
+        out.append(Row("op", OK, "Reaches OP", "seen at %s" % s.op, "workbench"))
     elif s.not_op:
         out.append(Row("op", BAD, "Reaches OP", s.not_op + ": Diagnose shows its AL status code "
                        "and what it means%s" % (
@@ -284,7 +284,7 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
                 (("errors", code), None, "Error code %s: what it means" % code, "", "manual"))
     # a fault before "Operation enabled" was seen is the enable's; one after it, the move's
     if s.enabled:
-        out.append(Row("enable", OK, "Enables", "\"Operation enabled\" seen at %s" % s.enabled))
+        out.append(Row("enable", OK, "Enables", "\"Operation enabled\" seen at %s" % s.enabled, "move"))
     elif s.fault:
         text, keep = fault()
         out.append(Row("enable", BAD, "Enables", text, "diagnose", remember=keep))
@@ -301,7 +301,7 @@ def rows(slave, proposal=None, problems=(), seen=None, period_us=None, dictionar
                        "again" % (text, " after a move of %.2f mm" % s.moved if s.moved else ""),
                        "move", remember=keep))
     elif s.moved:
-        out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm" % s.moved))
+        out.append(Row("follows", OK, "Follows", "followed a move of %.2f mm" % s.moved, "move"))
     else:
         out.append(Row("follows", TRY, "Follows", "shows when you jog it on the Move card", "move"))
     out.append(_start_position(slave, s))

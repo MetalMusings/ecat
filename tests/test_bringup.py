@@ -104,6 +104,13 @@ class TestRows(Base):
         self.assertEqual(keys.index("settings"), keys.index("pdo") + 1)
         self.assertNotIn("settings", [r.key for r in bringup.rows(drive(), proposal())])
 
+    def test_rows_seen_on_the_workbench_still_lead_there(self):
+        # done rows keep their card, to look again (the user, 2026-11-28)
+        rows = bringup.rows(drive(identity=ECT60), proposal(),
+                            seen=bringup.Seen(op="10:00", enabled="10:01", moved=2.0))
+        self.assertEqual([(self.row(rows, k).state, self.row(rows, k).card) for k in ("op", "enable", "follows")],
+                         [(bringup.OK, "workbench"), (bringup.OK, "move"), (bringup.OK, "move")])
+
     def test_no_following_error_row(self):
         # the workbench's own stop is no step of its own: Follows is (the user, 2026-11-28)
         self.assertNotIn("ferror", [r.key for r in bringup.rows(drive(identity=ECT60), proposal())])
