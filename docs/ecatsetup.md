@@ -1250,7 +1250,8 @@ Safety comes in layers, so that no single one has to be perfect:
    `~/.local/state/ecatsetup/drive-limits.json` before each limit is
    written, and written back by *Done* or when the workbench stops; if the
    program dies in between, it offers to write them back at its next
-   start. While another window runs a test, the values in that file are
+   start, once a master answers (after the offer to start one), and only
+   the values that differ from the drive's own. While another window runs a test, the values in that file are
    its own: no other window offers to write them back.
 4. **Limits in HAL.** The drive's `pos-cmd` comes from a `limit3` with the
    test's velocity, acceleration and travel, in the servo thread. Until

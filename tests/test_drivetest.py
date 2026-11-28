@@ -236,6 +236,18 @@ class TestDriveTest(TestTestMode):
         self.assertEqual(self.drive.sdos, written)
         self.assertTrue(drivetest.pending_restores())
 
+    def test_values_written_as_they_were_are_not_offered_back(self):
+        # a homing test left its method and speeds, each as the drive had them
+        # (2026-11-28): nothing to put back, the file goes
+        same = {"position": 0, "index": 0x6098, "subindex": 0, "dtype": "int8", "value": 21, "original": 21}
+        other = dict(same, index=0x6099, subindex=1, dtype="uint32", value=3000, original=100)
+        drivetest._save_restores([same])
+        self.assertEqual(drivetest.drop_unchanged(), [])
+        self.assertFalse(os.path.exists(drivetest.RESTORE_FILE))
+        drivetest._save_restores([same, other])
+        self.assertEqual(drivetest.drop_unchanged(), [other])
+        self.assertEqual(drivetest.pending_restores(), [other])
+
     def test_only_cia402_drives_in_a_mode_it_can_move(self):
         run = self.started()
         with self.assertRaises(testmode.TestError):

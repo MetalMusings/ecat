@@ -8955,6 +8955,7 @@ class MainWindow(QMainWindow):
         self.master_offer_off = False       # "Don't ask again this session"
         self.master_restart_asked = False   # a master that does not fit was offered a restart
         self.master_just_started = False    # a failed read after a start is not offered again
+        self.restore_offered = False        # left drive values offered once a master answers
         self.test_timer = QTimer(self)
         self.test_timer.setInterval(200)
         self.test_timer.timeout.connect(self.poll_test)
@@ -9542,6 +9543,11 @@ class MainWindow(QMainWindow):
             self.status("Read %d slaves" % len(bus))
             self.check(extra=notes)
             QTimer.singleShot(0, self.offer_master_restart)
+            if not self.restore_offered:
+                # once a master answers: before that it could not write them back, and
+                # its question would stand in front of the offer to start one
+                self.restore_offered = True
+                QTimer.singleShot(0, self.offer_restore)
         self.run("Reading the bus...", lambda progress: self.session.read_bus(progress), done)
 
     def update_from_bus(self):
@@ -9940,9 +9946,11 @@ class MainWindow(QMainWindow):
                                         % (tuning.TRIALS_FILE, "\n".join(failed)))
                 else:
                     self.status("Written back: %s" % "; ".join(done))
-        pending = drivetest.pending_restores()
-        if not pending or testmode.test_holder():
+        if testmode.test_holder():
             # while another window runs a test, the values are its own
+            return
+        pending = drivetest.drop_unchanged()
+        if not pending:
             return
         text = "\n".join("slave %s (%s): 0x%04X:%02X back to %s" % (
             e.get("position"), e.get("slave"), e["index"], e["subindex"], e["original"])
@@ -10321,8 +10329,10 @@ def main(path=None, esi_paths=(), ini_path=None, mode="csp", read_bus=True):
     if ini_path and integrate.expanded_source(ini_path):
         QTimer.singleShot(300, lambda: win.set_ini(ini_path))
     if read_bus:
-        win.read_bus()
-    QTimer.singleShot(500, win.offer_restore)
+        win.read_bus()          # offers to put back left values once the bus is read
+    else:
+        win.restore_offered = True
+        QTimer.singleShot(500, win.offer_restore)
     from . import quirks
     quirks.load()
     if quirks.problems:

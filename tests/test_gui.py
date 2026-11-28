@@ -1568,6 +1568,20 @@ class TestWindow(WindowBase):
             card.watch_button.click()
         watch.assert_called_once_with(0, 0x60FD, 0)
 
+    def test_left_drive_values_are_offered_once_the_bus_is_read(self):
+        # not at a fixed time after start: with no master its question stood in
+        # front of the offer to start one, and could not write anything (2026-11-28)
+        w = self.window()
+        calls = []
+        with mock.patch.object(w, "run", lambda what, fn, done: done(fn(lambda *a: None))), \
+                mock.patch.object(w, "offer_master_restart", lambda: None), \
+                mock.patch.object(w, "offer_restore", lambda: calls.append(1)):
+            w.read_bus()
+            QApplication.processEvents()
+            w.read_bus()
+            QApplication.processEvents()
+        self.assertEqual(calls, [1])
+
     def test_sdo_watch(self):
         w = self.window()
         page = w.test_page

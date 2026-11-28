@@ -188,6 +188,19 @@ def pending_restores():
         return []
 
 
+def drop_unchanged():
+    """Entries a test wrote with the value the drive already had: nothing to put
+    back. Left out of the file; the rest are returned (what is still to write)."""
+    entries = pending_restores()
+    left = [e for e in entries if e.get("value") != e.get("original")]
+    if len(left) != len(entries):
+        if left:
+            _save_restores(left)
+        elif os.path.exists(RESTORE_FILE):
+            os.remove(RESTORE_FILE)
+    return left
+
+
 def _save_restores(entries):
     os.makedirs(os.path.dirname(RESTORE_FILE), exist_ok=True)
     tmp = RESTORE_FILE + ".tmp"
