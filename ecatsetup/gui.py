@@ -1560,7 +1560,8 @@ class SlaveView(QWidget):
         self.again = QPushButton("Start over from the bus...")
         self.again.setToolTip("Read the slave and replace its whole entry (process data, pins, DC, "
                               "settings, init-cmds) with a new proposal for the chosen profile and "
-                              "mode. The name is kept; asks first. To change only the PDOs, use the "
+                              "mode. The name and the pin names of objects still mapped are kept; asks "
+                              "first. To change only the PDOs, use the "
                               "PDO boxes on the Process data card.")
         self.again.clicked.connect(self.propose_again)
         over.addWidget(self.again)
@@ -9589,7 +9590,8 @@ class MainWindow(QMainWindow):
     def propose_again(self, pos, mode, pdo_set):
         if self.session.slave(pos) is not None and QMessageBox.question(
                 self, TITLE, "Replace slave %d's process data, pins, DC and settings with a new "
-                "proposal from the bus? Its name is kept; other changes made to it are lost "
+                "proposal from the bus? Its name, and the pin names of objects it still maps, are "
+                "kept; other changes made to it are lost "
                 "(until you save, the file is not changed)." % pos,
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             self.refresh(keep_page=True)     # the PDO assignment box back to the one in use

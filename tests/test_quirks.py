@@ -95,6 +95,29 @@ class TestFiles(unittest.TestCase):
                 os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__),
                                                                "no-such-dir")
 
+    def test_a_users_file_gives_no_hal_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "el7041.yaml"), "w") as f:
+                f.write("name: mine\nmatch: {vendor: '0x2', product: '0x1B813052'}\n"
+                        "pins: {'0x7010:01': {pin: power}}\nhal: {lines: ['net a b']}\n")
+            with open(os.path.join(d, "other.yaml"), "w") as f:
+                f.write("name: other\nmatch: {vendor: '0x2', product: '0x1'}\n"
+                        "hal: {lines: ['net a b']}\n")
+            os.environ["ECATSETUP_DEVICES"] = d
+            try:
+                quirks.load(reload=True)
+                q = quirks.of((2, 0x1B813052))
+                self.assertEqual(q["pins"][(0x7010, 1)]["pin"], "power")        # pins: yes
+                self.assertNotIn("net a b", q["hal"]["lines"])               # the shipped lines stay
+                self.assertIn("net {signal:0x6010:04} => {name}-auto-reset.in1", q["hal"]["lines"])
+                self.assertNotIn("hal", quirks.of((2, 1)))
+                self.assertEqual(len(quirks.problems), 2)
+                self.assertIn("hal left out: only the program's files give it", quirks.problems[0])
+            finally:
+                os.environ["ECATSETUP_DEVICES"] = os.path.join(os.path.dirname(__file__),
+                                                               "no-such-dir")
+                quirks.load(reload=True)
+
     def test_parse_errors(self):
         for data, msg in (({"match": {"vendor": "0x2"}}, "match needs vendor and product"),
                           ({"pins": {"0x7010:01": {}}}, "pins.0x7010:01 needs a pin"),

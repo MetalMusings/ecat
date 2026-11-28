@@ -230,12 +230,22 @@ _cache = None
 problems = []   # files that could not be read, as text
 
 
-def _read(d):
+# keys only the program's own files give (decided 2026-11-28): HAL lines are a recipe the
+# program carries and tests, as lcec's translations are; a user's file that has them is
+# read without them
+SHIPPED_ONLY = ("hal",)
+
+
+def _read(d, own=True):
     out = []
     for path in sorted(glob.glob(os.path.join(d, "*.yaml"))):
         try:
             with open(path) as f:
                 data = yaml.safe_load(f)
+            if not own and isinstance(data, dict) and set(SHIPPED_ONLY) & set(data):
+                problems.append("%s: %s left out: only the program's files give it"
+                                % (path, ", ".join(k for k in SHIPPED_ONLY if k in data)))
+                data = {k: v for k, v in data.items() if k not in SHIPPED_ONLY}
             out.append((parse(data, path), data))
         except (OSError, yaml.YAMLError, TypeError, ValueError, AttributeError) as e:
             problems.append("%s: %s" % (path, e))
@@ -252,7 +262,7 @@ def load(reload=False):
     del problems[:]
     shipped = _read(SHIPPED)
     out = []
-    for q, data in _read(user_dir()):
+    for q, data in _read(user_dir(), own=False):
         mine = set(q.get("matches", [q.get("match")]))
         under = next(((sq, sd) for sq, sd in shipped
                       if mine & set(sq.get("matches", [sq.get("match")]))), None)

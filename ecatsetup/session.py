@@ -533,7 +533,8 @@ class Session:
 
     def propose_again(self, position, mode=None, pdo_set=None):
         """Read one slave again and replace its entry with a new proposal in
-        the given mode or PDO assignment. Its name and other modes are kept.
+        the given mode or PDO assignment. Its name, other modes and pin names
+        (config.keep_pins) are kept.
         Returns the proposal's notes."""
         old = self.slave(position)
         mode = mode or self._slave_mode(position)
@@ -541,7 +542,11 @@ class Session:
                                   extra_modes=self._slave_modes(position, mode))
         self.bus[position] = BusSlave(info, coe, p)
         new = config.slave_from_proposal(p, name=(old or {}).get("name"))
+        notes = list(p.notes)
         if old is not None:
+            kept = config.keep_pins(old, new)
+            if kept:
+                notes.append("pin names kept for %s" % ", ".join(kept))
             modes = (old.get("cia402") or {}).get("modes")
             if modes and "cia402" in new:
                 new["cia402"]["modes"] = [m for m in modes if m != new["cia402"]["mode"]]
@@ -553,7 +558,7 @@ class Session:
                 netif.fill_master(self.cfg, self.bus_interface)
             self.cfg["slaves"].append(new)
             self.cfg["slaves"].sort(key=lambda s: s["position"])
-        return list(p.notes)
+        return notes
 
     # what the PDO part of a slave's entry is made of: replaced together by a way or a profile
     PDO_KEYS = ("process-data", "encoders", "serial", "configure-pdos")

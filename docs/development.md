@@ -4456,3 +4456,17 @@ device file that still has `lcec:` is read without it. This is a first step of
 reducing the device files to what concerns the device (the discussion of
 2026-11-28: a free-text note per device, the rest from the standards and the
 device's own data).
+
+## Pin names kept, HAL lines the program's own (2026-11-28)
+
+Decided with the user after the lcec move. *Start over from the bus* (and a mode
+or PDO set change that proposes a slave again) keeps the pin choices of objects
+the new proposal still maps and gives pins to (`config.keep_pins`: names, bit
+pins, inverts, HAL types, scales), so a user's names survive without a quirk
+file. A user's quirk file may still name pins (a machine's choice, never shared);
+`hal` is read only from the program's own files (`quirks.SHIPPED_ONLY`): HAL lines
+are a recipe the program carries and tests, as lcec's translations are. A user's
+`hal` is left out with a note, and shared files cannot carry it (the checkable
+HAL form for sharing, `devicedata.check_hal`, is gone). The MetalMusings
+EaserCAT 7000 file is no longer shipped: it is the user's own card, with the
+plasma cutter's names (kept as test data in tests/data/devices).

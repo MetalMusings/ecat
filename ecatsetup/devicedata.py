@@ -36,7 +36,8 @@ CATEGORY = "general"
 LICENCE = "CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)"
 
 # what a shared file may hold: the device's facts, never the machine's choices
-SHARE_KEYS = (quirks.KEYS | {"format", "sources"}) - {"pins"}
+# pins: a machine's choice; hal: the program's own (quirks.SHIPPED_ONLY); lcec: read no more
+SHARE_KEYS = (quirks.KEYS | {"format", "sources"}) - {"pins", "lcec"} - set(quirks.SHIPPED_ONLY)
 SOURCE_KINDS = ("manual", "tried", "observed", "shared", "other")
 # what else a source may say (docs/development.md "Device facts: properties, advice, ..."):
 # a list's kind (a manual's "only these" or tests' "these worked"), what the fact does to
@@ -49,14 +50,6 @@ SOURCE_KEYS = ("kind", "ref", "date", "revision", "firmware", "by", "given", "li
 RESULTS = ("worked", "partly", "did not work")
 MAX_FILE = 32 * 1024
 MAX_TEXT = 2000
-
-# HAL in a shared file: plain logic only (decided 2026-11-26)
-HAL_COMPONENTS = {"and2", "or2", "xor2", "not", "edge", "oneshot", "debounce", "timedelay",
-                  "mux2", "scale", "comp", "lowpass", "flipflop", "toggle", "sum2", "limit1"}
-_INSTANCE = re.compile(r"\{name\}-[A-Za-z0-9_-]+")
-_OWN_PIN = re.compile(r"(\{name\}-[A-Za-z0-9_-]+)\.[A-Za-z0-9_.-]+")
-_SLAVE = re.compile(r"\{(pin|signal):0x[0-9A-Fa-f]{4}(:[0-9A-Fa-f]{1,2})?\}")
-_VALUE = re.compile(r"(TRUE|FALSE|true|false|[-+]?(0x[0-9A-Fa-f]+|[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?))")
 
 
 class Error(ValueError):
@@ -126,7 +119,8 @@ KINDS = (
     Kind(("measure", "ignore", "*"), "Tuning", "{2} is not recorded when measuring", "response"),
     Kind(("pins", "*"), "Process data", "Pin for {1}", "process-data", share=False,
          value="a machine's choice: never shared", sort=MACHINE),
-    Kind(("hal",), "HAL", "HAL lines", None, sort=ADVICE),
+    Kind(("hal",), "HAL", "HAL lines", None, share=False, sort=ADVICE,
+         value="the program's own: a user's file is read without them"),
 )
 
 
@@ -416,58 +410,6 @@ def strip(raw):
     return out
 
 
-def check_hal(hal):
-    """Problems of a quirk file's hal: block for sharing: only components of
-    plain logic, only setp and net, only the slave's own pins and the file's
-    own instances (never a machine signal)."""
-    out = []
-    if not isinstance(hal, dict):
-        return ["hal: not a mapping"]
-    inst = set()
-    for comp, names in (hal.get("load") or {}).items():
-        if comp not in HAL_COMPONENTS and not str(comp).startswith("conv_"):
-            out.append("hal: the component %s is not among those a shared file may load (%s, conv_*)"
-                       % (comp, ", ".join(sorted(HAL_COMPONENTS))))
-        for n in names or []:
-            if not _INSTANCE.fullmatch(str(n)):
-                out.append("hal: the instance %s must be named {name}-something" % n)
-            inst.add(str(n))
-
-    def own(tok):
-        m = _OWN_PIN.fullmatch(tok)
-        return bool(_SLAVE.fullmatch(tok) and tok.startswith("{pin:")) or bool(m and m.group(1) in inst)
-
-    for f in hal.get("addf") or []:
-        f = str(f)
-        if f.split(".")[0] not in inst:
-            out.append("hal: addf %s is not one of the file's own instances" % f)
-    for line in hal.get("lines") or []:
-        toks = str(line).split("#")[0].split()
-        if not toks:
-            continue
-        cmd = toks[0]
-        if cmd == "setp":
-            if len(toks) != 3 or not own(toks[1]) or not _VALUE.fullmatch(toks[2]):
-                out.append("hal: %r: setp takes one of the file's own pins (or the slave's) and a number"
-                           % line)
-        elif cmd == "net":
-            if len(toks) < 3:
-                out.append("hal: %r: net needs a signal and pins" % line)
-                continue
-            sig = toks[1]
-            if not (_INSTANCE.fullmatch(sig) or (_SLAVE.fullmatch(sig) and sig.startswith("{signal:"))):
-                out.append("hal: %r: the signal must be {name}-something or {signal:...}, never a "
-                           "machine signal" % line)
-            for t in toks[2:]:
-                if t in ("=>", "<=", "<=>"):
-                    continue
-                if not own(t):
-                    out.append("hal: %r: %s is neither the slave's pin nor one of the file's own" % (line, t))
-        else:
-            out.append("hal: %r: only setp and net lines may be shared (not %s)" % (line, cmd))
-    return out
-
-
 def _strings(x, where, out):
     if isinstance(x, str) and len(x) > MAX_TEXT:
         out.append("%s: a text longer than %d characters" % (where, MAX_TEXT))
@@ -498,8 +440,10 @@ def check(raw):
         out.append("unknown keys: %s" % ", ".join(sorted(extra)))
     # a kind that is never shared is refused even when it is empty
     private = sorted({k.path[0] for k in KINDS if not k.share} & set(raw))
+    why = {"pins": "pin names and scales are a machine's choice and are not shared",
+           "hal": "HAL lines come only with the program and are not shared"}
     for k in private:
-        out.append("%s: pin names and scales are a machine's choice and are not shared" % k)
+        out.append("%s: %s" % (k, why.get(k, "not shared")))
     m = raw.get("match")
     if not isinstance(m, dict) or "vendor" not in m or "product" not in m:
         out.append("match: vendor and product are needed")
@@ -510,8 +454,6 @@ def check(raw):
     if size > MAX_FILE:
         out.append("the file is %d bytes, more than %d" % (size, MAX_FILE))
     _strings(raw, "file", out)
-    if raw.get("hal") is not None:
-        out += check_hal(raw["hal"])
     srcs = raw.get("sources")
     if srcs is not None:
         if not isinstance(srcs, dict):

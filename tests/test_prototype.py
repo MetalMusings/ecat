@@ -1093,6 +1093,34 @@ class TestConfig(unittest.TestCase):
         self.assertIn("scale and offset need", errors)
         self.assertIn("neither value nor data", errors)
 
+    def test_keep_pins(self):
+        def slave(*entries):
+            return {"process-data": {"inputs": [{"entries": list(entries)}]}}
+        old = slave({"object": "0x6000:00", "bits": 32, "split": ["a", None, "b"], "invert": ["b"]},
+                    {"object": "0x6001:01", "bits": 16, "pin": "volts", "hal-type": "real",
+                     "scale": 2.0},
+                    {"object": "0x6002:00", "bits": 8, "split": ["x"] * 9},
+                    {"object": "0x6041:00", "bits": 16, "pin": "status"},
+                    {"object": "0x6003:00", "bits": 8, "pin": "same"})
+        new = slave({"object": "0x6000:00", "bits": 32, "pin": "word", "hal-type": "u32"},
+                    {"object": "0x6001:01", "bits": 16, "pin": "unit1", "hal-type": "s32"},
+                    {"object": "0x6002:00", "bits": 8, "pin": "w"},
+                    {"object": "0x6041:00", "bits": 16, "use": "profile"},
+                    {"object": "0x6003:00", "bits": 8, "pin": "same"},
+                    {"object": "0x6004:00", "bits": 8, "pin": "new"})
+        self.assertEqual(config.keep_pins(old, new), ["0X6000:00", "0X6001:01"])
+        e = {x["object"]: x for x in new["process-data"]["inputs"][0]["entries"]}
+        self.assertEqual(e["0x6000:00"], {"object": "0x6000:00", "bits": 32,
+                                          "split": ["a", None, "b"], "invert": ["b"]})
+        self.assertEqual((e["0x6001:01"]["pin"], e["0x6001:01"]["hal-type"], e["0x6001:01"]["scale"]),
+                         ("volts", "real", 2.0))
+        self.assertEqual(e["0x6002:00"]["pin"], "w")              # nine bit pins do not fit 8 bits
+        self.assertEqual(e["0x6041:00"], {"object": "0x6041:00", "bits": 16, "use": "profile"})
+        self.assertEqual(e["0x6004:00"]["pin"], "new")
+        # outputs and inputs apart
+        self.assertEqual(config.keep_pins({"process-data": {"outputs": old["process-data"]["inputs"]}},
+                                          slave({"object": "0x6000:00", "bits": 32, "pin": "w"})), [])
+
     def test_invert_is_checked(self):
         cfg = self.easercat_config()
         entries = cfg["slaves"][0]["process-data"]["inputs"][0]["entries"]

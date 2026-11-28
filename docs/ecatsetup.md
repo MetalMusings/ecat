@@ -179,8 +179,10 @@ Choosing a slave shows:
   were tried ([Measured SYNC0 cycles](#measured-sync0-cycles)), with a warning when
   the servo period is at or below one that was refused,
   for a drive the CiA 402 modes (below), *Start over from the bus...* (reads the
-  slave and replaces its whole entry with a new proposal, after asking; only
-  the name is kept) and the homing
+  slave and replaces its whole entry with a new proposal, after asking; the
+  name is kept, and so are the pin names, bit pins, inverts and scales of
+  objects that are still in the process data, where the profile does not
+  take them) and the homing
   card ([cia402](#cia-402-drives));
 - **CiA 402 modes**, for a drive: *Mode of operation* is the mode the
   drive starts in and runs in. Under *Can also switch to* you tick the
@@ -4308,9 +4310,12 @@ which revision they are for.
 A quirk file tells EtherCAT Setup what it cannot read from a device's ESI
 file, SII or object dictionary: better pin names, a scale, an object that
 is a command and not a setting, where a drive keeps a limit, HAL lines a
-device needs, and how lcec's settings for it translate. ecat has no
-product drivers; a device that needs something special gets a quirk file
-instead, which anyone can write without a new release.
+device needs. ecat has no product drivers; a device that needs something
+special gets a quirk file instead. HAL lines come only in the program's
+own files: they are a recipe that is tried before it is shipped, and a
+file of yours is read without them (put such lines in your own HAL file:
+*Apply* leaves them). How lcec's settings translate is not in the quirk
+files ([lcec translations](reference.md#lcec-translations)).
 
 Quirks act only through what EtherCAT Setup writes (`ethercat.yaml`,
 `ethercat.hal`) or does in its workbench. The `ecat` component never reads
@@ -4390,7 +4395,7 @@ otherwise on the card. Facts are of three sorts, and the page says which
 - **experience from a machine** is a value that worked there, such as a
   setting (`0x2009` = 2000 on a plasma cutter in CSP) or the values a
   homing method needs: it says where it worked, and may not suit yours;
-- **advice** is a recipe made from properties: HAL lines, lcec translations.
+- **advice** is a recipe made from properties: HAL lines (the program's own, not shared).
 
 When you remember a fact, you say where it comes from (the manual with its
 version and section, a test, ...); for experience also where it worked,

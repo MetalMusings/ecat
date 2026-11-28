@@ -228,6 +228,24 @@ class TestSession(BusTest):
         self.assertEqual(s.cfg["slaves"][1]["name"], "thc")
         self.assertIn("inputs", s.cfg["slaves"][1]["process-data"])
 
+    def test_propose_again_keeps_the_pin_names(self):
+        s = session.Session()
+        s.read_bus()
+        s.new()
+        e = next(e for pdo in s.cfg["slaves"][1]["process-data"]["outputs"]
+                 for e in pdo["entries"] if (e.get("pin") or e.get("split")) and e.get("bits", 0) >= 4)
+        obj = e["object"]
+        for k in ("pin", "hal-type", "scale", "offset"):
+            e.pop(k, None)
+        e["split"] = ["lamp", None, "valve"]
+        e["invert"] = ["lamp"]
+        notes = s.propose_again(1)
+        e = next(e for pdo in s.cfg["slaves"][1]["process-data"]["outputs"]
+                 for e in pdo["entries"] if e["object"] == obj)
+        self.assertEqual(e["split"][0], "lamp")
+        self.assertEqual(e["invert"], ["lamp"])
+        self.assertIn("pin names kept for %s" % obj.upper(), notes)
+
     def test_no_master(self):
         s = session.Session()
         with mock.patch.object(tool, "slave_positions", side_effect=tool.ToolError("no socket")):

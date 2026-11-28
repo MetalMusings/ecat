@@ -144,24 +144,13 @@ class TestCheck(unittest.TestCase):
         for raw, why in cases:
             self.assertTrue(any(why in p for p in devicedata.check(raw)), (why, devicedata.check(raw)))
 
-    def test_hal_lines_only_in_the_checkable_form(self):
-        ok = shipped("beckhoff-el7041.yaml")["hal"]
-        self.assertEqual(devicedata.check_hal(ok), [])
-
-        def bad(**change):
-            h = dict(ok, **change)
-            return devicedata.check_hal(h)
-        self.assertTrue(bad(lines=["loadusr -w rm -rf /"]))
-        self.assertTrue(bad(lines=["net estop-ext {name}-auto-reset.out"]))         # a machine signal
-        self.assertTrue(bad(lines=["net {name}-x iocontrol.0.emc-enable-in"]))      # a machine pin
-        self.assertTrue(bad(lines=["setp motion.servo.overruns 0"]))
-        self.assertTrue(bad(lines=["setp {name}-enable-edge.in-edge [EMC]X"]))
-        self.assertTrue(bad(lines=["source other.hal"]))
-        self.assertTrue(bad(load={"hal_parport": ["{name}-pp"]}))
-        self.assertTrue(bad(load={"edge": ["estop"]}))
-        self.assertTrue(bad(addf=["motion-command-handler"]))
-        self.assertEqual(bad(load={"conv_s32_float": ["{name}-c"]}, addf=["{name}-c"], lines=[
-            "net {signal:0x6000:11} => {name}-c.in", "net {name}-v {name}-c.out => {pin:0x7000:11}"]), [])
+    def test_hal_lines_are_not_shared(self):
+        raw = shipped("beckhoff-el7041.yaml")
+        self.assertIn("hal", raw)
+        self.assertNotIn("hal", devicedata.strip(raw))
+        self.assertTrue(any(p.startswith("hal: HAL lines come only with the program")
+                            for p in devicedata.check(raw)))
+        self.assertNotIn("lcec", devicedata.strip({"lcec": {"types": ["X"]}}))
 
 
 class TestShare(unittest.TestCase):
@@ -321,7 +310,8 @@ class TestKinds(unittest.TestCase):
     def test_every_kind_has_a_sort_and_only_machine_choices_stay_home(self):
         for k in devicedata.KINDS:
             self.assertIn(k.sort, devicedata.SORTS, k)
-            self.assertEqual(k.share, k.sort != devicedata.MACHINE, k)
+            # hal: advice, but the program's own (quirks.SHIPPED_ONLY)
+            self.assertEqual(k.share, k.sort != devicedata.MACHINE and k.path[0] != "hal", k)
         self.assertEqual(devicedata.sort(("commands", "0x2010")), devicedata.PROPERTY)
         self.assertEqual(devicedata.sort(("settings", "0x2009:00")), devicedata.EXPERIENCE)
         self.assertTrue(devicedata.kind(("homing", "methods")).listing)

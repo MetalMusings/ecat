@@ -7,6 +7,7 @@ that the setup program writes; numbers that are EtherCAT identifiers
 read as they do in vendor documentation.
 """
 
+import copy
 import ipaddress
 import json
 import re
@@ -280,6 +281,42 @@ def _entry(e):
         if getattr(e, "raw", False):
             d["raw"] = True
     return d
+
+
+# what the user chose for an entry's pin(s): kept when the slave is proposed again
+PIN_CHOICE = ("pin", "split", "invert", "hal-type", "scale", "offset", "extend", "raw")
+
+
+def keep_pins(old, new):
+    """Put the pin choices of a slave's old entry (its names, bit pins, inverts,
+    types and scales) into the new proposal's entries of the same object and
+    direction, where the new one gives a pin too (not one the profile owns, not a
+    gap). A bit list that no longer fits the entry's bits is not kept. Returns the
+    objects whose choice was kept."""
+    def entries(slave):
+        out = {}
+        for kind in ("inputs", "outputs"):
+            for pdo in ((slave or {}).get("process-data") or {}).get(kind) or []:
+                for e in pdo.get("entries") or []:
+                    if e.get("object"):
+                        out.setdefault((kind, str(e["object"]).upper()), e)
+        return out
+    was = entries(old)
+    kept = []
+    for key, e in entries(new).items():
+        o = was.get(key)
+        if o is None or e.get("use") or o.get("use") or not (o.get("pin") or o.get("split")):
+            continue
+        if o.get("split") and len(o["split"]) > (e.get("bits") or 0):
+            continue
+        choice = {k: copy.deepcopy(o[k]) for k in PIN_CHOICE if k in o}
+        if choice == {k: e[k] for k in PIN_CHOICE if k in e}:
+            continue
+        for k in PIN_CHOICE:
+            e.pop(k, None)
+        e.update(choice)
+        kept.append(key[1])
+    return kept
 
 
 def slave_from_proposal(p, name=None):

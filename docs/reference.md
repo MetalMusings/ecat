@@ -877,7 +877,7 @@ used, and the rest of the shipped file stays.
 | `tuning` | Per object: `kind` (`command-filter`, `position-loop`, `feedforward`, `torque`, `gain-high`, `other`) and `type`, and optionally `unit`, `min`, `max`, `factory`, `note`, `tried` (what it gave on a machine), and `when` (`object` and `values`: it is used only in that mode of the drive). Shown by *Look for settings in the drive* ([Measuring a drive's response](ecatsetup.md#measuring-a-drives-response)). |
 | `measure` | `ignore`: per object index, why the response measurement does not record it (a drive's object that does not mean what the standard says). |
 | `limits` | For a drive in PP or PV: `max-velocity` as `object` and `type` (the ethercat tool's: `uint32` ...), where the drive keeps it instead of `0x607F` (the settings then ask for it, the workbench writes it), or `travel` and `max-velocity` as a text saying why the drive's own object is not used. `following-error` and `max-torque` are still read (older files have them) but no longer used. |
-| `hal` | `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
+| `hal` | Only in the program's own files: a file of yours is read without it (a note says so). `load`: per HAL component, its instances (one `loadrt ... names=` for all slaves); `addf`: functions, added to the servo thread between `ecat.read-all` and `ecat.write-all`; `lines`: HAL lines. |
 
 ### HAL lines
 
